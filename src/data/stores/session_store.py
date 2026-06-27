@@ -1,0 +1,70 @@
+﻿# SPDX-License-Identifier: AGPL-3.0-or-later
+# Copyright (c) 2026 徐俊瑞 (Junrui Xu). Commercial licensing rights reserved.
+
+"""Session + message + document storage."""
+
+import logging
+from datetime import datetime
+from pathlib import Path
+
+from core.book_locks import book_lock
+from core.errors import NotFoundError
+
+logger = logging.getLogger(__name__)
+
+
+class SessionStoreMixin:
+    """Mixin providing session/message/document methods.  Requires BaseStore."""
+
+    def load_sessions(self, book_id: str) -> list[dict]:
+        return self._read_json(self._sessions_file(book_id))
+
+    def save_sessions(self, book_id: str, sessions: list[dict]):
+        self._write_json(self._sessions_file(book_id), sessions)
+
+    def create_session(self, book_id: str, title: str = "") -> dict:
+        with book_lock(book_id):
+            sessions = self.load_sessions(book_id)
+            sid = str(int(datetime.now().timestamp() * 1000))
+            if not title:
+                title = f"会话 {len(sessions) + 1}"
+            session = {
+                "id": sid,
+                "title": title,
+                "createdAt": datetime.now().isoformat(),
+                "updatedAt": datetime.now().isoformat(),
+                "messageCount": 0,
+            }
+            sessions.insert(0, session)
+            self.save_sessions(book_id, sessions)
+        return session
+
+    def update_session(self, book_id: str, session_id: str, data: dict) -> dict:
+        with book_lock(book_id):
+            sessions = self.load_sessions(book_id)
+            for s in sessions:
+                if s["id"] == session_id:
+                    s.update({k: v for k, v in data.items() if k != "id"})
+                    s["updatedAt"] = datetime.now().isoformat()
+                    self.save_sessions(book_id, sessions)
+                    return s
+        raise NotFoundError(f"会话不存在: {session_id}")
+
+    def delete_session(self, book_id: str, session_id: str):
+        with book_lock(book_id):
+            sessions = self.load_sessions(book_id)
+            sessions = [s for s in sessions if s["id"] != session_id]
+            self.save_sessions(book_id, sessions)
+            msg_file = self._messages_file(session_id)
+            if msg_file.exists():
+                msg_file.unlink()
+            docs_file = self._docs_file(session_id)
+            if docs_file.exists():
+                docs = self._read_json(docs_file)
+                for d in docs:
+                    p = Path(d["path"])
+                    if p.exists():
+                        p.unlink()
+                docs_file.unlink()
+
+
