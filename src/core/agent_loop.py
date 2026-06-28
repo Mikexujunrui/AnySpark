@@ -326,6 +326,7 @@ async def _loop_inner(
 
             # ── Stage 5: writing-mode / temperature bookkeeping ──
             state.update_writing_mode(streamed_text)
+            state.last_text_preview = (streamed_text or "")[:200]
 
             # ── Stage 5.5: token budget accounting (dual control w/ round cap) ──
             # Estimate per-round tokens: input from messages, output from the
@@ -430,6 +431,8 @@ async def _loop_inner(
                 return
 
             # ── Stage 7: tool-call branch ──
+            state.last_tool_calls = ", ".join(tc.name for tc in response.tool_calls)
+            logger.info("Round %d tool calls: %s", state.round, state.last_tool_calls)
             async for ev in _handle_tool_calls(
                 response,
                 messages,
@@ -472,6 +475,14 @@ async def _loop_inner(
         # the metrics log and frontend done event carry a meaningful signal.
         if not state.metrics.finish_reason:
             state.metrics.finish_reason = "abnormal_exit"
+            # Log diagnostic context so abnormal_exit is analyzable from
+            # server.log alone — no need for the user to paste screenshots.
+            # AI can read this to pinpoint the root cause.
+            logger.error(
+                "abnormal_exit: round=%d tool_calls=%d last_tools=%r last_text=%r",
+                state.round, state.metrics.tool_calls,
+                state.last_tool_calls, state.last_text_preview,
+            )
         logger.info("Agent loop metrics: %s", state.metrics.summary())
         _persist_metrics(state.metrics, agent_config, user_message)
 

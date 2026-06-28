@@ -194,6 +194,12 @@ class LoopState:
     # Structured parts collected during this turn for history persistence.
     parts: list = field(default_factory=list)
 
+    # Diagnostic context for abnormal_exit logging — last round's signal so
+    # the finally block can log WHY the loop died (which tool, last LLM text).
+    # Without this, abnormal_exit leaves no trace in server.log for diagnosis.
+    last_tool_calls: str = ""       # last round's tool names (e.g. "extract_all_chapters")
+    last_text_preview: str = ""     # last streamed_text preview (first 200 chars)
+
     def add_part(self, part) -> None:
         self.parts.append(part)
 
