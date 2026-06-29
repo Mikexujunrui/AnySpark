@@ -2,6 +2,19 @@
 
 本文档记录项目的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [1.2.1] - 2026-06-29
+
+### 修复
+
+- **导入小说功能失效**：修复上传缺少 `session_id` 导致 400 错误、`detect_chapters` 的 Content-Type 不匹配导致 422 错误、上传响应字段 `docId` → `data.id` 读取错误，三处问题导致导入小说完全无法使用
+- **全书变换工具 `ModuleNotFoundError`**：修复 `executor.py` 中 6 处 `from chapter_tools import` 裸导入为 `from tools.chapter_tools import`，该错误导致 `summarize_book`（生成全书摘要）、`apply_directive_globally`、`find_replace_book`、`transform_chapters_batch`、`restyle_book` 五个工具全部失效
+
+### 验证
+
+- `pytest`：451 passed, 3 skipped
+- 63 个核心模块导入健康度审计通过
+- `tsc --noEmit`：0 errors
+
 ## [1.2.0] - 2026-06-28
 
 ### 新增
