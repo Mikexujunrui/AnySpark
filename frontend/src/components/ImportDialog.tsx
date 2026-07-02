@@ -10,6 +10,7 @@ export default function ImportDialog({ bookId, sessionId, onClose }) {
   const [step, setStep] = useState('upload')
   const [file, setFile] = useState(null)
   const [uploading, setUploading] = useState(false)
+  const [detecting, setDetecting] = useState(false)
   const [docId, setDocId] = useState(null)
   const [detectResult, setDetectResult] = useState(null)
   const [importing, setImporting] = useState(false)
@@ -32,6 +33,8 @@ export default function ImportDialog({ bookId, sessionId, onClose }) {
       const data: any = await uploadDocument(bookId, f, sessionId)
       setDocId(data.docId || data.id)
       const docIdVal = data.docId || data.id
+      setUploading(false)
+      setDetecting(true)
       const detectData: any = await detectChapters(bookId, docIdVal, sessionId)
       setDetectResult(detectData)
       setStep('review')
@@ -39,6 +42,7 @@ export default function ImportDialog({ bookId, sessionId, onClose }) {
       showToast('上传失败', 'error')
     }
     setUploading(false)
+    setDetecting(false)
   }, [bookId, sessionId])
 
   const handleDrop = useCallback((e) => {
@@ -134,10 +138,10 @@ export default function ImportDialog({ bookId, sessionId, onClose }) {
                 onChange={(e) => handleFile(e.target.files[0])}
                 className="hidden"
               />
-              {uploading ? (
+              {uploading || detecting ? (
                 <div className="flex flex-col items-center gap-3">
                   <span className="w-8 h-8 border-2 border-zinc-500 border-t-sky-400 rounded-full animate-spin" />
-                  <p className="text-sm text-zinc-400">上传中...</p>
+                  <p className="text-sm text-zinc-400">{uploading ? '上传中...' : '正在检测章节结构...'}</p>
                   <p className="text-xs text-zinc-600">{file?.name}</p>
                 </div>
               ) : (

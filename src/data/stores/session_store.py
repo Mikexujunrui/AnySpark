@@ -72,6 +72,33 @@ class SessionStoreMixin:
         docs_file = self._docs_file(session_id)
         return self._read_json(docs_file, [])
 
+    def save_docs(self, session_id: str, docs: list[dict]):
+        """Save uploaded documents metadata for a session."""
+        docs_file = self._docs_file(session_id)
+        self._write_json(docs_file, docs)
+
+    def add_doc(self, session_id: str, doc_id: str, filename: str, chars: int, path: str) -> dict:
+        """Add a document metadata entry."""
+        docs = self.load_docs(session_id)
+        entry = {
+            "id": doc_id,
+            "filename": filename,
+            "chars": chars,
+            "path": path,
+            "uploadedAt": datetime.now().isoformat(),
+        }
+        docs.append(entry)
+        self.save_docs(session_id, docs)
+        return entry
+
+    def get_doc(self, session_id: str, doc_id: str) -> dict:
+        """Get a single document metadata entry by ID."""
+        docs = self.load_docs(session_id)
+        doc = self._resolve_by_id(docs, doc_id)
+        if not doc:
+            raise NotFoundError(f"文档不存在: {doc_id}")
+        return doc
+
     def load_messages(self, session_id: str) -> list[dict]:
         """Load conversation messages for a session.
 

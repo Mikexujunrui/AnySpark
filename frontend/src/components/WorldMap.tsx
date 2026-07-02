@@ -119,17 +119,15 @@ export default function WorldMap({ bookId }) {
       n.y = h / 2 + spread * Math.sin(angle)
     })
 
-    const density = links.length / Math.max(nodeCount, 1)
-    const charge = -Math.max(1200, nodeCount * 200 + density * 150)
     const linkDist = Math.max(120, Math.min(300, Math.sqrt(w * h / nodeCount) * 0.9))
 
     const simulation = d3.forceSimulation(nodes)
       .force('link', d3.forceLink(links).distance(linkDist).strength(0.12))
-      .force('charge', d3.forceManyBody().strength(charge).distanceMin(40).distanceMax(Math.max(w, h)))
+      .force('charge', d3.forceManyBody().strength(-400).distanceMin(40).distanceMax(Math.max(w, h)))
       .force('x', d3.forceX(w / 2).strength(0.02))
       .force('y', d3.forceY(h / 2).strength(0.02))
       .force('collision', d3.forceCollide().radius(d => d.r + 30).strength(1))
-      .velocityDecay(0.3).alpha(1).alphaDecay(0.006)
+      .velocityDecay(0.4)
     simRef.current = simulation
 
     const pairCounts = {}
@@ -144,13 +142,6 @@ export default function WorldMap({ bookId }) {
       l._ci = pairIndex[key]
       l._ct = pairCounts[key]
       pairIndex[key]++
-    })
-
-    simulation.stop()
-    for (let i = 0; i < 400; i++) simulation.tick()
-    nodes.forEach(n => {
-      n.x = Math.max(padding, Math.min(w - padding, n.x))
-      n.y = Math.max(padding, Math.min(h - padding, n.y))
     })
 
     function edgePath(d) {
@@ -282,7 +273,6 @@ export default function WorldMap({ bookId }) {
         d3.select(this).attr('x', dx).attr('y', dy + 1.5)
       })
     })
-    simulation.alpha(0.3).restart()
   }
 
   if (loading) return <LoadingState text="加载地图..." />

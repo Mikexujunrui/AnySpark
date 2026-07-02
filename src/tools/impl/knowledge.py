@@ -229,7 +229,7 @@ async def _extract_all_chapters(
                                     loop, content, entity_cache.get_cards(), title),
                                 timeout=30
                             )
-                        except Exception:
+                        except (Exception, TimeoutError):
                             skip = False
                         if skip:
                             status = f"  ⏭ {tag} ({len(content)}字): 无新变化，跳过"
@@ -481,7 +481,7 @@ async def _extract_all_chapters(
             summary_parts.append(f"\n一致性审核:\n{validation_result}")
 
         return "\n".join(summary_parts)
-    except Exception as e:
+    except (Exception, TimeoutError) as e:
         import logging
         import traceback
         logger = logging.getLogger(__name__)

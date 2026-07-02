@@ -156,17 +156,6 @@ export default function FullGraphView({ bookId }: { bookId: string }) {
     const { w, h } = dimensions
     svg.attr('width', w).attr('height', h)
 
-    // SVG defs — glow filters per node type
-    const defs = svg.append('defs')
-    Object.entries(NODE_STYLES).forEach(([type, s]) => {
-      const f = defs.append('filter').attr('id', `glow-${type}`)
-        .attr('x', '-100%').attr('y', '-100%').attr('width', '300%').attr('height', '300%')
-      f.append('feGaussianBlur').attr('stdDeviation', 3).attr('result', 'b')
-      const m = f.append('feMerge')
-      m.append('feMergeNode').attr('in', 'b')
-      m.append('feMergeNode').attr('in', 'SourceGraphic')
-    })
-
     const g = svg.append('g')
     const zoom = d3.zoom().scaleExtent([0.1, 8]).on('zoom', e => g.attr('transform', e.transform))
     svg.call(zoom)
@@ -229,11 +218,11 @@ export default function FullGraphView({ bookId }: { bookId: string }) {
         const t = (d as any).type
         return t.includes('INVOLVES') || t === 'HAS_PHASE' ? 25 : 60
       }).strength(0.05))
-      .force('charge', d3.forceManyBody().strength(-Math.max(300, n * 20)).distanceMax(Math.max(w, h)))
+      .force('charge', d3.forceManyBody().strength(-400).distanceMax(Math.max(w, h)))
       .force('x', d3.forceX((d: any) => (typeTargets[d.type] || typeTargets.unknown).x).strength(0.08))
       .force('y', d3.forceY((d: any) => (typeTargets[d.type] || typeTargets.unknown).y).strength(0.08))
       .force('collision', d3.forceCollide().radius((d: any) => (NODE_STYLES[d.type]?.r || 4) + 12).strength(0.7))
-      .velocityDecay(0.3).alpha(1).alphaDecay(0.01)
+      .velocityDecay(0.4)
     simRef.current = sim
 
     // ── Multi-edge detection: group links by (source, target) pair ──
@@ -381,11 +370,6 @@ export default function FullGraphView({ bookId }: { bookId: string }) {
       }
       el.attr('opacity', nodeOpacity)
 
-      // Glow halo (brighter for current time or high-importance nodes)
-      const glowOpacity = isCurrentTime ? 0.35 : (importance > 0.3 ? 0.2 : 0.1)
-      el.append('circle').attr('r', scaledR * 2).attr('fill', s.glow)
-        .attr('opacity', glowOpacity)
-        .attr('filter', `url(#glow-${d.type})`)
       // Main node (scaled by importance)
       el.append('circle').attr('r', scaledR).attr('fill', s.color)
         .attr('stroke', isCurrentTime ? '#22d3ee' : '#18181b')
@@ -414,7 +398,6 @@ export default function FullGraphView({ bookId }: { bookId: string }) {
       })
       nodeG.attr('transform', (d: any) => `translate(${d.x},${d.y})`)
     })
-    sim.tick(300)
   }
 
   const nodeCount = filteredData?.stats?.node_count || 0

@@ -197,6 +197,12 @@ async def run_agent_loop(
     except CancelledError:
         last_error_msg = "操作已取消"
         yield LoopEvent(type="cancelled", data={"message": last_error_msg})
+    except asyncio.CancelledError:
+        # asyncio-level cancellation (e.g. SSE client disconnect, task timeout).
+        # Must be caught here — otherwise it propagates to the SSE handler and
+        # the frontend gets a broken connection instead of a proper done event.
+        last_error_msg = "连接已中断（超时或客户端断开）"
+        yield LoopEvent(type="cancelled", data={"message": last_error_msg})
     except Exception as e:
         logger.exception(f"Agent loop error: {e}")
         last_error_msg = f"Agent 出错: {str(e)[:200]}"
@@ -1429,6 +1435,21 @@ async def _process_tool_result(
         # call fails with 400: "An assistant message with 'tool_calls' must
         # be followed by tool messages responding to each 'tool_call_id'."
         messages.append({"role": "tool", "tool_call_id": tc.id, "content": "工具执行完成（无文本输出）"})
+
+    # ── Post-extraction summary hint ──
+    # extract_all_chapters / extract_chapter return structured data but the
+    # LLM often just says "完成" after seeing it. Inject a hint that forces
+    # a natural-language report so the user sees what was actually extracted.
+    if tool_name in ("extract_all_chapters", "extract_chapter"):
+        _append_user_hint(
+            messages,
+            (
+                "[系统提示] 知识提取工具已返回结果。请用自然语言向用户汇报："
+                "① 共处理了多少章 ② 新增了哪些角色/地点/设定（列出名字）"
+                "③ 更新了多少已有实体 ④ 新增了多少关系和伏笔。"
+                "必须输出完整报告，禁止只说'完成'或'提取完成'。"
+            ),
+        )
 
     if chapter_updated:
         yield LoopEvent(type="chapter_updated", data={})

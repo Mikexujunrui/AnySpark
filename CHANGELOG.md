@@ -2,6 +2,20 @@
 
 本文档记录项目的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [2.0.2] - 2026-07-02
+
+### 修复
+
+- **导入小说功能崩溃**：修复后端 `JsonStore` 缺少 `add_doc`/`get_doc`/`save_docs` 方法导致的 `AttributeError`，上传文件时不再报错
+- **导入进度显示误导**：将"上传中..."拆分为"上传中..."和"正在检测章节结构..."两个阶段，用户不再误以为上传本身卡顿
+
+### 优化
+
+- **D3 力模拟图谱性能优化**：移除三处图谱组件（FullGraphView、RelationGraph、WorldMap）中阻塞主线程的同步 `sim.tick(N)` 调用，改为 D3 默认异步自然收敛（参考 MiroFish 做法）
+- **移除 SVG glow 滤镜**：删除 FullGraphView 中 12 种节点类型的 `feGaussianBlur` 发光滤镜及每节点的光晕圆，大幅降低大规模图谱的渲染开销
+- **斥力固定化**：三处图谱的 `forceManyBody().strength()` 从随节点数线性增长改为固定值 `-400`，避免节点越多越卡
+- **力模拟收敛加速**：`velocityDecay` 统一调整为 0.4，移除冗余的 `alpha(1).alphaDecay()` 显式设置，使用 D3 默认冷却速度
+
 ## [2.0.0] - 2026-07-02
 
 ### 新增

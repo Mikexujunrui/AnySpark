@@ -156,19 +156,15 @@ export default function RelationGraph({ bookId, characters, timelineEvents, sele
       n.y = h / 2 + r * Math.sin(angle)
     })
 
-    const density = links.length / Math.max(nodeCount, 1)
     const linkDistance = Math.max(120, Math.min(300, Math.sqrt(availW * availH / nodeCount) * 0.9))
-    const chargeStrength = -Math.max(1000, nodeCount * 180 + density * 100)
 
     const simulation = d3.forceSimulation(visibleNodes)
       .force('link', d3.forceLink(links).id(d => d.id).distance(linkDistance).strength(0.15))
-      .force('charge', d3.forceManyBody().strength(chargeStrength).distanceMin(40).distanceMax(Math.max(w, h) * 0.8))
+      .force('charge', d3.forceManyBody().strength(-400).distanceMin(40).distanceMax(Math.max(w, h) * 0.8))
       .force('x', d3.forceX(w / 2).strength(0.02))
       .force('y', d3.forceY(h / 2).strength(0.02))
       .force('collision', d3.forceCollide().radius(d => getNodeRadius(d) + 35).strength(1))
-      .velocityDecay(0.35)
-      .alpha(1)
-      .alphaDecay(0.008)
+      .velocityDecay(0.4)
 
     simulationRef.current = simulation
 
@@ -185,9 +181,6 @@ export default function RelationGraph({ bookId, characters, timelineEvents, sele
       l._curveTotal = pairCounts[key]
       pairIndex[key]++
     })
-
-    simulation.stop()
-    for (let i = 0; i < 350; i++) simulation.tick()
 
     visibleNodes.forEach(n => {
       n.x = Math.max(padding, Math.min(w - padding, n.x))
@@ -295,8 +288,6 @@ export default function RelationGraph({ bookId, characters, timelineEvents, sele
       node.attr('cx', d => d.x).attr('cy', d => d.y)
       label.attr('x', d => d.x).attr('y', d => d.y)
     })
-
-    simulation.alpha(0.3).restart()
   }
 
   function getNodeRadius(d) {

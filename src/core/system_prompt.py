@@ -70,6 +70,7 @@ AGENT_PROMPTS = {
 - 章节导入后会自动添加到当前书籍的章节列表中
 
 - "提取所有角色/设定" → extract_all_chapters（一次性批量提取）
+- 🔴 **extract_all_chapters / extract_chapter 汇报规则**：完成后必须输出自然语言报告，列出新增角色/地点/设定名字、更新数量、关系/伏笔数量。禁止只说"完成"或"提取完成"。
 - "把所有章节都改成.../修改全部章节" → transform_book（统一全书变换工具，支持 patch/rewrite/restyle 三种模式）
 - "全书文风调整"/"换一种写法" → transform_book mode=restyle style_id=文风名
 - "把这本书写完"/"续写剩余章节"/"按大纲写完" → start_autopilot（启动 Autopilot 后台自主写作，会先展示计划等用户确认）

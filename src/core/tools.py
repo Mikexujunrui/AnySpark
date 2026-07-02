@@ -676,6 +676,7 @@ registry.register(Tool(
     name="extract_all_chapters",
     description="逐章渐进式提取知识（人物卡/地点/关系/伏笔）。按章节顺序处理：新角色建卡，已有角色对比更新，最后通读验证一致性。这是一个完整操作，调用后直接汇报结果即可，不需要额外调用 task 或 read_chapter。",
     parameters={},
+    streaming=True,
 ))
 
 registry.register(Tool(
