@@ -13,6 +13,8 @@ from .simulation_routes import router as simulation_router
 from .knowledge import router as knowledge_router
 from .materials import router as materials_router
 from .narrative_logic import router as narrative_logic_router
+from .inspiration import router as inspiration_router
+from .pacing import router as pacing_router
 from .reviews import router as reviews_router
 from .scheduler import router as scheduler_router
 from .search import router as search_router
@@ -49,3 +51,5 @@ api_router.include_router(tasks_router)
 api_router.include_router(simulation_router)
 api_router.include_router(update_router)
 api_router.include_router(narrative_logic_router)
+api_router.include_router(pacing_router)
+api_router.include_router(inspiration_router)

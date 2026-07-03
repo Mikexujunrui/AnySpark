@@ -13,6 +13,7 @@ export default function ForeshadowBoard({ bookId }) {
   const [resolutionText, setResolutionText] = useState('')
   const [deleteFsId, setDeleteFsId] = useState(null)
   const [matching, setMatching] = useState(false)
+  const [autoMatches, setAutoMatches] = useState(null)
 
   useEffect(() => { loadData() }, [bookId, refreshKey])
 
@@ -59,6 +60,15 @@ export default function ForeshadowBoard({ bookId }) {
     setMatching(false)
   }
 
+  async function loadAutoMatches() {
+    setMatching(true)
+    try {
+      const res = await fetch(`/api/books/${bookId}/foreshadow-matches`)
+      if (res.ok) setAutoMatches(await res.json())
+    } catch (e) { console.error(e) }
+    setMatching(false)
+  }
+
   const getStatus = (f) => f.status || (f.resolved ? 'resolved' : 'open')
   const openFs = foreshadows.filter(f => getStatus(f) === 'open')
   const resolvedFs = foreshadows.filter(f => getStatus(f) === 'resolved')
@@ -84,6 +94,13 @@ export default function ForeshadowBoard({ bookId }) {
             className="ml-2 text-xs bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 rounded px-2 py-1 transition-colors"
           >
             {matching ? '匹配中...' : '自动匹配回收'}
+          </button>
+          <button
+            onClick={loadAutoMatches}
+            disabled={matching}
+            className="ml-1 text-xs bg-sky-800/60 hover:bg-sky-700/60 disabled:opacity-50 text-sky-200 rounded px-2 py-1 transition-colors"
+          >
+            AI 悬空检测
           </button>
         </div>
       </div>
@@ -357,6 +374,36 @@ export default function ForeshadowBoard({ bookId }) {
           </div>
         )}
       </div>
+
+      {/* AI 自动匹配结果面板 */}
+      {autoMatches && (
+        <div className="border-t border-zinc-800 bg-sky-950/20 p-4 shrink-0 max-h-60 overflow-y-auto">
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-xs font-semibold text-sky-400 flex items-center gap-1.5">
+              <Icon name="search" size={12} /> AI 伏笔匹配分析
+            </h4>
+            <button onClick={() => setAutoMatches(null)} className="text-zinc-600 hover:text-zinc-400">
+              <Icon name="x" size={12} />
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-2 mb-2 text-[10px]">
+            <span className="text-emerald-400">已匹配 {autoMatches.matched || 0}</span>
+            <span className="text-amber-400">弱匹配 {autoMatches.weak || 0}</span>
+            <span className="text-red-400">悬空 {autoMatches.dangling || 0}</span>
+          </div>
+          {autoMatches.matches?.filter((m: any) => m.status === 'dangling' || m.status === 'matched').slice(0, 5).map((m: any, i: number) => (
+            <div key={i} className={`text-[10px] rounded p-2 mb-1 border ${
+              m.status === 'dangling' ? 'bg-red-950/30 border-red-900/30' : 'bg-emerald-950/20 border-emerald-900/20'
+            }`}>
+              <span className="text-zinc-300">{m.foreshadow_description?.slice(0, 40)}</span>
+              {m.status === 'matched' && m.matched_chapter_title && (
+                <span className="text-emerald-500 ml-2">→ 第{m.matched_chapter_title}章 (相似度{(m.similarity * 100).toFixed(0)}%)</span>
+              )}
+              {m.status === 'dangling' && <span className="text-red-500 ml-2">⚠ 未回收</span>}
+            </div>
+          ))}
+        </div>
+      )}
 
       <ConfirmModal
         open={!!deleteFsId}

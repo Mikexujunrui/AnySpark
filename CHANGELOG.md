@@ -2,6 +2,55 @@
 
 本文档记录项目的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [2.2.0] - 2026-07-03
+
+### 新增
+
+- **叙事节奏曲线**：`core/pacing_analyzer.py` — 五维度章节节奏分析（对话占比/句长方差/场景转换/情感波动/综合节奏分），D3 折线图可视化
+- **角色语言指纹**：`core/voice_fingerprint.py` — 从章节对话中提取角色语言风格（高频词/句式/口头禅/情感倾向），注入 Prompt 确保对话一致性，前端 CharacterDetail 可折叠面板
+- **伏笔-回收自动匹配**：`core/foreshadow_matcher.py` — TF-IDF 余弦相似度自动匹配伏笔与回收点，悬空伏笔检测，ForeshadowBoard 集成 AI 悬空检测按钮
+- **章节间内容查重**：`core/dedup.py` — SimHash + 滑动窗口 Jaccard 相似度检测章节重复内容，StatsDashboard 新增查重 tab
+- **增量知识图谱同步**：`core/incremental_sync.py` — 章节写入后自动触发知识 diff，通过事件总线推送 KNOWLEDGE_PROPOSED 事件
+- **章节依赖图**：`core/chapter_dependency.py` — 构建章节间内容依赖关系图，BFS 影响传播分析，D3 力导向图可视化
+- **创作成本仪表盘**：`core/cost_tracker.py` — 按工具/书籍/时间维度统计 token 消耗与 API 成本，D3 饼图+趋势图
+- **语义 Diff**：`core/semantic_diff.py` — LLM 驱动的章节版本语义级对比（角色情绪/场景/情节走向变更），Agent 工具注册
+- **灵感碎片管理器**：`core/inspiration_box.py` — 三列看板（收件箱/已提升/已归档），支持关联角色/章节/伏笔，可提升为正式结构
+- **大纲逐级展开 Pipeline**：`core/outline_pipeline.py` — 一句话设定→总纲→分卷纲→章节纲→细纲四级自动展开，OutlinePanel 集成入口
+
+### 优化
+
+- **分卷前端优化**：ChaptersPanel 侧边栏按卷分组展示章节，每卷独立彩色头部+缩进列表，未分卷章节单独分组
+- **灵感碎片面板挂载**：BookDetail 辅助 Tab 组 + PanelHost 路由注册
+- **统计图表 SVG 响应式缩放**：全部 6 个图表（字数趋势/章节分布/Agent 趋势/节奏曲线/成本饼图/成本趋势）统一使用 `viewBox` + `preserveAspectRatio` 方案，彻底解决坐标轴被裁切或溢出面板的问题
+
+### 新增模块
+
+- `core/pacing_analyzer.py` — 叙事节奏分析
+- `core/dedup.py` — 章节查重
+- `core/cost_tracker.py` — 成本追踪
+- `core/semantic_diff.py` — 语义 Diff
+- `core/voice_fingerprint.py` — 角色语言指纹
+- `core/incremental_sync.py` — 增量知识同步
+- `core/inspiration_box.py` — 灵感碎片管理
+- `core/foreshadow_matcher.py` — 伏笔自动匹配
+- `core/chapter_dependency.py` — 章节依赖图
+- `core/outline_pipeline.py` — 大纲逐级展开
+- `routes/pacing.py` — 节奏分析 API
+- `routes/inspiration.py` — 灵感 API
+
+### 新增前端组件
+
+- `PacingCurve.tsx` — 节奏曲线（D3 多指标折线图）
+- `CostDashboard.tsx` — 成本仪表盘（饼图+趋势+Top5）
+- `InspirationInbox.tsx` — 灵感看板（三列式）
+- `ChapterDependencyGraph.tsx` — 章节依赖图（D3 力导向）
+- `CharacterVoicePanel.tsx` — 角色语言指纹面板
+- `OutlinePipelinePanel.tsx` — 大纲逐级展开 UI
+
+### 新增测试
+
+- 8 个测试文件，96 个测试用例，覆盖纯函数逻辑（SimHash/Jaccard/TF-IDF/BFS/情感分析/成本估算/灵感 CRUD）
+
 ## [2.0.2] - 2026-07-02
 
 ### 修复

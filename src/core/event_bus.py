@@ -19,6 +19,8 @@ class EventType(StrEnum):
     BOOK_DELETED = "book.deleted"
     TOOL_EXECUTED = "tool.executed"
     TOOL_FAILED = "tool.failed"
+    # Knowledge sync events
+    KNOWLEDGE_PROPOSED = "knowledge.proposed"
     # Reserved for future use — not currently emitted
     KNOWLEDGE_UPDATED = "knowledge.updated"
     SESSION_CREATED = "session.created"

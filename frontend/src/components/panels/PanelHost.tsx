@@ -19,6 +19,7 @@ import SimulationPanel from '../../features/simulation/SimulationPanel'
 import SimulationLayout from '../../features/simulation/components/SimulationLayout'
 import WorkflowView from '../WorkflowView'
 import ReviewPanel from '../ReviewPanel'
+import InspirationInbox from '../InspirationInbox'
 
 export default function PanelHost({ panelKey, bookId, sessionId, autoModeEnabled, transformSignal }) {
   // ChatPanel always stays mounted to preserve SSE connection
@@ -69,6 +70,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, autoModeEnabled
       {panelKey === 'search' && <div className="h-full"><SearchPanel bookId={bookId} /></div>}
       {panelKey === 'workflow' && <div className="h-full"><WorkflowView bookId={bookId} /></div>}
       {panelKey === 'review' && <div className="h-full"><ReviewPanel bookId={bookId} /></div>}
+      {panelKey === 'inspirations' && <div className="h-full"><InspirationInbox bookId={bookId} /></div>}
     </div>
   )
 }

@@ -1,4 +1,4 @@
-# 火花 AnySpark — 智能小说创作引擎 v2.0.0
+# 火花 AnySpark — 智能小说创作引擎 v2.2.0
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)

@@ -4,6 +4,7 @@ import Modal from './ui/Modal'
 import ConfirmModal from './ui/ConfirmModal'
 import Icon from './ui/Icon'
 import { triggerRefresh, useSelectedTimeOrder } from "../store"
+import CharacterVoicePanel from './CharacterVoicePanel'
 
 const PROP_LABELS = {
   appearance: '外貌', personality: '性格', abilities: '能力',
@@ -513,6 +514,9 @@ export default function CharacterDetail({ character, timelineEvents, bookId, onC
               </div>
             </div>
           )}
+
+          {/* ── 语言指纹 ── */}
+          <CharacterVoicePanel bookId={bookId} characterName={character.name} />
 
           {/* ── Legacy snapshots (backward compat) ── */}
           {legacySnaps.length > 0 && (

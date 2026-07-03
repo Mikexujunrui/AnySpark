@@ -601,6 +601,20 @@ async def _dispatch(loop, name: str, args: dict, kb,
     elif name == "verify_chapter":
         return await _verify_chapter(loop, args, kb, book_id, msg)
 
+    # ── Voice fingerprint tools ──
+    elif name == "analyze_voice":
+        return await _analyze_voice_tool(loop, args, book_id)
+    elif name == "get_voice_profile":
+        return await _get_voice_profile_tool(loop, book_id)
+
+    # ── Semantic diff tool ──
+    elif name == "semantic_diff":
+        return await _semantic_diff_tool(loop, args, book_id)
+
+    # ── Outline pipeline tool ──
+    elif name == "expand_outline_pipeline":
+        return await _expand_outline_pipeline_tool(loop, args, book_id)
+
     return f"工具 {name} 未注册 (params: {json.dumps(args, ensure_ascii=False)[:100]})"
 
 async def _transform_book_dispatcher(loop, args: dict, book_id: str, queue=None) -> str:
@@ -883,5 +897,75 @@ async def _start_autopilot(args: dict, book_id: str) -> dict:
 # ── Plot Card Tools ──
 
 
+# ── New tool handlers: voice, semantic diff, outline pipeline ──
 
 
+async def _analyze_voice_tool(loop, args: dict, book_id: str) -> str:
+    """Analyze a character's voice fingerprint."""
+    from core.voice_fingerprint import get_character_voice
+    char_name = args.get("character_name", "")
+    if not char_name:
+        return "错误: 需要 character_name 参数"
+    fp = await loop.run_in_executor(_ai_executor, get_character_voice, book_id, char_name)
+    from core.voice_fingerprint import build_voice_prompt
+    prompt = build_voice_prompt(fp)
+    return f"角色「{char_name}」语言指纹分析完成：\n\n{fp.to_dict()}\n\n写作提示词：\n{prompt}"
+
+
+async def _get_voice_profile_tool(loop, book_id: str) -> str:
+    """Get voice fingerprints for all characters."""
+    from core.voice_fingerprint import get_all_voice_fingerprints
+    fingerprints = await loop.run_in_executor(_ai_executor, get_all_voice_fingerprints, book_id)
+    if not fingerprints:
+        return "当前书籍无角色数据，无法分析语言指纹"
+    lines = [f"共 {len(fingerprints)} 个角色的语言指纹：\n"]
+    for fp in fingerprints:
+        if fp.dialogue_count > 0:
+            lines.append(f"- **{fp.character_name}**：{fp.emotional_tendency}，平均句长{fp.avg_sentence_length:.0f}字，{fp.dialogue_count}句对话")
+        else:
+            lines.append(f"- **{fp.character_name}**：无对话数据")
+    return "\n".join(lines)
+
+
+async def _semantic_diff_tool(loop, args: dict, book_id: str) -> str:
+    """Compute semantic diff between two chapter versions."""
+    from core.semantic_diff import compute_semantic_diff
+    chapter_id = args.get("chapter_id", "")
+    old_vid = args.get("old_version_id", "")
+    new_vid = args.get("new_version_id", "")
+    if not chapter_id or not old_vid or not new_vid:
+        return "错误: 需要 chapter_id, old_version_id, new_version_id 参数"
+    chapters = json_store.load_chapters(book_id)
+    ch = json_store._resolve_by_id(chapters, chapter_id)
+    if not ch:
+        return f"错误: 章节 {chapter_id} 不存在"
+    versions = ch.get("versions", [])
+    old_v = next((v for v in versions if v.get("id") == old_vid), None)
+    new_v = next((v for v in versions if v.get("id") == new_vid), None)
+    if not old_v or not new_v:
+        return "错误: 版本ID不存在"
+    result = await compute_semantic_diff(
+        old_content=old_v.get("content", ""),
+        new_content=new_v.get("content", ""),
+        chapter_title=new_v.get("title", ""),
+    )
+    import json as _json
+    return _json.dumps(result.to_dict(), ensure_ascii=False, indent=2)
+
+
+async def _expand_outline_pipeline_tool(loop, args: dict, book_id: str) -> str:
+    """Run the outline expansion pipeline."""
+    from core.outline_pipeline import expand_pipeline_to_json
+    seed = args.get("seed", "")
+    levels = int(args.get("levels", 4))
+    if not seed:
+        return "错误: 需要 seed 参数（一句话故事设定）"
+    results = await expand_pipeline_to_json(book_id, seed, levels)
+    lines = [f"大纲逐级展开完成（{levels}级）：\n"]
+    for r in results:
+        if r.get("event") == "level_completed":
+            lines.append(f"\n## Level {r['level']}: {r['level_name']}（{r['word_count']}字）")
+            lines.append(r.get("output", "")[:500] + "...")
+        elif r.get("event") == "pipeline_complete":
+            lines.append(f"\n完成！总字数：{r.get('final_word_count', 0)}")
+    return "\n".join(lines)

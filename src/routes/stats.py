@@ -6,6 +6,8 @@ from pathlib import Path
 from fastapi import APIRouter
 
 from core.config import DATA_DIR
+from core.cost_tracker import get_book_cost, get_cost_trend
+from core.dedup import dedup_book
 from data.json_store import json_store
 
 router = APIRouter(tags=["stats"])
@@ -388,3 +390,21 @@ def _empty_agent_metrics() -> dict:
         "outliers": [],
         "trend": [],
     }
+
+
+@router.get("/books/{book_id}/dedup")
+def dedup_stats(book_id: str):
+    """Cross-chapter content deduplication analysis."""
+    return dedup_book(book_id)
+
+
+@router.get("/books/{book_id}/cost")
+def book_cost(book_id: str):
+    """Aggregate cost summary for a book."""
+    return get_book_cost(book_id).to_dict()
+
+
+@router.get("/books/{book_id}/cost/trend")
+def book_cost_trend(book_id: str, days: int = 30):
+    """Daily cost trend for the last N days."""
+    return {"book_id": book_id, "days": days, "trend": get_cost_trend(book_id, days)}

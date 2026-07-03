@@ -51,6 +51,7 @@ const TAB_GROUPS: TabGroup[] = [
     tabs: [
       { key: 'outline', label: '大纲', icon: 'list' },
       { key: 'foreshadows', label: '伏笔', icon: 'target' },
+      { key: 'inspirations', label: '灵感', icon: 'lightbulb' },
       { key: 'references', label: '参考书', icon: 'book-open' },
     ],
   },

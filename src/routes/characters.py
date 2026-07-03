@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from core.graph_store import get_store
 from core.knowledge import CharacterSnapshot, EntityType, TimelineEvent
+from core.voice_fingerprint import get_all_voice_fingerprints, get_character_voice
 from data.json_store import json_store
 
 router = APIRouter(tags=["characters"])
@@ -278,3 +279,21 @@ def refresh_character_mentions(book_id: str):
         return json_store.refresh_character_mentions(book_id)
     except Exception as e:
         raise HTTPException(500, f"计算角色戏份失败: {str(e)[:200]}")
+
+
+@router.get("/books/{book_id}/characters/voice")
+def all_voice_fingerprints(book_id: str):
+    """Return voice fingerprints for all characters in the book."""
+    fingerprints = get_all_voice_fingerprints(book_id)
+    return {
+        "book_id": book_id,
+        "fingerprints": [fp.to_dict() for fp in fingerprints],
+        "total": len(fingerprints),
+    }
+
+
+@router.get("/books/{book_id}/characters/{char_name}/voice")
+def character_voice(book_id: str, char_name: str):
+    """Return voice fingerprint for a specific character."""
+    fp = get_character_voice(book_id, char_name)
+    return fp.to_dict()

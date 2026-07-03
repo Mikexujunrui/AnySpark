@@ -5,6 +5,8 @@ import { useResizeObserver } from "../hooks/useResizeObserver"
 import Icon from './ui/Icon'
 import StatCard from './ui/StatCard'
 import { showToast } from './ui/toast-utils'
+import PacingCurve from './PacingCurve'
+import CostDashboard from './CostDashboard'
 
 function formatWords(n: number | null | undefined): string {
   if (n == null) return '0'
@@ -101,18 +103,20 @@ export default function StatsDashboard() {
     const data = (stats.daily || []).slice(last30 ? -30 : -90)
     const svg = d3.select(lineSvgRef.current)
     svg.selectAll('*').remove()
-    svg.attr('width', w).attr('height', h)
+    const FW = 600, FH = 260
+    svg.attr('viewBox', `0 0 ${FW} ${FH}`).attr('preserveAspectRatio', 'xMidYMid meet')
+     .attr('width', '100%').attr('height', '100%').style('display', 'block')
 
     if (data.length === 0) {
-      svg.append('text').attr('x', w / 2).attr('y', h / 2)
+      svg.append('text').attr('x', FW / 2).attr('y', FH / 2)
         .attr('text-anchor', 'middle').attr('fill', '#52525b').attr('font-size', 13)
         .text('暂无写作数据')
       return
     }
 
-    const margin = { top: 20, right: 20, bottom: 40, left: 55 }
-    const innerW = w - margin.left - margin.right
-    const innerH = h - margin.top - margin.bottom
+    const margin = { top: 20, right: 20, bottom: 50, left: 55 }
+    const innerW = FW - margin.left - margin.right
+    const innerH = FH - margin.top - margin.bottom
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`)
 
     const parseDate = d3.timeParse('%Y-%m-%d')
@@ -187,8 +191,8 @@ export default function StatsDashboard() {
       focus.style('display', null).attr('transform', `translate(${x(d.date)},${y(d.words)})`)
       focus.select('.focus-v').attr('y2', innerH - y(d.words))
       tooltip.style('opacity', 1)
-        .style('left', `${x(d.date) + margin.left + 12}px`)
-        .style('top', `${y(d.words) + margin.top - 8}px`)
+        .style('left', `${event.offsetX + 12}px`)
+        .style('top', `${event.offsetY - 8}px`)
         .html(`<div style="font-weight:600;color:#e4e4e7;margin-bottom:3px">${formatDate(d.rawDate)}</div>`
             + `<div>写字: <span style="color:#38bdf8">${d.created}</span></div>`
             + `<div>编辑: <span style="color:#34d399">${d.edited}</span></div>`
@@ -208,18 +212,20 @@ export default function StatsDashboard() {
     const data = stats.perChapter || []
     const svg = d3.select(barSvgRef.current)
     svg.selectAll('*').remove()
-    svg.attr('width', w).attr('height', h)
+    const FW = 600, FH = 260
+    svg.attr('viewBox', `0 0 ${FW} ${FH}`).attr('preserveAspectRatio', 'xMidYMid meet')
+     .attr('width', '100%').attr('height', '100%').style('display', 'block')
 
     if (data.length === 0) {
-      svg.append('text').attr('x', w / 2).attr('y', h / 2)
+      svg.append('text').attr('x', FW / 2).attr('y', FH / 2)
         .attr('text-anchor', 'middle').attr('fill', '#52525b').attr('font-size', 13)
         .text('暂无章节数据')
       return
     }
 
-    const margin = { top: 20, right: 20, bottom: 50, left: 55 }
-    const innerW = w - margin.left - margin.right
-    const innerH = h - margin.top - margin.bottom
+    const margin = { top: 20, right: 20, bottom: 60, left: 55 }
+    const innerW = FW - margin.left - margin.right
+    const innerH = FH - margin.top - margin.bottom
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`)
 
     const x = d3.scaleBand().domain(data.map((d: any) => String(d.idx))).range([0, innerW]).padding(0.2)
@@ -253,8 +259,8 @@ export default function StatsDashboard() {
       tooltip.style('opacity', 1)
         .html(`<div style="font-weight:600;color:#e4e4e7">${d.isExtra ? '番外' : '第' + d.idx + '章'}: ${d.title}</div>`
             + `<div style="margin-top:3px"><span style="color:#38bdf8">${formatWords(d.wordCount)}</span> 字</div>`)
-        .style('left', `${x(String(d.idx))! + margin.left}px`)
-        .style('top', `${y(d.wordCount) + margin.top - 10}px`)
+        .style('left', `${event.offsetX + 12}px`)
+        .style('top', `${event.offsetY - 10}px`)
     }).on('mouseout', function() {
       d3.select(this).select('rect').attr('opacity', 0.85).attr('stroke', 'none')
       tooltip.style('opacity', 0)
@@ -285,11 +291,13 @@ export default function StatsDashboard() {
     const data = agentMetrics.trend
     const svg = d3.select(agentTrendSvgRef.current)
     svg.selectAll('*').remove()
-    svg.attr('width', w).attr('height', h)
+    const FW = 600, FH = 120
+    svg.attr('viewBox', `0 0 ${FW} ${FH}`).attr('preserveAspectRatio', 'xMidYMid meet')
+     .attr('width', '100%').attr('height', '100%').style('display', 'block')
 
-    const margin = { top: 15, right: 20, bottom: 30, left: 40 }
-    const innerW = w - margin.left - margin.right
-    const innerH = h - margin.top - margin.bottom
+    const margin = { top: 15, right: 20, bottom: 35, left: 40 }
+    const innerW = FW - margin.left - margin.right
+    const innerH = FH - margin.top - margin.bottom
     const g = svg.append('g').attr('transform', `translate(${margin.left},${margin.top})`)
 
     const parseDate = d3.timeParse('%Y-%m-%d')
@@ -600,6 +608,14 @@ export default function StatsDashboard() {
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ── 第七层：叙事节奏 + 成本分析 ── */}
+      {bookIdFilter && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
+          <PacingCurve bookId={bookIdFilter} />
+          <CostDashboard bookId={bookIdFilter} />
         </div>
       )}
     </div>

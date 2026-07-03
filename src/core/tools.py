@@ -1364,6 +1364,43 @@ registry.register(Tool(
 ))
 
 # ──────────────────────────────────────────────────────────────────────────
+# New tools: voice fingerprint, semantic diff, outline pipeline
+# ──────────────────────────────────────────────────────────────────────────
+
+registry.register(Tool(
+    name="analyze_voice",
+    description="分析指定角色的语言风格指纹：高频用词、句式偏好、口头禅、情感倾向。用于确保角色对话风格一致性。",
+    parameters={
+        "character_name": {"type": "string", "description": "角色名称"},
+    },
+))
+
+registry.register(Tool(
+    name="get_voice_profile",
+    description="获取所有角色的语言指纹摘要。写作前调用可了解每个角色的说话风格特征，帮助保持对话一致性。",
+    parameters={},
+))
+
+registry.register(Tool(
+    name="semantic_diff",
+    description="对比章节两个版本的语义差异（非文本差异）。识别角色情绪变化、场景变更、情节走向调整等。比 diff_chapters 更深入。",
+    parameters={
+        "chapter_id": {"type": "string", "description": "章节序号或ID"},
+        "old_version_id": {"type": "string", "description": "旧版本ID"},
+        "new_version_id": {"type": "string", "description": "新版本ID"},
+    },
+))
+
+registry.register(Tool(
+    name="expand_outline_pipeline",
+    description="大纲逐级展开Pipeline：一句话设定→总纲→分卷纲→章节纲→细纲。每级注入上级结果和知识库上下文，确保一致性。适合从零开始构思新书。",
+    parameters={
+        "seed": {"type": "string", "description": "一句话故事设定/种子"},
+        "levels": {"type": "integer", "description": "展开层级（1-4），默认4", "required": False},
+    },
+))
+
+# ──────────────────────────────────────────────────────────────────────────
 # Apply TOOL_META to registered tools
 # ──────────────────────────────────────────────────────────────────────────
 def _apply_tool_meta() -> None:

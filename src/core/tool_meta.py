@@ -41,7 +41,8 @@ READ_TOOLS = {"search_knowledge", "list_chapters", "read_chapter", "read_documen
               "list_references", "list_reference_chapters", "import_reference_chapters",
               "search_reference", "migrate_reference_knowledge", "manage_permissions",
               "check_constraints", "analyze_impact", "score_confidence",
-              "search_graph", "get_graph_insights", "verify_chapter"}
+              "search_graph", "get_graph_insights", "verify_chapter",
+              "analyze_voice", "get_voice_profile", "semantic_diff"}
 
 EXTRACT_TOOLS = {"extract_knowledge", "search_knowledge", "read_document",
                  "read_chapter", "extract_chapter"}
@@ -52,7 +53,8 @@ ANALYSIS_TOOLS = {"search_knowledge", "list_chapters", "read_chapter", "read_doc
                   "get_outline", "get_timeline", "get_detailed_outline", "get_worldbuilding",
                   "chapter_history", "diff_chapters", "ask_user",
                   "define_constraint", "check_constraints", "analyze_impact", "score_confidence",
-                  "delete_constraint", "search_graph", "get_graph_insights", "verify_chapter"}
+                  "delete_constraint", "search_graph", "get_graph_insights", "verify_chapter",
+                  "analyze_voice", "semantic_diff"}
 
 TASK_TOOLS = {"agent_tasks"}
 STYLE_TOOLS = {"set_style", "manage_styles"}
@@ -108,4 +110,6 @@ TOOL_META: dict[str, dict[str, bool]] = {
     # Narrative logic — constraint checking, impact analysis, confidence scoring
     "define_constraint":      {"mutates_kb": True},
     "delete_constraint":      {"mutates_kb": True},
+    # Outline expansion pipeline — streaming multi-level outline generation
+    "expand_outline_pipeline": {"streaming": True},
 }

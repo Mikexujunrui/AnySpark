@@ -3,6 +3,8 @@ import Icon from './ui/Icon'
 import EmptyState from './ui/EmptyState'
 import LoadingState from './ui/Skeleton'
 import { useRefreshKey } from "../store"
+import OutlinePipelinePanel from './OutlinePipelinePanel'
+import ChapterDependencyGraph from './ChapterDependencyGraph'
 
 export default function OutlinePanel({ bookId }: { bookId: string }) {
   const refreshKey = useRefreshKey()
@@ -19,6 +21,7 @@ export default function OutlinePanel({ bookId }: { bookId: string }) {
   const [editingDetailedIdx, setEditingDetailedIdx] = useState<number | null>(null)
   const [editingDetailedExtra, setEditingDetailedExtra] = useState(false)
   const [detailedEditDraft, setDetailedEditDraft] = useState<Record<string, any>>({})
+  const [showPipeline, setShowPipeline] = useState(false)
 
   useEffect(() => { loadAll() }, [bookId, refreshKey])
 
@@ -124,14 +127,28 @@ export default function OutlinePanel({ bookId }: { bookId: string }) {
             </button>
           </div>
         </div>
-        <span className="text-[11px] text-zinc-600">
-          {viewMode === 'outline'
-            ? `${regularCount} 章${extraCount ? ` + ${extraCount} 番外` : ''}`
-            : `${detailedRegularCount} 章${detailedExtraCount ? ` + ${detailedExtraCount} 番外` : ''}`}
-        </span>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setShowPipeline(!showPipeline)}
+            className="flex items-center gap-1 text-[11px] bg-violet-800/60 hover:bg-violet-700/60 text-violet-200 rounded-lg px-2 py-1 transition-colors"
+          >
+            <Icon name="sparkles" size={11} /> 逐级展开
+          </button>
+          <span className="text-[11px] text-zinc-600">
+            {viewMode === 'outline'
+              ? `${regularCount} 章${extraCount ? ` + ${extraCount} 番外` : ''}`
+              : `${detailedRegularCount} 章${detailedExtraCount ? ` + ${detailedExtraCount} 番外` : ''}`}
+          </span>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
+        {showPipeline && (
+          <div className="p-4 space-y-4">
+            <OutlinePipelinePanel bookId={bookId} onDone={() => { setShowPipeline(false); loadAll() }} />
+            <ChapterDependencyGraph bookId={bookId} />
+          </div>
+        )}
         {viewMode === 'detailed' && (
           <div className="divide-y divide-zinc-800/50">
             {!hasDetailed && (

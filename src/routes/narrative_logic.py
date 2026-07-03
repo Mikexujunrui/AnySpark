@@ -125,3 +125,41 @@ def get_confidence_scores(book_id: str, entity_id: str = ""):
         return asdict(score)
     scores = scorer.score_all()
     return [asdict(s) for s in scores]
+
+
+# ── Foreshadow matching endpoint ──
+
+@router.get("/books/{book_id}/foreshadow-matches")
+def foreshadow_matches(book_id: str):
+    """Return auto-matched foreshadow-payoff pairs and dangling foreshadows."""
+    from core.foreshadow_matcher import foreshadow_summary
+    return foreshadow_summary(book_id)
+
+
+@router.post("/books/{book_id}/foreshadow-matches/refresh")
+def refresh_foreshadow_matches(book_id: str):
+    """Force recompute foreshadow matches."""
+    from core.foreshadow_matcher import foreshadow_summary
+    return foreshadow_summary(book_id)
+
+
+# ── Chapter dependency graph endpoint ──
+
+@router.get("/books/{book_id}/chapter-dependencies")
+def chapter_dependencies(book_id: str):
+    """Return chapter dependency graph data."""
+    from core.chapter_dependency import build_and_visualize
+    return build_and_visualize(book_id)
+
+
+@router.post("/books/{book_id}/chapter-dependencies/impact")
+def chapter_dependency_impact(book_id: str, req: ImpactRequest):
+    """Return impact propagation for a modified chapter."""
+    from core.chapter_dependency import propagate_impact_by_id
+    affected = propagate_impact_by_id(book_id, req.source_id)
+    return {
+        "book_id": book_id,
+        "modified_chapter": req.source_id,
+        "affected_chapters": affected,
+        "total_affected": len(affected),
+    }

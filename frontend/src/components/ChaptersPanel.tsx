@@ -38,6 +38,8 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
   const [revertVersionId, setRevertVersionId] = useState(null)
   const [showCreateMenu, setShowCreateMenu] = useState(false)
   const [chapterSearch, setChapterSearch] = useState('')
+  const [volumes, setVolumes] = useState<any[]>([])
+  const [ungroupedChapterIds, setUngroupedChapterIds] = useState<string[]>([])
   const createMenuRef = useRef(null)
   const [recentlyEdited] = useState(new Set())
   const editorInstanceRef = useRef(null)
@@ -58,7 +60,7 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
   const findInputRef = useRef(null)
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { loadChapters() }, [bookId, refreshKey])
+  useEffect(() => { loadChapters(); loadVolumes() }, [bookId, refreshKey])
 
   // Close create menu on outside click
   useEffect(() => {
@@ -237,6 +239,17 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
       }
     } catch (e) { showToast('加载章节失败', 'error') }
     setLoading(false)
+  }
+
+  async function loadVolumes() {
+    try {
+      const res = await fetch(`/api/books/${bookId}/volumes`)
+      if (res.ok) {
+        const data = await res.json()
+        setVolumes(data.volumes || [])
+        setUngroupedChapterIds((data.ungrouped_chapters || []).map((c: any) => c.id))
+      }
+    } catch (e) { /* silent */ }
   }
 
   function selectChapter(ch) {
@@ -572,41 +585,116 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
               );
             }
 
+            // Build volume→chapters mapping from filtered results
+            const volColors = ['bg-sky-500', 'bg-violet-500', 'bg-amber-500', 'bg-emerald-500', 'bg-rose-500', 'bg-blue-500', 'bg-purple-500']
+            const volBgColors = ['bg-sky-950/30', 'bg-violet-950/30', 'bg-amber-950/30', 'bg-emerald-950/30', 'bg-rose-950/30', 'bg-blue-950/30', 'bg-purple-950/30']
+            const volBorderColors = ['border-sky-800/40', 'border-violet-800/40', 'border-amber-800/40', 'border-emerald-800/40', 'border-rose-800/40', 'border-blue-800/40', 'border-purple-800/40']
+            const groupedByVol: Record<string, any[]> = {}
+            const ungrouped: any[] = []
+            const groupedIds = new Set<string>()
+            volumes.forEach(v => {
+              const volChapters = (v.chapters || []).map((vc: any) => vc.id)
+              filteredRegular.forEach(ch => {
+                if (volChapters.includes(ch.id)) {
+                  if (!groupedByVol[v.id]) groupedByVol[v.id] = []
+                  groupedByVol[v.id].push(ch)
+                  groupedIds.add(ch.id)
+                }
+              })
+            })
+            filteredRegular.forEach(ch => {
+              if (!groupedIds.has(ch.id)) ungrouped.push(ch)
+            })
+
+            // Global chapter index for #N display
+            let globalIdx = 0
+
+            function renderChapterButton(ch: any, idx: number, isExtra = false) {
+              globalIdx++
+              return (
+                <button
+                  key={ch.id}
+                  onClick={() => selectChapter(ch)}
+                  className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all relative ${
+                    selectedId === ch.id
+                      ? isExtra
+                        ? 'bg-violet-900/40 text-zinc-100 border border-violet-700/30 shadow-sm'
+                        : 'bg-zinc-700 text-zinc-100 shadow-sm'
+                      : isExtra
+                        ? 'text-zinc-500 hover:text-zinc-300 hover:bg-violet-950/30'
+                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
+                  }`}
+                >
+                  {selectedId === ch.id && (
+                    <span className={`absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 rounded-r ${isExtra ? 'bg-violet-400' : 'bg-sky-400'}`} />
+                  )}
+                  <div className="flex items-center gap-1.5">
+                    {isExtra && <Icon name="star" size={10} className="text-violet-400 shrink-0" />}
+                    <p className="font-medium truncate flex-1">{ch.title || '无标题'}</p>
+                    {recentlyEdited.has(ch.id) && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" title="刚刚编辑" />
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 text-zinc-600 text-[10px] mt-0.5">
+                    <span className={`${isExtra ? 'text-violet-700' : 'text-zinc-700'} font-mono`}>#{isExtra ? `E${idx + 1}` : idx}</span>
+                    <span>{(ch.content || '').replace(/\s/g, '').length || 0} 字</span>
+                    <span className={`px-1 rounded font-mono ${
+                      ch.version_label?.includes('.')
+                        ? 'bg-sky-900/50 text-sky-400'
+                        : ch.version_count > 1 ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-800/50 text-zinc-600'
+                    }`}>{ch.version_label || `v${ch.version_count || 1}`}</span>
+                    {ch.status === 'final' && (
+                      <span className="text-[10px] bg-emerald-900/40 text-emerald-400 px-1 rounded ml-1 inline-flex items-center gap-0.5" title="定稿"><Icon name="check" size={10} /></span>
+                    )}
+                  </div>
+                </button>
+              )
+            }
+
             return (
               <>
-                {filteredRegular.map((ch, i) => (
-                  <button
-                    key={ch.id}
-                    onClick={() => selectChapter(ch)}
-                    className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all relative ${
-                      selectedId === ch.id
-                        ? 'bg-zinc-700 text-zinc-100 shadow-sm'
-                        : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800/50'
-                    }`}
-                  >
-                    {selectedId === ch.id && (
-                      <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 rounded-r bg-sky-400" />
+                {/* Volume-grouped chapters */}
+                {volumes.length > 0 && volumes.map((vol, vi) => {
+                  const volChapters = groupedByVol[vol.id] || []
+                  if (volChapters.length === 0) return null
+                  const colorIdx = vi % volColors.length
+                  return (
+                    <div key={vol.id} className="mb-1">
+                      <div className={`flex items-center gap-2 px-2 py-1.5 rounded-lg ${volBgColors[colorIdx]} border ${volBorderColors[colorIdx]}`}>
+                        <span className={`w-1.5 h-4 rounded-full ${volColors[colorIdx]}`} />
+                        <span className="text-[11px] font-semibold text-zinc-300 truncate flex-1">{vol.title || '未命名卷'}</span>
+                        <span className="text-[9px] text-zinc-500 shrink-0">{volChapters.length}章</span>
+                      </div>
+                      <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800/50 pl-2">
+                        {volChapters.map(ch => {
+                          globalIdx++
+                          return renderChapterButton(ch, globalIdx)
+                        })}
+                      </div>
+                    </div>
+                  )
+                })}
+
+                {/* Ungrouped chapters */}
+                {ungrouped.length > 0 && (
+                  <div className="mb-1">
+                    {volumes.length > 0 && (
+                      <div className="flex items-center gap-2 px-2 py-1.5">
+                        <span className="w-1.5 h-4 rounded-full bg-zinc-600" />
+                        <span className="text-[11px] font-semibold text-zinc-500">未分卷</span>
+                        <span className="text-[9px] text-zinc-600">{ungrouped.length}章</span>
+                      </div>
                     )}
-                    <div className="flex items-center gap-1.5">
-                      <p className="font-medium truncate flex-1">{ch.title || '无标题'}</p>
-                      {recentlyEdited.has(ch.id) && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" title="刚刚编辑" />
-                      )}
+                    <div className={`ml-2 mt-0.5 space-y-0.5 ${volumes.length > 0 ? 'border-l border-zinc-800/50 pl-2' : ''}`}>
+                      {ungrouped.map(ch => renderChapterButton(ch, globalIdx))}
                     </div>
-                    <div className="flex items-center gap-2 text-zinc-600 text-[10px] mt-0.5">
-                      <span className="text-zinc-700 font-mono">#{i + 1}</span>
-                      <span>{(ch.content || '').replace(/\s/g, '').length || 0} 字</span>
-                      <span className={`px-1 rounded font-mono ${
-                        ch.version_label?.includes('.')
-                          ? 'bg-sky-900/50 text-sky-400'
-                          : ch.version_count > 1 ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-800/50 text-zinc-600'
-                      }`}>{ch.version_label || `v${ch.version_count || 1}`}</span>
-                      {ch.status === 'final' && (
-                        <span className="text-[10px] bg-emerald-900/40 text-emerald-400 px-1 rounded ml-1 inline-flex items-center gap-0.5" title="定稿"><Icon name="check" size={10} /></span>
-                      )}
-                    </div>
-                  </button>
-                ))}
+                  </div>
+                )}
+
+                {/* If no volumes at all, chapters were rendered in ungrouped above */}
+                {volumes.length === 0 && ungrouped.length === 0 && filteredRegular.length === 0 && null}
+
+                {/* Extras */}
                 {filteredExtra.length > 0 && (
                   <>
                     <div className="flex items-center gap-2 px-2 py-2 mt-2">
@@ -614,42 +702,7 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
                       <span className="text-[10px] text-zinc-600 font-medium">番外 ({filteredExtra.length})</span>
                       <div className="flex-1 h-px bg-zinc-800" />
                     </div>
-                    {filteredExtra.map((ch, i) => (
-                      <button
-                        key={ch.id}
-                        onClick={() => selectChapter(ch)}
-                        className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-all relative ${
-                          selectedId === ch.id
-                            ? 'bg-violet-900/40 text-zinc-100 border border-violet-700/30 shadow-sm'
-                            : 'text-zinc-500 hover:text-zinc-300 hover:bg-violet-950/30'
-                        }`}
-                      >
-                        {selectedId === ch.id && (
-                          <span className="absolute left-0 top-1/2 -translate-y-1/2 w-0.5 h-6 rounded-r bg-violet-400" />
-                        )}
-                        <div className="flex items-center gap-1.5">
-                          <p className="font-medium truncate flex items-center gap-1.5 flex-1">
-                            <Icon name="star" size={10} className="text-violet-400 shrink-0" />
-                            {ch.title || '无标题'}
-                          </p>
-                          {recentlyEdited.has(ch.id) && (
-                            <span className="w-1.5 h-1.5 rounded-full bg-sky-400 shrink-0" title="刚刚编辑" />
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-zinc-600 text-[10px] mt-0.5">
-                          <span className="text-violet-700 font-mono">番外{i + 1}</span>
-                          <span>{(ch.content || '').replace(/\s/g, '').length || 0} 字</span>
-                          <span className={`px-1 rounded font-mono ${
-                            ch.version_label?.includes('.')
-                              ? 'bg-sky-900/50 text-sky-400'
-                              : ch.version_count > 1 ? 'bg-zinc-700 text-zinc-300' : 'bg-zinc-800/50 text-zinc-600'
-                          }`}>{ch.version_label || `v${ch.version_count || 1}`}</span>
-                          {ch.status === 'final' && (
-                            <span className="text-[10px] bg-emerald-900/40 text-emerald-400 px-1 rounded ml-1 inline-flex items-center gap-0.5" title="定稿"><Icon name="check" size={10} /></span>
-                          )}
-                        </div>
-                      </button>
-                    ))}
+                    {filteredExtra.map((ch, i) => renderChapterButton(ch, i, true))}
                   </>
                 )}
               </>

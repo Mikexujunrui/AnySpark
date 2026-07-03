@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, ConfigDict
 
 from core.errors import NotFoundError
+from core.semantic_diff import compute_semantic_diff
 from data.json_store import json_store
 
 router = APIRouter(tags=["chapters"])
@@ -359,3 +360,30 @@ def update_detailed_outline_extra(book_id: str, extra_index: int, data: Detailed
     if data.chapter_function:
         update["chapter_function"] = data.chapter_function
     return json_store.update_detailed_outline_extra(book_id, extra_index - 1, update)
+
+
+class SemanticDiffRequest(BaseModel):
+    old_version_id: str
+    new_version_id: str
+
+
+@router.post("/books/{book_id}/chapters/{chapter_id}/semantic-diff")
+async def chapter_semantic_diff(book_id: str, chapter_id: str, req: SemanticDiffRequest):
+    """Compute semantic diff between two chapter versions using LLM."""
+    chapters = json_store.load_chapters(book_id)
+    ch = json_store._resolve_by_id(chapters, chapter_id)
+    if not ch:
+        raise HTTPException(status_code=404, detail="Chapter not found")
+
+    versions = ch.get("versions", [])
+    old_v = next((v for v in versions if v.get("id") == req.old_version_id), None)
+    new_v = next((v for v in versions if v.get("id") == req.new_version_id), None)
+    if not old_v or not new_v:
+        raise HTTPException(status_code=404, detail="Version not found")
+
+    result = await compute_semantic_diff(
+        old_content=old_v.get("content", ""),
+        new_content=new_v.get("content", ""),
+        chapter_title=new_v.get("title", ch.get("title", "")),
+    )
+    return result.to_dict()
