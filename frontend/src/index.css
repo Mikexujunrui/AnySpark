@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* ── Tailwind dark mode: respond to data-theme attribute instead of prefers-color-scheme ── */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
 @theme {
   --animate-slide-in: slide-in 0.2s ease-out;
   --animate-fade-in: fade-in 0.15s ease-out;
@@ -25,8 +28,79 @@
   --shadow-lg: 0 12px 32px -4px rgb(0 0 0 / 0.5);
 }
 
+/* ── Global theme transitions ── */
+html, body {
+  background-color: var(--color-surface);
+  color: var(--color-content-muted);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ── Light theme global overrides: invert zinc scale ── */
+/* These rules provide light-mode backgrounds for the most common dark-mode patterns
+   without requiring dark: variants on every single component. */
+[data-theme="light"] {
+  /* ── Backgrounds: zinc-950/900/800 → white/zinc-50/zinc-100 ── */
+  & .bg-zinc-950,
+  & .bg-zinc-950\/30,
+  & .bg-zinc-950\/40,
+  & .bg-zinc-950\/50,
+  & .bg-zinc-950\/80 { background-color: #fafafa; }
+
+  & .bg-zinc-900,
+  & .bg-zinc-900\/30,
+  & .bg-zinc-900\/40,
+  & .bg-zinc-900\/50,
+  & .bg-zinc-900\/60,
+  & .bg-zinc-900\/80 { background-color: #ffffff; }
+
+  & .bg-zinc-800,
+  & .bg-zinc-800\/30,
+  & .bg-zinc-800\/50,
+  & .bg-zinc-800\/60,
+  & .bg-zinc-800\/70,
+  & .bg-zinc-800\/80 { background-color: #f4f4f5; }
+
+  & .bg-zinc-700,
+  & .bg-zinc-700\/50 { background-color: #e4e4e7; }
+
+  /* ── Borders: zinc-800/700 → zinc-200/300 ── */
+  & .border-zinc-800,
+  & .border-zinc-800\/40,
+  & .border-zinc-800\/50,
+  & .border-zinc-800\/60 { border-color: #d4d4d8; }
+
+  & .border-zinc-700,
+  & .border-zinc-700\/40,
+  & .border-zinc-700\/50,
+  & .border-zinc-700\/60 { border-color: #a1a1aa; }
+
+  & .border-zinc-600 { border-color: #71717a; }
+
+  /* ── Text: zinc-200/300/400 → zinc-800/700/600 ── */
+  & .text-zinc-100 { color: #09090b; }
+  & .text-zinc-200 { color: #18181b; }
+  & .text-zinc-300 { color: #27272a; }
+  & .text-zinc-400 { color: #3f3f46; }
+  & .text-zinc-500 { color: #52525b; }
+  & .text-zinc-600 { color: #71717a; }
+  & .text-zinc-700 { color: #a1a1aa; }
+
+  /* ── Dividers (bg-zinc-800 used as dividers) ── */
+  & .bg-zinc-800\/60 { background-color: #e4e4e7; }
+
+  /* ── Hover states ── */
+  & .hover\:bg-zinc-800\/50:hover { background-color: #e4e4e7; }
+  & .hover\:bg-zinc-700:hover { background-color: #d4d4d8; }
+  & .hover\:bg-zinc-700\/60:hover { background-color: #d4d4d8; }
+  & .hover\:bg-zinc-800:hover { background-color: #e4e4e7; }
+  & .hover\:bg-zinc-600:hover { background-color: #a1a1aa; }
+  & .hover\:text-zinc-300:hover { color: #27272a; }
+  & .hover\:text-zinc-400:hover { color: #3f3f46; }
+}
+
 /* ── Light theme overrides ── */
 [data-theme="light"] {
+  /* ── Semantic tokens ── */
   --color-surface: #f4f4f5;
   --color-surface-raised: #e4e4e7;
   --color-hairline: #d4d4d8;
@@ -39,6 +113,20 @@
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.08);
   --shadow-lg: 0 12px 32px -4px rgb(0 0 0 / 0.12);
+
+  /* ── Zinc palette inversion (mirrors dark → light) ── */
+  /* This makes ALL bg-zinc-*, text-zinc-*, border-zinc-* classes auto-respond to theme */
+  --color-zinc-50: #09090b;
+  --color-zinc-100: #18181b;
+  --color-zinc-200: #27272a;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-400: #52525b;
+  --color-zinc-500: #71717a;
+  --color-zinc-600: #a1a1aa;
+  --color-zinc-700: #d4d4d8;
+  --color-zinc-800: #e4e4e7;
+  --color-zinc-900: #f4f4f5;
+  --color-zinc-950: #fafafa;
 }
 
 @keyframes slide-in {
@@ -55,19 +143,19 @@
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--color-hairline); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: #52525b; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-zinc-600); }
 
 /* Markdown content styles — driven by design tokens */
 .markdown-body { color: var(--color-content-muted); }
 .markdown-body h1 { font-size: 1.25em; font-weight: 700; margin: 0.8em 0 0.4em; color: var(--color-content); }
 .markdown-body h2 { font-size: 1.125em; font-weight: 600; margin: 0.7em 0 0.35em; color: var(--color-content); }
-.markdown-body h3 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.3em; color: #d4d4d8; }
+.markdown-body h3 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.3em; color: var(--color-zinc-300); }
 .markdown-body p { margin: 0.4em 0; }
 .markdown-body ul, .markdown-body ol { padding-left: 1.5em; margin: 0.4em 0; }
 .markdown-body li { margin: 0.2em 0; }
 .markdown-body code { background: var(--color-surface-raised); padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.875em; color: var(--color-content-muted); }
 .markdown-body pre { background: var(--color-surface); border: 1px solid var(--color-surface-raised); border-radius: 8px; padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; }
-.markdown-body pre code { background: transparent; padding: 0; color: #d4d4d8; }
+.markdown-body pre code { background: transparent; padding: 0; color: var(--color-zinc-300); }
 .markdown-body blockquote { border-left: 3px solid var(--color-hairline); padding-left: 1em; margin: 0.5em 0; color: var(--color-content-muted); }
 .markdown-body strong { color: var(--color-content); font-weight: 600; }
 .markdown-body em { font-style: italic; }
@@ -91,8 +179,8 @@
   font-family: Georgia, 'Times New Roman', serif;
   font-size: 0.875rem;
   line-height: 1.75;
-  color: #e4e4e7;
-  background: #18181b;
+  color: var(--color-zinc-200);
+  background: var(--color-zinc-900);
 }
 
 .tiptap-editor .ProseMirror p {
@@ -103,7 +191,7 @@
 .tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
   content: attr(data-placeholder);
   float: left;
-  color: #71717a;
+  color: var(--color-zinc-500);
   pointer-events: none;
   height: 0;
   text-indent: 2em;
@@ -113,7 +201,7 @@
   font-size: 1.25rem;
   font-weight: 700;
   margin: 1em 0 0.5em;
-  color: #e4e4e7;
+  color: var(--color-zinc-200);
   text-indent: 0;
 }
 
@@ -121,7 +209,7 @@
   font-size: 1.1rem;
   font-weight: 600;
   margin: 0.8em 0 0.4em;
-  color: #d4d4d8;
+  color: var(--color-zinc-300);
   text-indent: 0;
 }
 
@@ -147,16 +235,16 @@
 }
 
 .tiptap-editor .ProseMirror blockquote {
-  border-left: 3px solid #3f3f46;
+  border-left: 3px solid var(--color-zinc-700);
   padding-left: 1em;
   margin: 0.5em 0;
-  color: #a1a1aa;
+  color: var(--color-zinc-400);
   font-style: italic;
 }
 
 .tiptap-editor .ProseMirror pre {
-  background: #27272a;
-  border: 1px solid #3f3f46;
+  background: var(--color-zinc-800);
+  border: 1px solid var(--color-zinc-700);
   border-radius: 8px;
   padding: 0.75em 1em;
   margin: 0.5em 0;
@@ -168,11 +256,11 @@
 .tiptap-editor .ProseMirror pre code {
   background: transparent;
   padding: 0;
-  color: #d4d4d8;
+  color: var(--color-zinc-300);
 }
 
 .tiptap-editor .ProseMirror code {
-  background: #27272a;
+  background: var(--color-zinc-800);
   padding: 0.15em 0.4em;
   border-radius: 4px;
   font-size: 0.875em;
@@ -180,7 +268,7 @@
 
 .tiptap-editor .ProseMirror strong {
   font-weight: 600;
-  color: #fafafa;
+  color: var(--color-zinc-50);
 }
 
 .tiptap-editor .ProseMirror em {
@@ -189,7 +277,7 @@
 
 .tiptap-editor .ProseMirror hr {
   border: none;
-  border-top: 1px solid #3f3f46;
+  border-top: 1px solid var(--color-zinc-700);
   margin: 1em 0;
 }
 
@@ -198,4 +286,21 @@
   color: #fef3c7;
   padding: 0.1em 0.2em;
   border-radius: 2px;
+}
+
+/* ── Light theme: TipTap editor ── */
+[data-theme="light"] .tiptap-editor .ProseMirror {
+  color: #18181b;
+  background: #ffffff;
+}
+[data-theme="light"] .tiptap-editor .ProseMirror h2 { color: #18181b; }
+[data-theme="light"] .tiptap-editor .ProseMirror h3 { color: #27272a; }
+[data-theme="light"] .tiptap-editor .ProseMirror blockquote { color: #52525b; border-left-color: #d4d4d8; }
+[data-theme="light"] .tiptap-editor .ProseMirror pre { background: #f4f4f5; border-color: #d4d4d8; }
+[data-theme="light"] .tiptap-editor .ProseMirror pre code { color: #27272a; }
+[data-theme="light"] .tiptap-editor .ProseMirror code { background: #f4f4f5; }
+[data-theme="light"] .tiptap-editor .ProseMirror strong { color: #09090b; }
+[data-theme="light"] .tiptap-editor .ProseMirror hr { border-top-color: #d4d4d8; }
+[data-theme="light"] .tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+  color: #a1a1aa;
 }
