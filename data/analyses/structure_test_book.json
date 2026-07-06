@@ -1,0 +1,40 @@
+{
+  "book_id": "test_book",
+  "chapter_count": 2,
+  "total_words": 213,
+  "avg_chapter_length": 106.5,
+  "chapter_length_distribution": [
+    93,
+    120
+  ],
+  "dialogue_ratio_distribution": [
+    0.355,
+    0.358
+  ],
+  "avg_dialogue_ratio": 0.357,
+  "paragraph_stats": {
+    "avg_per_chapter": 3,
+    "avg_length": 35.5
+  },
+  "sentence_stats": {
+    "avg_per_chapter": 6.5,
+    "avg_length": 15.4
+  },
+  "pacing_curve": [
+    {
+      "chapter": 1,
+      "title": "第一回",
+      "word_count": 93,
+      "dialogue_ratio": 0.355,
+      "pace_score": 0.148
+    },
+    {
+      "chapter": 2,
+      "title": "第二回",
+      "word_count": 120,
+      "dialogue_ratio": 0.358,
+      "pace_score": 0.151
+    }
+  ],
+  "pov_distribution": {}
+}

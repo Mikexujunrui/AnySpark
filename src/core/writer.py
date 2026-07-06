@@ -100,11 +100,80 @@ def _build_reference_context(book_id: str, ref_chapters: list[str] | None = None
                             content = content[:limit] + f"...（内容过长，已截断至{limit}字）"
                         ref_sections.append(content)
 
+            # Inject structural analysis report (if cached)
+            try:
+                from .reference_analyzer import load_analysis
+                structure_data = load_analysis("structure", ref_id)
+                if structure_data:
+                    ref_sections.append(_format_structure_constraints(structure_data))
+
+                # Inject style fingerprint (if cached)
+                style_data = load_analysis("style_fingerprint", ref_id)
+                if style_data:
+                    ref_sections.append(_format_style_constraints(style_data))
+            except Exception:
+                pass  # analysis injection is best-effort
+
             sections.extend(ref_sections)
         except Exception as e:
             sections.append(f"## 参考书 {ref_id} (加载失败: {str(e)[:50]})")
 
     return "\n".join(sections) if sections else ""
+
+
+def _format_structure_constraints(structure: dict) -> str:
+    """Format a structure report dict as a writing-constraint text block."""
+    lines = ["\n### 原著结构约束"]
+    ch_count = structure.get("chapter_count", 0)
+    total = structure.get("total_words", 0)
+    avg = structure.get("avg_chapter_length", 0)
+    if ch_count:
+        lines.append(
+            f"原著共 {ch_count} 章，{total} 字，平均每章 {avg:.0f} 字。"
+        )
+    avg_dr = structure.get("avg_dialogue_ratio", 0)
+    if avg_dr:
+        lines.append(f"平均对话占比 {avg_dr:.1%}。")
+    para = structure.get("paragraph_stats", {})
+    if para.get("avg_per_chapter"):
+        lines.append(
+            f"平均每章 {para['avg_per_chapter']:.0f} 段，每段约 {para['avg_length']:.0f} 字。"
+        )
+    sent = structure.get("sentence_stats", {})
+    if sent.get("avg_per_chapter"):
+        lines.append(
+            f"平均每章 {sent['avg_per_chapter']:.0f} 句，每句约 {sent['avg_length']:.0f} 字。"
+        )
+    lines.append("续写时应保持相近的章节篇幅和对话密度。")
+    return "\n".join(lines)
+
+
+def _format_style_constraints(fingerprint: dict) -> str:
+    """Format a style fingerprint dict as a writing-constraint text block."""
+    lines = ["\n### 文风量化约束"]
+    dist = fingerprint.get("sentence_length_distribution", {})
+    if dist:
+        lines.append("句长分布:")
+        for bucket in ["<10", "10-20", "20-40", ">40"]:
+            val = dist.get(bucket, 0)
+            if val:
+                lines.append(f"  {bucket}字: {val:.1%}")
+    ttr = fingerprint.get("vocabulary_richness_ttr", 0)
+    if ttr:
+        lines.append(f"词汇丰富度(TTR): {ttr:.3f}")
+    idiom = fingerprint.get("four_char_idiom_density", 0)
+    if idiom:
+        lines.append(f"四字成语密度: {idiom:.4f}")
+    para = fingerprint.get("paragraph_length_stats", {})
+    if para.get("mean"):
+        lines.append(
+            f"段落长度: 均值{para['mean']:.0f}字, 中位数{para.get('median', 0):.0f}字"
+        )
+    dd = fingerprint.get("dialogue_density", 0)
+    if dd:
+        lines.append(f"对话密度: {dd:.1%}")
+    lines.append("续写时应尽量匹配以上文风量化指标。")
+    return "\n".join(lines)
 
 
 def _build_write_prompt(task_instruction: str, mode: str, project_id: str,

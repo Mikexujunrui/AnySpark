@@ -73,10 +73,10 @@ class RetryConfig:
 
 @dataclass
 class CompactionConfig:
-    threshold_ratio: float = 0.95
-    protected_tail_tokens: int = 80000
-    tail_turns_to_keep: int = 5
-    max_tool_output_tokens: int = 50000
+    threshold_ratio: float = 0.70
+    protected_tail_tokens: int = 60000
+    tail_turns_to_keep: int = 4
+    max_tool_output_tokens: int = 30000
 
 
 @dataclass
@@ -91,8 +91,11 @@ class AgentConfig:
     soft_round_limit: int = 0
     # Token budget hard cap: stop the loop when cumulative input+output tokens
     # exceed ``token_budget_ratio`` × model context limit. 0 = disabled.
-    # Industry-standard dual control (rounds + tokens) to bound cost.
-    token_budget_ratio: float = 0.8
+    # Disabled by default — compaction (threshold_ratio) handles context
+    # management by pruning/summarizing when actual context approaches the
+    # model's window. Cumulative caps are too conservative for 1M-window
+    # models where multi-round workflows legitimately exceed 900K cumulative.
+    token_budget_ratio: float = 0.0
     max_workers: int = 8
     default_temperature: float = 0.3
     creative_temperature: float = 0.7

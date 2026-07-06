@@ -68,6 +68,10 @@ class WritingKnowledgeScope:
     forbidden_revelations: list[str] = field(default_factory=list)
     writing_rules: str = ""
 
+    # ── 分析层约束（由 reference_analyzer 生成，写作时注入）──
+    style_fingerprint: dict = field(default_factory=dict)
+    structure_report: dict = field(default_factory=dict)
+
     # ── 知识请求队列（子Agent发起，Master审核）──
     pending_requests: list[KnowledgeRequest] = field(default_factory=list)
 
@@ -165,6 +169,8 @@ class WritingKnowledgeScope:
             "forbidden_revelations": self.forbidden_revelations,
             "writing_rules": self.writing_rules,
             "pending_requests": [r.to_dict() for r in self.pending_requests],
+            "style_fingerprint": self.style_fingerprint,
+            "structure_report": self.structure_report,
         }
 
     def to_summary(self) -> str:
@@ -187,6 +193,12 @@ class WritingKnowledgeScope:
                 lines.append(f"  ✕ {r}")
         if self.writing_rules:
             lines.append(f"\n## 写作规则\n{self.writing_rules}")
+        if self.style_fingerprint:
+            lines.append(f"\n## 文风指纹\n{len(self.style_fingerprint)} 项量化指标")
+        if self.structure_report:
+            ch = self.structure_report.get('chapter_count', '?')
+            avg = self.structure_report.get('avg_chapter_length', '?')
+            lines.append(f"\n## 原著结构\n{ch} 章, 平均 {avg} 字/章")
         if self.target_word_count:
             lines.append(f"\n目标字数: {self.target_word_count}")
         return "\n".join(lines)
@@ -209,6 +221,8 @@ class WritingKnowledgeScope:
             forbidden_revelations=d.get("forbidden_revelations", []),
             writing_rules=d.get("writing_rules", ""),
             pending_requests=[KnowledgeRequest(**r) for r in d.get("pending_requests", [])],
+            style_fingerprint=d.get("style_fingerprint", {}),
+            structure_report=d.get("structure_report", {}),
         )
 
 

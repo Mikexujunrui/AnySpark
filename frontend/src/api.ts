@@ -107,6 +107,36 @@ export interface StylesListData {
   styles: unknown[]
 }
 
+export interface StructureReportData {
+  book_id: string
+  chapter_count: number
+  total_words: number
+  avg_chapter_length: number
+  chapter_length_distribution: number[]
+  dialogue_ratio_distribution: number[]
+  avg_dialogue_ratio: number
+  paragraph_stats: { avg_per_chapter: number; avg_length: number }
+  sentence_stats: { avg_per_chapter: number; avg_length: number }
+  pacing_curve: { chapter: number; title: string; word_count: number; dialogue_ratio: number; pace_score: number }[]
+  pov_distribution: Record<string, number>
+}
+
+export interface StyleFingerprintData {
+  book_id: string
+  sentence_length_distribution: Record<string, number>
+  vocabulary_richness_ttr: number
+  punctuation_pattern: Record<string, number>
+  four_char_idiom_density: number
+  paragraph_length_stats: { mean: number; median: number; std: number }
+  dialogue_density: number
+}
+
+export interface AnalysisSummaryData {
+  ref_book_id: string
+  structure?: { chapter_count: number; total_words: number; avg_chapter_length: number; avg_dialogue_ratio: number }
+  style_fingerprint?: { vocabulary_richness_ttr: number; dialogue_density: number; four_char_idiom_density: number }
+}
+
 export interface SkillsListData {
   skills: SkillData[]
 }
@@ -149,6 +179,18 @@ export const api = {
   // Reference books
   getReferences: (bookId: string): Promise<unknown> => get(`/api/books/${bookId}/references`),
   setReferences: (bookId: string, bookIds: string[]): Promise<unknown> => put(`/api/books/${bookId}/references`, { book_ids: bookIds }),
+
+  // Reference work analysis
+  triggerStructureAnalysis: (bookId: string, refBookId?: string): Promise<StructureReportData> =>
+    post(`/api/books/${bookId}/analyses/structure${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
+  getStructureAnalysis: (bookId: string, refBookId?: string): Promise<StructureReportData> =>
+    get(`/api/books/${bookId}/analyses/structure${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
+  triggerStyleAnalysis: (bookId: string, refBookId?: string): Promise<StyleFingerprintData> =>
+    post(`/api/books/${bookId}/analyses/style${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
+  getStyleAnalysis: (bookId: string, refBookId?: string): Promise<StyleFingerprintData> =>
+    get(`/api/books/${bookId}/analyses/style${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
+  listAnalyses: (bookId: string): Promise<{ analyses: AnalysisSummaryData[] }> =>
+    get(`/api/books/${bookId}/analyses`),
 
   // Styles
   getStyles: (): Promise<StylesListData> => get('/api/styles'),

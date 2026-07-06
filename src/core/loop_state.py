@@ -109,6 +109,7 @@ class LoopMetrics:
     tool_calls: int = 0
     hallucination_hits: dict = field(default_factory=dict)
     compactions: int = 0
+    tool_prunes: int = 0  # proactive stale tool result truncations
     sitreps: int = 0
     drift_corrections: int = 0
     kb_mutation_stops: int = 0
@@ -144,7 +145,7 @@ class LoopMetrics:
             f"tool_calls={self.tool_calls} hallucination={hits} "
             f"hall_retries={self.hallucination_retry_rounds} doom_skips={self.doom_loop_skips} "
             f"readonly={self.read_only_rounds} mixed={self.text_and_tool_rounds} "
-            f"compactions={self.compactions} sitreps={self.sitreps} "
+            f"compactions={self.compactions} tool_prunes={self.tool_prunes} sitreps={self.sitreps} "
             f"drift_corr={self.drift_corrections} kb_stops={self.kb_mutation_stops}"
             f"{subagent_info} "
             f"tokens={self.total_tokens} "

@@ -42,7 +42,8 @@ READ_TOOLS = {"search_knowledge", "list_chapters", "read_chapter", "read_documen
               "search_reference", "migrate_reference_knowledge", "manage_permissions",
               "check_constraints", "analyze_impact", "score_confidence",
               "search_graph", "get_graph_insights", "verify_chapter",
-              "analyze_voice", "get_voice_profile", "semantic_diff"}
+              "analyze_voice", "get_voice_profile", "semantic_diff",
+              "analyze_structure", "quantify_style"}
 
 EXTRACT_TOOLS = {"extract_knowledge", "search_knowledge", "read_document",
                  "read_chapter", "extract_chapter"}
@@ -54,7 +55,8 @@ ANALYSIS_TOOLS = {"search_knowledge", "list_chapters", "read_chapter", "read_doc
                   "chapter_history", "diff_chapters", "ask_user",
                   "define_constraint", "check_constraints", "analyze_impact", "score_confidence",
                   "delete_constraint", "search_graph", "get_graph_insights", "verify_chapter",
-                  "analyze_voice", "semantic_diff"}
+                  "analyze_voice", "semantic_diff",
+                  "analyze_structure", "quantify_style"}
 
 TASK_TOOLS = {"agent_tasks"}
 STYLE_TOOLS = {"set_style", "manage_styles"}
@@ -112,4 +114,7 @@ TOOL_META: dict[str, dict[str, bool]] = {
     "delete_constraint":      {"mutates_kb": True},
     # Outline expansion pipeline — streaming multi-level outline generation
     "expand_outline_pipeline": {"streaming": True},
+    # Reference work analysis — read-only, no streaming needed
+    "analyze_structure": {},
+    "quantify_style": {},
 }

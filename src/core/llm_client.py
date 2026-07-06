@@ -3,14 +3,17 @@
 
 import asyncio
 import logging
+import os
+import time
 from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass, field
 
+import httpx
 from httpx import Timeout
 from openai import OpenAI
 
 from .config import config
-from .retry import calculate_delay, is_context_overflow, is_retryable, with_retry
+from .retry import calculate_delay, is_connection_error, is_context_overflow, is_retryable, with_retry
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +106,28 @@ def _resolve(task: str) -> tuple:
 
 # ── Client factory ──────────────────────────────────────────────────────────
 
+def _make_httpx_client() -> httpx.Client:
+    """Create an httpx client that bypasses system proxy by default.
+
+    On Windows, httpx respects WinINET proxy settings (System Proxy).
+    VPN/Clash proxies (e.g. 127.0.0.1:29290) intercept TLS connections
+    and cause [SSL: UNEXPECTED_EOF_WHILE_READING] errors during long
+    streaming responses. Setting trust_env=False bypasses this.
+
+    Users who need a proxy can set LLM_PROXY env var explicitly.
+    """
+    proxy_url = os.getenv("LLM_PROXY", "")
+    kwargs = {
+        "timeout": Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0),
+    }
+    if proxy_url:
+        kwargs["proxy"] = proxy_url
+    else:
+        # Bypass system proxy (WinINET on Windows, HTTP_PROXY env on Linux)
+        kwargs["trust_env"] = False
+    return httpx.Client(**kwargs)
+
+
 def _get_client_for_provider(provider_id: str) -> OpenAI:
     """Get or create an OpenAI client for the given provider."""
     if provider_id in _clients:
@@ -113,13 +138,12 @@ def _get_client_for_provider(provider_id: str) -> OpenAI:
         s = get_settings()
         provider = s.get_provider(provider_id)
         if provider:
-            # All providers use OpenAI-compatible API
-            # (Anthropic/Gemini via proxy or native OpenAI-compatible endpoint)
             client = OpenAI(
                 api_key=provider.api_key,
                 base_url=provider.base_url or "https://api.deepseek.com",
                 timeout=Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0),
                 max_retries=0,
+                http_client=_make_httpx_client(),
             )
             _clients[provider_id] = client
             return client
@@ -147,6 +171,7 @@ def get_client() -> OpenAI:
             base_url=config.llm.base_url,
             timeout=Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0),
             max_retries=0,
+            http_client=_make_httpx_client(),
         )
     return _clients["_legacy"]
 
@@ -168,42 +193,80 @@ def reload_clients():
 
 # ── Sync calls ──────────────────────────────────────────────────────────────
 
+_STREAM_MAX_RETRIES = 5
+
+
 def chat(prompt: str, system: str = "", temperature: float = 0.3,
          task: str = "general") -> str:
-    provider_id, model = _resolve(task)
-    client = _get_client_for_provider(provider_id)
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        max_tokens=65536 if task in ("writing", "editing", "workflow") else 16384,
-    )
-    return response.choices[0].message.content or ""
+    """Sync chat with retry on transient connection errors."""
+    last_error = None
+    for attempt in range(_STREAM_MAX_RETRIES + 1):
+        try:
+            provider_id, model = _resolve(task)
+            client = _get_client_for_provider(provider_id)
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                max_tokens=65536 if task in ("writing", "editing", "workflow") else 16384,
+            )
+            return response.choices[0].message.content or ""
+        except Exception as e:
+            last_error = e
+            if not is_retryable(e) or attempt >= _STREAM_MAX_RETRIES:
+                raise
+            delay = calculate_delay(attempt, e)
+            err_type = "连接" if is_connection_error(e) else "服务"
+            logger.warning(f"[{err_type}错误] 重试 {attempt + 1}/{_STREAM_MAX_RETRIES}: {e!s:.80s} → {delay:.1f}s 后重试")
+            time.sleep(delay)
+    raise last_error  # unreachable
 
 
 def chat_stream(prompt: str, system: str = "", temperature: float = 0.3,
                 task: str = "general") -> Generator[str, None, None]:
-    provider_id, model = _resolve(task)
-    client = _get_client_for_provider(provider_id)
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": prompt})
-    stream = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=temperature,
-        stream=True,
-        max_tokens=65536 if task in ("writing", "editing", "workflow") else 16384,
-    )
-    for chunk in stream:
-        content = chunk.choices[0].delta.content
-        if content:
-            yield content
+    """Streaming chat with retry on transient connection errors.
+
+    Retry is only safe BEFORE any content is yielded. Once the stream
+    starts producing output, a mid-stream disconnect cannot be retried
+    (would produce duplicate content). In that case the error propagates.
+    """
+    last_error = None
+    for attempt in range(_STREAM_MAX_RETRIES + 1):
+        try:
+            provider_id, model = _resolve(task)
+            client = _get_client_for_provider(provider_id)
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": prompt})
+            stream = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=temperature,
+                stream=True,
+                max_tokens=65536 if task in ("writing", "editing", "workflow") else 16384,
+            )
+            content_yielded = False
+            for chunk in stream:
+                content = chunk.choices[0].delta.content
+                if content:
+                    content_yielded = True
+                    yield content
+            return  # success
+        except Exception as e:
+            last_error = e
+            # If content was already yielded, we cannot retry (would duplicate)
+            if content_yielded or not is_retryable(e) or attempt >= _STREAM_MAX_RETRIES:
+                raise
+            delay = calculate_delay(attempt, e)
+            err_type = "连接" if is_connection_error(e) else "服务"
+            logger.warning(f"[{err_type}错误/流式] 重试 {attempt + 1}/{_STREAM_MAX_RETRIES}: {e!s:.80s} → {delay:.1f}s 后重试")
+            time.sleep(delay)
+    raise last_error  # unreachable
 
 
 # ── Data classes ────────────────────────────────────────────────────────────
@@ -343,7 +406,7 @@ def chat_with_tools_stream(messages: list[dict], tools: list[dict] | None = None
 
 async def chat_with_tools_stream_async(messages: list[dict], tools: list[dict] | None = None,
                                        temperature: float = 0.3, task: str = "general",
-                                       max_stream_retries: int = 3,
+                                       max_stream_retries: int = 5,
                                        ) -> AsyncGenerator[StreamEvent, None]:
     from .retry import is_connection_error
 

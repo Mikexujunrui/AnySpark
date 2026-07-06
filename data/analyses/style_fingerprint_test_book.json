@@ -1,0 +1,27 @@
+{
+  "book_id": "test_book",
+  "sentence_length_distribution": {
+    "<10": 0.231,
+    "10-20": 0.615,
+    "20-40": 0.154,
+    ">40": 0.0
+  },
+  "vocabulary_richness_ttr": 0.895,
+  "punctuation_pattern": {
+    "。": 0.0485,
+    "，": 0.0529,
+    "！": 0.0,
+    "？": 0.0088,
+    "——": 0.0,
+    "……": 0.0,
+    "；": 0.0,
+    "：": 0.0132
+  },
+  "four_char_idiom_density": 0.0,
+  "paragraph_length_stats": {
+    "mean": 35.5,
+    "median": 26.5,
+    "std": 19.3
+  },
+  "dialogue_density": 0.357
+}

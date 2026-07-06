@@ -18,7 +18,7 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 
 from .agent_context import AgentContext
-from .compaction import handle_context_overflow, needs_compaction
+from .compaction import handle_context_overflow, needs_compaction, prune_stale_tool_results
 from .config import config
 from .hallucination import detect_hallucination
 from .llm_client import (
@@ -296,6 +296,15 @@ async def _loop_inner(
         while not state.exhausted:
             handle.check_cancelled()
             state.advance_round()
+
+            # ── Stage 0: proactive stale tool result pruning ──
+            # Truncates old tool outputs to short previews BEFORE compaction
+            # is needed. A read_chapter result of 8K tokens becomes 800 tokens
+            # in the next round, preventing linear context growth.
+            pruned_msgs, did_prune = prune_stale_tool_results(messages)
+            if did_prune:
+                messages[:] = pruned_msgs
+                state.metrics.tool_prunes += 1
 
             # ── Stage 1: compaction ──
             async for ev in _maybe_compact(messages, agent_config, state):

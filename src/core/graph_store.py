@@ -453,11 +453,19 @@ class GraphStore:
         rels = []
         for row in rows:
             a, r, b = row["a"], row["r"], row["b"]
+            # Handle both known and dynamic relationship types gracefully
+            raw_type = r.type.lower()
+            try:
+                rel_type = RelationType(raw_type)
+            except ValueError:
+                # Dynamic/custom relationship type not in the enum —
+                # store as-is using a generic string instead of crashing.
+                rel_type = raw_type  # type: ignore[assignment]
             rels.append(Relation(
                 id=r.get("id", str(uuid.uuid4())[:8]),
                 from_entity=a["id"],
                 to_entity=b["id"],
-                type=RelationType(r.type.lower()),
+                type=rel_type,
                 data=json.loads(r.get("data", "{}")) if r.get("data") else {},
             ))
         return rels
@@ -3118,7 +3126,7 @@ class GraphStore:
                     -[:{rel_type}]->(org:Entity {{project_id: $pid}})
                     <-[:{rel_type}]-(b:Entity:Character {{project_id: $pid}})
                     WHERE a.id < b.id
-                    AND NOT (a)-[:KNOWS|FRIEND|ALLY|FAMILY|ANTAGONIST|TEAM_MEMBER|TEAM_CAPTAIN]-(b)
+                    AND NOT (a)-[:KNOWS|FRIEND|ALLY|FAMILY|ANTAGONIST]-(b)
                     RETURN DISTINCT a.id AS aid, b.id AS bid, a.name AS aname, b.name AS bname,
                            org.name AS org_name, org.entity_type AS org_type
                     LIMIT 50
@@ -3148,7 +3156,7 @@ class GraphStore:
             WHERE a.id < b.id
             WITH a, b, count(DISTINCT ctx) AS shared_contexts, collect(DISTINCT ctx.name) AS ctx_names
             WHERE shared_contexts >= 2
-            AND NOT (a)-[:KNOWS|FRIEND|ALLY|FAMILY|ANTAGONIST|TEAM_MEMBER|TEAM_CAPTAIN]-(b)
+            AND NOT (a)-[:KNOWS|FRIEND|ALLY|FAMILY|ANTAGONIST]-(b)
             RETURN DISTINCT a.id AS aid, b.id AS bid, a.name AS aname, b.name AS bname,
                    shared_contexts, ctx_names
             ORDER BY shared_contexts DESC
@@ -3203,11 +3211,22 @@ class GraphStore:
             )
 
         # 5. LLM-driven suggestion for high-co-occurrence unlinked pairs
-        llm_rows = self._run("""
-            MATCH (t:Timeline {project_id: $pid})-[:INVOLVES|TIMELINE_INVOLVES]->(a:Entity:Character)
-            MATCH (t)-[:INVOLVES|TIMELINE_INVOLVES]->(b:Entity:Character)
+        # Build exclusion pattern dynamically from active schema to avoid Neo4j warnings
+        # about non-existent relationship types.
+        from .graph_schema import get_active_relationship_types as _get_rels
+        _structural_rels = {"INVOLVES", "HAS_PHASE", "DEPENDS_ON", "GOVERNS",
+                            "BEFORE", "AFTER", "FORESHADOWS", "RESOLVES", "CAUSES",
+                            "OCCURRED_AT", "LOCATED_IN", "LOCATED_AT", "PARTICIPATES_IN"}
+        _semantic_rels = [r for r in _get_rels() if r not in _structural_rels]
+        if _semantic_rels:
+            _exclude_pattern = "|".join(_semantic_rels)
+        else:
+            _exclude_pattern = "KNOWS|ALLY|FAMILY|ANTAGONIST|ROMANTIC|FRIEND"
+        llm_rows = self._run(f"""
+            MATCH (t:Timeline {{project_id: $pid}})-[:INVOLVES]->(a:Entity:Character)
+            MATCH (t)-[:INVOLVES]->(b:Entity:Character)
             WHERE a.id < b.id
-            AND NOT (a)-[:KNOWS|ALLY|FAMILY|ANTAGONIST|ROMANTIC|MASTER_OF|MENTOR_OF|KILLED|SAVED|LOVES|BELONGS_TO_HOUSE|BELONGS_TO_TEAM|BELONGS_TO_SECT|BELONGS_TO_FACTION|TEAM_MEMBER|TEAM_CAPTAIN|FRIEND|PREFECT]-(b)
+            AND NOT (a)-[:{_exclude_pattern}]-(b)
             WITH a, b, count(t) AS co_count
             WHERE co_count >= 5
             RETURN a.name AS aname, a.id AS aid, b.name AS bname, b.id AS bid, co_count
@@ -3284,15 +3303,10 @@ class GraphStore:
             suggestions = data.get("suggestions", [])
 
             added = 0
-            valid_types = {
-                "KNOWS", "ALLY", "ANTAGONIST", "FAMILY", "ROMANTIC",
-                "FRIEND", "MENTOR_OF", "MASTER_OF", "LOVES",
-                "BELONGS_TO_HOUSE", "BELONGS_TO_TEAM", "TEAM_MEMBER",
-                "TEAM_CAPTAIN", "BELONGS_TO_SECT", "BELONGS_TO_FACTION",
-                "PREFECT", "CLASS_TEACHER", "HEADMASTER",
-                "KILLED", "SAVED", "OWNS", "BELONGS_TO", "LOCATED_AT",
-                "PARTICIPATES_IN",
-            }
+            # Use active schema types instead of hardcoded list to support
+            # custom ontologies per book.
+            from .graph_schema import get_active_relationship_types as _get_rels
+            valid_types = set(_get_rels())
             for s in suggestions:
                 idx = s.get("pair_index", 0) - 1
                 if idx < 0 or idx >= len(candidate_pairs):

@@ -136,7 +136,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
     setEditingProvider(p.id)
     setProviderForm({
       id: p.id, name: p.name, type: p.type,
-      api_key: p.api_key || '', base_url: p.base_url || '',
+      api_key: '', base_url: p.base_url || '',
       models: (p.models || []).join(', '),
     })
   }
@@ -423,9 +423,9 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                     </select>
                   </div>
                   <div>
-                    <label className="text-[10px] text-zinc-500 block mb-1">API Key</label>
+                    <label className="text-[10px] text-zinc-500 block mb-1">API Key {editingProvider && '! 留空则保持原Key'}</label>
                     <input value={providerForm.api_key} onChange={e => setProviderForm(f => ({ ...f, api_key: e.target.value }))}
-                      type="password" placeholder="sk-..."
+                      type="password" placeholder={editingProvider ? '留空保持不变' : 'sk-...'}
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600" />
                   </div>
                   {providerForm.type === 'openai' && (

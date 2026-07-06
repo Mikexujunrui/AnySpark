@@ -412,6 +412,21 @@ async def _write_by_nodes(
     prev_ending = ""
     write_error = None
 
+    # ── Build stable system prompt (cacheable prefix) ──
+    # All knowledge context, rules, and chapter-level info go into the
+    # system message so it's identical across node calls. DeepSeek's prefix
+    # caching can then hit the entire system message, saving input tokens
+    # on nodes 2..N.
+    stable_system = f"""{system}
+
+# 本章可用知识库设定
+{scoped_context}
+{ref_block}
+---
+本章共 {len(plot_chain)} 个事件。
+{f'本章叙事功能: {chapter_function}' if chapter_function else ''}
+{f'写作规则: {writing_rules}' if writing_rules else ''}"""
+
     for i, event in enumerate(plot_chain):
         if write_error:
             break
@@ -419,22 +434,13 @@ async def _write_by_nodes(
         if queue:
             await queue.put({"_progress": f"\u8282\u70b9 {i+1}/{len(plot_chain)}: {event[:30]}..."})
 
-        # Build node-level prompt
+        # Build node-level prompt — only the variable parts go here
         prev_context = f"\u524d\u6587\u7ed3\u5c3e\uff08\u8bf7\u81ea\u7136\u8854\u63a5\uff09: ...{prev_ending[-200:]}" if prev_ending else "\uff08\u672c\u7ae0\u5f00\u5934\uff09"
 
-        node_prompt = f"""{scoped_context}
-
-{ref_block}
-
----
-
-本章共 {len(plot_chain)} 个事件，当前写第 {i+1} 个。
-{f'本章叙事功能: {chapter_function}' if chapter_function else ''}
-
+        node_prompt = f"""当前写第 {i+1} 个事件。
 {prev_context}
 
 当前事件: {event}
-{f'写作规则: {writing_rules}' if writing_rules else ''}
 
 【字数要求】严格控制在 {target_words_per_node} 字左右，不要超过 {target_words_per_node + 150} 字。
 请直接输出小说正文，不要加解释前缀。本段只写这一个事件，不要涉及后续事件。"""
@@ -446,7 +452,7 @@ async def _write_by_nodes(
         def _run():
             nonlocal write_error
             try:
-                for chunk in chat_stream(node_prompt, system=system,
+                for chunk in chat_stream(node_prompt, system=stable_system,
                                          temperature=0.7, task="writing"):
                     node_chunks.append(chunk)
                     chunk_queue.put_nowait(chunk)
@@ -482,13 +488,13 @@ async def _write_by_nodes(
             if violations_found and queue:
                 await queue.put({"_progress": f"\u8282\u70b9 {i+1}: \u68c0\u6d4b\u5230\u7981\u6b62\u89d2\u8272 {','.join(violations_found)}\uff0c\u91cd\u5199\u8be5\u8282\u70b9..."})
                 # Rewrite node with explicit prohibition
-                rewrite_prompt = node_prompt + f"\n\n\u26d4\ufe0f \u7981\u6b62\u63d0\u53ca\u4ee5\u4e0b\u89d2\u8272: {', '.join(violations_found)}\u3002\u8bf7\u91cd\u5199\u672c\u6bb5\u5185\u5bb9\uff0c\u786e\u4fdd\u8fd9\u4e9b\u89d2\u8272\u4e0d\u51fa\u73b0\u3002"
+                rewrite_prompt = f"当前写第 {i+1} 个事件。\n{prev_context}\n\n当前事件: {event}\n\n\u26d4\ufe0f \u7981\u6b62\u63d0\u53ca\u4ee5\u4e0b\u89d2\u8272: {', '.join(violations_found)}\u3002\u8bf7\u91cd\u5199\u672c\u6bb5\u5185\u5bb9\uff0c\u786e\u4fdd\u8fd9\u4e9b\u89d2\u8272\u4e0d\u51fa\u73b0\u3002"
                 rewrite_chunks = []
                 rewrite_queue: asyncio.Queue = asyncio.Queue()
 
                 def _rerun():
                     try:
-                        for chunk in chat_stream(rewrite_prompt, system=system,
+                        for chunk in chat_stream(rewrite_prompt, system=stable_system,
                                                  temperature=0.6, task="writing"):
                             rewrite_chunks.append(chunk)
                             rewrite_queue.put_nowait(chunk)

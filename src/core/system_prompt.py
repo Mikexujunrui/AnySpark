@@ -275,6 +275,11 @@ AGENT_PROMPTS = {
 - "验证章节"/"检查章节" → verify_chapter（写后验证：实体漂移/大纲合规/约束/伏笔/可信度）
 - 完整工作流: get_detailed_outline → delegate_writing（逐节点写+自动验证）→ 如有幻觉→patch_chapter修正→重新验证
 
+# 原著分析
+- "分析原著结构"/"结构分析" → analyze_structure（分析参考书的章节字数/对话占比/节奏曲线，纯Python确定性计算，结果缓存可复用）
+- "量化文风"/"文风指纹" → quantify_style（分析参考书的句长分布/词汇丰富度/标点模式/四字成语密度，纯Python确定性计算，结果缓存可复用）
+- 原著续写前推荐: analyze_structure + quantify_style → 写作时自动注入结构约束和文风约束到 prompt
+
 # 技能管理
 - "创建技能"/"新技能" → manage_skills action=create
 - "修改技能" → manage_skills action=update | "删除技能" → manage_skills action=delete
@@ -538,24 +543,47 @@ def _build_book_context(book_id: str, session_id: str = "") -> str:
 
     chapters = json_store.load_chapters(book_id)
     if chapters:
+        # Only show the most recent 5 chapters in detail; older chapters
+        # are summarised as a count. This keeps the dynamic context small
+        # and stable (important for prefix caching) while still giving the
+        # LLM enough navigation context. Use list_chapters for full listing.
+        RECENT_DETAIL_COUNT = 5
+        show_from = max(0, len(chapters) - RECENT_DETAIL_COUNT)
+
         ch_lines = []
         regular_idx = 0
         extra_idx = 0
-        for _i, c in enumerate(chapters[:20]):
+        skipped_regular = 0
+        skipped_extra = 0
+
+        # First pass: count (not display) chapters before the recent window
+        for c in chapters[:show_from]:
+            view = json_store._chapter_view(c)
+            if view.get("is_extra", False):
+                skipped_extra += 1
+            else:
+                skipped_regular += 1
+
+        if skipped_regular > 0 or skipped_extra > 0:
+            ch_lines.append(f"- （省略早期 {skipped_regular} 章 {skipped_extra} 番外，用 list_chapters 查看完整列表）")
+
+        # Second pass: display the recent window with correct numbering
+        for c in chapters[show_from:]:
             view = json_store._chapter_view(c)
             chars = len(view.get("content", ""))
             is_extra = view.get("is_extra", False)
             if is_extra:
                 extra_idx += 1
-                line = f"- #E{extra_idx} [番外] {view.get('title', '?')[:30]} ({chars}字)"
+                line = f"- #E{skipped_extra + extra_idx} [番外] {view.get('title', '?')[:30]} ({chars}字)"
             else:
                 regular_idx += 1
-                line = f"- #{regular_idx} {view.get('title', '?')[:30]} ({chars}字)"
-                if has_outline and regular_idx - 1 < len(outline_chapters) and outline_chapters[regular_idx - 1].get("synopsis"):
-                    line += f" — {outline_chapters[regular_idx - 1]['synopsis'][:40]}"
+                num = skipped_regular + regular_idx
+                line = f"- #{num} {view.get('title', '?')[:30]} ({chars}字)"
+                if has_outline and num - 1 < len(outline_chapters) and outline_chapters[num - 1].get("synopsis"):
+                    line += f" — {outline_chapters[num - 1]['synopsis'][:40]}"
             ch_lines.append(line)
         ch_lines.append("（用 #序号 引用普通章节如 #1，用 #E序号 引用番外如 #E1）")
-        parts.append(f"\n# 已有章节 ({len(chapters)}个)\n" + "\n".join(ch_lines))
+        parts.append(f"\n# 已有章节 ({skipped_regular + regular_idx}章{f'+{skipped_extra + extra_idx}番外' if extra_idx > 0 else ''})\n" + "\n".join(ch_lines))
 
     # ── 参考书提示（仅告知存在，不加载实体。按需用 search_reference 查询，用 migrate_reference_knowledge 迁移）──
     ref_ids = json_store.get_reference_books(book_id)

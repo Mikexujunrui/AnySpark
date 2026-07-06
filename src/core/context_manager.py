@@ -125,6 +125,25 @@ class ContextManager:
             structural_sections.append(f"\n## 风格要求\n{scope.style_requirements}")
         if scope.target_word_count:
             structural_sections.append(f"\n目标字数: {scope.target_word_count} 字")
+        # Inject analysis-layer constraints (from reference_analyzer)
+        if scope.style_fingerprint:
+            try:
+                from .reference_analyzer import StyleFingerprint
+                fp = StyleFingerprint(**scope.style_fingerprint)
+                fragment = fp.to_prompt_fragment()
+                if fragment:
+                    structural_sections.append(fragment)
+            except Exception:
+                pass  # best-effort injection
+        if scope.structure_report:
+            try:
+                from .reference_analyzer import StructureReport
+                sr = StructureReport(**scope.structure_report)
+                fragment = sr.to_prompt_fragment()
+                if fragment:
+                    structural_sections.append(f"\n## 原著结构参考\n{fragment}")
+            except Exception:
+                pass  # best-effort injection
 
         structural_budget = estimate_tokens("\n".join(structural_sections))
         total_lore_budget = self.budget.lore_budget

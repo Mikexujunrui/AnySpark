@@ -5,7 +5,8 @@ from core.errors import NotFoundError
 from core.event_store import event_store
 from core.llm_client import MODELS as LLM_MODELS
 from core.permissions import permission_manager
-from core.token_counter import count_tokens, get_context_limit
+from core.parts import turns_from_history, turns_to_llm_messages
+from core.token_counter import count_message_tokens, count_tokens, get_context_limit
 from data.json_store import json_store
 
 router = APIRouter(tags=["sessions"])
@@ -74,13 +75,20 @@ def get_context_usage(book_id: str, session_id: str):
         messages = event_store.replay_messages(session_id)
     else:
         messages = json_store.load_messages(session_id)
-    total_text = ""
-    for m in messages[-100:]:
-        text = m.get("text", "")
-        if isinstance(text, str) and text:
-            total_text += text + "\n"
 
-    token_count = count_tokens(total_text)
+    # Reconstruct actual LLM messages from structured parts.
+    # The old code only counted the ``text`` field (user-visible reply),
+    # missing tool calls, tool results, and system prompt overhead —
+    # which is why the context bar always showed 0 or very low.
+    turns = turns_from_history(messages)
+    llm_messages = turns_to_llm_messages(turns)
+    history_tokens = count_message_tokens(llm_messages)
+
+    # Add overhead for system prompt + dynamic context (tool descriptions,
+    # book info, chapter list, outline). This is a rough estimate since
+    # the actual system prompt is built at runtime per agent type.
+    SYSTEM_PROMPT_OVERHEAD = 20000
+    token_count = history_tokens + SYSTEM_PROMPT_OVERHEAD
 
     model_name = LLM_MODELS.get("flash", "deepseek-v4-flash")
     context_limit = get_context_limit(model_name)
@@ -90,6 +98,7 @@ def get_context_usage(book_id: str, session_id: str):
         "limit": context_limit,
         "ratio": round(token_count / context_limit * 100, 1),
         "message_count": len(messages),
+        "turn_count": len(turns),
         "model": model_name,
     }
 

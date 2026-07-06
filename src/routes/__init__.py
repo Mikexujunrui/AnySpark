@@ -3,6 +3,7 @@
 
 from fastapi import APIRouter
 
+from .analysis_routes import router as analysis_router
 from .books import router as books_router
 from .chapters import router as chapters_router
 from .characters import router as characters_router
@@ -53,3 +54,4 @@ api_router.include_router(update_router)
 api_router.include_router(narrative_logic_router)
 api_router.include_router(pacing_router)
 api_router.include_router(inspiration_router)
+api_router.include_router(analysis_router)

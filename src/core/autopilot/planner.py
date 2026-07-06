@@ -539,7 +539,7 @@ class AutopilotPlanner:
             f"如果不传 chapter_index，会导致章节编号混乱和重复。"
         )
         if ch_idx > 1:
-            ref_instruction += "请参考前面的章节内容，保持剧情连贯。"
+            ref_instruction += "前情提要和大纲已包含在写作知识范围中，请基于这些信息保持剧情连贯，无需读取前文全文。"
 
         steps.append(TaskStep(
             id=sid(2),

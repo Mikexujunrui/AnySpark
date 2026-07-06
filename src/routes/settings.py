@@ -99,9 +99,9 @@ def upsert_provider(data: ProviderUpdate):
         models=data.models,
     )
 
-    # Check if provider is masked (api_key ends with ****) → keep original key
+    # Check if provider is masked or empty → keep original key
     existing = s.get_provider(provider.id)
-    if data.api_key.endswith("****") and existing:
+    if existing and (not data.api_key or data.api_key.endswith("****")):
         provider.api_key = existing.api_key
 
     # Update or add

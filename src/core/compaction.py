@@ -13,6 +13,8 @@ TAIL_TURNS_TO_KEEP = config.compaction.tail_turns_to_keep
 COMPACTION_THRESHOLD_RATIO = config.compaction.threshold_ratio
 MAX_TOOL_OUTPUT_TOKENS = config.compaction.max_tool_output_tokens
 PRUNED_PLACEHOLDER = "[内容已省略 — 过长的工具输出已被裁剪以节省上下文]"
+STALE_TOOL_PREVIEW_TOKENS = 800
+STALE_PRUNED_MARKER = "[旧工具结果已截断为预览]"
 
 COMPACTION_SYSTEM = """你是对话历史压缩器。你的任务是将一段对话历史压缩为简洁的摘要。
 
@@ -46,6 +48,61 @@ def estimate_context_usage(messages: list[dict], model: str | None = None) -> tu
 def needs_compaction(messages: list[dict], model: str | None = None) -> bool:
     used, limit = estimate_context_usage(messages, model)
     return used > limit * COMPACTION_THRESHOLD_RATIO
+
+
+def prune_stale_tool_results(messages: list[dict]) -> tuple[list[dict], bool]:
+    """Proactively truncate old tool results to a short preview.
+
+    Unlike prune_tool_outputs (which only fires at compaction threshold and
+    truncates to MAX_TOOL_OUTPUT_TOKENS), this runs every round and truncates
+    stale tool messages outside the protected tail to a very short preview
+    (STALE_TOOL_PREVIEW_TOKENS). The LLM has already seen the full content in
+    the round it was returned; subsequent rounds only need a summary.
+
+    This is the single most effective token-saving mechanism: a read_chapter
+    result of 8K tokens becomes 800 tokens in the very next round, preventing
+    linear context growth.
+    """
+    tail_token_count = 0
+    tail_start_idx = len(messages)
+    for i in range(len(messages) - 1, -1, -1):
+        msg_tokens = count_tokens(messages[i].get("content", "") or "")
+        tail_token_count += msg_tokens
+        if tail_token_count >= PROTECTED_TAIL_TOKENS:
+            tail_start_idx = i + 1
+            break
+
+    # If all messages fit within the protected tail, nothing is stale.
+    if tail_start_idx >= len(messages):
+        return messages, False
+
+    pruned = False
+    result = []
+    for i, msg in enumerate(messages):
+        if i >= tail_start_idx:
+            result.append(msg)
+            continue
+
+        if msg.get("role") == "tool":
+            content = msg.get("content", "") or ""
+            # Skip already-pruned messages (both stale and full pruning)
+            if STALE_PRUNED_MARKER in content or PRUNED_PLACEHOLDER in content:
+                result.append(msg)
+                continue
+            tokens = count_tokens(content)
+            if tokens > STALE_TOOL_PREVIEW_TOKENS:
+                new_msg = dict(msg)
+                encoder = _get_encoder()
+                encoded = encoder.encode(content)
+                truncated = encoder.decode(encoded[:STALE_TOOL_PREVIEW_TOKENS])
+                new_msg["content"] = truncated + f"\n\n{STALE_PRUNED_MARKER}"
+                result.append(new_msg)
+                pruned = True
+                continue
+
+        result.append(msg)
+
+    return result, pruned
 
 
 def prune_tool_outputs(messages: list[dict]) -> tuple[list[dict], bool]:

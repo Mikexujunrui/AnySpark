@@ -1401,6 +1401,26 @@ registry.register(Tool(
 ))
 
 # ──────────────────────────────────────────────────────────────────────────
+# Reference work analysis tools — structural analysis and style quantification
+# ──────────────────────────────────────────────────────────────────────────
+
+registry.register(Tool(
+    name="analyze_structure",
+    description="分析参考书的叙事结构：逐章字数分布、对话占比、段落统计、节奏曲线。纯Python确定性计算，结果缓存可复用。适用于原著续写前的结构深读。",
+    parameters={
+        "ref_book_id": {"type": "string", "description": "参考书项目ID。留空则分析当前书的第一本参考书", "required": False},
+    },
+))
+
+registry.register(Tool(
+    name="quantify_style",
+    description="量化分析参考书的文风指纹：句长分布、词汇丰富度(TTR)、标点模式、四字成语密度、段落长度统计。纯Python确定性计算，结果缓存可复用。适用于原著续写前的文风匹配。",
+    parameters={
+        "ref_book_id": {"type": "string", "description": "参考书项目ID。留空则分析当前书的第一本参考书", "required": False},
+    },
+))
+
+# ──────────────────────────────────────────────────────────────────────────
 # Apply TOOL_META to registered tools
 # ──────────────────────────────────────────────────────────────────────────
 def _apply_tool_meta() -> None:

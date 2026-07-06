@@ -40,6 +40,17 @@ class RelationType(StrEnum):
     LOCATED_IN = "located_in"       # Location → Location (containment)
     ADJACENT_TO = "adjacent_to"     # Location → Location (neighboring)
     OCCURRED_AT = "occurred_at"     # Timeline → Location (event at place)
+    # ── Paired reverse relationship types ──
+    PARENT_OF = "parent_of"
+    CHILD_OF = "child_of"
+    APPRENTICE_OF = "apprentice_of"
+    STUDENT_OF = "student_of"
+    KILLED_BY = "killed_by"
+    SAVED_BY = "saved_by"
+    LOVED_BY = "loved_by"
+    SPOUSE_OF = "spouse_of"
+    SIBLING_OF = "sibling_of"
+    FRIEND = "friend"
 
 
 @dataclass

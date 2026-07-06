@@ -78,6 +78,10 @@ from tools.impl.plot import (
     _reconstruct_chapter,
     _suggest_plot_directions,
 )
+from tools.impl.reference_analysis import (
+    _analyze_structure_tool,
+    _quantify_style_tool,
+)
 from tools.impl.review import _manage_reviewers, _run_review
 from tools.impl.styles import _get_style, _list_styles, _manage_styles, _set_style
 from tools.impl.workflow_tools import _execute_workflow_streaming, _generate_workflow_streaming, _handle_workflow_tool
@@ -614,6 +618,12 @@ async def _dispatch(loop, name: str, args: dict, kb,
     # ── Outline pipeline tool ──
     elif name == "expand_outline_pipeline":
         return await _expand_outline_pipeline_tool(loop, args, book_id)
+
+    # ── Reference work analysis tools ──
+    elif name == "analyze_structure":
+        return await _analyze_structure_tool(loop, args, book_id)
+    elif name == "quantify_style":
+        return await _quantify_style_tool(loop, args, book_id)
 
     return f"工具 {name} 未注册 (params: {json.dumps(args, ensure_ascii=False)[:100]})"
 

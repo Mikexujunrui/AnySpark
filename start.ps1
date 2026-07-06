@@ -18,20 +18,19 @@ if ($LASTEXITCODE -ne 0) {
 
 # 2. Backend (with auto-restart)
 Write-Host "[2/3] Backend (port 8191)..."
-# Only kill processes listening on port 8191 (our backend), not all Python processes
 Get-NetTCPConnection -LocalPort 8191 -ErrorAction SilentlyContinue | ForEach-Object {
     Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue
 }
 
 function Start-Backend {
-    Start-Process -WindowStyle Minimized -FilePath "python" -ArgumentList "-u src/server.py" -PassThru
+    Start-Process -FilePath "python" -ArgumentList "-u src/server.py" -PassThru
 }
 $backendProc = Start-Backend
 Start-Sleep -Seconds 4
 
 # 3. Frontend
 Write-Host "[3/3] Frontend (port 8190)..."
-Start-Process -WindowStyle Minimized -FilePath "cmd" -ArgumentList "/c `"cd /d `"$projectDir\frontend`" && npx vite --port 8190 --host`""
+Start-Process -FilePath "cmd" -ArgumentList "/c cd /d `"$projectDir\frontend`" && npx vite --port 8190 --host"
 Start-Sleep -Seconds 4
 
 # 4. Open browser
@@ -43,16 +42,19 @@ Write-Host ""
 # Health check loop (every 30s restart backend if died, max 3 restarts)
 $restarts = 0
 $maxRestarts = 3
+$healthOkMsg = "[health] backend OK"
+$healthDownMsg = "[health] backend DOWN, restarting"
+$healthMaxMsg = "[health] max restarts reached"
+$healthDoneMsg = "[health] monitoring stopped after $maxRestarts restarts."
 while ($restarts -lt $maxRestarts) {
     Start-Sleep -Seconds 30
     try {
         $null = Invoke-WebRequest -Uri "http://localhost:8191/api/mode" -TimeoutSec 3 -UseBasicParsing
-        Write-Host "[health] backend OK" -ForegroundColor DarkGray
+        Write-Host $healthOkMsg -ForegroundColor DarkGray
     } catch {
         $restarts++
         if ($restarts -le $maxRestarts) {
-            Write-Host "[health] backend DOWN, restarting (attempt $restarts/$maxRestarts)" -ForegroundColor Yellow
-            # Only kill the specific backend process, not all Python processes
+            Write-Host ("$healthDownMsg (attempt $restarts/$maxRestarts)") -ForegroundColor Yellow
             if ($backendProc -and !$backendProc.HasExited) {
                 Stop-Process -Id $backendProc.Id -Force -ErrorAction SilentlyContinue
             }
@@ -62,10 +64,10 @@ while ($restarts -lt $maxRestarts) {
             $backendProc = Start-Backend
             Start-Sleep -Seconds 4
         } else {
-            Write-Host "[health] max restarts reached" -ForegroundColor Red
+            Write-Host $healthMaxMsg -ForegroundColor Red
         }
     }
 }
 
-Write-Host "[health] monitoring stopped after $maxRestarts restarts." -ForegroundColor DarkCyan
+Write-Host $healthDoneMsg -ForegroundColor DarkCyan
 Read-Host "Press Enter to exit"
