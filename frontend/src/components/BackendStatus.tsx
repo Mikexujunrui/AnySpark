@@ -8,7 +8,8 @@ export default function BackendStatus() {
 
   useEffect(() => {
     mountedRef.current = true
-    const timer: ReturnType<typeof setTimeout>
+    // eslint-disable-next-line prefer-const
+let timer: ReturnType<typeof setTimeout>
 
     async function check() {
       if (!mountedRef.current) return
