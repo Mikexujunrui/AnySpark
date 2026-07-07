@@ -8,9 +8,6 @@ export default function BackendStatus() {
 
   useEffect(() => {
     mountedRef.current = true
-    // eslint-disable-next-line prefer-const
-let timer: ReturnType<typeof setTimeout>
-
     async function check() {
       if (!mountedRef.current) return
       setStatus('connecting')
@@ -32,7 +29,7 @@ let timer: ReturnType<typeof setTimeout>
     }
 
     check()
-    timer = setInterval(check, 15_000)
+    const timer = setInterval(check, 15_000)
 
     return () => {
       mountedRef.current = false
