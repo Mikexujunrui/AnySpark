@@ -1,5 +1,6 @@
 // 推演功能3.0 — 模拟会话本地状态管理
 
+import { useMemo } from 'react'
 import { createStore } from '../../../store'
 import type { SessionInfo, TurnEvent, SimChoice } from '../types'
 
@@ -169,15 +170,19 @@ export function useSimRunState(): {
   loading: boolean
   error: string | null
 } {
-  return simStore.useStore(s => ({
-    narrative: s.narrative,
-    choices: s.choices,
-    choicePrompt: s.choicePrompt,
-    hotChoices: s.hotChoices,
-    streaming: s.streaming,
-    statusText: s.statusText,
-    lastEvent: s.lastEvent,
-    loading: s.loading,
-    error: s.error,
-  }))
+  // 每个字段单独订阅，避免每次创建新对象触发 useSyncExternalStore 的 Object.is 比较失败
+  const narrative = simStore.useStore(s => s.narrative)
+  const choices = simStore.useStore(s => s.choices)
+  const choicePrompt = simStore.useStore(s => s.choicePrompt)
+  const hotChoices = simStore.useStore(s => s.hotChoices)
+  const streaming = simStore.useStore(s => s.streaming)
+  const statusText = simStore.useStore(s => s.statusText)
+  const lastEvent = simStore.useStore(s => s.lastEvent)
+  const loading = simStore.useStore(s => s.loading)
+  const error = simStore.useStore(s => s.error)
+  // 用 useMemo 保持引用稳定：仅在依赖变化时才创建新对象
+  return useMemo(() => ({
+    narrative, choices, choicePrompt, hotChoices,
+    streaming, statusText, lastEvent, loading, error,
+  }), [narrative, choices, choicePrompt, hotChoices, streaming, statusText, lastEvent, loading, error])
 }
