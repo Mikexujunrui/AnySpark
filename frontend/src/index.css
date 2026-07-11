@@ -1,0 +1,293 @@
+@import "tailwindcss";
+
+/* ── Tailwind dark mode: respond to data-theme attribute instead of prefers-color-scheme ── */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
+
+@theme {
+  --animate-slide-in: slide-in 0.2s ease-out;
+  --animate-fade-in: fade-in 0.15s ease-out;
+
+  --color-surface: #18181b;
+  --color-surface-raised: #27272a;
+  --color-hairline: #3f3f46;
+  --color-content: #e4e4e7;
+  --color-content-muted: #a1a1aa;
+
+  --color-accent: #0ea5e9;
+  --color-accent-hover: #38bdf8;
+  --color-accent-soft: #0c4a6e;
+  --color-accent-contrast: #0b1220;
+
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.4);
+  --shadow-lg: 0 12px 32px -4px rgb(0 0 0 / 0.5);
+}
+
+@keyframes slide-in {
+  from { opacity: 0; transform: translateX(16px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* ── Global theme transitions ── */
+html, body {
+  background-color: var(--color-surface);
+  color: var(--color-content-muted);
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ── Light theme: zinc palette inversion ──
+   This inverts the built-in zinc color scale so that ALL bg-zinc-*,
+   text-zinc-*, border-zinc-* classes auto-respond to data-theme
+   without needing dark: variants on every single component. */
+[data-theme="light"] {
+  /* ── Semantic tokens ── */
+  --color-surface: #f4f4f5;
+  --color-surface-raised: #e4e4e7;
+  --color-hairline: #d4d4d8;
+  --color-content: #18181b;
+  --color-content-muted: #52525b;
+  --color-accent: #0284c7;
+  --color-accent-hover: #0369a1;
+  --color-accent-soft: #e0f2fe;
+  --color-accent-contrast: #f0f9ff;
+  --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+  --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.08);
+  --shadow-lg: 0 12px 32px -4px rgb(0 0 0 / 0.12);
+
+  /* ── Zinc palette mirror ── */
+  --color-zinc-50: #09090b;
+  --color-zinc-100: #18181b;
+  --color-zinc-200: #27272a;
+  --color-zinc-300: #3f3f46;
+  --color-zinc-400: #52525b;
+  --color-zinc-500: #71717a;
+  --color-zinc-600: #a1a1aa;
+  --color-zinc-700: #d4d4d8;
+  --color-zinc-800: #e4e4e7;
+  --color-zinc-900: #f4f4f5;
+  --color-zinc-950: #fafafa;
+
+  /* ── Accent color adjustments for light mode ──
+     Fluorescent buttons (Write/Plan/全书变换 etc.) use {color}-900/40
+     backgrounds + {color}-400 text. On light backgrounds these are
+     nearly invisible. Remap: 900/800→400 (strong enough for /40 opacity),
+     400→700 (dark text on light bg), 300→600, 950→300. */
+  --color-emerald-900: #34d399;
+  --color-emerald-800: #34d399;
+  --color-emerald-400: #047857;
+  --color-emerald-300: #059669;
+  --color-emerald-950: #6ee7b7;
+
+  --color-amber-900: #fbbf24;
+  --color-amber-800: #fbbf24;
+  --color-amber-400: #b45309;
+  --color-amber-300: #d97706;
+  --color-amber-950: #fcd34d;
+
+  --color-violet-900: #a78bfa;
+  --color-violet-800: #a78bfa;
+  --color-violet-400: #6d28d9;
+  --color-violet-300: #7c3aed;
+  --color-violet-950: #c4b5fd;
+
+  --color-red-900: #f87171;
+  --color-red-800: #f87171;
+  --color-red-400: #b91c1c;
+  --color-red-300: #dc2626;
+  --color-red-950: #fca5a5;
+
+  --color-blue-900: #60a5fa;
+  --color-blue-800: #60a5fa;
+  --color-blue-400: #1d4ed8;
+  --color-blue-300: #2563eb;
+  --color-blue-950: #93c5fd;
+
+  --color-sky-900: #38bdf8;
+  --color-sky-800: #38bdf8;
+  --color-sky-400: #0369a1;
+  --color-sky-300: #0284c7;
+  --color-sky-950: #7dd3fc;
+
+  --color-purple-900: #c084fc;
+  --color-purple-800: #c084fc;
+  --color-purple-400: #7e22ce;
+  --color-purple-300: #9333ea;
+  --color-purple-950: #d8b4fe;
+
+  --color-cyan-900: #22d3ee;
+  --color-cyan-800: #22d3ee;
+  --color-cyan-400: #0e7490;
+  --color-cyan-300: #0891b2;
+  --color-cyan-950: #67e8f9;
+
+  --color-rose-900: #fb7185;
+  --color-rose-800: #fb7185;
+  --color-rose-400: #be123c;
+  --color-rose-300: #e11d48;
+  --color-rose-950: #fda4af;
+
+  --color-teal-900: #2dd4bf;
+  --color-teal-800: #2dd4bf;
+  --color-teal-400: #0f766e;
+  --color-teal-300: #0d9488;
+  --color-teal-950: #5eead4;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--color-hairline); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-zinc-600); }
+
+/* ── Markdown content ── */
+.markdown-body { color: var(--color-content-muted); }
+.markdown-body h1 { font-size: 1.25em; font-weight: 700; margin: 0.8em 0 0.4em; color: var(--color-content); }
+.markdown-body h2 { font-size: 1.125em; font-weight: 600; margin: 0.7em 0 0.35em; color: var(--color-content); }
+.markdown-body h3 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.3em; color: var(--color-zinc-300); }
+.markdown-body p { margin: 0.4em 0; }
+.markdown-body ul, .markdown-body ol { padding-left: 1.5em; margin: 0.4em 0; }
+.markdown-body li { margin: 0.2em 0; }
+.markdown-body code { background: var(--color-surface-raised); padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.875em; color: var(--color-content-muted); }
+.markdown-body pre { background: var(--color-surface); border: 1px solid var(--color-surface-raised); border-radius: 8px; padding: 0.75em 1em; margin: 0.5em 0; overflow-x: auto; }
+.markdown-body pre code { background: transparent; padding: 0; color: var(--color-zinc-300); }
+.markdown-body blockquote { border-left: 3px solid var(--color-hairline); padding-left: 1em; margin: 0.5em 0; color: var(--color-content-muted); }
+.markdown-body strong { color: var(--color-content); font-weight: 600; }
+.markdown-body em { font-style: italic; }
+.markdown-body a { color: var(--color-accent); text-decoration: underline; text-underline-offset: 2px; transition: color 0.15s ease; }
+.markdown-body a:hover { color: var(--color-accent-hover); }
+.markdown-body hr { border: none; border-top: 1px solid var(--color-surface-raised); margin: 0.8em 0; }
+.markdown-body table { border-collapse: collapse; margin: 0.5em 0; font-size: 0.875em; }
+.markdown-body th, .markdown-body td { border: 1px solid var(--color-surface-raised); padding: 0.4em 0.75em; }
+.markdown-body th { background: var(--color-surface); font-weight: 600; }
+
+/* ── TipTap / ProseMirror Editor ── */
+.tiptap-editor {
+  height: 100%;
+  overflow-y: auto;
+}
+
+.tiptap-editor .ProseMirror {
+  min-height: calc(100vh - 240px);
+  padding: 1.5rem;
+  outline: none;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 0.875rem;
+  line-height: 1.75;
+  color: var(--color-zinc-200);
+  background: var(--color-zinc-900);
+}
+
+.tiptap-editor .ProseMirror p {
+  margin-bottom: 1rem;
+  text-indent: 2em;
+}
+
+.tiptap-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  color: var(--color-zinc-500);
+  pointer-events: none;
+  height: 0;
+  text-indent: 2em;
+}
+
+.tiptap-editor .ProseMirror h2 {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 1em 0 0.5em;
+  color: var(--color-zinc-200);
+  text-indent: 0;
+}
+
+.tiptap-editor .ProseMirror h3 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin: 0.8em 0 0.4em;
+  color: var(--color-zinc-300);
+  text-indent: 0;
+}
+
+.tiptap-editor .ProseMirror ul {
+  padding-left: 1.5em;
+  margin: 0.4em 0;
+  list-style-type: disc;
+}
+
+.tiptap-editor .ProseMirror ol {
+  padding-left: 1.5em;
+  margin: 0.4em 0;
+  list-style-type: decimal;
+}
+
+.tiptap-editor .ProseMirror li {
+  margin: 0.2em 0;
+}
+
+.tiptap-editor .ProseMirror li p {
+  margin-bottom: 0;
+  text-indent: 0;
+}
+
+.tiptap-editor .ProseMirror blockquote {
+  border-left: 3px solid var(--color-zinc-700);
+  padding-left: 1em;
+  margin: 0.5em 0;
+  color: var(--color-zinc-400);
+  font-style: italic;
+}
+
+.tiptap-editor .ProseMirror pre {
+  background: var(--color-zinc-800);
+  border: 1px solid var(--color-zinc-700);
+  border-radius: 8px;
+  padding: 0.75em 1em;
+  margin: 0.5em 0;
+  overflow-x: auto;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 0.8125rem;
+}
+
+.tiptap-editor .ProseMirror pre code {
+  background: transparent;
+  padding: 0;
+  color: var(--color-zinc-300);
+}
+
+.tiptap-editor .ProseMirror code {
+  background: var(--color-zinc-800);
+  padding: 0.15em 0.4em;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+.tiptap-editor .ProseMirror strong {
+  font-weight: 600;
+  color: var(--color-zinc-50);
+}
+
+.tiptap-editor .ProseMirror em {
+  font-style: italic;
+}
+
+.tiptap-editor .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--color-zinc-700);
+  margin: 1em 0;
+}
+
+.tiptap-editor .ProseMirror mark {
+  background: #854d0e;
+  color: #fef3c7;
+  padding: 0.1em 0.2em;
+  border-radius: 2px;
+}
