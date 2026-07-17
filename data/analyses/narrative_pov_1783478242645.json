@@ -1,0 +1,49 @@
+{
+  "book_id": "1783478242645",
+  "chapter_count": 9,
+  "omniscient_markers": [
+    {
+      "marker": "且说",
+      "position": 1836
+    },
+    {
+      "marker": "不知",
+      "position": 1040
+    },
+    {
+      "marker": "不知",
+      "position": 1642
+    },
+    {
+      "marker": "原来",
+      "position": 2911
+    },
+    {
+      "marker": "正是",
+      "position": 3504
+    },
+    {
+      "marker": "不知",
+      "position": 587
+    },
+    {
+      "marker": "不知",
+      "position": 2154
+    },
+    {
+      "marker": "不知",
+      "position": 5745
+    },
+    {
+      "marker": "不知",
+      "position": 365
+    },
+    {
+      "marker": "不知",
+      "position": 464
+    }
+  ],
+  "limited_pov_sections": 0,
+  "pov_shift_frequency": 10.67,
+  "narrator_intervention_count": 2
+}

@@ -1,0 +1,141 @@
+{
+  "book_id": "1783156338047",
+  "chapter_count": 16,
+  "chapter_tone_sequence": [
+    {
+      "chapter": 1,
+      "title": "意外的丰胸",
+      "primary_tone": "surprise",
+      "intensity": 0.556,
+      "joy_to_sorrow_markers": 4
+    },
+    {
+      "chapter": 2,
+      "title": "意外的扩张",
+      "primary_tone": "surprise",
+      "intensity": 0.333,
+      "joy_to_sorrow_markers": 4
+    },
+    {
+      "chapter": 3,
+      "title": "意外的ＳＰＡ",
+      "primary_tone": "surprise",
+      "intensity": 0.304,
+      "joy_to_sorrow_markers": 2
+    },
+    {
+      "chapter": 4,
+      "title": "意外的破处",
+      "primary_tone": "anger",
+      "intensity": 0.375,
+      "joy_to_sorrow_markers": 0
+    },
+    {
+      "chapter": 5,
+      "title": "意外的生长",
+      "primary_tone": "pleasure",
+      "intensity": 0.263,
+      "joy_to_sorrow_markers": 1
+    },
+    {
+      "chapter": 6,
+      "title": "意外的比赛",
+      "primary_tone": "surprise",
+      "intensity": 0.357,
+      "joy_to_sorrow_markers": 7
+    },
+    {
+      "chapter": 7,
+      "title": "意外的重赛",
+      "primary_tone": "surprise",
+      "intensity": 0.5,
+      "joy_to_sorrow_markers": 0
+    },
+    {
+      "chapter": 8,
+      "title": "意外的脱出",
+      "primary_tone": "contemplation",
+      "intensity": 0.343,
+      "joy_to_sorrow_markers": 16
+    },
+    {
+      "chapter": 9,
+      "title": "意外的醉酒",
+      "primary_tone": "surprise",
+      "intensity": 0.333,
+      "joy_to_sorrow_markers": 5
+    },
+    {
+      "chapter": 10,
+      "title": "意外的检查",
+      "primary_tone": "surprise",
+      "intensity": 0.543,
+      "joy_to_sorrow_markers": 2
+    },
+    {
+      "chapter": 11,
+      "title": "意外的日常",
+      "primary_tone": "surprise",
+      "intensity": 0.296,
+      "joy_to_sorrow_markers": 5
+    },
+    {
+      "chapter": 12,
+      "title": "意外的暴露",
+      "primary_tone": "surprise",
+      "intensity": 0.347,
+      "joy_to_sorrow_markers": 3
+    },
+    {
+      "chapter": 13,
+      "title": "意外的关注",
+      "primary_tone": "contemplation",
+      "intensity": 0.262,
+      "joy_to_sorrow_markers": 4
+    },
+    {
+      "chapter": 14,
+      "title": "意外的干预",
+      "primary_tone": "joy",
+      "intensity": 0.361,
+      "joy_to_sorrow_markers": 0
+    },
+    {
+      "chapter": 15,
+      "title": "意外的主动",
+      "primary_tone": "surprise",
+      "intensity": 0.298,
+      "joy_to_sorrow_markers": 4
+    },
+    {
+      "chapter": 16,
+      "title": "意外的异变",
+      "primary_tone": "contemplation",
+      "intensity": 0.47,
+      "joy_to_sorrow_markers": 3
+    }
+  ],
+  "tone_transition_matrix": {
+    "surprise": {
+      "surprise": 0.6,
+      "anger": 0.1,
+      "contemplation": 0.3
+    },
+    "anger": {
+      "pleasure": 1.0
+    },
+    "pleasure": {
+      "surprise": 1.0
+    },
+    "contemplation": {
+      "surprise": 0.5,
+      "joy": 0.5
+    },
+    "joy": {
+      "surprise": 1.0
+    }
+  },
+  "joy_to_sorrow_ratio": 3.75,
+  "dominant_tone": "surprise",
+  "emotional_volatility": 0.6
+}
