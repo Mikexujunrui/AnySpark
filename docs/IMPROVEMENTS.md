@@ -1,6 +1,21 @@
 # 改进跟踪文档
 
-> 系统性改进跟踪。完成 18/18 项基础改进 + v2.0.0 大规模扩展。
+> 系统性改进跟踪。完成 18/18 项基础改进 + v2.0.0 大规模扩展 + v2.6.0 质量增强。
+
+## Phase 7: v2.6.0 AI味扫描 + 批量导入优化 + 多项修复
+
+- [x] ~~**7.1 AI味扫描引擎** — `core/ai_flavor_scanner.py` — 7项纯规则检测，零token消耗~~
+- [x] ~~**7.2 AI味嗅觉审查员** — `reviewers/ai_flavor_sniffer.yaml` — 评审团新增LLM审查员~~
+- [x] ~~**7.3 AI味反馈闭环** — `knowledge_scope.py` + `context_manager.py` + `headless_loop.py`~~
+- [x] ~~**7.4 质量门AI味集成** — `quality_gate.py` 评审前自动扫描~~
+- [x] ~~**7.5 知识检索零匹配修复** — `_prepare_writing` 子串匹配fallback~~
+- [x] ~~**7.6 Neo4j宕机防御** — `batch_add_entities/relations/foreshadows` 空驱动检查~~
+- [x] ~~**7.7 启动脚本修复** — `start.bat/start.ps1` 自动创建Neo4j容器~~
+- [x] ~~**7.8 评审团前端修复** — 新增"续写专项"分类区，14位评审员全部可见~~
+- [x] ~~**7.9 章节拆分正则增强** — 从2种扩展到10种格式，LLM fallback三段采样~~
+- [x] ~~**7.10 批量导入优化** — `batch_add_chapters` O(n²)→O(n)~~
+
+---
 
 ## Phase 6: v2.0.0 全栈成熟化
 

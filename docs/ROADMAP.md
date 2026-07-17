@@ -1,134 +1,31 @@
 # 实施路线图
 
+> 当前版本: v2.6.0 | Phase 1-4 全部完成 | Phase 5-7 持续迭代
+
 ---
 
 ## 阶段概览
 
-```mermaid
-gantt
-    title 项目路线图
-    dateFormat  YYYY-MM-DD
-    axisFormat  %m/%d
-
-    section Phase 1: 核心MVP
-        基础项目架构搭建           :p1a, 2025-01-01, 7d
-        对话界面 + WebSocket       :p1b, after p1a, 7d
-        知识抽取Agent (基础)       :p1c, after p1a, 10d
-        知识库管理器 (基础)        :p1d, after p1a, 5d
-        写作Agent (基础)           :p1e, after p1c, 10d
-        Wiki知识查看器             :p1f, after p1d, 5d
-        LLM网关                    :p1g, after p1a, 3d
-        MVP集成联调                :p1h, after p1e, 5d
-
-    section Phase 2: 知识体系完善
-        一致性校验Agent            :p2a, after p1h, 6d
-        角色卡可视化               :p2b, after p1h, 5d
-        时间线可视化               :p2c, after p1h, 5d
-        文档解析器                 :p2d, after p1h, 3d
-        ~~PostgresSQL + pgvector迁移~~ :p2e, after p1h, 5d  ❌ 取消（改用 JSON文件 + SQLite FTS5）
-        上下文管理器 + 强约束模式   :p2f, after p2a, 8d
-
-    section Phase 3: 高级可视化+工作流
-        知识图谱可视化             :p3a, after p2b, 5d
-        4D世界地图                 :p3b, after p2c, 7d
-        伏笔追踪看板               :p3c, after p3a, 3d
-        工作流Agent + 执行引擎     :p3d, after p2f, 12d
-        剧情规划Agent              :p3e, after p3d, 6d
-        编辑Agent                  :p3f, after p2f, 5d
-        工作流可视化编辑器         :p3g, after p3d, 5d
-
-    section Phase 4: Neo4j迁移+打磨
-        Neo4j知识图谱迁移          :p4a, after p3c, 7d
-        ~~Celery异步任务队列~~         :p4b, after p3d, 4d  ❌ 取消（改用 asyncio + TaskQueue）
-        性能优化                   :p4c, after p4b, 5d
-        Docker Compose 部署        :p4d, after p4c, 3d
-        UX打磨 + 导出功能          :p4e, after p4d, 5d
-```
-
----
-
-## Phase 1: 核心 MVP（预估 6-8 周）
-
-**目标：** 跑通"对话 → 知识抽取 → 知识约束写作"核心链路
-
-| 模块 | 交付物 | 优先级 | 依赖 |
-|------|--------|--------|------|
-| 项目架构 | FastAPI + React + SQLite 脚手架 | P0 | — |
-| 对话界面 | 基础聊天UI + SSE | P0 | 脚手架 |
-| LLM网关 | DeepSeek API 接入 + prompt模板 | P0 | — |
-| 知识抽取Agent | 基础实体识别（人物/地点） | P0 | LLM网关 |
-| 知识库管理器 | 基础CRUD + SQLite存储 | P0 | — |
-| 写作Agent | 基础知识约束写作（弱约束模式） | P0 | 知识库 + LLM网关 |
-| Wiki查看器 | 实体列表 + 详情页 | P1 | 知识库管理器 |
-
-**MVP 知识约束策略：**
-- 数据存储用 SQLite + JSON 字段模拟图谱
-- 上下文构建只依赖 LLM 上下文窗口（跳过向量库）
-- 写作 Agent 使用"弱约束"模式（可补充但标记）
-- **目标：** 让用户能感受"写了设定 → AI 记住 → 写作时遵守"的闭环
-
-**验证标准：**
-1. 用户通过聊天添加 3 个角色设定
-2. AI 根据设定写出 500 字正文
-3. 正文内容和设定一致（无冲突事实）
-4. 用户可以在 Wiki 页面查看所有设定
-
----
-
-## Phase 2: 知识体系完善（预估 4-5 周）
-
-| 模块 | 交付物 | 优先级 | 说明 |
-|------|--------|--------|------|
-| 一致性校验Agent | 知识冲突检测 | P0 | 防止知识库矛盾 |
-| 角色卡可视化 | 角色详情、关系、轨迹 | P0 | 核心可视化需求 |
-| 时间线可视化 | 事件/章节在时间轴上分布 | P0 | 清晰展现创作脉络 |
-| 文档解析器 | txt/docx/md 上传解析 | P1 | 方便导入已有草稿 |
-| ~~pgvector 迁移~~ | 从纯 LLM 上下文升级到向量检索 | P1 | ❌ 取消（未实施） |
-| 上下文管理器 | 强约束模式正式上线 | P0 | 严格知识约束写作 |
-
----
-
-## Phase 3: 高级可视化 + 工作流（预估 5-6 周）
-
-| 模块 | 交付物 | 优先级 | 说明 |
-|------|--------|--------|------|
-| 知识图谱 | 实体关系力导向图 | P0 | 最直观的全局视图 |
-| 4D世界地图 | 地理+时间维度地图 | P1 | 高阶功能 |
-| 伏笔看板 | 伏笔→回收追踪 | P1 | 悬疑类网文刚需 |
-| 工作流Agent | 对话式工作流生成 | P0 | 核心差异化功能 |
-| 工作流执行引擎 | 编排Agent流水线 | P0 | 同↑ |
-| 剧情规划Agent | 根据知识库给选项 | P1 | 辅助创作 |
-| 编辑Agent | 润色/扩写/缩写 | P1 | 贴身编辑 |
-
----
-
-## Phase 4: Neo4j + 生产化（预估 3-4 周）
-
-| 模块 | 交付物 | 优先级 | 说明 |
-|------|--------|--------|------|
-| Neo4j 迁移 | SQLite → Neo4j | P0 | ✅ 已完成 |
-| ~~Celery 任务队列~~ | ~~异步LLM任务~~ | P1 | ❌ 取消（改用 asyncio + TaskQueue） |
-| Docker Compose | 一键部署 | P1 | ✅ 已完成 |
-| 性能优化 | 大知识库下响应速度 | P1 | 🔄 持续 |
-| 导出功能 | 小说全文导出 txt/docx | P1 | ✅ 已完成 |
-
----
-
-## 分阶段决策矩阵
-
-| 决策点 | Phase 1 | Phase 2 | Phase 3 | Phase 4 |
-|--------|---------|---------|---------|---------|
-| 数据库 | SQLite | — | — | →JSON文件 + SQLite FTS5 |
-| 图谱 | JSON模拟 | — | — | →Neo4j |
-| 任务队列 | asyncio | — | — | →asyncio + TaskQueue |
-| LLM | DeepSeek | — | DeepSeek（多Provider） | ✅ 多Provider |
-| 容器化 | 无 | — | — | ✅ Docker Compose |
-
-每个阶段结束后，应进行一次**可运行演示**，确保价值尽早交付。
+| 阶段 | 状态 | 时间 | 关键交付 |
+|------|------|------|----------|
+| Phase 1: 核心MVP | ✅ 完成 | 2025-01 | 对话界面 + 知识抽取 + 写作Agent |
+| Phase 2: 知识体系 | ✅ 完成 | 2025-02 | 一致性校验 + 可视化 + 上下文管理 |
+| Phase 3: 工作流+可视化 | ✅ 完成 | 2025-03 | 知识图谱 + 4D地图 + 伏笔看板 + 工作流 |
+| Phase 4: Neo4j+生产化 | ✅ 完成 | 2025-06 | Neo4j迁移 + Docker + 导出 |
+| Phase 5: 全栈成熟化 | ✅ 完成 | 2026-06~07 | 叙事逻辑 + 交互故事 + CI/CD + 68组件 |
+| Phase 6: 质量增强 | ✅ 完成 | 2026-07 | 参考书分析 + 文风系统 + 角色语言指纹 |
+| Phase 7: AI味扫描 | ✅ 完成 | 2026-07 | AI味扫描引擎 + 批量导入优化 + 多项修复 |
 
 ---
 
 ## 追加记录
+
+### v15 — 2026-07-16: v2.6.0 AI味扫描 + 批量导入优化
+- 变更类型: 新增 + 修复 + 优化
+- 涉及模块: ai_flavor_scanner(新), quality_gate, continuation_pipeline, context_manager, knowledge_scope, headless_loop, chapter_store, imports, knowledge, search, graph_store, reviewers, start.bat, start.ps1, ReviewPanel.tsx
+- 描述: 新增AI味扫描引擎（7项纯规则检测），集成到finalize_chapter和quality_gate。新增AI味嗅觉审查员（评审团第14位）。修复知识检索零匹配、Neo4j宕机崩溃、启动脚本Neo4j容器缺失、评审团前端分类缺失。优化章节拆分正则（2→10种格式）、批量导入（O(n²)→O(n)）。
+
+### v14 — 2026-07-10: v2.5.1 记忆系统 + [object Object]修复
 
 ### v11 — 2026-06-20: 结构化 Part 系统 + 完整历史持久化
 - 变更类型: 新增 + 重构

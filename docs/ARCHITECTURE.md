@@ -1,4 +1,4 @@
-# 系统架构设计 — AI 小说写作辅助 Agent v2.2
+# 系统架构设计 — AI 小说写作辅助 Agent v2.6
 
 ## 核心设计理念
 
@@ -202,6 +202,31 @@ Cancel 请求 → RunState.cancel → 设置 cancelled flag → 循环内 check 
 ---
 
 ## 变更记录
+
+### v2.6 - 2026-07-16: AI味扫描引擎 + 批量导入优化
+
+- 变更类型: 新增 + 修复 + 优化
+- 涉及模块: ai_flavor_scanner(新), quality_gate, continuation_pipeline, context_manager, knowledge_scope, headless_loop, chapter_store, imports, knowledge, search, graph_store, reviewers, start.bat, start.ps1, ReviewPanel.tsx
+- 描述: 新增AI味扫描引擎——7项纯规则检测（过渡词/模板句式/模糊词/面部微表情/段落同构/句长均匀度/对话标签），零token消耗，集成到finalize_chapter和quality_gate。新增AI味嗅觉审查员（评审团第14位）。AI味反馈闭环：上一章问题自动注入后续写作约束。修复知识检索零匹配（子串匹配fallback）、Neo4j宕机崩溃（3个batch_add方法空驱动检查）、启动脚本Neo4j容器缺失（自动创建）、评审团前端分类缺失（新增续写专项区）。优化章节拆分正则（2→10种格式）、LLM fallback三段采样、批量导入O(n²)→O(n)。
+
+**新增模块:**
+- `core/ai_flavor_scanner.py` — 7项纯规则检测引擎
+- `reviewers/ai_flavor_sniffer.yaml` — AI味嗅觉审查员人设
+- `tests/test_ai_flavor_scanner.py` — 21个测试用例
+
+**集成修改:**
+- `continuation_pipeline.py` — ChapterValidationResult新增ai_flavor_score/ai_flavor_issues
+- `quality_gate.py` — QualityResult新增AI味字段，评审前扫描
+- `knowledge_scope.py` — WritingKnowledgeScope新增prev_chapter_issues
+- `context_manager.py` — 注入上一章发现的问题
+- `headless_loop.py` — step_result持久化AI味评分
+- `chapter_store.py` — 新增batch_add_chapters批量导入
+- `imports.py` — 章节拆分正则10种格式 + LLM三段采样
+- `knowledge.py` — _prepare_writing子串匹配fallback
+- `graph_store.py` — 3个batch_add方法空驱动防御
+- `reviewers/ai_flavor_sniffer.yaml` — 新增评审员
+
+---
 
 ### v2.3 - 2026-07-03: 参考书分析引擎 + 上下文效率大修
 
