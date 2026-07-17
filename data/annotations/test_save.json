@@ -1,0 +1,20 @@
+{
+  "book_id": "test_save",
+  "entries": [
+    {
+      "id": "z001",
+      "critic": "批注者A",
+      "target_chapter": 1,
+      "target_text": "假作真时真亦假",
+      "comment_text": "此联妙极",
+      "comment_type": "technique_comment",
+      "implied_outcome": "真假呼应",
+      "certainty": "high",
+      "related_characters": [
+        "角色甲",
+        "角色乙"
+      ],
+      "must_fulfill": false
+    }
+  ]
+}
