@@ -115,6 +115,9 @@ class ContextManager:
             structural_sections.append(f"\n## 本章大纲\n{scope.chapter_outline}")
         if scope.prev_chapter_summary:
             structural_sections.append(f"\n## 前情提要\n{scope.prev_chapter_summary}")
+        if scope.prev_chapter_issues:
+            issues_text = "\n".join(f"- {i}" for i in scope.prev_chapter_issues[:5])
+            structural_sections.append(f"\n## 上一章发现的问题（本章请避免）\n{issues_text}")
         if scope.writing_rules:
             structural_sections.append(f"\n## 写作规则\n{scope.writing_rules}")
         if scope.forbidden_characters:

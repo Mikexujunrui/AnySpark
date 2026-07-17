@@ -2,6 +2,35 @@
 
 本文档记录项目的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [2.6.0] - 2026-07-16
+
+### 新增
+
+- **AI味扫描引擎**：`core/ai_flavor_scanner.py` — 7项纯规则检测（过渡词密度/模板句式/模糊词/面部微表情/段落同构/句长均匀度/对话标签多样性），零token消耗，写后自动评分，集成到 `finalize_chapter` 和 `run_quality_gate`
+- **AI味嗅觉审查员**：`reviewers/ai_flavor_sniffer.yaml` — 评审团新增LLM审查员，检测机械表达/情感表演性/肢体逻辑/对话自然度/描写重复，默认关闭按需启用
+- **AI味扫描API**：`GET /books/{book_id}/ai-flavor-scan` — 对指定章节或最新章节进行7项纯规则检测
+- **AI味反馈闭环**：`knowledge_scope.py` 新增 `prev_chapter_issues`，`context_manager.py` 自动注入上一章发现的问题，`headless_loop.py` 在 step_result 中持久化AI味评分
+
+### 修复
+
+- **知识检索零匹配**：`_prepare_writing` 新增子串匹配fallback，FTS无结果时遍历实体名/别名匹配大纲摘要，并有明确提示
+- **Neo4j宕机防御**：`batch_add_entities`/`batch_add_relations`/`batch_add_foreshadows` 增加 `_driver is None` 检查，优雅降级不再崩溃
+- **启动脚本自动创建Neo4j**：`start.bat`/`start.ps1` 容器不存在时自动 `docker run` 创建，不再静默失败；`start.bat` 删除重复内容
+- **评审团前端显示**：新增"续写专项"分类区，4位 `continuation` 类别评审员不再不可见
+
+### 优化
+
+- **章节拆分正则增强**：从2种格式扩展到10种（第X章/回/节/幕/话、序章/楔子/番外、纯数字/罗马数字、Chapter/Volume），LLM fallback改为头尾中三段采样
+- **批量导入优化**：新增 `batch_add_chapters`，导入从 O(n²) 降到 O(n)，1281章从数十秒降到秒级
+
+### 验证
+
+- `ruff check src/ tests/`：0 errors
+- `pytest`：27 passed（新增21个AI味扫描测试）
+
+
+---
+
 ## [2.5.1] - 2026-07-10
 
 ### 修复

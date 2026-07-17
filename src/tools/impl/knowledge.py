@@ -778,6 +778,29 @@ async def _prepare_writing(
                 role = e.data.get("role", "")
                 role_str = f" [{role}]" if role else ""
                 lines.append(f"  - **{e.name}**{role_str} [{e.type}]")
+    else:
+        # FTS returned zero results — fall back to substring matching against
+        # entity names and aliases using characters from the synopsis
+        entity_map = {e.id: e for e in kb.list_entities()}
+        if entity_map:
+            # Extract potential entity-name keywords from synopsis (2-4 char substrings)
+            synopsis_text = ch.get("synopsis", "") if ch else ""
+            matched: list[tuple[str, str]] = []  # (name, type)
+            seen: set[str] = set()
+            for e in entity_map.values():
+                names = [e.name] + list(e.aliases)
+                for n in names:
+                    if len(n) >= 2 and n in synopsis_text and n not in seen:
+                        matched.append((e.name, e.type))
+                        seen.add(n)
+                        break
+            if matched:
+                lines.append("\n**知识库相关实体** (大纲子串匹配):")
+                for name, etype in matched[:10]:
+                    lines.append(f"  - **{name}** [{etype}]")
+            else:
+                lines.append(f"\n⚠️ 知识搜索未匹配到相关实体（搜索词: {search_query[:30]}...）")
+                lines.append("  建议: 在大纲中明确写出本章出场的角色名，或使用 /s 添加角色设定")
 
     # 4. Graph insights
     try:
@@ -847,6 +870,20 @@ async def _finalize_chapter(
         lines.append("✅ 状态: draft → **final**（已定稿）")
     else:
         lines.append(f"ℹ️ 状态: {status}（已是定稿状态，重新提取知识）")
+
+    # 0.5 AI味扫描（纯规则，零token）
+    try:
+        from core.ai_flavor_scanner import scan_chapter
+        cur = json_store._get_current_version(chapter)
+        content = cur.get("content", "")
+        if content and len(content) >= 100:
+            flavor = scan_chapter(content)
+            lines.append(f"\n### AI味扫描\n综合评分: {flavor.overall_score:.0f}/100")
+            if not flavor.is_clean:
+                for line in flavor.flagged_lines[:5]:
+                    lines.append(f"  ⚠️ {line}")
+    except Exception:
+        pass
 
     # 1. Verify chapter
     from tools.impl.narrative_logic import _verify_chapter

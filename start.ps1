@@ -10,8 +10,20 @@ Write-Host "==========================================="
 Write-Host "[1/3] Neo4j..."
 $neo = docker start novel-neo4j 2>&1
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "  WARN: Neo4j container missing"
-    Write-Host "  Run: docker run -d --name novel-neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/novel_agent_2024! neo4j:5.26-community"
+    Write-Host "  Creating Neo4j container..."
+    $create = docker run -d --name novel-neo4j `
+        -p 7474:7474 -p 7687:7687 `
+        -e NEO4J_AUTH=neo4j/novel_agent_2024! `
+        -e NEO4J_PLUGINS='[]' `
+        neo4j:5.26-community 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "  ERROR: Failed to create Neo4j container. Is Docker running?" -ForegroundColor Red
+        Write-Host "  知识库功能将不可用。请安装 Docker Desktop 后重试。"
+    } else {
+        Write-Host "  OK: Neo4j created and started on port 7687"
+        Write-Host "  (首次启动需等待约30秒初始化)"
+        Start-Sleep -Seconds 30
+    }
 } else {
     Write-Host "  OK: Neo4j on port 7687"
 }

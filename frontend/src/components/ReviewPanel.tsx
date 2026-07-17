@@ -292,10 +292,23 @@ export default function ReviewPanel({ bookId }) {
 
           {/* Readers */}
           {reviewers.filter(r => r.category === 'reader').length > 0 && (
-            <div>
+            <div className="mb-4">
               <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">读者代言人</h3>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
                 {reviewers.filter(r => r.category === 'reader').map(r => (
+                  <ReviewerCard key={r.id} reviewer={r} onToggle={handleToggle}
+                    onSelect={setSelectedReviewer} selected={selectedReviewer === r.id} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Continuation */}
+          {reviewers.filter(r => r.category === 'continuation').length > 0 && (
+            <div>
+              <h3 className="text-[10px] text-zinc-500 uppercase tracking-wider mb-2">续写专项</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {reviewers.filter(r => r.category === 'continuation').map(r => (
                   <ReviewerCard key={r.id} reviewer={r} onToggle={handleToggle}
                     onSelect={setSelectedReviewer} selected={selectedReviewer === r.id} />
                 ))}

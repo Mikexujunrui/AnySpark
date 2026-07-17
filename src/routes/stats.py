@@ -408,3 +408,40 @@ def book_cost(book_id: str):
 def book_cost_trend(book_id: str, days: int = 30):
     """Daily cost trend for the last N days."""
     return {"book_id": book_id, "days": days, "trend": get_cost_trend(book_id, days)}
+
+
+@router.get("/books/{book_id}/ai-flavor-scan")
+def ai_flavor_scan(book_id: str, chapter_id: str | None = None):
+    """AI味扫描：对指定章节或最新章节进行7项纯规则检测。
+
+    Args:
+        book_id: 书籍ID
+        chapter_id: 可选，指定章节ID。不传则使用最新章节
+    """
+    from core.ai_flavor_scanner import scan_chapter
+
+    chapters = json_store.load_chapters(book_id)
+    if not chapters:
+        return {"error": "无章节数据", "book_id": book_id}
+
+    if chapter_id:
+        target = json_store._resolve_by_id(chapters, chapter_id)
+        if not target:
+            return {"error": f"章节 {chapter_id} 不存在", "book_id": book_id}
+    else:
+        regular = [ch for ch in chapters if not ch.get("is_extra")]
+        if not regular:
+            return {"error": "无正文章节", "book_id": book_id}
+        target = regular[-1]
+
+    cur = json_store._get_current_version(target)
+    content = cur.get("content", "")
+    title = cur.get("title", target.get("title", ""))
+
+    report = scan_chapter(content)
+    return {
+        "book_id": book_id,
+        "chapter_id": target.get("id", ""),
+        "chapter_title": title,
+        **report.to_dict(),
+    }

@@ -98,6 +98,11 @@ class StepContextAccumulator:
                 elif btype == 'quality_score':
                     q = source_result.get('quality', {})
                     content = f"评分: {q.get('score', 'N/A')}, 评语: {q.get('summary', '')[:200]}"
+                    # Surface AI flavor issues if available
+                    ai_issues = q.get('ai_flavor_issues', [])
+                    if ai_issues:
+                        issues_text = "; ".join(ai_issues[:3])
+                        content += f" | AI味警告: {issues_text}"
                 elif btype == 'chapter_ref':
                     idx = source_result.get('chapter_index', '')
                     content = f"章节 #{idx} 已完成"
@@ -717,6 +722,8 @@ class TaskRunner:
                         "threshold": q_result.threshold,
                         "action": q_result.action,
                         "summary": q_result.summary,
+                        "ai_flavor_score": q_result.ai_flavor_score,
+                        "ai_flavor_issues": q_result.ai_flavor_issues,
                     }
                     if should_pause_for_quality(q_result, task.audit_mode or "soft"):
                         await bus.emit(Event(

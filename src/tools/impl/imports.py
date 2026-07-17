@@ -116,8 +116,8 @@ async def _import_chapters(
     if not chapters_data:
         return "未检测到章节结构。请确认文档格式，或手动指定章节。"
 
-    for cd in chapters_data:
-        json_store.add_chapter(book_id, cd["title"], cd["content"])
+    # 批量导入：一次加载、一次保存，1281章也从O(n²)降到O(n)
+    json_store.batch_add_chapters(book_id, chapters_data)
 
     total_chars = sum(len(cd["content"]) for cd in chapters_data)
     titles = ", ".join(cd["title"][:20] for cd in chapters_data[:5])
@@ -125,9 +125,27 @@ async def _import_chapters(
 
 
 def _regex_split_chapters(full_text: str) -> list[dict]:
+    # Chinese numeral pattern (一~九百九十九) + digit pattern
+    cn_num = r'[零一二三四五六七八九十百千万]+'
+    digit = r'\d+'
+    num = f'(?:{cn_num}|{digit})'
+    # Optional volume prefix: "第X卷" before the chapter heading
+    vol_prefix = rf'(?:第{num}[卷部篇集])?\s*'
+    # Chapter heading: 第X章/回/节/幕/话
+    ch_heading = rf'{vol_prefix}第{num}\s*[章回节幕话]'
+    # Special chapters: 序章/楔子/番外/尾声/后记/附录/终章/引子
+    special = r'(?:序章|楔子|番外|尾声|后记|附录|终章|引子|开篇|结局)'
+    # Numbered: 123. or 123、 or 【123】 at line start
+    numbered = r'^\s*\d+[\s\.、，．]+'
+    # Roman numerals: I. II. III. etc at line start
+    roman = r'^\s*[IVXLCDM]{2,}\.'
+
     chapter_heading = re.compile(
-        r'^.*?(第[一二三四五六七八九十百千万\d]+(?:章|回))\s*(.*?)$|^(Chapter\s+\d+)\s*(.*?)$',
-        re.MULTILINE
+        rf'^({ch_heading}|{special})\s*[：:]?\s*(.*?)$'
+        rf'|^(Chapter\s+\d+|Volume\s+\d+)\s*[：:]?\s*(.*?)$'
+        rf'|({numbered})\s*(.*?)$'
+        rf'|({roman})\s*(.*?)$',
+        re.MULTILINE,
     )
     matches = list(chapter_heading.finditer(full_text))
     if not matches:
@@ -148,8 +166,20 @@ def _regex_split_chapters(full_text: str) -> list[dict]:
 
     candidates = []
     for i, m in enumerate(valid_matches):
-        ch_num = m.group(1) or m.group(3)
-        ch_name = (m.group(2) or m.group(4) or "").strip()
+        # New regex groups: 1=ch_heading|special, 2=title, 3=Chapter/Volume, 4=title,
+        # 5=numbered, 6=title, 7=roman, 8=title
+        if m.group(1):
+            ch_num = m.group(1)
+            ch_name = (m.group(2) or "").strip()
+        elif m.group(3):
+            ch_num = m.group(3)
+            ch_name = (m.group(4) or "").strip()
+        elif m.group(5):
+            ch_num = m.group(5).strip()
+            ch_name = (m.group(6) or "").strip()
+        else:
+            ch_num = m.group(7).strip()
+            ch_name = (m.group(8) or "").strip()
         title = f"{ch_num} {ch_name}".strip() if ch_name else ch_num
         start = m.end()
         end = valid_matches[i + 1].start() if i + \
@@ -187,7 +217,16 @@ def _regex_split_chapters(full_text: str) -> list[dict]:
 
 
 async def _llm_split_chapters(loop, full_text: str) -> list[dict]:
-    sample = full_text[:50000]
+    # Sample from beginning, middle, and end for large texts
+    text_len = len(full_text)
+    if text_len <= 50000:
+        sample = full_text
+    else:
+        head = full_text[:20000]
+        mid_start = text_len // 2 - 10000
+        mid = full_text[mid_start:mid_start + 20000]
+        tail = full_text[-20000:]
+        sample = f"{head}\n\n... (省略中间内容) ...\n\n{mid}\n\n... (省略中间内容) ...\n\n{tail}"
     detect_system = """你是文档结构分析器。识别文本中的章节标题模式。
 文档可能使用非标准章节格式（如"卷一"、"上篇"、数字编号、特殊符号分隔等）。
 

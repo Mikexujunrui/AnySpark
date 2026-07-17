@@ -80,6 +80,8 @@ class ChapterValidationResult:
     voice_consistency_score: float = 0.0  # 角色声音一致性
     foreshadow_compliance: bool = False   # 伏笔约束是否满足
     logic_check_passed: bool = False      # 叙事逻辑检查
+    ai_flavor_score: float = 100.0        # AI味评分 (0-100, 越高越人味)
+    ai_flavor_issues: list[str] = field(default_factory=list)  # AI味检测问题
     issues: list[str] = field(default_factory=list)
 
     def passed(self) -> bool:
@@ -89,6 +91,7 @@ class ChapterValidationResult:
             and self.voice_consistency_score >= 0.5
             and self.foreshadow_compliance
             and self.logic_check_passed
+            and self.ai_flavor_score >= 50.0
         )
 
 
@@ -240,6 +243,17 @@ def validate_chapter_content(
 
     # 4. 基本叙事逻辑检查
     result.logic_check_passed = len(chapter_content) > 100  # 有实质内容即通过
+
+    # 5. AI味扫描（纯规则检测，零token消耗）
+    try:
+        from core.ai_flavor_scanner import scan_chapter
+        flavor_report = scan_chapter(chapter_content)
+        result.ai_flavor_score = flavor_report.overall_score
+        result.ai_flavor_issues = flavor_report.flagged_lines
+        if not flavor_report.is_clean:
+            result.issues.extend(flavor_report.flagged_lines)
+    except Exception:
+        pass  # AI味扫描失败不影响主流程
 
     return result
 

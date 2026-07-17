@@ -58,6 +58,9 @@ class WritingKnowledgeScope:
     chapter_outline: str = ""
     prev_chapter_summary: str = ""
 
+    # ── 反馈闭环 ──
+    prev_chapter_issues: list[str] = field(default_factory=list)  # 上一章验证发现的问题
+
     # ── 写作指示 ──
     style_requirements: str = ""
     target_word_count: int = 0
@@ -175,6 +178,7 @@ class WritingKnowledgeScope:
             "items": [e.to_dict() for e in self.items],
             "chapter_outline": self.chapter_outline[:500],
             "prev_chapter_summary": self.prev_chapter_summary[:300],
+            "prev_chapter_issues": self.prev_chapter_issues,
             "style_requirements": self.style_requirements,
             "target_word_count": self.target_word_count,
             "additional_instructions": self.additional_instructions,
@@ -231,6 +235,10 @@ class WritingKnowledgeScope:
             lines.append(f"\n## 叙事视角\n{len(self.narrative_pov)} 项指标")
         if self.emotional_curve is not None and len(self.emotional_curve) > 0:
             lines.append(f"\n## 情感弧线\n{len(self.emotional_curve)} 项指标")
+        if self.prev_chapter_issues:
+            lines.append("\n## 上一章发现的问题 (本章请避免)")
+            for issue in self.prev_chapter_issues[:5]:
+                lines.append(f"  - {issue}")
         if self.target_word_count:
             lines.append(f"\n目标字数: {self.target_word_count}")
         return "\n".join(lines)
@@ -246,6 +254,7 @@ class WritingKnowledgeScope:
             items=[EntityExposure.from_dict(e) for e in d.get("items", [])],
             chapter_outline=d.get("chapter_outline", ""),
             prev_chapter_summary=d.get("prev_chapter_summary", ""),
+            prev_chapter_issues=d.get("prev_chapter_issues", []),
             style_requirements=d.get("style_requirements", ""),
             target_word_count=d.get("target_word_count", 0),
             additional_instructions=d.get("additional_instructions", ""),

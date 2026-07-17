@@ -11,7 +11,7 @@ If score < threshold:
 """
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +39,8 @@ class QualityResult:
     summary: str = ""
     reviewer_count: int = 0
     action: str = "continue"  # "continue" | "rewrite" | "pause"
+    ai_flavor_score: float = 100.0  # AI味评分 (0-100, 越高越人味)
+    ai_flavor_issues: list[str] = field(default_factory=list)  # AI味检测问题
 
 
 async def run_quality_gate(
@@ -67,6 +69,17 @@ async def run_quality_gate(
 
     try:
         from core.review_panel import panel
+
+        # ── AI味扫描（纯规则，零token，在评审之前运行）──
+        ai_flavor_score = 100.0
+        ai_flavor_issues: list[str] = []
+        try:
+            from core.ai_flavor_scanner import scan_chapter
+            flavor_report = scan_chapter(chapter_text)
+            ai_flavor_score = flavor_report.overall_score
+            ai_flavor_issues = flavor_report.flagged_lines
+        except Exception:
+            pass
 
         # Pick the first N active reviewers for a lightweight review
         active_reviewers = panel.get_active_reviewers()
@@ -111,6 +124,8 @@ async def run_quality_gate(
             summary=report.summary[:500] if report.summary else "",
             reviewer_count=report.reviewer_count,
             action=action,
+            ai_flavor_score=ai_flavor_score,
+            ai_flavor_issues=ai_flavor_issues,
         )
 
     except Exception as e:

@@ -145,6 +145,9 @@ class GraphStore(EntityMixin, RelationMixin, AnalysisMixin):
     def batch_add_entities(self, entities: list[Entity]):
         if not entities:
             return
+        if self._driver is None:
+            logger.warning("batch_add_entities skipped: Neo4j unavailable")
+            return
         params = []
         for e in entities:
             params.append({
@@ -166,6 +169,9 @@ class GraphStore(EntityMixin, RelationMixin, AnalysisMixin):
 
     def batch_add_relations(self, relations: list["Relation"]):
         if not relations:
+            return
+        if self._driver is None:
+            logger.warning("batch_add_relations skipped: Neo4j unavailable")
             return
         from collections import defaultdict
         by_type = defaultdict(list)
@@ -197,6 +203,9 @@ class GraphStore(EntityMixin, RelationMixin, AnalysisMixin):
 
     def batch_add_foreshadows(self, foreshadows: list["Foreshadow"]):
         if not foreshadows:
+            return
+        if self._driver is None:
+            logger.warning("batch_add_foreshadows skipped: Neo4j unavailable")
             return
         params = []
         for fs in foreshadows:

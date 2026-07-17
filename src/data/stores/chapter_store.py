@@ -108,6 +108,51 @@ class ChapterStoreMixin:
         self._invalidate_character_mentions(book_id)
         return self._chapter_view(chapter)
 
+    def batch_add_chapters(self, book_id: str, chapters_data: list[dict]):
+        """导入多个章节：一次加载、一次保存、一次索引。
+
+        chapters_data: [{"title": str, "content": str}, ...]
+        """
+        if not chapters_data:
+            return
+        with book_lock(book_id):
+            chapters = self.load_chapters(book_id)
+            new_chapters = []
+            for cd in chapters_data:
+                ch_id = str(int(datetime.now().timestamp() * 1000))
+                vid = self._make_version_id()
+                trimmed = cd["content"][:config.storage.max_chapter_chars]
+                chapter = {
+                    "id": ch_id,
+                    "title": cd["title"],
+                    "current_version": vid,
+                    "is_extra": False,
+                    "status": "draft",
+                    "createdAt": datetime.now().isoformat(),
+                    "updatedAt": datetime.now().isoformat(),
+                    "versions": [{
+                        "id": vid,
+                        "content": trimmed,
+                        "title": cd["title"],
+                        "message": "初始版本",
+                        "timestamp": datetime.now().isoformat(),
+                        "parent": None,
+                        "word_count": len(trimmed.replace("\n", "").replace(" ", "")),
+                        "version_label": "v1",
+                    }],
+                }
+                chapters.append(chapter)
+                new_chapters.append(chapter)
+            self.save_chapters(book_id, chapters)
+            non_extra_count = sum(1 for c in chapters if not c.get("is_extra"))
+            self.update_book_stats(book_id, chapter_count=non_extra_count)
+        # Rebuild FTS once for all chapters
+        try:
+            fts_engine.rebuild_chapters(book_id, chapters)
+        except (OSError, RuntimeError) as e:
+            logger.debug(f"FTS rebuild failed after batch import: {e}")
+        self._invalidate_character_mentions(book_id)
+
     def _find_chapter(self, chapters: list[dict], chapter_id: str) -> dict | None:
         cid = chapter_id.strip()
         # 番外索引: #E1, #E2, ... 或 番外1, 番外2, ...
