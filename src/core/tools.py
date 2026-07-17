@@ -807,6 +807,7 @@ registry.register(Tool(
         "scope": {"type": "string", "description": "章节范围：'all'（默认）或 '#1-#5' 或 '#1,#3,#7'", "required": False},
         "execution_mode": {"type": "string", "description": "执行模式：'auto'(自动判断) | 'serial'(串行) | 'parallel'(并行)。默认 auto", "required": False},
         "dry_run": {"type": "boolean", "description": "是否预览模式（不实际修改，只报告匹配数）。默认 false", "required": False},
+        "precheck": {"type": "boolean", "description": "是否启用两阶段预检（先轻量LLM判断相关性，再全量编辑）。默认 true，可大幅节省无关章节的token消耗", "required": False},
     },
     dangerous=True,
 ))

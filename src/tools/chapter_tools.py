@@ -191,6 +191,7 @@ async def apply_directive_globally(loop, args: dict, book_id: str) -> str:
     scope = args.get("scope", "all")
     execution_mode = args.get("execution_mode", "auto")
     dry_run = bool(args.get("dry_run", False))
+    precheck = bool(args.get("precheck", True))  # 两阶段：先轻量检查相关性，再全量编辑
 
     if not directive:
         return "错误: 需要 directive 参数（自然语言修改指令）"
@@ -202,6 +203,19 @@ async def apply_directive_globally(loop, args: dict, book_id: str) -> str:
     target_indices = _parse_chapter_range(scope, len(chapters))
     if not target_indices:
         return f"无法解析章节范围: {scope}"
+
+    # ── Pre-check system prompt (Flash model, cheap) ──
+    precheck_system = """你是章节分类器。判断本章是否包含指令要求修改的内容。
+只输出 YES 或 NO，不要输出其他内容。
+
+判断标准：
+- 如果指令要求修改某个角色/场景/风格，检查本章是否包含该角色/场景/类似风格
+- 如果指令是全局性的（如"统一术语"），始终输出 YES
+- 如果指令是"改名"类操作，检查本章是否出现该名称
+- 不确定时输出 YES（宁可多改，不要漏改）"""
+
+    precheck_count = 0
+    precheck_hit = 0
 
     # Determine execution mode
     serial_keywords = ["呼应", "连贯", "伏笔", "前后", "顺序", "承接", "时间线"]
@@ -238,7 +252,7 @@ async def apply_directive_globally(loop, args: dict, book_id: str) -> str:
         len(target_indices)
 
         async def _edit_one(pos: int):
-            nonlocal completed
+            nonlocal completed, precheck_count, precheck_hit
             async with semaphore:
                 idx = target_indices[pos]
                 ch = chapters[idx]
@@ -249,6 +263,27 @@ async def apply_directive_globally(loop, args: dict, book_id: str) -> str:
                 if not content or len(content) < 50:
                     return (pos, f"  #{idx+1} {title[:15]}: 内容过短，跳过", "skip")
 
+                # Phase 1: Lightweight pre-check (Flash model, ~2K token input)
+                if precheck:
+                    precheck_count += 1
+                    sample = content[:2000]
+                    precheck_prompt = f"指令: {directive}\n\n章节标题: {title}\n章节开头: {sample}\n\n本章是否需要修改？"
+                    try:
+                        pre_result = await asyncio.wait_for(
+                            loop.run_in_executor(
+                                ai_executor, llm_chat, precheck_prompt,
+                                precheck_system, 0.0, "extraction"),
+                            timeout=15)
+                        if pre_result and "YES" in pre_result.upper():
+                            precheck_hit += 1
+                        else:
+                            return (pos, f"  ⏭ #{idx+1} {title[:15]}: 预检不相关，跳过", "skip")
+                    except TimeoutError:
+                        pass  # 预检超时直接进入全量编辑（宁可多改）
+                    except Exception:
+                        pass  # 预检异常直接进入全量编辑
+
+                # Phase 2: Full edit
                 prompt = f"## 原文（{title}）\n{content}\n\n请按指令修改后输出完整正文:"
                 try:
                     new_content = await asyncio.wait_for(
@@ -337,9 +372,11 @@ async def apply_directive_globally(loop, args: dict, book_id: str) -> str:
         f"  执行模式: {execution_mode}",
         f"  范围: {scope}（{len(target_indices)} 章）",
         f"  ✅ 成功: {edited} | 🚫 跳过: {skipped} | ❌ 失败: {failed}",
-        "",
-        "逐章结果:",
     ]
+    if precheck and precheck_count > 0:
+        hit_rate = precheck_hit / precheck_count * 100
+        summary.append(f"  🔍 预检: {precheck_hit}/{precheck_count} 章命中（{hit_rate:.0f}%），跳过 {precheck_count - precheck_hit} 章")
+    summary += ["", "逐章结果:"]
     summary.extend(r for r in results if r)
     return "\n".join(summary)
 
