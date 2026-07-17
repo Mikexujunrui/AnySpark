@@ -6,7 +6,6 @@ Extracted from executor.py to keep module sizes manageable.
 import json
 import logging
 import re
-from pathlib import Path
 
 from core.config import config
 from core.llm_client import chat as llm_chat
@@ -105,7 +104,8 @@ async def _import_chapters(
     except Exception:
         return f"文档 {doc_id} 不存在"
 
-    full_text = Path(doc["path"]).read_text(encoding="utf-8")
+    from core.document_parser import parse_document
+    full_text = parse_document(doc["path"])
     chapters_data = []
 
     chapters_data = _regex_split_chapters(full_text)

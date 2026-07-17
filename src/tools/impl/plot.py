@@ -548,7 +548,8 @@ def _read_document(args: dict, session_id: str, book_id: str) -> str:
     path = Path(doc["path"])
     if not path.exists():
         return "文件已丢失"
-    text = path.read_text(encoding="utf-8")
+    from core.document_parser import parse_document
+    text = parse_document(path)
     offset = int(args.get("offset", 0))
     limit = int(args.get("limit", config.storage.max_context_chars))
     return text[offset:offset + limit]
