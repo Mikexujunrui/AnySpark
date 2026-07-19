@@ -7,6 +7,7 @@ from datetime import datetime
 from data.json_store import json_store
 
 from .config import PROJECT_ROOT, config
+from .genre_config import DEFAULT_GENRE, get_genre
 from .plugin_loader import plugin_manager
 from .skills import manager as skill_manager
 from .styles import manager as style_manager
@@ -18,7 +19,6 @@ from .tool_meta import (
     TASK_TOOLS,
     WRITE_TOOLS,
 )
-from .genre_config import DEFAULT_GENRE, get_genre
 from .tools import registry
 
 # Genre-specific system prompts (each genre has its own write-mode prompt)
