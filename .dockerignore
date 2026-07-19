@@ -1,0 +1,45 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+.pytest_cache/
+.coverage
+
+# Environment
+.env
+
+# Data (runtime)
+data/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docs (not needed in container)
+docs/
+
+# Tests (not needed in container)
+tests/
+
+# CI
+.github/
+
+# Misc
+*.md
+*.log
+backend.pid
