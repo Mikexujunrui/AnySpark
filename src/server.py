@@ -13,7 +13,6 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-
 from core.config import config
 from core.errors import register_error_handlers
 from core.headless_loop import init_task_runner

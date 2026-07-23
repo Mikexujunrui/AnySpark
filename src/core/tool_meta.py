@@ -114,6 +114,9 @@ TOOL_META: dict[str, dict[str, bool]] = {
     "transform_book":         {"streaming": True, "touches_chapter": True, "context_aware": True},
     "find_replace_book":     {"streaming": True, "touches_chapter": True},
     "summarize_book":         {"streaming": True, "mutates_kb": True},
+    "apply_directive_globally": {"streaming": True, "touches_chapter": True},
+    "restyle_book":           {"streaming": True, "touches_chapter": True},
+    "transform_chapters_batch": {"streaming": True, "touches_chapter": True},
     # Autopilot launcher
     "start_autopilot":        {"streaming": True, "touches_chapter": True},
     # Narrative logic — constraint checking, impact analysis, confidence scoring

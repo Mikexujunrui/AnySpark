@@ -78,7 +78,6 @@ from tools.impl.imports import (
     _manage_notes,
 )
 from tools.impl.knowledge import (
-    _extract_all_chapters,
     _extract_chapter,
     _finalize_chapter,
     _prepare_writing,

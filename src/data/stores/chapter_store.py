@@ -13,9 +13,9 @@ from core.config import DATA_DIR, config
 from core.errors import NotFoundError, StorageError
 from core.event_bus import Event, EventType, bus
 from core.search import fts as fts_engine
+from data.stores._base import _fuzzy_find, _locate_in_paragraph, _split_paragraphs
 
 logger = logging.getLogger(__name__)
-from data.stores._base import _fuzzy_find, _locate_in_paragraph, _split_paragraphs
 
 
 class ChapterStoreMixin:

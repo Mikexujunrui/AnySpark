@@ -781,6 +781,42 @@ registry.register(Tool(
 ))
 
 registry.register(Tool(
+    name="apply_directive_globally",
+    description="全书批量修改工具——用自然语言指令对全部（或指定范围）章节执行统一修改。每章自动创建新版本可回滚。支持常用修改如：统一人物称呼、调整文风、增强场面描写等。自动判断串行/并行执行。",
+    parameters={
+        "directive": {"type": "string", "description": "自然语言修改指令，如'把所有小姐改成姑娘'、'战争场面描写更详细'"},
+        "scope": {"type": "string", "description": "章节范围：'all' 或 '#1-#5' 或 '#1,#3,#7'，默认 'all'", "required": False},
+        "execution_mode": {"type": "string", "description": "执行模式：'auto'(自动判断) | 'serial'(串行) | 'parallel'(并行)。默认 auto", "required": False},
+        "dry_run": {"type": "boolean", "description": "是否预览模式（不实际修改，只报告匹配数）。默认 false", "required": False},
+        "precheck": {"type": "boolean", "description": "是否两阶段执行：先轻量检查相关性，再全量编辑。默认 true", "required": False},
+    },
+    dangerous=True,
+))
+
+registry.register(Tool(
+    name="restyle_book",
+    description="将指定章节应用一种写作风格。保持情节不变，只调整遣词造句、句式结构、修辞手法等文风要素。需指定 style_id（从 list_styles 获取可用风格）。",
+    parameters={
+        "style_id": {"type": "string", "description": "风格ID/名称（必填，从 list_styles 或 /api/styles 获取可用风格列表）"},
+        "scope": {"type": "string", "description": "章节范围：'all' 或 '#1-#5' 或 '#1,#3,#7'，默认 'all'", "required": False},
+        "dry_run": {"type": "boolean", "description": "是否预览模式（不实际修改）。默认 false", "required": False},
+    },
+    dangerous=True,
+))
+
+registry.register(Tool(
+    name="transform_chapters_batch",
+    description="对指定章节列表执行批量变换。mode='patch'（局部修改）或 'rewrite'（完全重写）。每章自动创建新版本可回滚。",
+    parameters={
+        "chapter_ids": {"type": "string", "description": "章节范围，如 '#1-#5' 或 '#1,#3,#7'"},
+        "instruction": {"type": "string", "description": "自然语言修改指令"},
+        "mode": {"type": "string", "description": "变换模式：'patch'(局部修改) | 'rewrite'(完全重写)。默认 patch", "required": False},
+        "dry_run": {"type": "boolean", "description": "是否预览模式。默认 false", "required": False},
+    },
+    dangerous=True,
+))
+
+registry.register(Tool(
     name="delete_version",
     description="删除章节的指定历史版本。不能删除当前版本（需先 revert 到其他版本）。至少保留一个版本。",
     parameters={

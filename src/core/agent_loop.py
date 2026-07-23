@@ -511,7 +511,7 @@ async def _loop_inner(
                 "score_confidence", "check_constraints",
                 "web_search", "web_fetch",
             })
-            current_tool_names = set(tc.name for tc in response.tool_calls)
+            current_tool_names = {tc.name for tc in response.tool_calls}
             if current_tool_names and current_tool_names.issubset(_NOOP_READ_ONLY_TOOLS):
                 state.metrics.read_only_rounds += 1
                 if state.metrics.read_only_rounds >= 5:

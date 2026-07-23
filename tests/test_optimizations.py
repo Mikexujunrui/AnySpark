@@ -23,9 +23,9 @@ def _mock_count_tokens(text):
 
 def test_config_values():
     """Optimization 2: compaction threshold lowered."""
-    assert config.compaction.threshold_ratio == 0.70
+    assert config.compaction.threshold_ratio == 0.50
     assert config.compaction.max_tool_output_tokens == 30000
-    assert config.compaction.protected_tail_tokens == 60000
+    assert config.compaction.protected_tail_tokens == 15000
     assert config.compaction.tail_turns_to_keep == 4
 
 

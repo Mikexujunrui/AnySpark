@@ -411,6 +411,7 @@ async def generate_continuity_cards(book_id: str):
     """Generate continuity cards for all existing chapters. Uses flash model
     for speed — each card is ~400 tokens max_tokens."""
     import asyncio
+
     from tools.impl.knowledge import _generate_continuity_card
 
     chapters = json_store.load_chapters(book_id)

@@ -451,7 +451,7 @@ async def _agent_loop_sse(msg: str, req: MessageRequest, handle=None):
                     )
                 # Send a progress ping to keep the connection alive
                 yield {"event": "progress", "data": json.dumps({
-                    "stage": "处理中...", "detail": f"等待 Agent 响应 (轮次中...)"
+                    "stage": "处理中...", "detail": "等待 Agent 响应 (轮次中...)"
                 }, ensure_ascii=False)}
                 continue
 
