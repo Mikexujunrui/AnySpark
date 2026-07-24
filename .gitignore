@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+*.egg-info/
+
+# Environment
+.env
+
+# Data (runtime) — all user-generated data, private to each deployment
+data/*.db
+data/*.json
+data/uploads/
+data/styles/
+data/skills/
+data/reviewers/
+data/logs/
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Runtime PID
+backend.pid
+
+# Temp output files
+err.txt
+out.txt
+se.txt
+so.txt
+data/repos/
+data/test_tb_git*/
+data/*.jsonl
+data/*.db-journal
+data/*.db-shm
+data/*.db-wal
+data/analyses/
+
+# Internal working docs (not part of source distribution)
+docs/CODE_HEALTH_ISSUES.md
+data/simulations/
+data/annotations/
+
+# Screenshots (not part of the source code)
+screenshot_*.png
+
+# Pytest
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+docker-images.tar
+
+# Build artifacts (PyInstaller)
+build/
+dist/
+dist/NovelAgent.zip
