@@ -67,3 +67,6 @@ docker-images.tar
 build/
 dist/
 dist/NovelAgent.zip
+
+# Release ZIPs
+AnySpark_*.zip
