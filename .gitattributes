@@ -1,0 +1,55 @@
+# Auto-detect text files, ensure LF line endings in repo
+* text=auto
+
+# Python
+*.py text eol=lf
+*.pyi text eol=lf
+
+# Shell scripts
+*.sh text eol=lf
+*.bash text eol=lf
+
+# Config files
+*.yml text eol=lf
+*.yaml text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+
+# Windows batch/PowerShell（keep CRLF）
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Frontend
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.svg text eol=lf
+
+# Binary files
+*.pyd binary
+*.pyc binary
+*.pyo binary
+*.dll binary
+*.exe binary
+*.zip binary
+*.tar.gz binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.db binary
+*.db-shm binary
+*.db-wal binary
+*.db-journal binary
+*.sqlite binary
+*.sqlite3 binary
+*.ttf binary
+*.woff binary
+*.woff2 binary
+*.eot binary

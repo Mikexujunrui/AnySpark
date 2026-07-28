@@ -1,0 +1,97 @@
+# Skills configuration for the AI Novel Writing Agent.
+# Each skill defines a composite workflow that combines multiple tools.
+# Triggers determine which content types auto-suggest the skill.
+# Steps are the tool calls executed in order.
+
+- name: full_novel_import
+  description: "导入完整小说：章节存档 + 一致性校验"
+  triggers: [novel_chapter, mixed]
+  steps:
+    - tool: store_chapter
+      label: "存储章节"
+      params: {}
+    - tool: compare_versions
+      label: "一致性校验"
+      params: {}
+
+- name: setting_extraction
+  description: "纯设定提取：深度解析人物、世界观、事件、关系"
+  triggers: [setting_document]
+  steps:
+    - tool: extract_knowledge
+      label: "提取结构化知识"
+      params: {}
+    - tool: search_knowledge
+      label: "检索重复实体"
+      params: {}
+
+- name: draft_polish
+  description: "草稿精修：存为章节（定稿后请用 finalize_chapter 提取知识）"
+  triggers: [story_fragment]
+  steps:
+    - tool: store_inspiration
+      label: "存储片段草稿"
+      params: {}
+
+- name: brainstorm_expand
+  description: "灵感展开：记录灵感 + 提示关联角色 + 建议剧情方向"
+  triggers: [inspiration_note]
+  steps:
+    - tool: store_inspiration
+      label: "记录灵感"
+      params:
+        tags: ["灵感"]
+    - tool: search_knowledge
+      label: "查找关联角色/设定"
+      params: {}
+
+- name: daily_writing
+  description: "日常写作流程：续写 + 校验 + 保存章节"
+  triggers: [instruction]
+  steps:
+    - tool: write_chapter
+      label: "AI续写"
+      params: {mode: strict}
+    - tool: compare_versions
+      label: "一致性校验"
+      params: {}
+    - tool: store_chapter
+      label: "保存到章节"
+      params: {}
+
+- name: full_novel_reconstruct
+  description: "拆书复写：将完整小说拆解为结构化数据，然后仅根据结构化数据逐章复写，保留全部主线剧情"
+  triggers: [novel_chapter, mixed]
+  steps:
+    - tool: decompose_chapter
+      label: "拆解章节为场景和情节节拍"
+      params: {}
+    - tool: extract_style
+      label: "提取文风特征"
+      params: {}
+    - tool: count_words
+      label: "统计原文字数"
+      params: {}
+    - tool: reconstruct_chapter
+      label: "根据情节大纲复写本章"
+      params: {target_words: 0}
+    - tool: compare_plot
+      label: "对比原文和复写版情节覆盖率"
+      params: {}
+
+- name: chapter_rewrite
+  description: "单章复写：拆解+复写单章（定稿后请用 finalize_chapter 补充知识库）"
+  triggers: [story_fragment, novel_chapter]
+  steps:
+    - tool: decompose_chapter
+      label: "拆解章节结构"
+      params: {}
+    - tool: count_words
+      label: "统计字数"
+      params: {}
+    - tool: reconstruct_chapter
+      label: "复写本章"
+      params: {}
+    - tool: compare_plot
+      label: "校验情节完整性"
+      params: {}
