@@ -18,6 +18,11 @@ ALLOWED_EXTENSIONS = {".txt", ".md", ".docx"}
 MAX_FILE_SIZE = 200 * 1024 * 1024  # 200MB
 
 
+def _is_extra_title(title: str) -> bool:
+    """检测章节标题是否为番外章。"""
+    return bool(re.match(r'^番外', title.strip()))
+
+
 def sanitize_filename(filename: str) -> str:
     """清洗文件名，防止路径穿越"""
     name = PurePosixPath(filename).name
@@ -213,7 +218,8 @@ async def confirm_import(book_id: str, doc_id: str, data: ImportConfirm, session
         raise HTTPException(400, "未匹配到章节，请检查正则或标题列表")
 
     for cd in chapters_data:
-        json_store.add_chapter(book_id, cd["title"], cd["content"])
+        is_extra = _is_extra_title(cd["title"])
+        json_store.add_chapter(book_id, cd["title"], cd["content"], is_extra=is_extra)
 
     titles = ", ".join(cd["title"][:20] for cd in chapters_data[:5])
     return {

@@ -18,6 +18,12 @@ from data.stores._base import _fuzzy_find, _locate_in_paragraph, _split_paragrap
 logger = logging.getLogger(__name__)
 
 
+def _is_extra_title(title: str) -> bool:
+    """检测章节标题是否为番外章。"""
+    stripped = title.strip()
+    return bool(re.match(r'^番外', stripped))
+
+
 class ChapterStoreMixin:
     """Mixin providing chapter + version management.  Requires BaseStore."""
 
@@ -139,7 +145,7 @@ class ChapterStoreMixin:
                     "id": ch_id,
                     "title": cd["title"],
                     "current_version": vid,
-                    "is_extra": False,
+                    "is_extra": _is_extra_title(cd["title"]),
                     "status": "draft",
                     "createdAt": datetime.now().isoformat(),
                     "updatedAt": datetime.now().isoformat(),

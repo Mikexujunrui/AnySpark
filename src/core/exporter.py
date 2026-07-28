@@ -1,5 +1,14 @@
+import html
 import io
 from datetime import datetime
+
+
+def _format_chapter_title(ch: dict, index: int) -> str:
+    """Format chapter title, adding [番外] prefix for extra chapters."""
+    title = ch.get("title", f"第{index}章")
+    if ch.get("is_extra"):
+        return f"[番外] {title}"
+    return title
 
 
 def export_txt(book_title: str, chapters: list[dict], include_metadata: bool = False) -> bytes:
@@ -11,7 +20,7 @@ def export_txt(book_title: str, chapters: list[dict], include_metadata: bool = F
     lines.append("")
 
     for i, ch in enumerate(chapters, 1):
-        title = ch.get("title", f"第{i}章")
+        title = _format_chapter_title(ch, i)
         content = ch.get("content", "")
         lines.append(f"\n{'─' * 20}")
         lines.append(f"  {title}")
@@ -26,7 +35,11 @@ def export_txt(book_title: str, chapters: list[dict], include_metadata: bool = F
     lines.append("")
     lines.append("─── 全书完 ───")
     total = sum(len(ch.get("content", "")) for ch in chapters)
-    lines.append(f"共 {len(chapters)} 章，{total} 字")
+    extra_count = sum(1 for ch in chapters if ch.get("is_extra"))
+    stats_parts = [f"共 {len(chapters)} 章，{total} 字"]
+    if extra_count:
+        stats_parts.append(f"（含番外 {extra_count} 章）")
+    lines.append("".join(stats_parts))
 
     return "\n".join(lines).encode("utf-8")
 
@@ -47,14 +60,16 @@ def export_docx(book_title: str, chapters: list[dict]) -> bytes:
     doc.add_paragraph(f"导出时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
     doc.add_page_break()
 
+    extra_count = sum(1 for ch in chapters if ch.get("is_extra"))
     if len(chapters) > 1:
         doc.add_heading("目录", level=1)
         for i, ch in enumerate(chapters, 1):
-            doc.add_paragraph(f"{i}. {ch.get('title', f'第{i}章')}", style="List Number")
+            title = _format_chapter_title(ch, i)
+            doc.add_paragraph(f"{i}. {title}", style="List Number")
         doc.add_page_break()
 
     for i, ch in enumerate(chapters, 1):
-        title = ch.get("title", f"第{i}章")
+        title = _format_chapter_title(ch, i)
         content = ch.get("content", "")
         doc.add_heading(title, level=1)
 
@@ -73,7 +88,10 @@ def export_docx(book_title: str, chapters: list[dict]) -> bytes:
     final = doc.add_paragraph("── 全书完 ──")
     final.alignment = WD_ALIGN_PARAGRAPH.CENTER
     total = sum(len(ch.get("content", "")) for ch in chapters)
-    stats = doc.add_paragraph(f"共 {len(chapters)} 章，{total} 字")
+    stats_text = f"共 {len(chapters)} 章，{total} 字"
+    if extra_count:
+        stats_text += f"（含番外 {extra_count} 章）"
+    stats = doc.add_paragraph(stats_text)
     stats.alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     buffer = io.BytesIO()
@@ -83,6 +101,8 @@ def export_docx(book_title: str, chapters: list[dict]) -> bytes:
 
 def export_single_chapter_txt(chapter: dict) -> bytes:
     title = chapter.get("title", "章节")
+    if chapter.get("is_extra"):
+        title = f"[番外] {title}"
     content = chapter.get("content", "")
     text = f"{title}\n\n{content}"
     return text.encode("utf-8")
@@ -142,28 +162,28 @@ def export_epub(book_title: str, chapters: list[dict], cover_path: str = "", ver
     toc = []
 
     for i, ch in enumerate(chapters, 1):
-        title = ch.get("title", f"第{i}章")
+        title = _format_chapter_title(ch, i)
         content = ch.get("content", "")
 
-        # Convert plain text to HTML paragraphs
-        html_lines = [f"<h2>{title}</h2>"]
+        # Convert plain text to HTML paragraphs with XML escaping
+        html_lines = [f"<h2>{html.escape(title)}</h2>"]
         for para in content.split("\n"):
             p = para.strip()
             if p:
-                html_lines.append(f"<p>{p}</p>")
+                html_lines.append(f"<p>{html.escape(p)}</p>")
         html_body = "\n".join(html_lines)
 
+        escaped_title = html.escape(title, quote=True)
         chapter = epub.EpubHtml(
             title=title,
             file_name=f"chap_{i}.xhtml",
             lang="zh",
         )
         chapter.content = (
-            f'<?xml version="1.0" encoding="utf-8"?>\n'
             f"<!DOCTYPE html>\n"
             f'<html xmlns="http://www.w3.org/1999/xhtml" '
             f'xml:lang="zh">\n'
-            f"<head><title>{title}</title>"
+            f"<head><title>{escaped_title}</title>"
             f'<link rel="stylesheet" type="text/css" href="style/default.css"/>'
             f"</head>\n"
             f"<body>\n{html_body}\n</body>\n</html>"
@@ -176,8 +196,6 @@ def export_epub(book_title: str, chapters: list[dict], cover_path: str = "", ver
     book.spine = spine
     book.add_item(epub.EpubNcx())
     book.add_item(epub.EpubNav())
-
-    import io
 
     buffer = io.BytesIO()
     epub.write_epub(buffer, book, {})
