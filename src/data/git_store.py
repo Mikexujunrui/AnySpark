@@ -13,6 +13,7 @@ import json
 import logging
 import threading
 import time
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -135,8 +136,6 @@ class GitStore:
     # ── Chapter CRUD ──
 
     def _next_chapter_id(self) -> str:
-        """Generate a unique chapter ID using nanosecond precision."""
-        import uuid
         return str(int(time.time_ns() // 1_000_000)) + uuid.uuid4().hex[:6]
 
     def add_chapter(self, title: str, content: str, status: str = "draft") -> dict:
