@@ -12,6 +12,7 @@ Git content is managed via pure object model (no working tree).
 import json
 import logging
 import threading
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -133,9 +134,14 @@ class GitStore:
 
     # ── Chapter CRUD ──
 
+    def _next_chapter_id(self) -> str:
+        """Generate a unique chapter ID using nanosecond precision."""
+        import uuid
+        return str(int(time.time_ns() // 1_000_000)) + uuid.uuid4().hex[:6]
+
     def add_chapter(self, title: str, content: str, status: str = "draft") -> dict:
         self._check_git()
-        ch_id = str(int(datetime.now().timestamp() * 1000))
+        ch_id = self._next_chapter_id()
         path = self._chapter_content_path(ch_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(f"# {title}\n\n{content[: config.storage.max_chapter_chars]}", encoding="utf-8")
