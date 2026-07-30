@@ -70,7 +70,10 @@ class GenerationSettings:
             top_p=max(0.01, min(float(self.top_p), 1.0)),
             frequency_penalty=max(-2.0, min(float(self.frequency_penalty), 2.0)),
             presence_penalty=max(-2.0, min(float(self.presence_penalty), 2.0)),
-            max_output_tokens=max(512, min(int(self.max_output_tokens), 384000)),
+            # 384k output requests are rejected by many OpenAI-compatible
+            # gateways before billing. 65k is still generous for long prose
+            # while remaining portable across current providers.
+            max_output_tokens=max(512, min(int(self.max_output_tokens), 65536)),
         )
 
 

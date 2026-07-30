@@ -136,6 +136,25 @@ def upsert_provider(data: ProviderUpdate):
     if not found:
         s.providers.append(provider)
 
+    def _slot_is_usable(slot: ModelSlot) -> bool:
+        assigned = s.get_provider(slot.provider_id)
+        return bool(
+            assigned
+            and assigned.api_key.strip()
+            and slot.model.strip()
+            and (not assigned.models or slot.model in assigned.models)
+        )
+
+    # A freshly added, configured Provider should immediately work. This is
+    # especially important on first setup, where both slots still reference
+    # the keyless built-in placeholder and "connection test succeeded" would
+    # otherwise be followed by a chat that never uses the new Provider.
+    if provider.api_key.strip():
+        for slot in (s.slot_pro, s.slot_flash):
+            if not _slot_is_usable(slot):
+                slot.provider_id = provider.id
+                slot.model = provider.models[0]
+
     # Keep every slot valid when a provider's selected model set changes.
     for slot in (s.slot_pro, s.slot_flash):
         if slot.provider_id == provider.id and slot.model not in provider.models:
@@ -357,12 +376,37 @@ def update_book_settings(book_id: str, data: BookSettingsUpdate):
     if data.mode and data.mode not in VALID_MODES:
         raise HTTPException(400, f"Invalid mode: {data.mode}")
 
+    def _normalized_book_slot(provider_id: str, model: str, global_slot: ModelSlot) -> tuple[str, str]:
+        effective_provider_id = provider_id or global_slot.provider_id
+        provider = s.get_provider(effective_provider_id)
+        if provider_id and provider is None:
+            raise HTTPException(400, f"Provider not found: {provider_id}")
+        if model:
+            if provider is None or model not in provider.models:
+                raise HTTPException(400, f"Model not found in provider: {model}")
+            return provider_id, model
+        if provider_id:
+            if not provider.models:
+                raise HTTPException(400, f"Provider has no models: {provider_id}")
+            return provider_id, provider.models[0]
+        return "", ""
+
+    pro_provider_id, pro_model = _normalized_book_slot(
+        data.slot_pro_provider_id,
+        data.slot_pro_model,
+        s.slot_pro,
+    )
+    flash_provider_id, flash_model = _normalized_book_slot(
+        data.slot_flash_provider_id,
+        data.slot_flash_model,
+        s.slot_flash,
+    )
     override = BookOverrides(
         mode=data.mode,
-        slot_pro_provider_id=data.slot_pro_provider_id,
-        slot_pro_model=data.slot_pro_model,
-        slot_flash_provider_id=data.slot_flash_provider_id,
-        slot_flash_model=data.slot_flash_model,
+        slot_pro_provider_id=pro_provider_id,
+        slot_pro_model=pro_model,
+        slot_flash_provider_id=flash_provider_id,
+        slot_flash_model=flash_model,
     )
     s.book_overrides[book_id] = override
     update_settings(s)

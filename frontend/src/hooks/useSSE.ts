@@ -89,9 +89,21 @@ export function useSSE({ bookId, sessionId, agentMode, autoModeEnabled, onMessag
           for await (const event of parseSSE(res)) {
             if (!mountedRef.current) break
             resetHeartbeat(controller)
-            const text = event.type === 'chunk'
-              ? (typeof event.parsed === 'string' ? event.parsed : ((event.parsed as Record<string, unknown>)?.text as string) || event.data || '')
-              : ''
+            const data = event.parsed as Record<string, unknown> | string | null
+            if (event.type === 'progress' && data && typeof data === 'object') {
+              onProgress?.(data)
+              continue
+            }
+            if (event.type === 'done') {
+              onProgress?.(null)
+              const doneText = data && typeof data === 'object' ? String(data.message || '') : ''
+              if (doneText) onMessage?.({ type: 'plain', text: doneText })
+              continue
+            }
+            if (event.type !== 'chunk') continue
+            const text = typeof data === 'string'
+              ? data
+              : ((data as Record<string, unknown>)?.text as string) || event.data || ''
             if (text) {
               if (!started) {
                 started = true

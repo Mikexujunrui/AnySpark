@@ -230,6 +230,8 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
       let errorText = '⚠️ 请求失败，请检查后端'
       if (msg?.startsWith('/s ')) errorText = '⚠️ 提取失败'
       if (msg?.startsWith('/w ') || msg?.startsWith('/ws ')) errorText = '⚠️ 连接出错，请重试'
+      const detail = e?.message?.trim()
+      if (detail) errorText = `${errorText}\n\n${detail}`
       setMessages(prev => [...prev, { role: 'agent', text: errorText, retry: true }])
     },
     onMetrics: (data) => {

@@ -33,6 +33,8 @@ for package_name in ("uvicorn", "sse_starlette", "pygit2", "ebooklib"):
 
 tiktoken_datas, tiktoken_binaries, tiktoken_hidden = collect_all("tiktoken")
 hidden_imports.extend(tiktoken_hidden)
+hidden_imports.extend(collect_submodules("tiktoken_ext"))
+hidden_imports.append("tiktoken_ext.openai_public")
 hidden_imports.extend(["webview", "webview.platforms.cocoa"])
 
 a = Analysis(
@@ -44,6 +46,7 @@ a = Analysis(
         ("styles", "styles"),
         ("reviewers", "reviewers"),
         ("skills", "skills"),
+        ("src/core/prompts", "core/prompts"),
         ("pyproject.toml", "."),
         ("LICENSE", "."),
         *tiktoken_datas,

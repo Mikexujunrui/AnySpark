@@ -26,6 +26,7 @@ from .llm_client import (
     LLMResponse,
     ToolCall,
     chat_with_tools_stream_async,
+    llm_book_context,
     model_for,
 )
 from .loop_state import LoopState
@@ -183,14 +184,15 @@ async def run_agent_loop(
     did_yield_done = False
     last_error_msg = ""
     try:
-        async for event in _loop_inner(user_message, agent_config, history_messages, handle):
-            if event.type == "done":
-                did_yield_done = True
-            elif event.type == "error":
-                last_error_msg = event.data.get("message", "")
-            yield event
-            # Touch session timestamp to prevent stale timeout
-            run_state.touch(session_id)
+        with llm_book_context(agent_config.book_id):
+            async for event in _loop_inner(user_message, agent_config, history_messages, handle):
+                if event.type == "done":
+                    did_yield_done = True
+                elif event.type == "error":
+                    last_error_msg = event.data.get("message", "")
+                yield event
+                # Touch session timestamp to prevent stale timeout
+                run_state.touch(session_id)
     except CancelledError:
         last_error_msg = "操作已取消"
         yield LoopEvent(type="cancelled", data={"message": last_error_msg})
