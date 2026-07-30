@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Cross-platform native desktop window (WKWebView on macOS, WebView2 on Windows)
+pywebview>=6.2,<7
+pyinstaller>=6.11,<7

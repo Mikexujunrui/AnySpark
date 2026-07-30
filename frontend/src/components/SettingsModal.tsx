@@ -22,6 +22,12 @@ const PROVIDER_TYPE_LABELS = {
   gemini: 'Gemini',
 }
 
+const PROVIDER_DEFAULT_URLS = {
+  openai: 'https://api.openai.com/v1',
+  anthropic: 'https://api.anthropic.com/v1',
+  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
+}
+
 export default function SettingsModal({ onClose, onModeChanged, bookId }: { onClose: () => void; onModeChanged?: (mode: string) => void; bookId?: string }) {
   const [tab, setTab] = useState('providers')
   const [settings, setSettings] = useState(null)
@@ -41,9 +47,19 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
     id: '', name: '', type: 'openai', api_key: '', base_url: '', models: '',
   })
   const [testing, setTesting] = useState(null)
+  const [fetchingModels, setFetchingModels] = useState(false)
+  const [availableModels, setAvailableModels] = useState<string[]>([])
+  const [modelSearch, setModelSearch] = useState('')
 
   // Custom map
   const [customMap, setCustomMap] = useState({})
+  const [generationForm, setGenerationForm] = useState({
+    temperature: 0.7,
+    top_p: 0.95,
+    frequency_penalty: 0.15,
+    presence_penalty: 0,
+    max_output_tokens: 65536,
+  })
 
   // Book override state
   const [bookOverrides, setBookOverrides] = useState(null)
@@ -63,6 +79,13 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
       const data = await res.json()
       setSettings(data)
       setCustomMap(data.custom_map || {})
+      setGenerationForm(data.generation || {
+        temperature: 0.7,
+        top_p: 0.95,
+        frequency_penalty: 0.15,
+        presence_penalty: 0,
+        max_output_tokens: 65536,
+      })
       setLoading(false)
     } catch (e) {
       setError('加载设置失败')
@@ -131,6 +154,8 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
   function openAddProvider() {
     setEditingProvider(null)
     setProviderForm({ id: '', name: '', type: 'openai', api_key: '', base_url: '', models: '' })
+    setAvailableModels([])
+    setModelSearch('')
   }
 
   function openEditProvider(p) {
@@ -140,14 +165,57 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
       api_key: '', base_url: p.base_url || '',
       models: (p.models || []).join(', '),
     })
+    setAvailableModels(p.models || [])
+    setModelSearch('')
+  }
+
+  function selectedModels() {
+    return [...new Set(providerForm.models.split(/[\n,，]+/).map(s => s.trim()).filter(Boolean))]
+  }
+
+  function setSelectedModels(models: string[]) {
+    setProviderForm(f => ({ ...f, models: [...new Set(models)].join(', ') }))
+  }
+
+  function toggleModel(model: string) {
+    const selected = selectedModels()
+    setSelectedModels(selected.includes(model) ? selected.filter(m => m !== model) : [...selected, model])
+  }
+
+  async function fetchProviderModels() {
+    setFetchingModels(true)
+    try {
+      const res = await fetch('/api/settings/models/discover', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider_id: editingProvider || '',
+          type: providerForm.type,
+          api_key: providerForm.api_key,
+          base_url: providerForm.base_url,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '拉取模型失败')
+      setAvailableModels(data.models || [])
+      setModelSearch('')
+      showToast(`已拉取 ${data.count || data.models?.length || 0} 个模型，请勾选要使用的模型`)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '拉取模型失败')
+    }
+    setFetchingModels(false)
   }
 
   async function saveProvider() {
+    if (selectedModels().length === 0) {
+      showToast('请至少选择或手动填写一个模型')
+      return
+    }
     setSaving(true)
     try {
       const body = {
         ...providerForm,
-        models: providerForm.models.split(',').map(s => s.trim()).filter(Boolean),
+        models: selectedModels(),
       }
       const res = await fetch('/api/settings/providers', {
         method: 'POST',
@@ -160,7 +228,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
       }
       const data = await res.json()
       setSettings(data)
-      setEditingProvider(null)
+      openAddProvider()
       showToast('Provider 已保存')
     } catch (e) {
       showToast(e.message)
@@ -296,6 +364,25 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
     }
   }
 
+  async function saveGenerationSettings() {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/settings/generation', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(generationForm),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '保存失败')
+      setSettings(data)
+      setGenerationForm(data.generation)
+      showToast('正文生成参数已保存')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '保存失败')
+    }
+    setSaving(false)
+  }
+
   if (loading) {
     return (
       <Modal open onClose={onClose} title="API 设置" size="md">
@@ -328,6 +415,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
             { key: 'providers', label: 'Provider', icon: 'globe' },
             { key: 'slots', label: '模型分配', icon: 'layers' },
             { key: 'mode', label: '模式', icon: 'zap' },
+            { key: 'generation', label: '生成参数', icon: 'sliders' },
             ...(bookId ? [{ key: 'book', label: '书籍覆盖', icon: 'book-open' }] : []),
             { key: 'memory', label: '记忆系统', icon: 'database' },
             { key: 'about', label: '关于', icon: 'info' },
@@ -368,10 +456,12 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                         {testing === p.id ? '测试中...' : '测试连接'}
                       </button>
                       <button onClick={() => openEditProvider(p)}
+                        aria-label={`编辑 ${p.name}`}
                         className="text-zinc-500 hover:text-blue-400 p-1 rounded hover:bg-zinc-800">
                         <Icon name="edit" size={12} />
                       </button>
                       <button onClick={() => deleteProvider(p.id)}
+                        aria-label={`删除 ${p.name}`}
                         className="text-zinc-500 hover:text-red-400 p-1 rounded hover:bg-zinc-800">
                         <Icon name="trash" size={12} />
                       </button>
@@ -394,7 +484,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                     {editingProvider !== null ? `编辑: ${editingProvider}` : '添加 Provider'}
                   </span>
                   {editingProvider !== null && (
-                    <button onClick={() => setEditingProvider(null)} className="text-zinc-500 hover:text-zinc-300 text-[10px]">
+                    <button onClick={openAddProvider} className="text-zinc-500 hover:text-zinc-300 text-[10px]">
                       取消
                     </button>
                   )}
@@ -417,7 +507,11 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                   </div>
                   <div>
                     <label className="text-[10px] text-zinc-500 block mb-1">类型</label>
-                    <select value={providerForm.type} onChange={e => setProviderForm(f => ({ ...f, type: e.target.value }))}
+                    <select value={providerForm.type} onChange={e => {
+                      const type = e.target.value
+                      setProviderForm(f => ({ ...f, type, base_url: PROVIDER_DEFAULT_URLS[type] || '' }))
+                      setAvailableModels([])
+                    }}
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600">
                       {Object.entries(PROVIDER_TYPE_LABELS).map(([k, v]) => (
                         <option key={k} value={k}>{v}</option>
@@ -430,21 +524,67 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                       type="password" placeholder={editingProvider ? '留空保持不变' : 'sk-...'}
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600" />
                   </div>
-                  {providerForm.type === 'openai' && (
-                    <div>
-                      <label className="text-[10px] text-zinc-500 block mb-1">Base URL</label>
-                      <input value={providerForm.base_url} onChange={e => setProviderForm(f => ({ ...f, base_url: e.target.value }))}
-                        placeholder="https://api.deepseek.com"
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600" />
-                    </div>
-                  )}
                   <div>
-                    <label className="text-[10px] text-zinc-500 block mb-1">Models (逗号分隔)</label>
-                    <input value={providerForm.models} onChange={e => setProviderForm(f => ({ ...f, models: e.target.value }))}
-                      placeholder="deepseek-v4-pro, deepseek-v4-flash"
+                    <label className="text-[10px] text-zinc-500 block mb-1">Base URL</label>
+                    <input value={providerForm.base_url} onChange={e => {
+                      setProviderForm(f => ({ ...f, base_url: e.target.value }))
+                      setAvailableModels([])
+                    }}
+                      placeholder={PROVIDER_DEFAULT_URLS[providerForm.type] || 'https://api.example.com/v1'}
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600" />
+                    <p className="text-[9px] text-zinc-600 mt-1">
+                      留空使用官方地址；第三方中转请填写它提供的 OpenAI 兼容地址
+                    </p>
                   </div>
-                  <button onClick={saveProvider} disabled={saving || !providerForm.id || !providerForm.name}
+                  <div className="border border-zinc-800 rounded-lg p-2.5 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-[10px] text-zinc-400 font-medium">模型列表</div>
+                        <div className="text-[9px] text-zinc-600">已选 {selectedModels().length} 个</div>
+                      </div>
+                      <button onClick={fetchProviderModels} disabled={fetchingModels || (!providerForm.api_key && !editingProvider)}
+                        className="flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-sky-400 px-2.5 py-1.5 rounded text-[10px] transition-colors">
+                        <Icon name="refresh" size={11} className={fetchingModels ? 'animate-spin' : ''} />
+                        {fetchingModels ? '拉取中...' : '拉取模型'}
+                      </button>
+                    </div>
+
+                    {availableModels.length > 0 && (
+                      <>
+                        <div className="flex gap-1.5">
+                          <input value={modelSearch} onChange={e => setModelSearch(e.target.value)}
+                            placeholder="搜索模型名称"
+                            className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-[10px] text-zinc-300 outline-none focus:border-blue-600" />
+                          <button onClick={() => setSelectedModels(availableModels)}
+                            className="text-[9px] text-zinc-500 hover:text-zinc-300 px-1.5">全选</button>
+                          <button onClick={() => setSelectedModels([])}
+                            className="text-[9px] text-zinc-500 hover:text-zinc-300 px-1.5">清空</button>
+                        </div>
+                        <div className="max-h-44 overflow-y-auto border border-zinc-800 rounded bg-zinc-950/50 p-1">
+                          {availableModels
+                            .filter(model => model.toLowerCase().includes(modelSearch.trim().toLowerCase()))
+                            .map(model => (
+                              <label key={model} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-zinc-800/70 cursor-pointer">
+                                <input type="checkbox" checked={selectedModels().includes(model)}
+                                  onChange={() => toggleModel(model)} className="accent-sky-500" />
+                                <span className="text-[10px] text-zinc-300 font-mono break-all">{model}</span>
+                              </label>
+                            ))}
+                        </div>
+                      </>
+                    )}
+
+                    <details>
+                      <summary className="text-[9px] text-zinc-600 hover:text-zinc-400 cursor-pointer">
+                        手动填写（用于不支持模型拉取的服务）
+                      </summary>
+                      <textarea value={providerForm.models}
+                        onChange={e => setProviderForm(f => ({ ...f, models: e.target.value }))}
+                        rows={2} placeholder="model-a, model-b"
+                        className="mt-1.5 w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-[10px] text-zinc-300 outline-none focus:border-blue-600 resize-y" />
+                    </details>
+                  </div>
+                  <button onClick={saveProvider} disabled={saving || !providerForm.id || !providerForm.name || selectedModels().length === 0}
                     className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-xs py-2 rounded-lg font-medium transition-colors">
                     {saving ? '保存中...' : '保存 Provider'}
                   </button>
@@ -586,6 +726,85 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* ── Tab: Prose Generation Parameters ── */}
+          {tab === 'generation' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-sky-900/50 bg-sky-950/20 p-3">
+                <div className="text-xs font-semibold text-sky-300">只影响小说正文与改写</div>
+                <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
+                  Agent 的工具选择仍使用稳定参数，因此提高创造性不会让工具调用更容易“打架”。
+                  不同模型对参数的敏感程度不同，建议小幅调整后用同一段提示词对比。
+                </p>
+              </div>
+
+              {[
+                {
+                  key: 'temperature', label: '温度 Temperature', min: 0, max: 2, step: 0.05,
+                  hint: '越高越有变化，越低越保守。文学续写建议 0.55–0.85。',
+                },
+                {
+                  key: 'top_p', label: '候选范围 Top P', min: 0.05, max: 1, step: 0.05,
+                  hint: '控制候选词范围。一般只需与温度二选一重点调整。',
+                },
+                {
+                  key: 'frequency_penalty', label: '重复惩罚 Frequency', min: -2, max: 2, step: 0.05,
+                  hint: '减少同一词句反复出现。过高会导致用词生硬，建议 0–0.35。',
+                },
+                {
+                  key: 'presence_penalty', label: '话题拓展 Presence', min: -2, max: 2, step: 0.05,
+                  hint: '越高越鼓励引入新概念；续写容易跑题，通常保持 0 或略低。',
+                },
+              ].map(item => (
+                <div key={item.key} className="rounded-xl border border-zinc-800 p-4">
+                  <div className="mb-2 flex items-center justify-between">
+                    <label className="text-xs font-medium text-zinc-300">{item.label}</label>
+                    <input
+                      type="number"
+                      min={item.min}
+                      max={item.max}
+                      step={item.step}
+                      value={generationForm[item.key]}
+                      onChange={e => setGenerationForm(f => ({ ...f, [item.key]: Number(e.target.value) }))}
+                      className="w-20 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-right text-xs text-zinc-200 outline-none focus:border-sky-600"
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    min={item.min}
+                    max={item.max}
+                    step={item.step}
+                    value={generationForm[item.key]}
+                    onChange={e => setGenerationForm(f => ({ ...f, [item.key]: Number(e.target.value) }))}
+                    className="w-full accent-sky-500"
+                  />
+                  <p className="mt-1 text-[10px] text-zinc-600">{item.hint}</p>
+                </div>
+              ))}
+
+              <div className="rounded-xl border border-zinc-800 p-4">
+                <label className="text-xs font-medium text-zinc-300">单次最大输出 Token</label>
+                <input
+                  type="number"
+                  min={512}
+                  max={384000}
+                  step={512}
+                  value={generationForm.max_output_tokens}
+                  onChange={e => setGenerationForm(f => ({ ...f, max_output_tokens: Number(e.target.value) }))}
+                  className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 outline-none focus:border-sky-600"
+                />
+                <p className="mt-1 text-[10px] text-zinc-600">最终仍受所选模型和 API 服务商上限限制。</p>
+              </div>
+
+              <button
+                onClick={saveGenerationSettings}
+                disabled={saving}
+                className="w-full rounded-lg bg-sky-600 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-500 disabled:bg-zinc-700 disabled:text-zinc-500"
+              >
+                {saving ? '保存中...' : '保存正文生成参数'}
+              </button>
             </div>
           )}
 

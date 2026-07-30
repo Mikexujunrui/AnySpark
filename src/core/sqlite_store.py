@@ -17,11 +17,11 @@ import json
 import logging
 import math
 import sqlite3
-import sys
 import uuid
 from datetime import datetime
 from pathlib import Path
 
+from .config import DATA_DIR
 from .graph_schema import (
     get_symmetric_types,
 )
@@ -185,19 +185,16 @@ class SQLiteStore:
     via project_id foreign keys.  Graph algorithms run in Python.
     """
 
-    _db_dir: Path = Path("data")
+    _db_dir: Path = DATA_DIR
     _instances: dict[str, SQLiteStore] = {}
 
     @classmethod
     def _resolve_db_dir(cls) -> Path:
         """Return a writable directory for the SQLite database.
 
-        In PyInstaller EXE: next to the executable (not inside _MEIPASS).
-        In development: the project-root data/ directory.
+        DATA_DIR already resolves to a persistent writable location in both
+        packaged and development modes.
         """
-        if getattr(sys, "frozen", False):
-            exe_dir = Path(sys.executable).parent.resolve()
-            return exe_dir / "data"
         return cls._db_dir
 
     # ── Class-level cache for expensive computed insights (same as original) ──

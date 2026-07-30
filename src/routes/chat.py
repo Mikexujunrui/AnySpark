@@ -151,6 +151,7 @@ async def session_status(session_id: str):
 @router.post("/chat")
 async def chat_with_agent(req: MessageRequest):
     msg = req.message.strip()
+    display_msg = msg
 
     # ── 会话自动命名：首条非斜杠命令消息自动成为会话标题 ──
     if req.session_id and not msg.startswith("/") and not msg.startswith("#"):
@@ -185,6 +186,28 @@ async def chat_with_agent(req: MessageRequest):
     if msg.startswith("/style"):
         return _style_cmd(req, msg)
 
+    # Any other slash command may be a real project Skill.  Older versions
+    # displayed these commands in the UI but never routed them.
+    if msg.startswith("/"):
+        from core.skills import manager as skill_manager
+
+        command, _, remainder = msg[1:].partition(" ")
+        if skill_manager.get(command):
+            if req.mode == "plan":
+                return {"type": "error", "message": "执行写作技能需要 Write 模式。"}
+            msg = skill_manager.render_instruction(command, remainder)
+
+    from core.settings import validate_runtime_settings
+
+    config_errors = validate_runtime_settings()
+    if config_errors:
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            400,
+            "模型配置未完成：" + "；".join(config_errors) + "。请打开右上角“API 设置”后重试。",
+        )
+
     if msg.startswith("/s "):
         if req.mode == "plan":
             return {"type": "error", "message": "提取设定需要 Write 模式。"}
@@ -214,14 +237,14 @@ async def chat_with_agent(req: MessageRequest):
 
     # ── General agent loop: acquire session handle or queue ──
     sid = req.session_id or req.book_id
-    handle = await run_state.start_or_queue(sid, msg, req.mode)
+    handle = await run_state.start_or_queue(sid, display_msg, req.mode)
     if handle is None:
         # Message was queued — the running loop will pick it up
         return {"type": "queued", "message": "消息已排队，将在当前操作完成后处理"}
 
     # New run started — proceed with agent loop
     try:
-        return EventSourceResponse(_agent_loop_sse(msg, req, handle))
+        return EventSourceResponse(_agent_loop_sse(msg, req, handle, display_msg=display_msg))
     except Exception:
         await run_state.release(sid, handle)
         raise
@@ -245,6 +268,24 @@ INTENT_CLASSIFY_SYSTEM = """你是小说写作助手的意图分类器。仅分�
 async def _classify_intent(msg: str) -> tuple[str, dict]:
     import asyncio
     import json
+
+    # Most chat messages cannot match the five shortcut intents. Avoid paying
+    # for a classifier request unless the message contains a relevant concept.
+    classifier_keywords = (
+        "大纲",
+        "细纲",
+        "剧情骨架",
+        "世界观",
+        "时间线",
+        "地点地图",
+        "位置地图",
+        "location map",
+        "outline",
+        "timeline",
+        "worldbuilding",
+    )
+    if not any(keyword in msg.lower() for keyword in classifier_keywords):
+        return "general", {}
 
     from core.llm_client import MODELS, get_client
     from tools.executor import get_executor
@@ -389,7 +430,8 @@ def _style_cmd(req: MessageRequest, msg: str) -> dict:
         return {"type": "text", "message": "\n".join(lines)}
 
 
-async def _agent_loop_sse(msg: str, req: MessageRequest, handle=None):
+async def _agent_loop_sse(msg: str, req: MessageRequest, handle=None, display_msg: str | None = None):
+    persisted_user_msg = display_msg if display_msg is not None else msg
     history_msgs = _load_history_as_llm_messages(req.session_id) if req.session_id else []
 
     if history_msgs and needs_compaction([{"role": "system", "content": ""}] + history_msgs):
@@ -418,7 +460,7 @@ async def _agent_loop_sse(msg: str, req: MessageRequest, handle=None):
             sid,
             "user_message",
             {
-                "text": msg,
+                "text": persisted_user_msg,
                 "mode": req.mode,
             },
         )
@@ -561,7 +603,7 @@ async def _agent_loop_sse(msg: str, req: MessageRequest, handle=None):
 
     # ── Persist to both EventStore and legacy store for backward compat ──
     if final_text and sid:
-        _persist_turn(req.book_id, req.session_id, msg, final_text, mode=req.mode, parts=turn_parts)
+        _persist_turn(req.book_id, req.session_id, persisted_user_msg, final_text, mode=req.mode, parts=turn_parts)
 
 
 def _map_loop_event_to_sse(event: LoopEvent) -> dict | None:

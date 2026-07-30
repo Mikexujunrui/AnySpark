@@ -231,57 +231,68 @@ class AutopilotPlanner:
         """Read current book state: outline, chapters, knowledge."""
         from data.json_store import json_store
 
+        def chinese_number(value: str) -> int:
+            digits = {"零": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+            units = {"十": 10, "百": 100, "千": 1000, "万": 10000}
+            total = section = current = 0
+            for char in value:
+                if char in digits:
+                    current = digits[char]
+                elif char in units:
+                    unit = units[char]
+                    if unit == 10000:
+                        section = (section + current) * unit
+                        total += section
+                        section = current = 0
+                    else:
+                        section += (current or 1) * unit
+                        current = 0
+            return total + section + current
+
         chapters = json_store.load_chapters(book_id) or []
         outline = json_store.load_outline(book_id) or {}
         detailed_outline = json_store.load_detailed_outline(book_id) or {}
 
         # Determine which chapters exist
         existing_indices = set()
+        chapter_titles: dict[int, str] = {}
+        regular_position = 0
         for ch in chapters:
+            if ch.get("is_extra"):
+                continue
+            regular_position += 1
             idx = ch.get("index", ch.get("chapter_index"))
             if idx is not None:
-                existing_indices.add(int(idx))
+                resolved_idx = int(idx)
+                existing_indices.add(resolved_idx)
+                chapter_titles[resolved_idx] = ch.get("title", f"第{resolved_idx}章")
                 continue
             # fallback: 从句柄名称推断 (如 "第十一章 荒野追杀" → 11)
             title = ch.get("title", "")
             if title:
                 import re
 
-                ch_num_map = {
-                    "一": 1,
-                    "二": 2,
-                    "三": 3,
-                    "四": 4,
-                    "五": 5,
-                    "六": 6,
-                    "七": 7,
-                    "八": 8,
-                    "九": 9,
-                    "十": 10,
-                    "百": 100,
-                }
                 # 尝试匹配 "第X章" 格式
-                m = re.match(r"第([一二三四五六七八九十百千\d]+)章", title)
+                m = re.match(r"第([零一二三四五六七八九十百千万\d]+)章", title)
                 if m:
                     num_str = m.group(1)
                     if num_str.isdigit():
-                        existing_indices.add(int(num_str))
+                        resolved_idx = int(num_str)
+                        existing_indices.add(resolved_idx)
+                        chapter_titles[resolved_idx] = title
+                        continue
                     else:
-                        # 中文数字转换
-                        val = 0
-                        unit = 1
-                        for c in reversed(num_str):
-                            if c in ch_num_map:
-                                n = ch_num_map[c]
-                                if n >= 10:
-                                    unit = n if val == 0 else unit * n
-                                    val = max(val, 1) * unit if val == 0 else val
-                                else:
-                                    val += n * unit
-                            elif c == "零":
-                                pass
-                        if val > 0:
-                            existing_indices.add(val)
+                        resolved_idx = chinese_number(num_str)
+                        if resolved_idx > 0:
+                            existing_indices.add(resolved_idx)
+                            chapter_titles[resolved_idx] = title
+                            continue
+
+            # Imported prose often uses creative titles without "第N章".
+            # Its list position is nevertheless canonical and must count as an
+            # existing protected chapter.
+            existing_indices.add(regular_position)
+            chapter_titles[regular_position] = title or f"第{regular_position}章"
 
         # Get outline chapter list
         outline_chapters = []
@@ -297,10 +308,16 @@ class AutopilotPlanner:
         volumes_count = len(volumes)
         volumes_with_story = len([v for v in volumes if v.get("storyLine", "").strip()])
 
+        def chapter_content(chapter: dict) -> str:
+            """Read both versioned storage rows and legacy/import test rows."""
+            if chapter.get("versions") and chapter.get("id"):
+                return json_store._chapter_view(chapter).get("content", "")
+            return str(chapter.get("content", "") or "")
+
         return {
             "existing_indices": existing_indices,
             "existing_count": len(chapters),
-            "total_words": sum(len(ch.get("content", "")) for ch in chapters),
+            "total_words": sum(len(chapter_content(ch)) for ch in chapters),
             "outline_chapters": outline_chapters,
             "has_outline": bool(outline_chapters),
             "has_summary": bool(outline.get("summary", "").strip()) if isinstance(outline, dict) else False,
@@ -309,13 +326,7 @@ class AutopilotPlanner:
             else 0,
             "volumes_count": volumes_count,
             "volumes_with_story": volumes_with_story,
-            "chapter_titles": {
-                int(ch.get("index", ch.get("chapter_index", 0))): ch.get(
-                    "title", f"第{ch.get('index', ch.get('chapter_index', '?'))}章"
-                )
-                for ch in chapters
-                if ch.get("index") or ch.get("chapter_index")
-            },
+            "chapter_titles": chapter_titles,
         }
 
     # ── Write New Plan ──
@@ -323,6 +334,18 @@ class AutopilotPlanner:
     def _plan_write_new(self, prefix: str, config: AutopilotConfig, book_state: dict, intent: PlanIntent) -> dict:
         """Plan for sequential chapter writing."""
         chapters_to_write = self._determine_chapters(book_state, config)
+        if not chapters_to_write:
+            return {
+                "plan_summary": (
+                    "✅ 没有可安全续写的新章节：当前大纲中的章节都已存在。"
+                    "Auto 不会把这些原稿当成待写章节重写；请先在大纲中新增后续章节。"
+                ),
+                "chapters": [],
+                "steps": [],
+                "estimated_chapters": 0,
+                "total_steps": 0,
+                "intent_type": "write_new",
+            }
 
         steps = []
         step_counter = 0
@@ -597,35 +620,16 @@ class AutopilotPlanner:
             )
         )
 
-        # 5. Extract knowledge
-        if config.auto_extract:
+        # 5. Quality review — must happen before knowledge extraction so a
+        # hallucinated draft cannot contaminate the durable fact database.
+        if config.auto_review:
             steps.append(
                 TaskStep(
                     id=sid(4),
                     type="agent_loop",
-                    label=f"提取{ch_title}知识",
-                    config={
-                        "prompt": f"从刚写完的{ch_title}中提取关键设定：新出场人物、"
-                        f"地点、道具、伏笔、时间线事件。使用 extract_knowledge 工具。",
-                        "agent_type": "extract",
-                        "mode": "write",
-                        "temperature": 0.1,
-                        "max_rounds": 20,
-                        "step_category": "extract",
-                        "chapter_index": ch_idx,
-                    },
-                )
-            )
-
-        # 6. Quality review
-        if config.auto_review:
-            steps.append(
-                TaskStep(
-                    id=sid(5),
-                    type="agent_loop",
                     label=f"评审{ch_title}",
                     config={
-                        "prompt": f"对{ch_title}进行质量评审。检查：\n"
+                        "prompt": f"只读取并评审刚写完的{ch_title}，禁止调用任何写作或修改工具。检查：\n"
                         f"1. 与大纲是否一致\n"
                         f"2. 人物行为是否合理\n"
                         f"3. 叙事节奏是否流畅\n"
@@ -638,6 +642,27 @@ class AutopilotPlanner:
                         "quality_gate": config.quality_gate,
                         "chapter_ref": f"#{ch_idx}",
                         "step_category": "review",
+                    },
+                )
+            )
+
+        # 6. Extract knowledge only after the quality gate passed.
+        if config.auto_extract:
+            steps.append(
+                TaskStep(
+                    id=sid(5),
+                    type="agent_loop",
+                    label=f"提取{ch_title}知识",
+                    config={
+                        "prompt": f"从已经通过质量门的{ch_title}中提取关键设定：新出场人物、"
+                        f"地点、道具、伏笔、时间线事件。使用 extract_knowledge 工具。",
+                        "agent_type": "extract",
+                        "mode": "write",
+                        "temperature": 0.1,
+                        "max_rounds": 20,
+                        "step_category": "extract",
+                        "chapter_index": ch_idx,
+                        "depends_on": [sid(4)] if config.auto_review else [sid(3)],
                     },
                 )
             )

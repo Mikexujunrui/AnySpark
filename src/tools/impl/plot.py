@@ -516,6 +516,11 @@ async def _reconstruct_chapter(loop, args: dict, kb, book_id: str) -> str:
 2. 可以用不同的词语和句式，但事件走向必须一致
 3. 知识库中的角色设定必须严格遵守
 4. 直接输出复写的章节正文，不要加说明前缀"""
+    from core.creative_constitution import build_constitution_system_section
+
+    constitution_section = build_constitution_system_section(book_id)
+    if constitution_section:
+        system = f"{system}\n\n{constitution_section}"
     prompt = f"""知识库:\n{summary}\n\n情节大纲:\n{outline}\n\n{"章节标题: " + title if title else ""}\n请复写本章（{
         target
     }字）:"""
@@ -523,7 +528,9 @@ async def _reconstruct_chapter(loop, args: dict, kb, book_id: str) -> str:
         _ai_executor, llm_chat, prompt, system, config.agent.creative_temperature, "writing"
     )
     ch_title = title or "复写章节"
-    chapter = json_store.add_chapter(book_id, ch_title, result)
+    chapter = json_store.add_chapter(
+        book_id, ch_title, result, origin="ai_reconstruction", protected=True
+    )
     return _format_chapter_result(book_id, chapter["id"], ch_title, result)
 
 

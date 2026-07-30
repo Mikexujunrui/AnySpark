@@ -56,11 +56,11 @@ class PermissionRule:
 
 
 class PermissionManager:
-    """Session-scoped permission manager with autonomous mode support.
+    """Session-scoped permission manager with safe autonomous operation.
 
-    When ``autonomous_mode`` is True, ALL tools (including dangerous ones)
-    are auto-approved without user confirmation. Use with caution — the Agent
-    can irreversibly delete data."""
+    Autonomous mode may remove friction for ordinary tools, but it never
+    bypasses a destructive/full-rewrite confirmation.
+    """
 
     def __init__(self):
         self._rules: list[PermissionRule] = []
@@ -72,9 +72,15 @@ class PermissionManager:
         self._rules.append(rule)
 
     def check(self, tool_name: str) -> str:
-        # Autonomous mode: skip ALL permission checks (dangerous tools auto-approved)
+        from core.tools import registry
+
+        tool = registry._tools.get(tool_name)
+        dangerous = bool(tool and tool.dangerous) or tool_name in DANGEROUS_TOOLS
+
+        # Autonomous mode must not become an implicit "overwrite my originals"
+        # switch. Dangerous operations still require an explicit click.
         if self.autonomous_mode:
-            return "allow"
+            return "ask" if dangerous else "allow"
 
         # Consume one-time token first (true "approve once")
         if self._one_time_token == tool_name:
@@ -90,12 +96,7 @@ class PermissionManager:
 
         # Query the tool registry for the dangerous flag (single source of truth).
         # Falls back to DANGEROUS_TOOLS dict for backward compatibility.
-        from core.tools import registry
-
-        tool = registry._tools.get(tool_name)
-        if tool and tool.dangerous:
-            return "ask"
-        if tool_name in DANGEROUS_TOOLS:
+        if dangerous:
             return "ask"
 
         return "allow"

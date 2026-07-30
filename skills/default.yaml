@@ -4,15 +4,23 @@
 # Steps are the tool calls executed in order.
 
 - name: full_novel_import
-  description: "导入完整小说：章节存档 + 一致性校验"
+  description: "导入完整小说：按章节存档、保护原稿并提取可检索设定"
   triggers: [novel_chapter, mixed]
+  instructions: |
+    只导入用户上传的文档，不改写原文。导入后把所有章节视为受保护原稿，再从原稿提取知识。
+  guardrails:
+    - "禁止续写、润色或改写导入文本"
+    - "若章节识别结果异常，停止并报告，不猜测边界"
+  outputs:
+    - "识别并导入的章节数"
+    - "受保护原稿状态和知识提取结果"
   steps:
-    - tool: store_chapter
-      label: "存储章节"
+    - tool: import_chapters
+      label: "按边界导入受保护原稿"
       params: {}
-    - tool: compare_versions
-      label: "一致性校验"
-      params: {}
+    - tool: extract_all_chapters
+      label: "从原稿提取事实知识"
+      params: {force: false}
 
 - name: setting_extraction
   description: "纯设定提取：深度解析人物、世界观、事件、关系"
@@ -26,37 +34,61 @@
       params: {}
 
 - name: draft_polish
-  description: "草稿精修：存为章节（定稿后请用 finalize_chapter 提取知识）"
+  description: "草稿精修：先评审再确认，只对指定段落做最小修改"
   triggers: [story_fragment]
+  instructions: "先定位具体问题并展示修改提案；用户确认后只做局部 patch。"
+  guardrails:
+    - "禁止整章重写"
+    - "未经确认禁止写入"
+  outputs:
+    - "问题证据、确认项和实际修改范围"
   steps:
-    - tool: store_inspiration
-      label: "存储片段草稿"
+    - tool: run_review
+      label: "定位可验证的偏差"
+      params: {}
+    - tool: ask_user
+      label: "确认局部修改"
+      params: {}
+    - tool: patch_chapter
+      label: "应用最小修改"
       params: {}
 
 - name: brainstorm_expand
   description: "灵感展开：记录灵感 + 提示关联角色 + 建议剧情方向"
   triggers: [inspiration_note]
   steps:
-    - tool: store_inspiration
+    - tool: manage_notes
       label: "记录灵感"
       params:
-        tags: ["灵感"]
+        action: add
     - tool: search_knowledge
       label: "查找关联角色/设定"
       params: {}
+    - tool: suggest_plot_directions
+      label: "给出可选择的剧情方向"
+      params: {}
 
 - name: daily_writing
-  description: "日常写作流程：续写 + 校验 + 保存章节"
+  description: "日常写作流程：确认边界、生成唯一新章草稿、验证并评审"
   triggers: [instruction]
+  instructions: "只写尚不存在的新章，一轮只生成一份草稿，评审失败也不自动重写。"
+  guardrails:
+    - "禁止覆盖已有章节"
+    - "禁止先 write 再 store 造成重复章节"
+  outputs:
+    - "唯一新章草稿与写后检查"
   steps:
-    - tool: write_chapter
-      label: "AI续写"
-      params: {mode: strict}
-    - tool: compare_versions
-      label: "一致性校验"
+    - tool: list_chapters
+      label: "确认已有章节边界"
       params: {}
-    - tool: store_chapter
-      label: "保存到章节"
+    - tool: delegate_writing
+      label: "生成并保存唯一新章"
+      params: {mode: strict}
+    - tool: verify_chapter
+      label: "校验事实与约束"
+      params: {}
+    - tool: run_review
+      label: "评审但不自动改写"
       params: {}
 
 - name: full_novel_reconstruct
@@ -94,4 +126,133 @@
       params: {}
     - tool: compare_plot
       label: "校验情节完整性"
+      params: {}
+
+- name: literary_continuation
+  description: "高保真文学续写：保护已有正文，以创作宪法、前文证据和细纲驱动新章，写后只评审不偷改"
+  triggers: [instruction, novel_chapter]
+  instructions: |
+    只续写尚不存在的新章节。先确认已有章节边界，目标章节已存在时立即停止并询问用户。
+    写作必须以当前书已有正文为事实源，以创作宪法为最高文学约束。完成初稿后先做验证和评审，
+    不得因为评审分数低而自动调用第二个全章生成工具覆盖初稿。
+  guardrails:
+    - "禁止覆盖、删除、重排任何已有章节"
+    - "一轮只允许一个全章生成工具"
+    - "评审发现问题时先展示差距，等待用户决定是否局部修改"
+    - "无法确认的关键事实不得自行补全"
+  outputs:
+    - "新章编号、标题、字数和版本"
+    - "与创作宪法及前文的一致性检查"
+    - "评审指出的具体偏差和可选局部修复建议"
+  steps:
+    - tool: list_chapters
+      label: "确认已有章节边界"
+      params: {}
+    - tool: prepare_writing
+      label: "准备受约束的写作上下文"
+      params: {}
+    - tool: delegate_writing
+      label: "生成唯一一份新章草稿"
+      params: {mode: strict}
+    - tool: verify_chapter
+      label: "验证事实与叙事约束"
+      params: {}
+    - tool: run_review
+      label: "多维评审但不自动重写"
+      params: {}
+
+- name: author_style_continuation
+  description: "作者文风续写：从参考书提取节奏、句式、视角和用词样本，不把其他作品人物带进本书"
+  triggers: [instruction, novel_chapter]
+  instructions: |
+    把参考书视为“作者风格语料”，而不是默认的同世界观知识库。先读取已缓存的结构、量化文风、
+    深度文风和叙事视角结果；若缺失则先分析。使用少量代表性原文片段作为风格证据，模仿统计
+    特征和叙事方法，不复刻具体句子。正文事实只来自当前书、创作宪法和用户指令。
+  guardrails:
+    - "禁止把风格参考书中的无关角色、地点、道具和剧情带入当前书"
+    - "禁止大段复用参考书原句"
+    - "只写不存在的新章节，已有章节只读"
+    - "生成后先报告文风偏差，不自动整章重写"
+  outputs:
+    - "采用的参考书和风格证据维度"
+    - "新章保存结果"
+    - "句长、对话密度、视角、修辞与原样本的偏差"
+  steps:
+    - tool: analyze_structure
+      label: "分析作者结构习惯"
+      params: {}
+    - tool: quantify_style
+      label: "量化基础文风"
+      params: {}
+    - tool: analyze_deep_style
+      label: "分析深层句式与叙事风格"
+      params: {}
+    - tool: prepare_writing
+      label: "准备当前书事实与风格证据"
+      params: {}
+    - tool: delegate_writing
+      label: "生成高保真新章草稿"
+      params: {mode: strict}
+    - tool: run_review
+      label: "评审原文一致性和文风拟合"
+      params: {}
+
+- name: canon_audit
+  description: "原文一致性审计：只读检查人物、时间线、因果和新增设定，绝不自动修改正文"
+  triggers: [novel_chapter, story_fragment]
+  instructions: |
+    对指定章节执行只读审计。每个问题都必须给出当前章证据和已有正文/知识库证据，区分确定矛盾、
+    可能偏差和纯审美建议。不得为了“修好”而调用任何写入工具。
+  guardrails:
+    - "全程只读，不编辑、不重写、不提取未证实设定"
+    - "没有双向证据的问题不得判定为硬错误"
+    - "文学偏好不能伪装成事实矛盾"
+  outputs:
+    - "按严重程度排列的问题清单"
+    - "每个问题的两侧原文证据"
+    - "只提供最小修改建议，不直接执行"
+  steps:
+    - tool: read_chapter
+      label: "读取目标章节"
+      params: {}
+    - tool: search_knowledge
+      label: "查找相关既有事实"
+      params: {}
+    - tool: verify_chapter
+      label: "执行确定性一致性检查"
+      params: {}
+    - tool: run_review
+      label: "调用原文一致性评审"
+      params: {}
+
+- name: surgical_literary_revision
+  description: "文学外科手术式修改：先定位味道不对的具体段落，确认后只做最小 patch"
+  triggers: [story_fragment, instruction]
+  instructions: |
+    先评审并指出正文“味道不对”的可定位原因，把事实问题、人物声音、叙事距离、节奏和套话分开。
+    用 ask_user 展示修改提案。用户确认后只使用 patch_chapter 修改命中的段落，不得整章重写。
+  guardrails:
+    - "未获得用户确认前禁止写入"
+    - "禁止 edit_chapter、rewrite_by_chain 和任何全章生成工具"
+    - "每个 patch 必须有原文锚点并保留未命中段落"
+    - "修改后展示修改范围和版本，不宣称绝对变好"
+  outputs:
+    - "问题段落、原因和证据"
+    - "用户确认的修改清单"
+    - "实际 patch 成功数、失败数和版本"
+  steps:
+    - tool: read_chapter
+      label: "读取目标正文"
+      params: {}
+    - tool: run_review
+      label: "定位文学性偏差"
+      params: {}
+    - tool: ask_user
+      label: "确认最小修改提案"
+      params: {}
+    - tool: patch_chapter
+      label: "只修改确认段落"
+      params: {}
+    - tool: semantic_diff
+      label: "核对修改是否超出范围"
       params: {}

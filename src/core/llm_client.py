@@ -29,6 +29,10 @@ MODELS = {
 CREATIVE_TASKS = set(config.llm.creative_tasks)
 
 
+class LLMConfigurationError(RuntimeError):
+    """Raised when a configured model slot cannot create a provider client."""
+
+
 # ── Mode helpers ────────────────────────────────────────────────────────────
 
 
@@ -139,26 +143,29 @@ def _get_client_for_provider(provider_id: str) -> OpenAI:
     if provider_id in _clients:
         return _clients[provider_id]
 
+    from .settings import get_settings
+
+    s = get_settings()
+    provider = s.get_provider(provider_id)
+    if provider is None:
+        raise LLMConfigurationError(f"模型供应商不存在：{provider_id or '未选择'}")
+    if not provider.api_key.strip():
+        raise LLMConfigurationError(f"{provider.name} 尚未填写 API Key，请先在“API 设置”中完成配置。")
+
+    from .model_discovery import provider_base_url
+
     try:
-        from .settings import get_settings
-
-        s = get_settings()
-        provider = s.get_provider(provider_id)
-        if provider:
-            client = OpenAI(
-                api_key=provider.api_key,
-                base_url=provider.base_url or "https://api.deepseek.com",
-                timeout=Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0),
-                max_retries=0,
-                http_client=_make_httpx_client(),
-            )
-            _clients[provider_id] = client
-            return client
-    except Exception as e:
-        logger.warning(f"Failed to create client for provider {provider_id}: {e}")
-
-    # Fallback: legacy single client
-    return get_client()
+        client = OpenAI(
+            api_key=provider.api_key,
+            base_url=provider_base_url(provider.type, provider.base_url),
+            timeout=Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0),
+            max_retries=0,
+            http_client=_make_httpx_client(),
+        )
+    except Exception as exc:
+        raise LLMConfigurationError(f"无法创建 {provider.name} 客户端：{str(exc)[:160]}") from exc
+    _clients[provider_id] = client
+    return client
 
 
 def get_client() -> OpenAI:
@@ -168,12 +175,14 @@ def get_client() -> OpenAI:
 
         s = get_settings()
         return _get_client_for_provider(s.slot_pro.provider_id)
-    except (AttributeError, RuntimeError, KeyError):
+    except (AttributeError, KeyError):
         pass
 
     # Ultimate fallback
     global _clients
     if "_legacy" not in _clients:
+        if not config.llm.api_key.strip():
+            raise LLMConfigurationError("尚未配置 API Key，请先在“API 设置”中添加供应商。")
         _clients["_legacy"] = OpenAI(
             api_key=config.llm.api_key,
             base_url=config.llm.base_url,
@@ -204,6 +213,52 @@ def reload_clients():
 _STREAM_MAX_RETRIES = 5
 
 
+def _prose_completion_kwargs(task: str, fallback_temperature: float) -> dict:
+    """Return user-configured controls for prose calls only."""
+    if task not in ("writing", "editing", "workflow"):
+        return {
+            "temperature": fallback_temperature,
+            "max_tokens": 16384,
+        }
+    try:
+        generation = _settings().generation.normalized()
+        return {
+            "temperature": generation.temperature,
+            "top_p": generation.top_p,
+            "frequency_penalty": generation.frequency_penalty,
+            "presence_penalty": generation.presence_penalty,
+            "max_tokens": generation.max_output_tokens,
+        }
+    except (AttributeError, TypeError, ValueError):
+        return {
+            "temperature": fallback_temperature,
+            "max_tokens": 65536,
+        }
+
+
+def _provider_rejected_optional_params(exc: Exception, kwargs: dict) -> bool:
+    """Detect OpenAI-compatible gateways that omit sampling parameters."""
+    if not any(key in kwargs for key in ("top_p", "frequency_penalty", "presence_penalty")):
+        return False
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "unsupported parameter",
+            "unknown parameter",
+            "unrecognized parameter",
+            "unexpected keyword",
+            "extra inputs are not permitted",
+            "not support",
+        )
+    )
+
+
+def _portable_completion_kwargs(kwargs: dict) -> dict:
+    """Keep universal controls when a gateway rejects optional tuning."""
+    return {key: value for key, value in kwargs.items() if key in ("temperature", "max_tokens")}
+
+
 def chat(prompt: str, system: str = "", temperature: float = 0.3, task: str = "general") -> str:
     """Sync chat with retry on transient connection errors."""
     last_error = None
@@ -215,12 +270,22 @@ def chat(prompt: str, system: str = "", temperature: float = 0.3, task: str = "g
             if system:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                max_tokens=65536 if task in ("writing", "editing", "workflow") else 16384,
-            )
+            kwargs = _prose_completion_kwargs(task, temperature)
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    **kwargs,
+                )
+            except Exception as exc:
+                if not _provider_rejected_optional_params(exc, kwargs):
+                    raise
+                logger.warning("Provider rejected optional prose parameters; retrying with portable controls")
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    **_portable_completion_kwargs(kwargs),
+                )
             return response.choices[0].message.content or ""
         except Exception as e:
             last_error = e
@@ -246,6 +311,7 @@ def chat_stream(
     """
     last_error = None
     for attempt in range(_STREAM_MAX_RETRIES + 1):
+        content_yielded = False
         try:
             provider_id, model = _resolve(task)
             client = _get_client_for_provider(provider_id)
@@ -253,14 +319,26 @@ def chat_stream(
             if system:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
-            stream = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=temperature,
-                stream=True,
-                max_tokens=65536 if task in ("writing", "editing", "workflow") else 16384,
-            )
-            content_yielded = False
+            kwargs = _prose_completion_kwargs(task, temperature)
+            try:
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    stream=True,
+                    **kwargs,
+                )
+            except Exception as exc:
+                if not _provider_rejected_optional_params(exc, kwargs):
+                    raise
+                logger.warning(
+                    "Provider rejected optional streaming prose parameters; retrying with portable controls"
+                )
+                stream = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    stream=True,
+                    **_portable_completion_kwargs(kwargs),
+                )
             for chunk in stream:
                 content = chunk.choices[0].delta.content
                 if content:

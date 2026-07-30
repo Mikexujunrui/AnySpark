@@ -160,6 +160,18 @@ TASK_TOOLS = {"agent_tasks"}
 STYLE_TOOLS = {"set_style", "manage_styles"}
 RESEARCH_TOOLS = {"web_search", "web_fetch"}
 
+# A single Agent response/run may produce at most one full chapter draft.
+# These tools all create or replace chapter-scale prose and cannot safely be
+# executed together because later calls do not see earlier results.
+FULL_CHAPTER_GENERATION_TOOLS = {
+    "delegate_writing",
+    "write_chapter",
+    "rewrite_by_chain",
+    "reconstruct_chapter",
+    "edit_chapter",
+    "store_chapter",
+}
+
 
 # ── Tool behavioural metadata — single source of truth.
 # Replaces the four ad-hoc tool-name sets previously hardcoded inside

@@ -10,6 +10,7 @@ interface RefBook {
   title: string
   entityCount?: number
   chapterCount?: number
+  usage?: 'style' | 'canon' | 'both'
 }
 
 interface DeepStyleData {
@@ -24,9 +25,9 @@ interface DeepStyleData {
   personification_density?: number
   antithesis_density?: number
   allusion_density?: number
-  prophecy_frequency?: number
-  foreshadowing_density?: number
-  omen_density?: number
+  avg_prophecy_per_chapter?: number
+  poem_prophecy_count?: number
+  dream_omen_count?: number
   first_person_ratio?: number
   third_person_ratio?: number
   omniscient_ratio?: number
@@ -113,6 +114,16 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
       showToast('已移除', 'success')
     } catch {
       showToast('移除失败', 'error')
+    }
+  }
+
+  async function changeUsage(refBookId: string, usage: 'style' | 'canon' | 'both') {
+    try {
+      await api.setReferenceUsage(bookId, refBookId, usage)
+      setReferences(prev => prev.map(ref => ref.id === refBookId ? { ...ref, usage } : ref))
+      showToast('参考书用途已更新', 'success')
+    } catch {
+      showToast('用途更新失败', 'error')
     }
   }
 
@@ -242,7 +253,7 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
             <Icon name="book-open" size={20} /> 参考书
           </h2>
           <p className="text-sm text-zinc-500 mt-1">
-            指定其他项目为参考书，其角色/设定/关系会以只读方式注入写作上下文
+            默认只学习作者文风；只有你明确切换用途后，才会读取原著人物与设定
           </p>
         </div>
         {allBooks.length > 0 && (
@@ -257,7 +268,7 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
         <div className="flex flex-col items-center justify-center py-20 text-zinc-600">
           <Icon name="book-open" size={36} className="mb-3 text-zinc-700" />
           <p className="text-sm mb-1">未设置参考书</p>
-          <p className="text-xs mb-4">如同人小说可指定原著为参考书，写作时自动参考原著设定</p>
+          <p className="text-xs mb-4">可学习同一作者其他作品的文风，或明确设为同人原著事实源</p>
           {allBooks.length > 0 ? (
             <button onClick={() => setShowPicker(true)}
               className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-5 py-2 rounded-lg transition-colors text-sm flex items-center gap-2">
@@ -298,6 +309,17 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
                         <Icon name={isExpanded ? 'chevron-up' : 'chevron-down'} size={12} />
                         {isExpanded ? '收起' : '分析'}
                       </button>
+                      <select
+                        value={book.usage || 'style'}
+                        onChange={e => changeUsage(book.id, e.target.value as 'style' | 'canon' | 'both')}
+                        onClick={e => e.stopPropagation()}
+                        title="选择参考书如何参与写作"
+                        className="rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1.5 text-[10px] text-zinc-300 outline-none focus:border-violet-600"
+                      >
+                        <option value="style">只学文风</option>
+                        <option value="canon">只作原著设定</option>
+                        <option value="both">文风＋设定</option>
+                      </select>
                       <button onClick={() => removeReference(book.id)}
                         className="text-xs text-zinc-600 hover:text-red-400 transition-colors flex items-center gap-1">
                         <Icon name="x" size={12} /> 移除
@@ -390,8 +412,8 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
             <Icon name="info" size={14} /> 提示
           </h3>
           <p className="text-xs text-zinc-500 leading-relaxed">
-            参考书的知识图谱（角色名、设定、关系）会自动注入写作上下文和评审团"原著党"评审中。
-            分析原著结构和文风后，写作时会额外注入量化约束（章节篇幅、对话密度、句长分布等），让续写更贴近原著风格。
+            “只学文风”只注入结构、节奏、视角和少量风格样本，不会把另一部作品的人物设定带进正文；
+            “只作原著设定”用于同世界观续写；“文风＋设定”同时启用两者。分析结果会缓存并在写作时自动注入。
           </p>
         </div>
       )}
@@ -556,7 +578,11 @@ function Metric({ label, value }: { label: string; value: string }) {
 const RADAR_DIMENSIONS = [
   { key: 'sentence_rhythm', label: '句式韵律', fields: ['parallel_ratio', 'four_six_prose_density', 'classical_marker_density', 'long_short_alternation', 'inversion_frequency'] },
   { key: 'rhetoric_density', label: '修辞密度', fields: ['metaphor_density', 'personification_density', 'antithesis_density', 'allusion_density'] },
-  { key: 'prophecy_signature', label: '谶语特征', fields: ['prophecy_frequency', 'foreshadowing_density', 'omen_density'] },
+  {
+    key: 'prophecy_signature',
+    label: '谶语特征',
+    fields: ['avg_prophecy_per_chapter', 'poem_prophecy_count', 'dream_omen_count'],
+  },
   { key: 'narrative_pov', label: '叙事视角', fields: ['first_person_ratio', 'third_person_ratio', 'omniscient_ratio', 'pov_shift_frequency'] },
 ]
 
@@ -666,9 +692,9 @@ const FIELD_LABELS: Record<string, string> = {
   personification_density: '拟人密度',
   antithesis_density: '排比密度',
   allusion_density: '典故密度',
-  prophecy_frequency: '谶语频率',
-  foreshadowing_density: '伏笔密度',
-  omen_density: '预兆密度',
+  avg_prophecy_per_chapter: '平均每章预叙',
+  poem_prophecy_count: '诗词谶语数',
+  dream_omen_count: '梦兆/预感数',
   first_person_ratio: '第一人称占比',
   third_person_ratio: '第三人称占比',
   omniscient_ratio: '全知视角占比',

@@ -132,10 +132,13 @@ async def _run_review(loop, args: dict, kb, book_id: str, msg: str = "", queue=N
         try:
             parts = [kb.get_knowledge_summary()[:3000]]
             ref_ids = json_store.get_reference_books(book_id)
+            ref_profiles = json_store.get_reference_profiles(book_id)
             if ref_ids:
                 from core.graph_store import GraphStore
 
                 for ref_id in ref_ids:
+                    if ref_profiles.get(ref_id, "style") not in ("canon", "both"):
+                        continue
                     try:
                         ref_kb = GraphStore(ref_id)
                         ref_kb.init_schema()
@@ -144,6 +147,17 @@ async def _run_review(loop, args: dict, kb, book_id: str, msg: str = "", queue=N
                             ref_title = json_store.get_book(ref_id).get("title", ref_id)
                             parts.append(f"\n---\n# 参考书: {ref_title}\n{ref_summary}")
                         ref_kb.close()
+                    except Exception:
+                        pass
+                # Style-only references contribute style evidence but never
+                # unrelated character/world facts.
+                if any(ref_profiles.get(ref_id, "style") in ("style", "both") for ref_id in ref_ids):
+                    try:
+                        from core.writer import _build_reference_context
+
+                        style_context = _build_reference_context(book_id)
+                        if style_context:
+                            parts.append(f"\n---\n# 参考书文风证据\n{style_context[:7000]}")
                     except Exception:
                         pass
             knowledge_context = "\n".join(parts)

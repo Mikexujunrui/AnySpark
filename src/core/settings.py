@@ -8,6 +8,7 @@ import json
 import logging
 import os
 from dataclasses import asdict, dataclass, field
+from pathlib import Path
 
 from .config import DATA_DIR
 
@@ -38,7 +39,7 @@ class ProviderConfig:
     name: str  # display name
     type: str  # "openai" | "anthropic" | "gemini"
     api_key: str = ""
-    base_url: str = ""  # required for openai-compatible
+    base_url: str = ""  # empty means the official default for this provider type
     models: list = field(default_factory=list)  # available model names
 
 
@@ -46,6 +47,31 @@ class ProviderConfig:
 class ModelSlot:
     provider_id: str = ""
     model: str = ""
+
+
+@dataclass
+class GenerationSettings:
+    """User-tunable parameters for prose generation.
+
+    These values are deliberately applied only to plain prose calls, not to
+    the tool-routing Agent.  High creativity helps fiction, but makes JSON
+    arguments and tool selection less stable.
+    """
+
+    temperature: float = 0.7
+    top_p: float = 0.95
+    frequency_penalty: float = 0.15
+    presence_penalty: float = 0.0
+    max_output_tokens: int = 65536
+
+    def normalized(self) -> "GenerationSettings":
+        return GenerationSettings(
+            temperature=max(0.0, min(float(self.temperature), 2.0)),
+            top_p=max(0.01, min(float(self.top_p), 1.0)),
+            frequency_penalty=max(-2.0, min(float(self.frequency_penalty), 2.0)),
+            presence_penalty=max(-2.0, min(float(self.presence_penalty), 2.0)),
+            max_output_tokens=max(512, min(int(self.max_output_tokens), 384000)),
+        )
 
 
 @dataclass
@@ -87,6 +113,7 @@ class AppSettings:
         }
     )
     book_overrides: dict = field(default_factory=dict)  # {bookId: BookOverrides}
+    generation: GenerationSettings = field(default_factory=GenerationSettings)
     update_check_enabled: bool = True  # whether to check GitHub for new releases
     memory_enabled: bool = True  # global toggle for the memory system (project + preferences)
 
@@ -124,7 +151,9 @@ class AppSettings:
             ),
             mode=override.mode or self.mode,
             custom_map=dict(self.custom_map),
+            generation=self.generation,
             update_check_enabled=self.update_check_enabled,
+            memory_enabled=self.memory_enabled,
         )
         return effective
 
@@ -152,6 +181,12 @@ class AppSettings:
         book_overrides = {}
         for k, v in d.get("book_overrides", {}).items():
             book_overrides[k] = BookOverrides(**v) if isinstance(v, dict) else v
+        generation_data = d.get("generation", {})
+        generation = (
+            GenerationSettings(**generation_data).normalized()
+            if isinstance(generation_data, dict)
+            else GenerationSettings()
+        )
         return AppSettings(
             providers=providers,
             slot_pro=slot_pro,
@@ -159,6 +194,7 @@ class AppSettings:
             mode=mode if mode in VALID_MODES else "split",
             custom_map=custom_map,
             book_overrides=book_overrides,
+            generation=generation,
             update_check_enabled=d.get("update_check_enabled", True),
             memory_enabled=d.get("memory_enabled", True),
         )
@@ -204,11 +240,52 @@ def load_settings() -> AppSettings:
 
 def save_settings(s: AppSettings):
     """Persist settings to data/settings.json."""
-    DATA_DIR.mkdir(exist_ok=True)
-    SETTINGS_FILE.write_text(
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    temp_file = Path(f"{SETTINGS_FILE}.tmp")
+    temp_file.write_text(
         json.dumps(s.to_dict(mask_keys=False), ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    temp_file.replace(SETTINGS_FILE)
+
+
+def validate_runtime_settings(settings: AppSettings | None = None) -> list[str]:
+    """Return actionable errors for the model slots used by the active mode.
+
+    This is intentionally network-free. It catches missing providers, keys,
+    and model names before an Agent run enters retry loops or attempts an
+    intent-classification request.
+    """
+    s = settings or get_settings()
+    required_slots: set[str]
+    if s.mode == "quality":
+        required_slots = {"pro"}
+    elif s.mode == "flash":
+        required_slots = {"flash"}
+    elif s.mode == "custom":
+        required_slots = {slot for slot in s.custom_map.values() if slot in {"pro", "flash"}}
+        required_slots = required_slots or {"flash"}
+    else:
+        required_slots = {"pro", "flash"}
+
+    errors: list[str] = []
+    for slot_name in sorted(required_slots):
+        slot = s.slot_pro if slot_name == "pro" else s.slot_flash
+        display_name = "高质量模型" if slot_name == "pro" else "快速模型"
+        if not slot.provider_id:
+            errors.append(f"{display_name}尚未选择供应商")
+            continue
+        provider = s.get_provider(slot.provider_id)
+        if provider is None:
+            errors.append(f"{display_name}引用的供应商不存在：{slot.provider_id}")
+            continue
+        if not provider.api_key.strip():
+            errors.append(f"{provider.name}尚未填写 API Key")
+        if not slot.model.strip():
+            errors.append(f"{display_name}尚未选择模型")
+        elif provider.models and slot.model not in provider.models:
+            errors.append(f"{display_name}模型不在供应商列表中：{slot.model}")
+    return errors
 
 
 # ── Singleton ──

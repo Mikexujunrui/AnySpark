@@ -14,6 +14,7 @@ import asyncio
 import json
 import logging
 import traceback
+from collections import defaultdict, deque
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass, field
 
@@ -659,7 +660,10 @@ def _prepare_initial_messages(
 
     active_style = style_manager.get_active_style(agent_config.book_id) if agent_config.book_id else ""
     system_prompt = build_system_prompt(
-        agent_type=agent_config.agent_type, style_name=active_style, auto_mode_enabled=agent_config.auto_mode_enabled
+        agent_type=agent_config.agent_type,
+        style_name=active_style,
+        auto_mode_enabled=agent_config.auto_mode_enabled,
+        book_id=agent_config.book_id,
     )
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -932,6 +936,17 @@ async def _handle_tool_calls(
 ) -> AsyncGenerator[LoopEvent, None]:
     streamed_text = response.content or ""
 
+    # Some OpenAI-compatible providers occasionally omit tool-call IDs or
+    # reuse one ID inside the same streamed response. Normalize them before
+    # they enter either the API history or the persisted structured parts.
+    seen_call_ids: set[str] = set()
+    for index, tc in enumerate(response.tool_calls):
+        if not tc.id or tc.id in seen_call_ids:
+            old_id = tc.id
+            tc.id = f"call_local_{state.round}_{index}"
+            logger.warning("Repaired invalid tool_call id %r -> %s", old_id, tc.id)
+        seen_call_ids.add(tc.id)
+
     # ── Append assistant message with tool_calls ──
     assistant_msg = {
         "role": "assistant",
@@ -1073,6 +1088,11 @@ async def _handle_tool_calls(
                 yield ev
             _collect_result_parts(tc, result, state, messages)
 
+    # Treat one assistant tool-call response as an atomic protocol batch.
+    # This also backfills calls skipped by cancellation/terminal tools before
+    # any user/assistant message can be appended.
+    _sanitize_tool_messages(messages)
+
     yield LoopEvent(
         type="tool-end",
         data={
@@ -1117,10 +1137,28 @@ async def _prepare_tool_calls(
     """Validate args, enforce permissions. Appends valid tool calls to
     ``prepared`` and yields ``question`` events as needed."""
     processed_ids: set[str] = set()
+    from .tool_meta import FULL_CHAPTER_GENERATION_TOOLS
+
+    full_write_seen = False
     try:
         for tc in response.tool_calls:
             handle.check_cancelled()
 
+            if tc.name in FULL_CHAPTER_GENERATION_TOOLS:
+                if state.chapter_write_completed:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": (
+                                f"⛔ 写作互斥保护：本轮已经由 {state.chapter_write_tool or '写作工具'} "
+                                "保存了一份章节草稿。禁止再调用另一个全章生成工具覆盖或另存。"
+                                "请基于现有草稿结束本轮；评审和局部修改应在独立步骤中进行。"
+                            ),
+                        }
+                    )
+                    processed_ids.add(tc.id)
+                    continue
             try:
                 args = json.loads(tc.arguments) if tc.arguments else {}
             except json.JSONDecodeError:
@@ -1165,6 +1203,23 @@ async def _prepare_tool_calls(
                     processed_ids.add(tc.id)
                     continue
                 permission_manager.approve_once(tc.name)
+
+            if tc.name in FULL_CHAPTER_GENERATION_TOOLS:
+                if full_write_seen:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": (
+                                "⛔ 写作互斥保护：同一个模型响应包含多个全章写入工具。"
+                                "系统只执行第一个有效调用，当前调用已取消，"
+                                "防止新生成内容被后续工具清除或覆盖。"
+                            ),
+                        }
+                    )
+                    processed_ids.add(tc.id)
+                    continue
+                full_write_seen = True
 
             processed_ids.add(tc.id)
             prepared.append({"tc": tc, "args": args})
@@ -1328,6 +1383,11 @@ async def _process_tool_result(
 
     elif isinstance(result, dict) and result.get("type") == "writing_result":
         if result.get("saved"):
+            from .tool_meta import FULL_CHAPTER_GENERATION_TOOLS
+
+            if tool_name in FULL_CHAPTER_GENERATION_TOOLS:
+                state.chapter_write_completed = True
+                state.chapter_write_tool = tool_name
             yield LoopEvent(
                 type="writing_end",
                 data={
@@ -1404,21 +1464,6 @@ async def _process_tool_result(
         # be followed by tool messages responding to each 'tool_call_id'."
         messages.append({"role": "tool", "tool_call_id": tc.id, "content": "工具执行完成（无文本输出）"})
 
-    # ── Post-extraction summary hint ──
-    # extract_all_chapters / extract_chapter return structured data but the
-    # LLM often just says "完成" after seeing it. Inject a hint that forces
-    # a natural-language report so the user sees what was actually extracted.
-    if tool_name in ("extract_all_chapters", "extract_chapter"):
-        _append_user_hint(
-            messages,
-            (
-                "[系统提示] 知识提取工具已返回结果。请用自然语言向用户汇报："
-                "① 共处理了多少章 ② 新增了哪些角色/地点/设定（列出名字）"
-                "③ 更新了多少已有实体 ④ 新增了多少关系和伏笔。"
-                "必须输出完整报告，禁止只说'完成'或'提取完成'。"
-            ),
-        )
-
     if chapter_updated:
         yield LoopEvent(type="chapter_updated", data={})
 
@@ -1494,89 +1539,74 @@ def _collect_result_parts(tc: ToolCall, result, state: LoopState, messages: list
 
 
 def _sanitize_tool_messages(messages: list[dict]) -> None:
-    """In-place hygiene pass ensuring tool_call ↔ tool pairs are never orphaned.
+    """Repair tool protocol batches in-place.
 
-    Removes tool messages whose ``tool_call_id`` has no matching assistant
-    ``tool_calls`` entry (orphaned responses from compaction edge cases), and
-    appends placeholder tool messages for any assistant ``tool_calls`` whose
-    ``tool_call_id`` has no matching response (orphaned calls from partial
-    processing — e.g. cancel/exception mid-loop in ``_prepare_tool_calls``).
+    OpenAI-compatible APIs require every assistant message containing
+    ``tool_calls`` to be followed *immediately* by one tool response for each
+    call. Merely checking that a response exists somewhere later is not
+    sufficient: ``assistant(c1,c2) → tool(c1) → user → tool(c2)`` is invalid.
 
-    The LLM API strictly requires: *every* assistant message with ``tool_calls``
-    must be followed by tool messages responding to each ``tool_call_id``. A
-    violation produces an unrecoverable 400 that retries can't fix.
+    Rebuilding the history batch-by-batch provides four guarantees:
+    responses are contiguous, ordered like the declared calls, missing
+    responses receive placeholders, and orphan/duplicate responses are
+    dropped. Invalid or reused call IDs are normalized at the same time.
     """
     if not messages:
         return
 
-    # Step 1: collect every tool_call_id referenced by any assistant message.
-    all_call_ids: set[str] = set()
+    # Gather responses first. A deque preserves the original response order
+    # when a malformed history contains duplicate IDs.
+    responses: dict[str, deque[dict]] = defaultdict(deque)
     for msg in messages:
-        if msg.get("role") == "assistant" and msg.get("tool_calls"):
-            for tc in msg["tool_calls"]:
-                tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                if tc_id:
-                    all_call_ids.add(tc_id)
-
-    if not all_call_ids:
-        # No assistant-with-tool_calls in the conversation — nothing to do.
-        # (Orphan tool messages with no assistant are exceedingly rare but
-        # handled in step 2 as a defensive sweep.)
-        pass
-
-    # Step 2: sweep tool messages. Remove those whose call id isn't in
-    # ``all_call_ids`` (truly orphan); track which ids got answered.
-    answered: set[str] = set()
-    indices_to_remove: list[int] = []
-    for i, msg in enumerate(messages):
         if msg.get("role") == "tool":
             tc_id = msg.get("tool_call_id")
-            if not tc_id:
-                # Malformed tool message with no id — drop it.
-                indices_to_remove.append(i)
-                continue
-            if tc_id not in all_call_ids:
-                # Orphan tool message: assistant_tool_calls it responded to is
-                # gone (e.g. summarised away by compaction). Drop it.
-                indices_to_remove.append(i)
-                continue
-            answered.add(tc_id)
+            if tc_id:
+                responses[str(tc_id)].append(dict(msg))
 
-    for i in reversed(indices_to_remove):
-        messages.pop(i)
+    rebuilt: list[dict] = []
+    used_call_ids: set[str] = set()
+    repair_index = 0
 
-    # Step 3: any call ids with no response yet get placeholders.
-    # The API REQUIRES tool messages to immediately follow the assistant(tool_calls)
-    # message they respond to — they cannot be arbitrarily placed. Find the
-    # correct insertion point for each orphaned assistant msg and insert
-    # placeholder tool messages immediately after it.
-    orphaned = all_call_ids - answered
-    if orphaned:
-        # Build a map: tool_call_id → which assistant message it belongs to
-        # (by index in the messages list). We need to insert tool placeholders
-        # right after the LAST assistant message that carries tool_calls.
-        # Strategy: for each assistant msg with tool_calls, collect its
-        # orphaned ids, then insert placeholder tool messages after it.
-        insertions: list[tuple[int, list[dict]]] = []  # (insert_after_idx, [tool_msgs])
-        for i, msg in enumerate(messages):
-            if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                orphaned_for_this: list[dict] = []
-                for tc in msg["tool_calls"]:
-                    tc_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", None)
-                    if tc_id and tc_id in orphaned:
-                        orphaned_for_this.append(
-                            {
-                                "role": "tool",
-                                "tool_call_id": tc_id,
-                                "content": "[占位] 上一步工具调用未获得响应（可能已取消或中断），请继续下一步。",
-                            }
-                        )
-                if orphaned_for_this:
-                    insertions.append((i, orphaned_for_this))
-        # Insert in reverse order so indices stay valid
-        for insert_after_idx, tool_msgs in reversed(insertions):
-            for j, tm in enumerate(tool_msgs):
-                messages.insert(insert_after_idx + 1 + j, tm)
+    for msg_index, msg in enumerate(messages):
+        if msg.get("role") == "tool":
+            # Tool responses are reinserted beside their owning assistant
+            # message. Any response left unused is an orphan and is discarded.
+            continue
+
+        rebuilt.append(msg)
+        if msg.get("role") != "assistant" or not msg.get("tool_calls"):
+            continue
+
+        batch_responses: list[dict] = []
+        for call_index, tc in enumerate(msg["tool_calls"]):
+            original_id = tc.get("id") if isinstance(tc, dict) else getattr(tc, "id", "")
+            original_id = str(original_id or "")
+
+            repaired_id = original_id
+            if not repaired_id or repaired_id in used_call_ids:
+                repair_index += 1
+                repaired_id = f"call_repaired_{msg_index}_{call_index}_{repair_index}"
+                if isinstance(tc, dict):
+                    tc["id"] = repaired_id
+                else:
+                    tc.id = repaired_id
+            used_call_ids.add(repaired_id)
+
+            response_queue = responses.get(original_id)
+            if response_queue:
+                tool_msg = response_queue.popleft()
+                tool_msg["tool_call_id"] = repaired_id
+            else:
+                tool_msg = {
+                    "role": "tool",
+                    "tool_call_id": repaired_id,
+                    "content": "[占位] 工具调用未获得响应（可能已取消或中断），请继续下一步。",
+                }
+            batch_responses.append(tool_msg)
+
+        rebuilt.extend(batch_responses)
+
+    messages[:] = rebuilt
 
 
 def _build_drift_correction(user_message: str, state: LoopState) -> str:

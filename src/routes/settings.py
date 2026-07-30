@@ -10,11 +10,13 @@ from pydantic import BaseModel
 
 from core.llm_client import MODELS, reload_clients
 from core.llm_client import get_mode as _llm_get_mode
+from core.model_discovery import ModelDiscoveryError, discover_models, provider_base_url
 from core.settings import (
     TASK_TYPES,
     VALID_MODES,
     VALID_PROVIDER_TYPES,
     BookOverrides,
+    GenerationSettings,
     ModelSlot,
     ProviderConfig,
     get_settings,
@@ -54,12 +56,27 @@ class TestRequest(BaseModel):
     provider_id: str
 
 
+class ModelDiscoveryRequest(BaseModel):
+    provider_id: str = ""
+    type: str = "openai"
+    api_key: str = ""
+    base_url: str = ""
+
+
 class BookSettingsUpdate(BaseModel):
     mode: str = ""
     slot_pro_provider_id: str = ""
     slot_pro_model: str = ""
     slot_flash_provider_id: str = ""
     slot_flash_model: str = ""
+
+
+class GenerationSettingsUpdate(BaseModel):
+    temperature: float = 0.7
+    top_p: float = 0.95
+    frequency_penalty: float = 0.15
+    presence_penalty: float = 0.0
+    max_output_tokens: int = 65536
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
@@ -86,10 +103,13 @@ def upsert_provider(data: ProviderUpdate):
         raise HTTPException(400, "Provider id cannot be empty")
     if not data.name.strip():
         raise HTTPException(400, "Provider name cannot be empty")
-    if data.type == "openai" and not data.base_url:
-        raise HTTPException(400, "base_url is required for openai-compatible providers")
-    if not data.models:
+    models = list(dict.fromkeys(model.strip() for model in data.models if model.strip()))
+    if not models:
         raise HTTPException(400, "At least one model is required")
+    try:
+        base_url = provider_base_url(data.type, data.base_url)
+    except ModelDiscoveryError as exc:
+        raise HTTPException(400, str(exc))
 
     s = get_settings()
     provider = ProviderConfig(
@@ -97,8 +117,8 @@ def upsert_provider(data: ProviderUpdate):
         name=data.name.strip(),
         type=data.type,
         api_key=data.api_key,
-        base_url=data.base_url,
-        models=data.models,
+        base_url=base_url,
+        models=models,
     )
 
     # Check if provider is masked or empty → keep original key
@@ -115,6 +135,19 @@ def upsert_provider(data: ProviderUpdate):
             break
     if not found:
         s.providers.append(provider)
+
+    # Keep every slot valid when a provider's selected model set changes.
+    for slot in (s.slot_pro, s.slot_flash):
+        if slot.provider_id == provider.id and slot.model not in provider.models:
+            slot.model = provider.models[0]
+    for book_id, override in list(s.book_overrides.items()):
+        if isinstance(override, dict):
+            override = BookOverrides(**override)
+            s.book_overrides[book_id] = override
+        if override.slot_pro_provider_id == provider.id and override.slot_pro_model not in provider.models:
+            override.slot_pro_model = provider.models[0]
+        if override.slot_flash_provider_id == provider.id and override.slot_flash_model not in provider.models:
+            override.slot_flash_model = provider.models[0]
 
     update_settings(s)
     reload_clients()
@@ -144,17 +177,29 @@ def update_slots(data: SlotUpdate):
     s = get_settings()
 
     if data.slot_pro_provider_id:
-        if not s.get_provider(data.slot_pro_provider_id):
+        provider = s.get_provider(data.slot_pro_provider_id)
+        if not provider:
             raise HTTPException(400, f"Provider not found: {data.slot_pro_provider_id}")
+        if data.slot_pro_model and data.slot_pro_model not in provider.models:
+            raise HTTPException(400, f"Model not found in provider: {data.slot_pro_model}")
         s.slot_pro.provider_id = data.slot_pro_provider_id
     if data.slot_pro_model:
+        provider = s.get_provider(data.slot_pro_provider_id or s.slot_pro.provider_id)
+        if not provider or data.slot_pro_model not in provider.models:
+            raise HTTPException(400, f"Model not found in provider: {data.slot_pro_model}")
         s.slot_pro.model = data.slot_pro_model
 
     if data.slot_flash_provider_id:
-        if not s.get_provider(data.slot_flash_provider_id):
+        provider = s.get_provider(data.slot_flash_provider_id)
+        if not provider:
             raise HTTPException(400, f"Provider not found: {data.slot_flash_provider_id}")
+        if data.slot_flash_model and data.slot_flash_model not in provider.models:
+            raise HTTPException(400, f"Model not found in provider: {data.slot_flash_model}")
         s.slot_flash.provider_id = data.slot_flash_provider_id
     if data.slot_flash_model:
+        provider = s.get_provider(data.slot_flash_provider_id or s.slot_flash.provider_id)
+        if not provider or data.slot_flash_model not in provider.models:
+            raise HTTPException(400, f"Model not found in provider: {data.slot_flash_model}")
         s.slot_flash.model = data.slot_flash_model
 
     update_settings(s)
@@ -177,6 +222,19 @@ def switch_mode(data: ModeUpdate):
     return s.to_dict(mask_keys=True)
 
 
+@router.put("/settings/generation")
+def update_generation_settings(data: GenerationSettingsUpdate):
+    """Update prose-only generation controls.
+
+    Tool-calling requests intentionally keep their conservative parameters so
+    changing literary creativity cannot destabilize Agent tool selection.
+    """
+    s = get_settings()
+    s.generation = GenerationSettings(**data.model_dump()).normalized()
+    update_settings(s)
+    return s.to_dict(mask_keys=True)
+
+
 @router.post("/settings/test")
 def test_provider_connection(data: TestRequest):
     """Test a provider's API connection with a simple request."""
@@ -189,7 +247,7 @@ def test_provider_connection(data: TestRequest):
         start = time.time()
         client = OpenAI(
             api_key=provider.api_key,
-            base_url=provider.base_url or "https://api.openai.com/v1",
+            base_url=provider_base_url(provider.type, provider.base_url),
             timeout=Timeout(connect=10.0, read=15.0, write=10.0, pool=10.0),
             max_retries=0,
         )
@@ -211,6 +269,34 @@ def test_provider_connection(data: TestRequest):
             "success": False,
             "error": str(e)[:200],
         }
+
+
+@router.post("/settings/models/discover")
+def discover_provider_models(data: ModelDiscoveryRequest):
+    """Fetch model IDs using either form credentials or a saved provider key."""
+    if data.type not in VALID_PROVIDER_TYPES:
+        raise HTTPException(400, f"不支持的 Provider 类型: {data.type}")
+
+    api_key = data.api_key.strip()
+    base_url = data.base_url.strip()
+    if data.provider_id:
+        existing = get_settings().get_provider(data.provider_id)
+        if existing:
+            if not api_key or api_key.endswith("****"):
+                api_key = existing.api_key
+            if not base_url:
+                base_url = existing.base_url
+
+    try:
+        models, endpoint = discover_models(data.type, api_key, base_url)
+    except ModelDiscoveryError as exc:
+        raise HTTPException(400, str(exc))
+    return {
+        "success": True,
+        "models": models,
+        "count": len(models),
+        "endpoint": endpoint,
+    }
 
 
 # ── Legacy compat: /api/mode ────────────────────────────────────────────────

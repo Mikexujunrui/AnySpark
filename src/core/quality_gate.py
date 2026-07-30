@@ -5,9 +5,8 @@ Used by Autopilot after each chapter is written. Runs a subset of reviewers
 threshold determined by the gate level (low/medium/high).
 
 If score < threshold:
-  - soft mode: pause task, notify user
-  - hard mode: already paused at each step
-  - autonomous mode: trigger one auto-rewrite, then proceed regardless
+  - every mode pauses and preserves the current draft
+  - no hidden rewrite is allowed; the user decides whether and how to revise
 """
 
 import logging
@@ -38,7 +37,7 @@ class QualityResult:
     gate_level: str = "medium"
     summary: str = ""
     reviewer_count: int = 0
-    action: str = "continue"  # "continue" | "rewrite" | "pause"
+    action: str = "continue"  # "continue" | "pause"
     ai_flavor_score: float = 100.0  # AI味评分 (0-100, 越高越人味)
     ai_flavor_issues: list[str] = field(default_factory=list)  # AI味检测问题
 
@@ -59,7 +58,7 @@ async def run_quality_gate(
         chapter_ref: Chapter reference (e.g., "#3").
         gate_level: "low" | "medium" | "high" — determines score threshold.
         audit_mode: "hard" | "soft" | "autonomous" — determines failure action.
-        max_rewrite_attempts: Max auto-rewrite attempts in autonomous mode.
+        max_rewrite_attempts: Kept for API compatibility; hidden rewrites are disabled.
 
     Returns:
         QualityResult with pass/fail, score, and recommended action.
@@ -109,13 +108,9 @@ async def run_quality_gate(
         score = report.overall_score
         passed = score >= threshold
 
-        # Determine action based on audit mode
-        if passed:
-            action = "continue"
-        elif audit_mode == "autonomous":
-            action = "rewrite"  # Will trigger auto-rewrite
-        else:
-            action = "pause"  # soft/hard: pause for user review
+        # All modes preserve the generated draft and pause on failure. Hidden
+        # full-chapter rewrites made streaming text appear to disappear.
+        action = "continue" if passed else "pause"
 
         return QualityResult(
             passed=passed,
@@ -131,14 +126,15 @@ async def run_quality_gate(
 
     except Exception as e:
         logger.warning("Quality gate review failed: %s", e)
-        # If review fails, auto-pass (don't block the pipeline)
+        # Fail closed: a broken reviewer must not let unattended generation
+        # continue and compound an unchecked continuity error.
         return QualityResult(
-            passed=True,
-            score=7.0,
+            passed=False,
+            score=0.0,
             threshold=threshold,
             gate_level=gate_level,
-            summary=f"评审出错，自动通过: {str(e)[:100]}",
-            action="continue",
+            summary=f"评审出错，已暂停并保留当前草稿: {str(e)[:100]}",
+            action="pause",
         )
 
 
@@ -146,8 +142,5 @@ def should_pause_for_quality(result: QualityResult, audit_mode: str) -> bool:
     """Decide whether to pause the autopilot task based on quality result."""
     if result.passed:
         return False
-    if audit_mode == "autonomous":
-        # Autonomous mode only pauses after exhausting rewrite attempts
-        return False
-    # soft mode: pause to let user review
+    # Auto mode must also stop; proceeding would amplify continuity errors.
     return True

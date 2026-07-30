@@ -69,11 +69,24 @@ def export_spark(book_id: str, output_path: str | None = None) -> str:
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
+        try:
+            from data.json_store import json_store
+
+            book = json_store.get_book(book_id)
+            book_metadata = {
+                "title": book.get("title", ""),
+                "description": book.get("description", ""),
+                "creativeConstitution": book.get("creativeConstitution", ""),
+                "constitutionEnabled": book.get("constitutionEnabled", True),
+            }
+        except Exception:
+            book_metadata = {}
 
         # ── 1. Manifest ──
         manifest = {
             "format_version": ARCHIVE_VERSION,
             "book_id": book_id,
+            "book": book_metadata,
             "exported_at": datetime.now().isoformat(),
             "entity_count": 0,
             "relation_count": 0,
@@ -122,6 +135,15 @@ def import_spark(book_id: str, archive_path: str) -> dict:
         tmp = Path(tmpdir)
 
         with zipfile.ZipFile(archive_path, "r") as zf:
+            root = tmp.resolve()
+            total_size = 0
+            for member in zf.infolist():
+                total_size += member.file_size
+                if total_size > 1024 * 1024 * 1024:
+                    raise ValueError("Invalid .spark archive: uncompressed data is too large")
+                target = (tmp / member.filename).resolve()
+                if not target.is_relative_to(root):
+                    raise ValueError("Invalid .spark archive: unsafe file path")
             zf.extractall(tmp)
 
         # ── Validate manifest ──

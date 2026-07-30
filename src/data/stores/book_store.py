@@ -41,6 +41,8 @@ class BookStoreMixin:
                 "id": bid,
                 "title": title,
                 "description": description,
+                "creativeConstitution": "",
+                "constitutionEnabled": True,
                 "entityCount": 0,
                 "chapterCount": 0,
                 "createdAt": datetime.now().isoformat(),
@@ -168,6 +170,13 @@ class BookStoreMixin:
             for b in books:
                 if b["id"] == book_id:
                     b["referenceBookIds"] = ref_ids
+                    existing_profiles = b.get("referenceProfiles", {})
+                    b["referenceProfiles"] = {
+                        ref_id: existing_profiles.get(ref_id, "style")
+                        if existing_profiles.get(ref_id, "style") in ("style", "canon", "both")
+                        else "style"
+                        for ref_id in ref_ids
+                    }
                     b["updatedAt"] = datetime.now().isoformat()
                     break
             self.save_books(books)
@@ -178,3 +187,35 @@ class BookStoreMixin:
             return book.get("referenceBookIds", [])
         except (KeyError, TypeError):
             return []
+
+    def get_reference_profiles(self, book_id: str) -> dict[str, str]:
+        try:
+            book = self.get_book(book_id)
+            ref_ids = book.get("referenceBookIds", [])
+            stored = book.get("referenceProfiles", {})
+            return {
+                ref_id: stored.get(ref_id, "style")
+                if stored.get(ref_id, "style") in ("style", "canon", "both")
+                else "style"
+                for ref_id in ref_ids
+            }
+        except (KeyError, TypeError):
+            return {}
+
+    def set_reference_usage(self, book_id: str, ref_id: str, usage: str):
+        if usage not in ("style", "canon", "both"):
+            raise ValueError(f"不支持的参考书用途: {usage}")
+        with book_lock("_global"):
+            books = self.load_books()
+            for book in books:
+                if book["id"] != book_id:
+                    continue
+                if ref_id not in book.get("referenceBookIds", []):
+                    raise ValueError("该书不是当前项目的参考书")
+                profiles = dict(book.get("referenceProfiles", {}))
+                profiles[ref_id] = usage
+                book["referenceProfiles"] = profiles
+                book["updatedAt"] = datetime.now().isoformat()
+                self.save_books(books)
+                return
+        raise NotFoundError(f"书籍不存在: {book_id}")

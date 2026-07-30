@@ -219,7 +219,14 @@ async def confirm_import(book_id: str, doc_id: str, data: ImportConfirm, session
 
     for cd in chapters_data:
         is_extra = _is_extra_title(cd["title"])
-        json_store.add_chapter(book_id, cd["title"], cd["content"], is_extra=is_extra)
+        json_store.add_chapter(
+            book_id,
+            cd["title"],
+            cd["content"],
+            is_extra=is_extra,
+            origin="document_import",
+            protected=True,
+        )
 
     titles = ", ".join(cd["title"][:20] for cd in chapters_data[:5])
     return {
