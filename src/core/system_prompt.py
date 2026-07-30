@@ -210,15 +210,16 @@ AGENT_PROMPTS = {
 
 # 参考书原著
 - "设置参考书"/"把XX设为参考书" → 先用 list_books 查找项目ID，再用 set_reference_books 设置
-- delegate_writing 会自动注入参考书设定（角色/地点）
+- 新参考书默认“只学文风”：仅注入句式、节奏、视角、结构和少量风格证据，禁止带入人物/地点/剧情
+- 只有在参考书面板设为“原著设定”或“文风+设定”，delegate_writing 才会注入其事实
 - 可指定原著章节完整注入上下文: delegate_writing ref_chapters=["#1","#3"]
 - 同人写作/参考原著时，用 list_reference_chapters 查看原著章节列表，用 ref_chapters 指定相关章节
 - "看参考书列表"/"哪些参考书" → list_references
 - "所有项目" → list_books
 - "读取参考书第X章" → read_chapter ref_book_id=参考书ID chapter_id=#X
 - "拆解参考书第X章" → decompose_chapter ref_book_id=参考书ID chapter_id=#X
-- ⚠️ 本书搜索不到的角色/设定/地点 → 用 search_reference 在参考书中查找
-- 将参考书的角色/设定迁移到本书 → migrate_reference_knowledge（可修改后迁移，参考书原数据不会被改）
+- ⚠️ 本书搜索不到的角色/设定/地点 → 只可在“原著设定/文风+设定”参考书中用 search_reference 查找
+- 将参考书的角色/设定迁移到本书 → migrate_reference_knowledge；“只学文风”参考书会被程序拒绝
 
 # 剧情卡片
 - "接下来怎么写"/"给几个选择"/"剧情走向"/"帮我想想接下来" → suggest_plot_directions
@@ -422,6 +423,13 @@ AGENT_PROMPTS = {
 def build_system_prompt(agent_type: str = "write", style_name: str = "", **kwargs) -> str:
     base_prompt = AGENT_PROMPTS.get(agent_type, AGENT_PROMPTS["write"])
     sections = [base_prompt]
+    book_id = str(kwargs.get("book_id", "") or "")
+    if book_id:
+        from .creative_constitution import build_constitution_system_section
+
+        constitution_section = build_constitution_system_section(book_id)
+        if constitution_section:
+            sections.append(constitution_section)
 
     # ── Plan-mode: auto-generate disabled tools list from TOOL_META ──
     if agent_type == "plan" and "{PLAN_DISABLED_TOOLS}" in base_prompt:
@@ -464,7 +472,7 @@ def build_system_prompt(agent_type: str = "write", style_name: str = "", **kwarg
 
     skills = skill_manager.list_skills()
     if skills:
-        skill_text = "\n".join(f"- {s['name']}: {s['description']}" for s in skills[:5])
+        skill_text = "\n".join(f"- /{s['name']}: {s['description']}" for s in skills)
         sections.append(f"\n# 可用技能流程\n{skill_text}")
 
     if style_name:
@@ -632,12 +640,20 @@ def _build_book_context(book_id: str, session_id: str = "") -> str:
     # ── 参考书提示（仅告知存在，不加载实体。按需用 search_reference 查询，用 migrate_reference_knowledge 迁移）──
     ref_ids = json_store.get_reference_books(book_id)
     if ref_ids:
+        profiles = json_store.get_reference_profiles(book_id)
         names = []
         for ref_id in ref_ids:
             try:
                 ref_book = json_store.get_book(ref_id)
+                usage = profiles.get(ref_id, "style")
+                usage_label = {
+                    "style": "只学文风",
+                    "canon": "原著设定",
+                    "both": "文风+设定",
+                }.get(usage, "只学文风")
                 names.append(
-                    f"{ref_book.get('title', '?')} (id: {ref_id}, {ref_book.get('chapterCount', 0)}章/{ref_book.get('entityCount', 0)}实体)"
+                    f"{ref_book.get('title', '?')} [{usage_label}] "
+                    f"(id: {ref_id}, {ref_book.get('chapterCount', 0)}章/{ref_book.get('entityCount', 0)}实体)"
                 )
             except (KeyError, TypeError):
                 pass
@@ -645,9 +661,9 @@ def _build_book_context(book_id: str, session_id: str = "") -> str:
             parts.append(
                 f"\n# 参考书 ({len(names)}本，不自动加载到上下文)\n"
                 + "\n".join(f"- {n}" for n in names)
-                + "\n使用 search_reference 按需查询参考书中的角色/设定/章节。"
-                + "\n当本书缺少某个知识点时，应主动搜索参考书。"
-                + "\n可将参考书知识点复制到本书: migrate_reference_knowledge（参考书原数据不会被修改）。"
+                + "\n[只学文风] 不得查询或迁移其人物设定，只用于句式、节奏、视角和措辞样本。"
+                + "\n[原著设定/文风+设定] 才可用 search_reference 查询事实；"
+                + "迁移知识仍需 migrate_reference_knowledge，参考书原数据不会被修改。"
             )
 
     # ── Book summary (long-context awareness) ──

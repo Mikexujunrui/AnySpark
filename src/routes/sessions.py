@@ -125,16 +125,15 @@ class AutonomousToggle(BaseModel):
 
 @router.put("/books/{book_id}/sessions/{session_id}/autonomous")
 def toggle_autonomous(book_id: str, session_id: str, data: AutonomousToggle):
-    """Toggle autonomous mode for this session.
+    """Toggle safe autonomous mode.
 
-    When enabled, the Agent can execute dangerous tools (delete_chapter,
-    delete_entity, etc.) without user confirmation. The flag resets when
-    the server restarts or permission_manager is manually reset.
+    Routine tools run continuously, while destructive and original-editing
+    tools retain their explicit confirmation gate.
     """
     permission_manager.autonomous_mode = data.enabled
     return {
         "autonomous": data.enabled,
-        "message": "自主模式已启用 — Agent 可直接执行危险操作"
+        "message": "安全自主模式已启用 — 常规步骤连续执行，危险操作仍需确认"
         if data.enabled
         else "自主模式已关闭 — Agent 执行危险操作前需用户确认",
     }

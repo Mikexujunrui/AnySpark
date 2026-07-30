@@ -106,7 +106,8 @@ export function useSSE({ bookId, sessionId, agentMode, autoModeEnabled, onMessag
       } else {
         if (!isEventStream(res)) {
           const data = await res.json()
-          if (mountedRef.current) onMessage?.({ type: 'plain', text: data.message || '完成' })
+          const plainText = data.message || data.detail || data.error || (res.ok ? '完成' : `请求失败 (${res.status})`)
+          if (mountedRef.current) onMessage?.({ type: 'plain', text: plainText })
           const elapsed = Math.round(performance.now() - startTime)
           console.log(`${DIAG_PREFIX} useSSE.sendMessage — 非SSE响应完成 | %dms`, elapsed)
           return

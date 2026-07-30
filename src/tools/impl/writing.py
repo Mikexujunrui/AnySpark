@@ -242,9 +242,62 @@ def _format_chapter_result(
     return result
 
 
+def _requested_regular_chapter_index(args: dict, instruction: str = "") -> int | None:
+    """Resolve a requested regular chapter number from explicit args/text."""
+    if bool(args.get("is_extra", False)):
+        return None
+    explicit = args.get("chapter_index")
+    if explicit is not None:
+        try:
+            value = int(explicit)
+            return value if value > 0 else None
+        except (TypeError, ValueError):
+            return None
+    text = " ".join(
+        value
+        for value in (
+            str(args.get("chapter_title", "") or ""),
+            str(args.get("title", "") or ""),
+            instruction,
+        )
+        if value
+    )
+    # Only accept a real "第N章" marker. A loose first-number match mistakes
+    # target word counts such as "写一章 2500 字" for chapter #2500.
+    match = re.search(r"第\s*(\d+)\s*章", text)
+    return int(match.group(1)) if match else None
+
+
+def _guard_new_chapter_target(book_id: str, args: dict, instruction: str = "") -> dict | None:
+    """Hard stop if a new-writing tool points at an existing chapter."""
+    index = _requested_regular_chapter_index(args, instruction)
+    if index is None:
+        return None
+    chapters = json_store.load_chapters(book_id)
+    existing = json_store._find_chapter(chapters, f"#{index}")
+    if not existing:
+        return None
+    view = json_store._chapter_view(existing)
+    return {
+        "type": "writing_result",
+        "text": (
+            f"⛔ 原稿保护：第{index}章“{view.get('title', '')}”已经存在，"
+            "新章写作工具拒绝覆盖。若用户明确要求修改旧章，请先展示修改方案，"
+            "再使用 patch_chapter；只有明确要求整章重写时才使用 edit_chapter。"
+        ),
+        "chapter_id": view.get("id", ""),
+        "chapter_title": view.get("title", ""),
+        "saved": False,
+        "protected": True,
+    }
+
+
 async def _write_chapter(loop, args: dict, book_id: str, msg: str) -> str:
     from core.writer import write as wr
 
+    guard = _guard_new_chapter_target(book_id, args, args.get("instruction", msg))
+    if guard:
+        return guard
     ref_chapters = args.get("ref_chapters", []) or None
     result = await loop.run_in_executor(
         _ai_executor,
@@ -264,18 +317,9 @@ async def _write_chapter(loop, args: dict, book_id: str, msg: str) -> str:
             title = f"番外{sum(1 for c in chapters if c.get('is_extra')) + 1}"
         else:
             title = f"第{sum(1 for c in chapters if not c.get('is_extra')) + 1}章"
-    # 去重: 如果已有相同chapter_index的章节,更新而非新建
-    if chapter_index is not None:
-        chapters = json_store.load_chapters(book_id)
-        for ch in chapters:
-            existing_idx = ch.get("index", ch.get("chapter_index"))
-            if existing_idx is not None and int(existing_idx) == int(chapter_index):
-                # 更新已有章节
-                from data.json_store import json_store as js
-
-                js.edit_chapter(book_id, ch["id"], result, title=title, message=f"autopilot重写第{chapter_index}章")
-                return _format_chapter_result(book_id, ch["id"], title, result)
-    chapter = json_store.add_chapter(book_id, title, result, is_extra=is_extra)
+    chapter = json_store.add_chapter(
+        book_id, title, result, is_extra=is_extra, origin="ai_draft", protected=True
+    )
     # 存储chapter_index用于后续追踪
     if chapter_index is not None:
         from data.json_store import json_store as js
@@ -296,6 +340,9 @@ async def _write_chapter_streaming(loop, args: dict, kb, book_id: str, msg: str,
     from core.writer import write_stream as write_stream_fn
 
     instruction = args.get("instruction", msg)
+    guard = _guard_new_chapter_target(book_id, args, instruction)
+    if guard:
+        return guard
     mode = args.get("mode", "strict")
     ref_chapters = args.get("ref_chapters", [])
 
@@ -345,15 +392,20 @@ async def _write_chapter_streaming(loop, args: dict, kb, book_id: str, msg: str,
 
     full_text = "".join(chunks)
 
-    if write_blocked and full_text and len(full_text) > 200:
+    if write_error and full_text and len(full_text) > 200:
         title = args.get("chapter_title", args.get("title", ""))
         if not title:
             chapters = json_store.load_chapters(book_id)
             title = f"第{len(chapters) + 1}章"
-        chapter = json_store.add_chapter(book_id, title, full_text)
+        chapter = json_store.add_chapter(
+            book_id, title, full_text, origin="ai_partial", protected=True
+        )
         return {
             "type": "writing_result",
-            "text": f"⚠️ 内容审查截断: 写入前 {len(full_text)} 字。请在截断处之后重新续写。(id: {chapter['id'][:8]})",
+            "text": (
+                f"⚠️ 生成中断但已保全前 {len(full_text)} 字：{write_error}。"
+                f"请从截断处继续，不要从头调用另一个写作工具。(id: {chapter['id'][:8]})"
+            ),
             "chapter_id": chapter["id"],
             "chapter_title": title,
             "word_count": len(full_text),
@@ -380,24 +432,9 @@ async def _write_chapter_streaming(loop, args: dict, kb, book_id: str, msg: str,
             title = f"番外{sum(1 for c in chapters if c.get('is_extra')) + 1}"
         else:
             title = f"第{sum(1 for c in chapters if not c.get('is_extra')) + 1}章"
-    # 去重: 如果已有相同chapter_index的章节,更新而非新建
-    if chapter_index is not None:
-        chapters = json_store.load_chapters(book_id)
-        for ch in chapters:
-            existing_idx = ch.get("index", ch.get("chapter_index"))
-            if existing_idx is not None and int(existing_idx) == int(chapter_index):
-                from data.json_store import json_store as js
-
-                js.edit_chapter(book_id, ch["id"], full_text, title=title, message=f"autopilot重写第{chapter_index}章")
-                return {
-                    "type": "writing_result",
-                    "text": _format_chapter_result(book_id, ch["id"], title, full_text),
-                    "chapter_id": ch["id"],
-                    "chapter_title": title,
-                    "word_count": len(full_text),
-                    "saved": True,
-                }
-    chapter = json_store.add_chapter(book_id, title, full_text, is_extra=is_extra)
+    chapter = json_store.add_chapter(
+        book_id, title, full_text, is_extra=is_extra, origin="ai_draft", protected=True
+    )
     # 存储chapter_index用于后续追踪
     if chapter_index is not None:
         from data.json_store import json_store as js
@@ -522,36 +559,12 @@ async def _write_by_nodes(
             if violations_found and queue:
                 await queue.put(
                     {
-                        "_progress": f"\u8282\u70b9 {i + 1}: \u68c0\u6d4b\u5230\u7981\u6b62\u89d2\u8272 {','.join(violations_found)}\uff0c\u91cd\u5199\u8be5\u8282\u70b9..."
+                        "_progress": (
+                            f"节点 {i + 1}: 检测到禁止角色 {','.join(violations_found)}；"
+                            "已保留当前草稿并交给写后评审，不会在后台替换刚显示的正文"
+                        )
                     }
                 )
-                # Rewrite node with explicit prohibition
-                rewrite_prompt = f"当前写第 {i + 1} 个事件。\n{prev_context}\n\n当前事件: {event}\n\n\u26d4\ufe0f \u7981\u6b62\u63d0\u53ca\u4ee5\u4e0b\u89d2\u8272: {', '.join(violations_found)}\u3002\u8bf7\u91cd\u5199\u672c\u6bb5\u5185\u5bb9\uff0c\u786e\u4fdd\u8fd9\u4e9b\u89d2\u8272\u4e0d\u51fa\u73b0\u3002"
-                rewrite_chunks = []
-                rewrite_queue: asyncio.Queue = asyncio.Queue()
-
-                def _rerun():
-                    try:
-                        for chunk in chat_stream(rewrite_prompt, system=stable_system, temperature=0.6, task="writing"):
-                            rewrite_chunks.append(chunk)
-                            rewrite_queue.put_nowait(chunk)
-                    except Exception as e:
-                        logger.warning("node rewrite failed: %s", e)
-                    finally:
-                        rewrite_queue.put_nowait(None)
-
-                loop.run_in_executor(_ai_executor, _rerun)
-                # Drain old node text from full_text, replace with rewrite
-                full_text = full_text[: -len(node_text)] if node_text else full_text
-                while True:
-                    chunk = await rewrite_queue.get()
-                    if chunk is None:
-                        break
-                    if queue:
-                        await queue.put({"_writing": chunk})
-                    full_text += chunk
-                if rewrite_chunks:
-                    prev_ending = "".join(rewrite_chunks)[-200:]
 
         # Add separator between nodes
         if i < len(plot_chain) - 1 and not write_error:
@@ -567,6 +580,9 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
     from core.knowledge_scope import ExposureLevel, WritingKnowledgeScope, scope_manager
 
     instruction = args.get("instruction", msg)
+    guard = _guard_new_chapter_target(book_id, args, instruction)
+    if guard:
+        return guard
     mode = args.get("mode", "strict")
     target_words = int(args.get("target_words", 2500))
     scope = WritingKnowledgeScope(book_id=book_id, target_word_count=target_words)
@@ -586,12 +602,7 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
 
     outline = json_store.get_outline(book_id)
     chapters_list = outline.get("chapters", [])
-    ch_num = None
-    import re
-
-    m = re.search(r"第?\s*(\d+)", instruction)
-    if m:
-        ch_num = int(m.group(1))
+    ch_num = _requested_regular_chapter_index(args, instruction)
 
     if ch_num and 1 <= ch_num <= len(chapters_list):
         ch = chapters_list[ch_num - 1]
@@ -713,7 +724,7 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
 
         ref_context = _build_reference_context(book_id, ref_chapters if ref_chapters else None)
 
-    ref_prefix = "---\n\n以下是参考书（原著）的设定和章节，写作时请参考：\n\n"
+    ref_prefix = "---\n\n以下是按用途隔离后的参考证据；严格遵守每本书标注的用途：\n\n"
     ref_block = (ref_prefix + ref_context) if ref_context else ""
     prompt = f"""以下是本章可用的知识库设定：
 
@@ -731,6 +742,11 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
     from core.writer import WRITER_STRICT_SYSTEM, WRITER_SUGGEST_SYSTEM
 
     system = WRITER_STRICT_SYSTEM if mode == "strict" else WRITER_SUGGEST_SYSTEM
+    from core.creative_constitution import build_constitution_system_section
+
+    constitution_section = build_constitution_system_section(book_id)
+    if constitution_section:
+        system = f"{system}\n\n{constitution_section}"
     from core.plugin_loader import plugin_manager
 
     system = plugin_manager.call_hook_chain("modify_system_prompt", system, context="writing")
@@ -764,7 +780,9 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
                     title = (
                         f"第{sum(1 for c in json_store.load_chapters(book_id) if not c.get('is_extra')) + 1}章(部分)"
                     )
-                chapter = json_store.add_chapter(book_id, title, full_text)
+                chapter = json_store.add_chapter(
+                    book_id, title, full_text, origin="ai_partial", protected=True
+                )
                 scope_report = _build_scope_report(scope)
                 graph_insight = _build_graph_insight_report(kb, scope)
                 if graph_insight:
@@ -798,7 +816,7 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
         if queue:
             await queue.put({"_progress": f"写作完成 ({len(full_text)}字)，正在验证..."})
 
-        # ── 先验后存：验证通过后才存储 ──
+        # ── 先验证后保存为草稿；hard 约束由 finalize_chapter 阻断定稿 ──
         title = args.get("chapter_title", "")
         is_extra = bool(args.get("is_extra", False))
         if not title:
@@ -828,8 +846,10 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
             msg,
         )
 
-        # 验证通过才存储
-        chapter = json_store.add_chapter(book_id, title, full_text, is_extra=is_extra)
+        # Advisory findings remain visible while the editable draft is saved.
+        chapter = json_store.add_chapter(
+            book_id, title, full_text, is_extra=is_extra, origin="ai_draft", protected=True
+        )
         extra_info = ""
         if verify_result:
             extra_info = verify_result
@@ -880,10 +900,35 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
         if queue:
             await queue.put({"_writing": chunk})
 
+    full_text = "".join(chunks)
     if write_error:
+        if len(full_text.strip()) >= 200:
+            title = args.get("chapter_title", "")
+            if not title:
+                all_chapters = json_store.load_chapters(book_id)
+                title = f"第{sum(1 for c in all_chapters if not c.get('is_extra')) + 1}章(部分)"
+            chapter = json_store.add_chapter(
+                book_id,
+                title,
+                full_text,
+                is_extra=bool(args.get("is_extra", False)),
+                origin="ai_partial",
+                protected=True,
+            )
+            return {
+                "type": "writing_result",
+                "text": (
+                    f"⚠️ 写作中断但已保全 {len(full_text)} 字：{write_error}。"
+                    "请从截断处继续，不要重新生成整章。"
+                ),
+                "chapter_id": chapter["id"],
+                "chapter_title": title,
+                "word_count": len(full_text),
+                "saved": True,
+                "partial": True,
+            }
         return {"type": "writing_result", "text": f"写作中断: {write_error}", "saved": False}
 
-    full_text = "".join(chunks)
     if not full_text or len(full_text.strip()) < 50:
         return {
             "type": "writing_result",
@@ -918,8 +963,10 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
         book_id,
         msg,
     )
-    # 验证通过才存储
-    chapter = json_store.add_chapter(book_id, title, full_text, is_extra=is_extra)
+    # Save as draft; finalize_chapter is the authoritative final-state gate.
+    chapter = json_store.add_chapter(
+        book_id, title, full_text, is_extra=is_extra, origin="ai_draft", protected=True
+    )
     extra_info = ""
     if verify_result:
         extra_info = verify_result
@@ -1112,6 +1159,11 @@ async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: s
 7. 原文参考提供了原始素材，改写时应保留其核心信息和氛围
 {edit_instructions and f"8. 修改指令: {edit_instructions}" or ""}
 {style_profile and f"9. 文风约束: {style_profile[:1000]}" or ""}"""
+            from core.creative_constitution import build_constitution_system_section
+
+            constitution_section = build_constitution_system_section(book_id)
+            if constitution_section:
+                system = f"{system}\n\n{constitution_section}"
 
             prompt = f"""知识库:
 {summary if summary else "（无）"}
@@ -1175,7 +1227,9 @@ async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: s
         # Store partial result if we have content
         if full_text:
             title = f"{chapter_title}(部分)"
-            chapter = json_store.add_chapter(book_id, title, full_text)
+            chapter = json_store.add_chapter(
+                book_id, title, full_text, origin="ai_partial", protected=True
+            )
             return {
                 "type": "writing_result",
                 "text": _format_chapter_result(book_id, chapter["id"], title, full_text, f"中断: {write_error}"),
@@ -1190,7 +1244,9 @@ async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: s
     if not full_text:
         return {"type": "writing_result", "text": "写作未生成内容。", "saved": False}
 
-    chapter = json_store.add_chapter(book_id, chapter_title, full_text)
+    chapter = json_store.add_chapter(
+        book_id, chapter_title, full_text, origin="ai_draft", protected=True
+    )
     return {
         "type": "writing_result",
         "text": _format_chapter_result(book_id, chapter["id"], chapter_title, full_text, f"剧情链: {len(nodes)}节点"),
@@ -1206,17 +1262,17 @@ def _store_chapter(args: dict, book_id: str, msg: str) -> str:
     content = args.get("content", msg)
     is_extra = bool(args.get("is_extra", False))
     chapter_index = args.get("chapter_index", None)
-    # 去重: 如果已有相同chapter_index的章节,更新而非新建
-    if chapter_index is not None:
-        chapters = json_store.load_chapters(book_id)
-        for ch in chapters:
-            existing_idx = ch.get("index", ch.get("chapter_index"))
-            if existing_idx is not None and int(existing_idx) == int(chapter_index):
-                json_store.edit_chapter(
-                    book_id, ch["id"], content, title=title, message=f"autopilot重写第{chapter_index}章"
-                )
-                return _format_chapter_result(book_id, ch["id"], title, content)
-    chapter = json_store.add_chapter(book_id, title, content, is_extra=is_extra)
+    guard = _guard_new_chapter_target(book_id, args, content)
+    if guard:
+        return guard
+    chapter = json_store.add_chapter(
+        book_id,
+        title,
+        content,
+        is_extra=is_extra,
+        origin="user_supplied",
+        protected=True,
+    )
     # 存储chapter_index用于后续追踪
     if chapter_index is not None:
         chapters = json_store.load_chapters(book_id)
@@ -1236,8 +1292,12 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
     from core.knowledge_scope import ExposureLevel, WritingKnowledgeScope, scope_manager
 
     instruction = args.get("instruction", msg)
+    guard = _guard_new_chapter_target(book_id, args, instruction)
+    if guard:
+        return guard
     mode = args.get("mode", "strict")
     target_words = int(args.get("target_words", 2500))
+    ch_num = _requested_regular_chapter_index(args, instruction)
 
     scope = WritingKnowledgeScope(book_id=book_id, target_word_count=target_words)
 
@@ -1265,12 +1325,6 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
         chapters = outline.get("chapters", [])
         # 尝试匹配当前章节
         args.get("chapter_title", "")
-        ch_num = None
-        import re
-
-        m = re.search(r"第?\s*(\d+)", instruction)
-        if m:
-            ch_num = int(m.group(1))
         if ch_num and 1 <= ch_num <= len(chapters):
             ch_outline = chapters[ch_num - 1]
             if ch_outline.get("synopsis"):
@@ -1318,7 +1372,7 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
 
         ref_context = _build_reference_context(book_id, ref_chapters if ref_chapters else None)
 
-    ref_prefix2 = "---\n\n以下是参考书（原著）的设定和章节，写作时请参考：\n\n"
+    ref_prefix2 = "---\n\n以下是按用途隔离后的参考证据；严格遵守每本书标注的用途：\n\n"
     ref_block2 = (ref_prefix2 + ref_context) if ref_context else ""
     prompt = f"""以下是本章可用的知识库设定：
 
@@ -1337,6 +1391,11 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
     from core.writer import WRITER_STRICT_SYSTEM, WRITER_SUGGEST_SYSTEM
 
     system = WRITER_STRICT_SYSTEM if mode == "strict" else WRITER_SUGGEST_SYSTEM
+    from core.creative_constitution import build_constitution_system_section
+
+    constitution_section = build_constitution_system_section(book_id)
+    if constitution_section:
+        system = f"{system}\n\n{constitution_section}"
     from core.plugin_loader import plugin_manager
 
     system = plugin_manager.call_hook_chain("modify_system_prompt", system, context="writing")
@@ -1366,8 +1425,10 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
         book_id,
         msg,
     )
-    # 验证通过才存储
-    chapter = json_store.add_chapter(book_id, title, result, is_extra=is_extra)
+    # Save as draft; finalize_chapter is the authoritative final-state gate.
+    chapter = json_store.add_chapter(
+        book_id, title, result, is_extra=is_extra, origin="ai_draft", protected=True
+    )
     scope_report = _build_scope_report(scope)
     graph_insight = _build_graph_insight_report(kb, scope)
     if graph_insight:

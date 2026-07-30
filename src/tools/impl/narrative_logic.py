@@ -26,6 +26,11 @@ from core.utils import extract_json_from_response
 logger = logging.getLogger(__name__)
 
 
+def verification_has_hard_failures(report: str) -> bool:
+    """Return whether a human-defined hard narrative constraint failed."""
+    return "🔴 [hard]" in report or ("[hard]" in report and "约束" in report)
+
+
 # ── Constraint definition ──
 
 

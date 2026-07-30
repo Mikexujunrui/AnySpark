@@ -4,8 +4,11 @@
 import json
 import logging
 import os
+import shutil
 import sys
+import tomllib
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -13,12 +16,148 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 # ── Path resolution ──
-# In PyInstaller EXE: files live in sys._MEIPASS, data/exe lives next to sys.executable
-# In development: files live under the project root (3 levels up from src/core/)
+# Packaged resources are immutable and live in sys._MEIPASS. User data must
+# live somewhere writable and persistent:
+#   macOS app: ~/Library/Application Support/AnySpark
+#   Windows app: %APPDATA%\AnySpark
+#   Linux app: ${XDG_DATA_HOME:-~/.local/share}/AnySpark
+#   development: repository root
 if getattr(sys, "frozen", False):
-    _project_root = Path(sys.executable).parent.resolve()
+    RESOURCE_ROOT = Path(sys._MEIPASS).resolve()
 else:
-    _project_root = Path(__file__).resolve().parent.parent.parent
+    RESOURCE_ROOT = Path(__file__).resolve().parent.parent.parent
+
+_home_override = os.getenv("ANYSPARK_HOME", "").strip()
+if _home_override:
+    _project_root = Path(_home_override).expanduser().resolve()
+elif getattr(sys, "frozen", False):
+    if sys.platform == "darwin":
+        _project_root = (Path.home() / "Library" / "Application Support" / "AnySpark").resolve()
+    elif sys.platform == "win32":
+        appdata = os.getenv("APPDATA") or os.getenv("LOCALAPPDATA")
+        appdata_root = Path(appdata) if appdata else Path.home() / "AppData" / "Roaming"
+        _project_root = (appdata_root / "AnySpark").resolve()
+    else:
+        xdg_data_home = os.getenv("XDG_DATA_HOME", "").strip()
+        data_home = Path(xdg_data_home).expanduser() if xdg_data_home else Path.home() / ".local" / "share"
+        _project_root = (data_home / "AnySpark").resolve()
+else:
+    _project_root = RESOURCE_ROOT
+
+
+def _packaged_version() -> str:
+    version_file = RESOURCE_ROOT / "pyproject.toml"
+    try:
+        with version_file.open("rb") as handle:
+            return str(tomllib.load(handle).get("project", {}).get("version", "unknown"))
+    except (OSError, tomllib.TOMLDecodeError):
+        return "unknown"
+
+
+APP_VERSION = _packaged_version()
+
+
+def _contains_user_data(data_dir: Path) -> bool:
+    if not data_dir.is_dir():
+        return False
+    markers = ("books.json", "settings.json", "novel.db")
+    if any((data_dir / marker).exists() for marker in markers):
+        return True
+    try:
+        return any(path.is_file() and path.name != ".DS_Store" for path in data_dir.rglob("*"))
+    except OSError:
+        return False
+
+
+def _migrate_legacy_frozen_data(target_root: Path) -> str:
+    """Copy legacy executable-adjacent data into the persistent user root.
+
+    The operation is deliberately copy-only: source data is never removed, so
+    an interrupted migration can be retried and the old portable installation
+    remains a recovery copy.
+    """
+    if not getattr(sys, "frozen", False):
+        return ""
+
+    target_data = target_root / "data"
+    if _contains_user_data(target_data):
+        return ""
+
+    candidates = [Path(sys.executable).resolve().parent, Path.cwd().resolve()]
+    seen: set[Path] = set()
+    for legacy_root in candidates:
+        if legacy_root in seen or legacy_root == target_root:
+            continue
+        seen.add(legacy_root)
+        legacy_data = legacy_root / "data"
+        if not _contains_user_data(legacy_data):
+            continue
+
+        try:
+            target_root.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(legacy_data, target_data, dirs_exist_ok=True)
+            for filename in (".env", "config.json"):
+                source = legacy_root / filename
+                destination = target_root / filename
+                if source.is_file() and not destination.exists():
+                    shutil.copy2(source, destination)
+            report = {
+                "migrated_at": datetime.now().isoformat(),
+                "source": str(legacy_root),
+                "target": str(target_root),
+                "source_preserved": True,
+            }
+            (target_root / "migration.json").write_text(
+                json.dumps(report, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            return str(legacy_root)
+        except OSError as exc:
+            logger.warning("Legacy AnySpark data migration failed from %s: %s", legacy_root, exc)
+    return ""
+
+
+def _backup_data_before_upgrade(target_root: Path, data_dir: Path) -> Path | None:
+    """Create one recovery archive whenever a frozen app version changes."""
+    if not getattr(sys, "frozen", False):
+        return None
+
+    marker = target_root / ".install-version"
+    if not _contains_user_data(data_dir):
+        # A clean install has nothing to back up, but recording its version now
+        # prevents logs created later in the same release from looking like
+        # legacy user data on the next launch.
+        try:
+            target_root.mkdir(parents=True, exist_ok=True)
+            marker.write_text(APP_VERSION, encoding="utf-8")
+        except OSError:
+            pass
+        return None
+
+    try:
+        previous_version = marker.read_text(encoding="utf-8").strip() if marker.exists() else "legacy"
+    except OSError:
+        previous_version = "legacy"
+
+    if previous_version == APP_VERSION:
+        return None
+
+    backup_path: Path | None = None
+    try:
+        backup_dir = target_root / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        base_name = backup_dir / f"pre-upgrade_{previous_version}_to_{APP_VERSION}_{timestamp}"
+        backup_path = Path(shutil.make_archive(str(base_name), "zip", root_dir=data_dir))
+        temp_marker = Path(f"{marker}.tmp")
+        temp_marker.write_text(APP_VERSION, encoding="utf-8")
+        temp_marker.replace(marker)
+    except OSError as exc:
+        logger.warning("AnySpark pre-upgrade backup failed: %s", exc)
+    return backup_path
+
+
+_migrated_from = _migrate_legacy_frozen_data(_project_root)
 
 # Load .env from project root next to the executable
 load_dotenv(_project_root / ".env")
@@ -30,9 +169,10 @@ load_dotenv(Path.cwd() / ".env")
 
 PROJECT_ROOT = _project_root
 DATA_DIR = PROJECT_ROOT / "data"
-DATA_DIR.mkdir(exist_ok=True)
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+UPGRADE_BACKUP_PATH = _backup_data_before_upgrade(PROJECT_ROOT, DATA_DIR)
 UPLOAD_DIR = DATA_DIR / "uploads"
-UPLOAD_DIR.mkdir(exist_ok=True)
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
 
 def load_workspace_overrides(cfg: "AppConfig", book_id: str = ""):

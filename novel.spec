@@ -6,7 +6,7 @@ Usage:
     pip install pyinstaller
     pyinstaller novel.spec
 
-The resulting EXE will be in dist/NovelAgent/NovelAgent.exe
+    The resulting EXE will be in dist/AnySpark/AnySpark.exe
 """
 
 import sys
@@ -51,7 +51,7 @@ if data_pkg.is_dir():
         core_modules.append(rel)
 
 a = Analysis(
-    ['src/server.py'],
+    ['src/desktop_launcher.py'],
     pathex=[
         str(Path(".").resolve()),
         str(Path("src").resolve()),  # <-- so core.*, routes.*, tools.* can be found
@@ -64,12 +64,17 @@ a = Analysis(
         ('styles', 'styles'),
         ('reviewers', 'reviewers'),
         ('skills', 'skills'),
+        ('pyproject.toml', '.'),
+        ('LICENSE', '.'),
         # tiktoken encoding plugins (namespace package, not auto-detected)
         *([(_TIKTOKEN_EXT_SRC, 'tiktoken_ext')] if _TIKTOKEN_EXT_SRC else []),
         # NOTE: data/ is NOT included — SQLiteStore creates novel.db at runtime
         # next to the executable (_resolve_db_dir handles this for frozen mode).
     ],
     hiddenimports=[
+        'webview',
+        'webview.platforms.winforms',
+        'webview.platforms.edgechromium',
         # FastAPI + ASGI server
         'uvicorn',
         'uvicorn.logging',
@@ -134,14 +139,14 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='NovelAgent',
+    name='AnySpark',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=True,  # Keep console for server logs; set False for GUI-only mode
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
@@ -158,5 +163,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='NovelAgent',
+    name='AnySpark',
 )

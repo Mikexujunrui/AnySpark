@@ -3,6 +3,7 @@ __pycache__/
 *.pyc
 *.pyo
 .venv/
+.venv-macos-build/
 *.egg-info/
 
 # Environment
@@ -20,6 +21,7 @@ data/logs/
 # Node
 frontend/node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
 
 # IDE
 .vscode/
@@ -67,6 +69,8 @@ docker-images.tar
 build/
 dist/
 dist/NovelAgent.zip
+packaging/macos/AnySpark.iconset/
+packaging/macos/AnySpark.icns
 
 # Release ZIPs
 AnySpark_*.zip

@@ -196,6 +196,13 @@ export const api = {
   createBook: (data: Partial<BookData>): Promise<BookData> => post('/api/books', data),
   updateBook: (id: string, data: Partial<BookData>): Promise<BookData> => put(`/api/books/${id}`, data),
   deleteBook: (id: string): Promise<unknown> => del(`/api/books/${id}`),
+  importSparkProject: async (file: File): Promise<{ ok: boolean; book: BookData; stats: Record<string, unknown> }> => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch('/api/books/import-spark', { method: 'POST', body: formData })
+    await assertOk(res)
+    return res.json()
+  },
 
   // Sessions
   getSessions: (bookId: string): Promise<SessionData[]> => get(`/api/books/${bookId}/sessions`),
@@ -213,6 +220,8 @@ export const api = {
   // Reference books
   getReferences: (bookId: string): Promise<unknown> => get(`/api/books/${bookId}/references`),
   setReferences: (bookId: string, bookIds: string[]): Promise<unknown> => put(`/api/books/${bookId}/references`, { book_ids: bookIds }),
+  setReferenceUsage: (bookId: string, refBookId: string, usage: 'style' | 'canon' | 'both'): Promise<unknown> =>
+    put(`/api/books/${bookId}/references/${refBookId}/usage`, { usage }),
 
   // Reference work analysis
   triggerStructureAnalysis: (bookId: string, refBookId?: string): Promise<StructureReportData> =>

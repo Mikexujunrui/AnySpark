@@ -1,0 +1,4 @@
+-r requirements-desktop.txt
+
+# macOS application icon generation
+Pillow>=10.0
