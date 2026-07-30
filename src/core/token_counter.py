@@ -1,10 +1,16 @@
+import logging
+
 import tiktoken
 
 _encoder: tiktoken.Encoding | None = None
+_encoder_unavailable = False
+logger = logging.getLogger(__name__)
 
 
-def _get_encoder() -> tiktoken.Encoding:
-    global _encoder
+def _get_encoder() -> tiktoken.Encoding | None:
+    global _encoder, _encoder_unavailable
+    if _encoder_unavailable:
+        return None
     if _encoder is None:
         try:
             # DeepSeek has no official tiktoken encoder. Using gpt-4o's
@@ -14,14 +20,29 @@ def _get_encoder() -> tiktoken.Encoding:
             # but not for exact billing.
             _encoder = tiktoken.encoding_for_model("gpt-4o")
         except (KeyError, ValueError):
-            _encoder = tiktoken.get_encoding("cl100k_base")
+            try:
+                _encoder = tiktoken.get_encoding("cl100k_base")
+            except Exception as exc:
+                # A frozen desktop build may lose tiktoken's namespace-package
+                # encoding plugins. Context management must never prevent the
+                # first LLM request from being sent, so use a conservative
+                # UTF-8 estimate until a packaged encoder is available.
+                _encoder_unavailable = True
+                logger.warning("tiktoken encoder unavailable; using UTF-8 token estimate: %s", exc)
+                return None
     return _encoder
 
 
 def count_tokens(text: str) -> int:
     if not text:
         return 0
-    return len(_get_encoder().encode(text))
+    encoder = _get_encoder()
+    if encoder is not None:
+        return len(encoder.encode(text))
+    # Three UTF-8 bytes per estimated token is intentionally conservative
+    # for Chinese prose and safe enough for compaction/context budgeting.
+    byte_count = len(text.encode("utf-8"))
+    return max(1, (byte_count + 2) // 3)
 
 
 def count_message_tokens(messages: list[dict]) -> int:

@@ -15,11 +15,11 @@ import tomllib
 
 import httpx
 
-from .config import PROJECT_ROOT
+from .config import RESOURCE_ROOT
 
 logger = logging.getLogger(__name__)
 
-PYPROJECT = PROJECT_ROOT / "pyproject.toml"
+PYPROJECT = RESOURCE_ROOT / "pyproject.toml"
 
 # GitHub repository used as the release source (owner/name).
 GITHUB_REPO = "Mikexujunrui/AnySpark"

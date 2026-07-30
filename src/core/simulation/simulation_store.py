@@ -19,11 +19,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from core.config import DATA_DIR
+
 from ..graph_store import GraphStore
 
 logger = logging.getLogger(__name__)
-
-DATA_DIR = Path(__file__).parent.parent.parent.parent / "data"
 
 # ── Event types ──
 

@@ -1,4 +1,4 @@
-# 火花 AnySpark — 智能小说创作引擎 v3.0.0
+# 火花 AnySpark — 智能小说创作引擎 v3.2.0
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)
@@ -7,6 +7,11 @@
 [![CI](https://github.com/Mikexujunrui/AnySpark/actions/workflows/ci.yml/badge.svg)](https://github.com/Mikexujunrui/AnySpark/actions/workflows/ci.yml)
 
 > **每个人心中都有一簇火花，AnySpark 帮你点燃它。** 火花是一个基于 LLM 自主循环架构的全流程 AI 叙事创作平台——不止是写作助手，更是你的故事引擎。
+
+> **3.2.0 今晚整合版**：新增创作宪法、可执行文学 Skills、正文生成参数、参考书文风/事实隔离、
+> 原稿保护与安全 Auto 质量门。详见
+> [3.2.0 使用与发布指南](docs/3.2.0_今晚最终版使用与发布.md) 和 [更新日志](CHANGELOG.md)。
+> 打包版现已使用独立桌面窗口，不再打开默认浏览器；关闭窗口会一并停止本地后台服务。
 
 > ⚠️ **设计哲学：AI 为笔，你为执笔人。** 火花的开发初衷是让 AI 在不脱离人类作家掌控的前提下辅助创作——第一目标是提升写作效率的同时，确保故事**不偏离**你设定的方向。Autopilot、全书变换、批量改写等涉及大规模自动操作的特性目前均为**实验功能**，请在充分审核每步输出的前提下谨慎使用。人类作家的判断力始终是创作的最后一道闸门。
 
@@ -177,7 +182,7 @@
 | **Book 级写锁** | threading.RLock 保证并行会话写入安全，实测 20 并发零数据丢失 |
 | **章节版本控制** | Git 风格 version history / revert / diff，每次编辑自动创建新版本 |
 | **联网搜索** | MCP JSON-RPC 2.0 协议，Exa / Parallel 双后端，支持 research 子 Agent 深度调研 |
-| **参考书注入** | 多本参考书同步注入写作上下文，支持原著单章完整注入辅助同人创作 |
+| **参考书用途隔离** | 默认只学文风；可逐本切换为原著事实或文风＋事实，防止其他作品人物串入正文 |
 | **事件总线** | 类型化事件系统，解耦工具执行、知识抽取、章节变更等模块通信 |
 
 ### 🎨 创作工作流与扩展
@@ -185,7 +190,9 @@
 | 功能 | 说明 |
 |------|------|
 | **工作流引擎** | 15 种步骤类型（read / decompose / annotate / rewrite / ask_user / search / compare_plot / diff / generate_outline 等），上下文自动传递 |
-| **技能系统** | YAML 定义复合工作流技能，预装 full_novel_reconstruct / chapter_rewrite / daily_writing 等 7 个技能 |
+| **技能系统** | YAML 定义可执行复合工作流，支持指令/护栏/强制输出，预装 11 个系统 Skill |
+| **创作宪法** | 每本书独立的项目级硬约束，覆盖普通对话、正文写作、修改、评审和 Auto |
+| **正文生成参数** | 可视化设置 Temperature、Top P、重复惩罚与输出上限，不扰动工具调用稳定性 |
 | **文风系统** | 系统默认 + 用户自定义双源分离，每本书独立活跃风格，支持 CRUD 管理 |
 | **插件系统** | Python 钩子插件（on_write / on_extract / modify_system_prompt），支持自定义提取器和写作风格 |
 | **交互故事系统** | 图谱驱动的分支叙事引擎，支持读者选择驱动剧情走向 |
@@ -300,6 +307,27 @@ start.bat
 
 脚本会自动启动后端和前端服务，完成后打开浏览器访问 `http://localhost:8190`。
 
+### 🍎 macOS 打包版
+
+仓库现已包含原生 macOS 独立窗口应用与 DMG 构建流程。应用使用系统 WKWebView，
+不会启动默认浏览器，并正常显示在 Dock 中；关闭应用会同步停止本地服务。构建后不需要用户安装
+Python 或 Node.js，双击应用即可启动。详见
+[macOS 打包与使用](docs/MACOS_PACKAGING.md)。
+
+### 📦 Windows / macOS 安装包
+
+GitHub Release 会自动生成：
+
+- `AnySpark_*_Windows_x64_Setup.exe`：Windows 安装版，推荐普通用户使用
+- `AnySpark_*_Windows_x64_portable.zip`：Windows 便携版
+- `AnySpark_*_macOS_arm64.dmg`：Apple Silicon Mac 拖拽安装版
+
+Windows 与 macOS 安装包都使用独立桌面窗口和单实例唤醒，不再打开系统默认浏览器。
+覆盖安装不会删除小说或 API 设置。Windows 数据保存在
+`%APPDATA%\AnySpark\data`，macOS 数据保存在
+`~/Library/Application Support/AnySpark/data`。版本变化时打包版会先在
+`backups/` 创建升级前备份。完整说明见 [升级与数据迁移](docs/UPGRADING.md)。
+
 ### 🔧 方式二：手动启动
 
 ```bash
@@ -344,12 +372,17 @@ npx vite --port 8190 --host
 <details>
 <summary><b>如何更新到最新版本？</b></summary>
 
+安装包用户直接运行新版 Windows Setup，或将新版 `AnySpark.app` 拖入
+`Applications` 并选择替换即可。用户数据在系统数据目录中，不会随程序覆盖。
+
+源码用户：
+
 ```bash
 git pull                    # 拉取最新代码
 pip install -r requirements.txt  # 更新依赖
 cd frontend && npm install && cd ..  # 更新前端依赖
 ```
-你的数据在 `data/` 目录中，更新不会丢失。
+源码模式的数据仍在项目的 `data/` 目录中。
 </details>
 
 <details>
@@ -521,8 +554,11 @@ data/
 
 - `data/` 目录已被 `.gitignore` 完全排除
 - 项目代码仅包含系统默认配置
-- **备份**：定期备份 `data/` 目录 + `.env` 文件即可保存全部私有数据
-- **迁移**：部署新版本时保留 `data/` 目录即可无缝迁移
+- **源码模式**：用户数据位于仓库 `data/`
+- **Windows 安装/便携版**：用户数据位于 `%APPDATA%\AnySpark\data`
+- **macOS 安装版**：用户数据位于 `~/Library/Application Support/AnySpark/data`
+- **备份**：打包版升级时自动备份，也可手动复制整个 `AnySpark` 用户目录
+- **迁移**：单本小说优先使用 `.spark`；整机迁移请复制完整用户数据目录
 
 ---
 

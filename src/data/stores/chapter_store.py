@@ -35,6 +35,10 @@ class ChapterStoreMixin:
         self._write_json(self._chapters_file(book_id), chapters)
 
     def _migrate_chapter(self, ch: dict) -> dict:
+        # Old projects had no provenance metadata. Treat every pre-existing
+        # chapter as protected so "write new" can never overwrite user prose.
+        ch.setdefault("origin", "legacy")
+        ch.setdefault("protected", True)
         if "versions" in ch:
             return ch
         content = ch.pop("content", "")
@@ -82,7 +86,14 @@ class ChapterStoreMixin:
             return f"v{major + 1}"
 
     def add_chapter(
-        self, book_id: str, title: str, content: str, is_extra: bool = False, status: str = "draft"
+        self,
+        book_id: str,
+        title: str,
+        content: str,
+        is_extra: bool = False,
+        status: str = "draft",
+        origin: str = "user",
+        protected: bool = True,
     ) -> dict:
         with book_lock(book_id):
             chapters = self.load_chapters(book_id)
@@ -95,6 +106,8 @@ class ChapterStoreMixin:
                 "current_version": vid,
                 "is_extra": is_extra,
                 "status": status,
+                "origin": origin,
+                "protected": bool(protected),
                 "createdAt": datetime.now().isoformat(),
                 "updatedAt": datetime.now().isoformat(),
                 "versions": [
@@ -127,7 +140,13 @@ class ChapterStoreMixin:
         self._invalidate_character_mentions(book_id)
         return self._chapter_view(chapter)
 
-    def batch_add_chapters(self, book_id: str, chapters_data: list[dict]):
+    def batch_add_chapters(
+        self,
+        book_id: str,
+        chapters_data: list[dict],
+        origin: str = "imported",
+        protected: bool = True,
+    ):
         """导入多个章节：一次加载、一次保存、一次索引。
 
         chapters_data: [{"title": str, "content": str}, ...]
@@ -147,6 +166,8 @@ class ChapterStoreMixin:
                     "current_version": vid,
                     "is_extra": _is_extra_title(cd["title"]),
                     "status": "draft",
+                    "origin": cd.get("origin", origin),
+                    "protected": bool(cd.get("protected", protected)),
                     "createdAt": datetime.now().isoformat(),
                     "updatedAt": datetime.now().isoformat(),
                     "versions": [
@@ -247,6 +268,8 @@ class ChapterStoreMixin:
             "word_count": word_count,
             "is_extra": ch.get("is_extra", False),
             "status": ch.get("status", "draft"),
+            "origin": ch.get("origin", "legacy"),
+            "protected": ch.get("protected", True),
         }
 
     def _get_current_version(self, ch: dict) -> dict:

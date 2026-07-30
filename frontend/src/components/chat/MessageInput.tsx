@@ -92,7 +92,11 @@ export default function MessageInput({
         <button
           onClick={onAutonomousToggle}
           disabled={streaming || uploading}
-          title={autonomousMode ? '自主模式：Agent 可直接执行删除等危险操作，点击关闭' : '点击启用自主模式：Agent 执行危险操作无需每次确认'}
+          title={
+            autonomousMode
+              ? '安全自主模式：常规步骤连续执行；删除和修改原稿仍需确认'
+              : '点击启用安全自主模式；不会关闭删除和原稿修改确认'
+          }
           className={`rounded-lg px-2.5 h-7 text-[11px] font-medium transition-all shrink-0 flex items-center gap-1 ${
             autonomousMode
               ? 'bg-red-900/40 text-red-400 border border-red-800 hover:bg-red-900/60'

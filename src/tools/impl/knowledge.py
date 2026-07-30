@@ -126,6 +126,7 @@ def _call_edit_llm(llm_chat, prompt, system):
 async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "", queue=None) -> str:
 
     args.get("focus", "")
+    force = bool(args.get("force", False))
     try:
         chapters = json_store.load_chapters(book_id)
         if not chapters:
@@ -142,6 +143,11 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
         BATCH_CONCURRENCY = 3
         failed = 0
 
+        from core.extraction_cache import ExtractionCache
+        from core.grounding import ground_progressive_result
+
+        extraction_cache = ExtractionCache(book_id)
+        cache_changed = False
         entity_cache = _EntityCache(kb)
 
         prepared = []
@@ -186,6 +192,18 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
             except Exception as e:
                 return ("parse_error", tag, str(e)[:40])
 
+            chapter_key = str(chapters[idx].get("id") or idx + 1)
+            chapter_result, grounding_stats = ground_progressive_result(
+                chapter_result,
+                content,
+                f"#{idx + 1}",
+                title,
+            )
+            chapter_result["_extraction_meta"] = {
+                "chapter_key": chapter_key,
+                "fingerprint": extraction_cache.fingerprint(content),
+                "grounding_dropped": grounding_stats.dropped_total,
+            }
             return ("ok", tag, chapter_result)
 
         for batch_start in range(0, len(prepared), BATCH_CONCURRENCY):
@@ -203,6 +221,18 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
                 tag = f"第{idx + 1}/{len(chapters)}章 {title[:15]}"
                 if not content or len(content) < 50:
                     chapter_logs.append(f"  ⚠️ {tag}: 跳过（无内容）")
+                    continue
+
+                chapter_key = str(chapters[idx].get("id") or idx + 1)
+                if (
+                    not force
+                    and entity_cache.get_entities()
+                    and extraction_cache.is_current(chapter_key, content)
+                ):
+                    status = f"  ♻️ {tag}: 内容未变化，复用上次提取结果（0 token）"
+                    chapter_logs.append(status)
+                    if queue:
+                        await queue.put({"_progress": status.strip()})
                     continue
 
                 if entity_cache.get_cards():
@@ -288,6 +318,7 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
                 elif status_type == "ok":
                     chapter_result = data
                     try:
+                        extraction_meta = chapter_result.pop("_extraction_meta", {})
                         new_count, update_count, rel_count, fs_count = _apply_progressive_result_batch(
                             chapter_result, kb, book_id
                         )
@@ -298,7 +329,17 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
                         # Collect LLM-extracted timeline events
                         for te in chapter_result.get("timeline_events", []):
                             collected_tl_events.append(te)
-                        status = f"  ✅ {tag}: +{new_count}新 ↑{update_count}更新 +{rel_count}关系 +{fs_count}伏笔"
+                        chapter_key = extraction_meta.get("chapter_key")
+                        fingerprint = extraction_meta.get("fingerprint")
+                        if chapter_key and fingerprint:
+                            extraction_cache.entries[str(chapter_key)] = fingerprint
+                            cache_changed = True
+                        grounding_dropped = int(extraction_meta.get("grounding_dropped", 0) or 0)
+                        grounding_note = f" ⛨过滤{grounding_dropped}条无原文依据提案" if grounding_dropped else ""
+                        status = (
+                            f"  ✅ {tag}: +{new_count}新 ↑{update_count}更新 "
+                            f"+{rel_count}关系 +{fs_count}伏笔{grounding_note}"
+                        )
                         chapter_logs.append(status)
                         if queue:
                             await queue.put({"_progress": status.strip()})
@@ -315,6 +356,9 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
             total_foreshadows += batch_fs
 
             entity_cache.refresh()
+
+        if cache_changed:
+            extraction_cache.save()
 
         entities = kb.list_entities()
         json_store.update_book_stats(book_id, entity_count=len(entities))
@@ -655,6 +699,11 @@ async def _extract_chapter(loop, args: dict, kb, book_id: str, msg: str = "") ->
     if not content or len(content) < 50:
         return f"章节 {title} 内容过短（{len(content)}字），无法提取。"
 
+    from core.extraction_cache import ExtractionCache
+
+    extraction_cache = ExtractionCache(book_id)
+    chapter_key = str(chapter.get("id") or chapter_id)
+
     # Build existing knowledge summary for dedup
     store = GraphStore(book_id)
     store.init_schema()
@@ -667,6 +716,9 @@ async def _extract_chapter(loop, args: dict, kb, book_id: str, msg: str = "") ->
     finally:
         store.close()
 
+    if existing_names and not args.get("force", False) and extraction_cache.is_current(chapter_key, content):
+        return f"♻️ {title}: 章节内容未变化，已复用上次知识提取结果（0 token）。如需重建请使用 force=true。"
+
     # Extract
     proposal = await loop.run_in_executor(
         _ai_executor,
@@ -676,11 +728,24 @@ async def _extract_chapter(loop, args: dict, kb, book_id: str, msg: str = "") ->
         book_id,
     )
 
+    from core.grounding import ground_proposal
+
+    proposal, grounding_stats = ground_proposal(proposal, content, chapter_id, title)
+
     if not proposal.entities:
-        return f"📋 {title}: 未检测到新实体。知识库已包含 {len(existing_names)} 个实体。"
+        extraction_cache.mark(chapter_key, content)
+        extraction_cache.save()
+        suffix = (
+            f" 已过滤 {grounding_stats.dropped_total} 条无原文依据的 AI 提案。"
+            if grounding_stats.dropped_total
+            else ""
+        )
+        return f"📋 {title}: 未检测到有原文依据的新实体。知识库已包含 {len(existing_names)} 个实体。{suffix}"
 
     # Accept and merge
     result = await loop.run_in_executor(_ai_executor, accept_proposal, proposal, book_id)
+    extraction_cache.mark(chapter_key, content)
+    extraction_cache.save()
 
     # Build summary
     entity_names = [e.name for e in proposal.entities]
@@ -695,6 +760,8 @@ async def _extract_chapter(loop, args: dict, kb, book_id: str, msg: str = "") ->
         lines.append(f"  关系: {rel_count} 条")
     if fs_count:
         lines.append(f"  伏笔: {fs_count} 个")
+    if grounding_stats.dropped_total:
+        lines.append(f"  证据过滤: {grounding_stats.dropped_total} 条无原文依据提案未入库")
     lines.append(f"  知识库总计: {len(existing_names) + len(entity_names)} 个实体")
     lines.append(f"\n详细: {result[:300]}")
 
@@ -892,8 +959,10 @@ async def _generate_continuity_card(loop, chapter_text: str, chapter_index: int,
 
 
 async def _finalize_chapter(loop, args: dict, kb, book_id: str, msg: str = "") -> str:
-    """定稿闭环：将章节标记为 final → 验证 → 提取知识 → 检查伏笔。
-    只有章节状态为 draft 时会自动提升为 final；已是 final 则直接重新提取。
+    """定稿闭环：验证 → 提取知识 → 连续性卡片 → 标记 final。
+
+    用户定义的 hard 叙事约束未通过时保持 draft，并且不把本章知识
+    写入正式知识库。
     """
     chapter_id = args.get("chapter_id", "").strip()
     if not chapter_id:
@@ -912,12 +981,11 @@ async def _finalize_chapter(loop, args: dict, kb, book_id: str, msg: str = "") -
 
     lines = [f"## 📋 {title} 定稿闭环\n"]
 
-    # 0. 提升状态：draft → final（已是 final 则跳过）
+    # 0. Report current state. Promotion happens only after every gate.
     if status == "draft":
-        json_store.set_chapter_status(book_id, chapter_id, "final")
-        lines.append("✅ 状态: draft → **final**（已定稿）")
+        lines.append("ℹ️ 状态: draft（正在执行定稿检查）")
     else:
-        lines.append(f"ℹ️ 状态: {status}（已是定稿状态，重新提取知识）")
+        lines.append(f"ℹ️ 状态: {status}（重新验证并刷新知识）")
 
     # 0.5 AI味扫描（纯规则，零token）
     try:
@@ -938,7 +1006,7 @@ async def _finalize_chapter(loop, args: dict, kb, book_id: str, msg: str = "") -
         pass
 
     # 1. Verify chapter
-    from tools.impl.narrative_logic import _verify_chapter
+    from tools.impl.narrative_logic import _verify_chapter, verification_has_hard_failures
 
     verify_result = await _verify_chapter(
         loop,
@@ -951,7 +1019,17 @@ async def _finalize_chapter(loop, args: dict, kb, book_id: str, msg: str = "") -
     )
     lines.append(f"\n### 验证结果\n{verify_result}")
 
-    # 2. Extract knowledge（总是提取，因为只有定稿时才会调用此工具）
+    if verification_has_hard_failures(verify_result):
+        if status == "final":
+            json_store.set_chapter_status(book_id, chapter_id, "draft")
+        lines.append(
+            "\n### 定稿结果\n"
+            "⛔ 检测到 hard 叙事约束冲突，本章保持 **draft**；"
+            "未提取知识、未更新连续性卡片。请修正文后重新定稿。"
+        )
+        return "\n".join(lines)
+
+    # 2. Extract grounded knowledge only after the hard-constraint gate.
     extract_result = await _extract_chapter(
         loop,
         {
@@ -985,5 +1063,12 @@ async def _finalize_chapter(loop, args: dict, kb, book_id: str, msg: str = "") -
             lines.append(f"\n### 连续性卡片\n✅ 已生成第{ch_idx}章结束时的状态快照")
     except Exception:
         pass
+
+    # 5. Promote only after validation, extraction, and continuity work.
+    if status == "draft":
+        json_store.set_chapter_status(book_id, chapter_id, "final")
+        lines.append("\n### 定稿结果\n✅ 状态: draft → **final**（已定稿）")
+    else:
+        lines.append("\n### 定稿结果\n✅ 已完成重新验证与知识刷新")
 
     return "\n".join(lines)

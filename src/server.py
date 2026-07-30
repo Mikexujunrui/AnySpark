@@ -19,7 +19,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from core.config import config
+from core.config import APP_VERSION, DATA_DIR, config
 from core.errors import register_error_handlers
 from core.headless_loop import init_task_runner
 from core.scheduler import engine as sched_engine
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # ── Configure centralized logging ──
-    log_dir = Path("data/logs")
+    log_dir = DATA_DIR / "logs"
     log_dir.mkdir(parents=True, exist_ok=True)
 
     log_format = logging.Formatter(
@@ -225,6 +225,20 @@ async def delete_confirmation_middleware(request: Request, call_next):
 
 @app.get("/api/health")
 async def health_check():
+    return {
+        "status": "ok",
+        "app": "AnySpark",
+        "version": APP_VERSION,
+        "desktop_shell": True,
+    }
+
+
+@app.post("/api/desktop/activate", include_in_schema=False)
+async def desktop_activate():
+    """Restore the packaged desktop window when a second instance is opened."""
+    from core.desktop_bridge import request_activation
+
+    request_activation()
     return {"status": "ok"}
 
 
@@ -447,33 +461,7 @@ wf_engine.register("diff", _handle_diff)
 wf_engine.register("generate_outline", _handle_generate_outline)
 
 
-def _open_browser(port: int, delay: float = 2.0):
-    """Open the browser to the app URL after a short delay.
-
-    Only activates in PyInstaller EXE mode (frozen) — never in development.
-    Uses a daemon thread so it doesn't block server shutdown.
-    """
-    import threading
-    import webbrowser
-
-    def _do_open():
-        import time
-
-        time.sleep(delay)
-        url = f"http://localhost:{port}"
-        try:
-            webbrowser.open(url)
-            logger.info("Browser opened: %s", url)
-        except Exception as exc:
-            logger.warning("Failed to open browser: %s", exc)
-
-    threading.Thread(target=_do_open, daemon=True).start()
-
-
 if __name__ == "__main__":
     import uvicorn
 
-    # Auto-open browser in EXE mode (frozen) after server starts
-    if getattr(sys, "frozen", False):
-        _open_browser(config.server.port)
     uvicorn.run(app, host=config.server.host, port=config.server.port, timeout_keep_alive=300, log_level="info")

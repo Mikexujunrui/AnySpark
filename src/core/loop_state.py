@@ -186,6 +186,8 @@ class LoopState:
     has_writing_output: bool = False
     rounds_since_writing: int = 0
     temperature: float = 0.0
+    chapter_write_completed: bool = False
+    chapter_write_tool: str = ""
 
     # Structured parts collected during this turn for history persistence.
     parts: list = field(default_factory=list)

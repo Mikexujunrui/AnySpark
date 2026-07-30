@@ -2,6 +2,7 @@ import json
 import logging
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextvars import copy_context
 
 from .graph_store import GraphStore
 from .knowledge import Entity, EntityType, Foreshadow, KnowledgeProposal, Relation, RelationType
@@ -175,7 +176,10 @@ def _ner_augmented_scan(text: str, existing_knowledge: str, book_id: str) -> Kno
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         with ThreadPoolExecutor(max_workers=min(len(batches), 6)) as executor:
-            futures = {executor.submit(_extract_batch, batch, text): i for i, batch in enumerate(batches)}
+            futures = {
+                executor.submit(copy_context().run, _extract_batch, batch, text): i
+                for i, batch in enumerate(batches)
+            }
             for future in as_completed(futures):
                 try:
                     all_entities.extend(future.result())
@@ -226,7 +230,10 @@ def _legacy_extract_split_mode(text: str, existing_knowledge: str, book_id: str)
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
         with ThreadPoolExecutor(max_workers=min(len(batches), 6)) as executor:
-            futures = {executor.submit(_extract_batch, batch, text): i for i, batch in enumerate(batches)}
+            futures = {
+                executor.submit(copy_context().run, _extract_batch, batch, text): i
+                for i, batch in enumerate(batches)
+            }
             for future in as_completed(futures):
                 try:
                     all_entities.extend(future.result())
@@ -440,7 +447,7 @@ def _extract_split_stream(text: str, existing_knowledge: str, book_id: str):
     completed = 0
 
     with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = {executor.submit(_extract_one, e, text): e for e in rough.entities}
+        futures = {executor.submit(copy_context().run, _extract_one, e, text): e for e in rough.entities}
         for future in as_completed(futures):
             entity = futures[future]
             try:
@@ -481,6 +488,43 @@ def _proposal_to_dict(p: KnowledgeProposal) -> dict:
         "relations": [{"id": r.id, "from": r.from_entity, "to": r.to_entity, "type": r.type} for r in p.relations],
         "foreshadows": [{"id": f.id, "text": f.text, "hint": f.hint} for f in p.foreshadows],
     }
+
+
+def proposal_from_dict(data: dict) -> KnowledgeProposal:
+    """Rebuild a proposal emitted by ``extract_stream`` without another LLM call."""
+    proposal = KnowledgeProposal()
+    for item in data.get("entities", []):
+        proposal.entities.append(
+            Entity(
+                id=item.get("id") or str(uuid.uuid4())[:8],
+                type=item.get("type", EntityType.CONCEPT),
+                name=item.get("name", ""),
+                aliases=item.get("aliases", []),
+                data=item.get("data", {}),
+            )
+        )
+    for item in data.get("relations", []):
+        try:
+            relation_type = RelationType(item.get("type", RelationType.KNOWS))
+        except ValueError:
+            relation_type = RelationType.KNOWS
+        proposal.relations.append(
+            Relation(
+                id=item.get("id") or str(uuid.uuid4())[:8],
+                from_entity=item.get("from", ""),
+                to_entity=item.get("to", ""),
+                type=relation_type,
+            )
+        )
+    for item in data.get("foreshadows", []):
+        proposal.foreshadows.append(
+            Foreshadow(
+                id=item.get("id") or str(uuid.uuid4())[:8],
+                text=item.get("text", ""),
+                hint=item.get("hint", ""),
+            )
+        )
+    return proposal
 
 
 def _parse_proposal(response: str) -> KnowledgeProposal:

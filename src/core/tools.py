@@ -219,7 +219,14 @@ registry.register(
     Tool(
         name="extract_chapter",
         description="仅提取知识：从指定章节中提取新实体/关系/伏笔，与已有知识库对比后补充。不验证、不扫描AI味、不生成连续性卡片。用于草稿阶段的增量知识补充。写完定稿请用 finalize_chapter。",
-        parameters={"chapter_id": {"type": "string", "description": "章节序号，如 #5 或 #E1（番外）"}},
+        parameters={
+            "chapter_id": {"type": "string", "description": "章节序号，如 #5 或 #E1（番外）"},
+            "force": {
+                "type": "boolean",
+                "description": "忽略内容指纹缓存并重新提取，默认 false",
+                "required": False,
+            },
+        },
     )
 )
 
@@ -234,7 +241,7 @@ registry.register(
 registry.register(
     Tool(
         name="finalize_chapter",
-        description="【定稿收尾】一键完成：验证（实体漂移/大纲合规/约束）+ AI味扫描（纯规则零token） + 增量提取知识 + 伏笔检查 + 生成连续性卡片。仅当章节最终定稿时使用，草稿阶段不要调用。草稿阶段如需单独提取知识请用 extract_chapter（仅提取，不验证不扫描）。",
+        description="【定稿收尾】按安全顺序执行：验证 → AI味扫描（纯规则零token）→ 有原文证据的增量知识提取 → 伏笔检查 → 连续性卡片 → 标记final。hard叙事约束冲突会保持draft并阻止知识入库。仅当章节最终定稿时使用。",
         parameters={"chapter_id": {"type": "string", "description": "章节序号，如 #5 或 #E1（番外）"}},
     )
 )
@@ -249,7 +256,7 @@ registry.register(
             "is_extra": {"type": "boolean", "description": "是否为番外（不计入正常章节序号）", "required": False},
             "chapter_index": {
                 "type": "integer",
-                "description": "章节序号（如第5章写5），用于去重更新已有章节",
+                "description": "章节序号（如第5章写5）；若该序号已存在会拒绝覆盖",
                 "required": False,
             },
         },
@@ -297,7 +304,7 @@ registry.register(
             "chapter_title": {"type": "string", "description": "章节标题（不指定则自动生成）", "required": False},
             "chapter_index": {
                 "type": "integer",
-                "description": "章节序号（如第5章写5），用于去重更新已有章节",
+                "description": "章节序号（如第5章写5）；若该序号已存在会拒绝覆盖",
                 "required": False,
             },
             "ref_chapters": {
@@ -838,8 +845,14 @@ registry.register(
 registry.register(
     Tool(
         name="extract_all_chapters",
-        description="逐章渐进式提取知识（人物卡/地点/关系/伏笔）。按章节顺序处理：新角色建卡，已有角色对比更新，最后通读验证一致性。这是一个完整操作，调用后直接汇报结果即可，不需要额外调用 task 或 read_chapter。",
-        parameters={},
+        description="逐章渐进式提取知识（人物卡/地点/关系/伏笔）。自动跳过内容未变化且已成功提取的章节，避免重复消耗 token；新实体和关系必须能在章节原文中找到证据。这是一个完整操作，调用后直接汇报结果即可。",
+        parameters={
+            "force": {
+                "type": "boolean",
+                "description": "忽略内容指纹缓存并重新提取全部章节，默认 false",
+                "required": False,
+            }
+        },
         streaming=True,
     )
 )
@@ -945,6 +958,7 @@ registry.register(
                 "required": False,
             },
         },
+        dangerous=True,
     )
 )
 
@@ -1664,7 +1678,10 @@ registry.register(
 registry.register(
     Tool(
         name="set_reference_books",
-        description="设置当前小说项目的参考书（如同人小说可指定原著为参考书）。参考书的知识图谱（角色/设定/关系）会以只读方式注入写作上下文。先用 list_books 查看可用的项目ID。",
+        description=(
+            "设置当前小说项目的参考书。新增参考书默认“只学文风”，不会把人物/地点/剧情事实注入当前书；"
+            "可在参考书面板改成“原著设定”或“文风+设定”。先用 list_books 查看项目ID。"
+        ),
         parameters={
             "book_ids": {
                 "type": "array",
@@ -1722,7 +1739,10 @@ registry.register(
 registry.register(
     Tool(
         name="search_reference",
-        description="在参考书中搜索角色、设定或章节内容。不自动加载参考书，按需查询。如同人写作需查原著设定时使用。",
+        description=(
+            "在用途为“原著设定”或“文风+设定”的参考书中搜索角色和设定。"
+            "“只学文风”的书会被硬隔离并跳过事实搜索。"
+        ),
         parameters={
             "query": {"type": "string", "description": "搜索关键词（角色名、术语、事件等）"},
         },

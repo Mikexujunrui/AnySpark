@@ -1,13 +1,12 @@
 import asyncio
 import json
-import os
-from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Response, UploadFile
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 from core.archive import import_spark
+from core.config import DATA_DIR
 from core.graph_store import get_store
 from data.json_store import json_store
 
@@ -475,8 +474,8 @@ def import_spark_archive(book_id: str):
 
     Returns import statistics.
     """
-    archive_path = os.path.join("data", "archives", f"{book_id}.spark")
-    if not os.path.exists(archive_path):
+    archive_path = DATA_DIR / "archives" / f"{book_id}.spark"
+    if not archive_path.exists():
         raise HTTPException(404, f"归档文件不存在: {archive_path}")
     try:
         stats = import_spark(book_id, archive_path)
@@ -493,7 +492,7 @@ async def upload_spark_archive(book_id: str, file: UploadFile):
     """
     if not file.filename or not file.filename.endswith(".spark"):
         raise HTTPException(400, "仅支持 .spark 文件")
-    archives_dir = Path("data/archives")
+    archives_dir = DATA_DIR / "archives"
     archives_dir.mkdir(parents=True, exist_ok=True)
     dest = archives_dir / f"{book_id}.spark"
     content = await file.read()

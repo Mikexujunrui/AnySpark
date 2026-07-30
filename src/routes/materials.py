@@ -19,6 +19,10 @@ class RefBooksSet(BaseModel):
     book_ids: list[str]
 
 
+class RefUsageSet(BaseModel):
+    usage: str
+
+
 class SubscribeRequest(BaseModel):
     material_id: str
 
@@ -88,7 +92,10 @@ async def unsubscribe_material(book_id: str, material_id: str):
 @router.get("/books/{book_id}/references")
 async def get_references(book_id: str):
     ref_ids = json_store.get_reference_books(book_id)
+    profiles = json_store.get_reference_profiles(book_id)
     books = [b for b in json_store.load_books() if b["id"] in ref_ids]
+    for book in books:
+        book["usage"] = profiles.get(book["id"], "style")
     return {"reference_book_ids": ref_ids, "references": books}
 
 
@@ -96,3 +103,14 @@ async def get_references(book_id: str):
 async def set_references(book_id: str, body: RefBooksSet):
     json_store.set_reference_books(book_id, body.book_ids)
     return {"ok": True}
+
+
+@router.put("/books/{book_id}/references/{ref_book_id}/usage")
+async def set_reference_usage(book_id: str, ref_book_id: str, body: RefUsageSet):
+    try:
+        json_store.set_reference_usage(book_id, ref_book_id, body.usage)
+    except ValueError as exc:
+        from fastapi import HTTPException
+
+        raise HTTPException(400, str(exc))
+    return {"ok": True, "usage": body.usage}

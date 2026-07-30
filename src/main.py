@@ -10,6 +10,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
+from core.config import APP_VERSION
 from core.extractor import accept_proposal, extract_from_text
 from core.graph_store import get_store
 from data.json_store import json_store
@@ -48,6 +49,8 @@ def _ensure_book(project_id: str, title: str = "") -> str:
             "id": project_id,
             "title": title or f"CLI项目-{project_id[:8]}",
             "description": "通过CLI自动创建",
+            "creativeConstitution": "",
+            "constitutionEnabled": True,
             "entityCount": 0,
             "chapterCount": 0,
             "createdAt": now,
@@ -675,7 +678,7 @@ def main():
   项目文档: docs/README.md
 """,
     )
-    parser.add_argument("-v", "--version", action="version", version="AI Novel Agent 0.5.0")
+    parser.add_argument("-v", "--version", action="version", version=f"火花 AnySpark {APP_VERSION}")
     parser.add_argument("-p", "--project", default=DEFAULT_PROJECT, help="项目 ID（默认: cli）")
     parser.add_argument("--non-interactive", action="store_true", help="非交互模式（执行单条命令后退出）")
     parser.add_argument("command", nargs="*", help="要执行的命令（非交互模式）")

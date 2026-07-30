@@ -33,6 +33,9 @@ class Skill:
         self.triggers = definition.get("triggers", [])
         self.steps = definition.get("steps", [])
         self.config = definition.get("config", {})
+        self.instructions = definition.get("instructions", "")
+        self.guardrails = definition.get("guardrails", [])
+        self.outputs = definition.get("outputs", [])
         self.source = source
 
     def to_dict(self) -> dict:
@@ -41,6 +44,9 @@ class Skill:
             "description": self.description,
             "triggers": self.triggers,
             "steps": self.steps,
+            "instructions": self.instructions,
+            "guardrails": self.guardrails,
+            "outputs": self.outputs,
             "source": self.source,
         }
 
@@ -50,6 +56,10 @@ class Skill:
             "description": self.description,
             "triggers": self.triggers,
             "steps": self.steps,
+            "instructions": self.instructions,
+            "guardrails": self.guardrails,
+            "outputs": self.outputs,
+            "config": self.config,
         }
 
     def matches(self, content_type: str) -> bool:
@@ -167,6 +177,46 @@ class SkillManager:
                 }
             )
         return results
+
+    def render_instruction(self, skill_name: str, user_input: str = "") -> str:
+        """Render a skill as an executable Agent instruction.
+
+        Skill steps often need chapter IDs or user choices that cannot be
+        known when the YAML is authored.  Rendering keeps the workflow
+        deterministic while allowing the Agent to fill only those arguments.
+        """
+        skill = self._skills.get(skill_name)
+        if not skill:
+            raise ValueError(f"技能不存在: {skill_name}")
+        step_lines = []
+        for index, step in enumerate(skill.steps, 1):
+            tool = step.get("tool", "")
+            label = step.get("label", tool)
+            params = step.get("params", {})
+            param_text = json.dumps(params, ensure_ascii=False) if params else "{}"
+            step_lines.append(f"{index}. {label}：调用 `{tool}`，预设参数 {param_text}")
+        guardrails = "\n".join(f"- {rule}" for rule in skill.guardrails) or "- 只执行本技能列出的范围"
+        outputs = "\n".join(f"- {item}" for item in skill.outputs) or "- 报告实际执行结果"
+        return f"""[已启用技能: {skill.name}]
+说明：{skill.description}
+
+用户本次补充要求：
+{user_input.strip() or "无；使用当前项目、大纲和最近章节确定目标。"}
+
+技能专用指令：
+{skill.instructions or "严格按以下步骤调用工具执行，不要只描述计划。"}
+
+固定流程：
+{chr(10).join(step_lines)}
+
+不可违反：
+{guardrails}
+
+完成时必须输出：
+{outputs}
+
+这是一次实际执行请求。需要关键选择时用 ask_user；某一步失败时停止后续写入并明确报告，
+不要换另一个全章生成工具从头再写。"""
 
 
 manager = SkillManager()
