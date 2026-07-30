@@ -229,7 +229,10 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
       const data = await res.json()
       setSettings(data)
       openAddProvider()
-      showToast('Provider 已保存')
+      const assigned = ['slot_pro', 'slot_flash']
+        .filter(slot => data?.[slot]?.provider_id === body.id)
+        .map(slot => slot === 'slot_pro' ? 'Pro' : 'Flash')
+      showToast(assigned.length ? `Provider 已保存并分配到 ${assigned.join(' / ')}` : 'Provider 已保存')
     } catch (e) {
       showToast(e.message)
     }
@@ -789,7 +792,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                 <input
                   type="number"
                   min={512}
-                  max={384000}
+                  max={65536}
                   step={512}
                   value={generationForm.max_output_tokens}
                   onChange={e => setGenerationForm(f => ({ ...f, max_output_tokens: Number(e.target.value) }))}
@@ -846,6 +849,55 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                   ))}
                 </div>
               </div>
+
+              {/* Provider/model overrides */}
+              {(['pro', 'flash'] as const).map(slotName => {
+                const providerKey = `slot_${slotName}_provider_id`
+                const modelKey = `slot_${slotName}_model`
+                const selectedProviderId = bookOverrideForm[providerKey] || ''
+                const selectedProvider = providers.find(p => p.id === selectedProviderId)
+                const globalSlot = slotName === 'pro' ? settings?.slot_pro : settings?.slot_flash
+                return (
+                  <div key={slotName} className="border border-zinc-800 rounded-xl p-3">
+                    <div className="text-[10px] text-zinc-500 mb-2">
+                      {slotName === 'pro' ? 'Pro 高质量槽位' : 'Flash 快速槽位'}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <select
+                        value={selectedProviderId}
+                        onChange={e => {
+                          const providerId = e.target.value
+                          const provider = providers.find(p => p.id === providerId)
+                          setBookOverrideForm(f => ({
+                            ...f,
+                            [providerKey]: providerId,
+                            [modelKey]: provider?.models?.[0] || '',
+                          }))
+                        }}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600"
+                      >
+                        <option value="">
+                          继承全局：{providers.find(p => p.id === globalSlot?.provider_id)?.name || '未选择'}
+                        </option>
+                        {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                      <select
+                        value={bookOverrideForm[modelKey] || ''}
+                        disabled={!selectedProvider}
+                        onChange={e => setBookOverrideForm(f => ({ ...f, [modelKey]: e.target.value }))}
+                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600 disabled:text-zinc-600"
+                      >
+                        <option value="">
+                          {selectedProvider ? '-- 选择模型 --' : `继承：${globalSlot?.model || '未选择'}`}
+                        </option>
+                        {(selectedProvider?.models || []).map(model => (
+                          <option key={model} value={model}>{model}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                )
+              })}
 
               {/* Global reference */}
               <div className="border border-zinc-800 rounded-xl p-3 bg-zinc-950/50">

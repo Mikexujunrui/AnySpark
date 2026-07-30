@@ -6,6 +6,8 @@ import logging
 import os
 import time
 from collections.abc import AsyncGenerator, Generator
+from contextlib import contextmanager
+from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
 
 import httpx
@@ -27,6 +29,7 @@ MODELS = {
 }
 
 CREATIVE_TASKS = set(config.llm.creative_tasks)
+_active_book_id: ContextVar[str] = ContextVar("anyspark_active_book_id", default="")
 
 
 class LLMConfigurationError(RuntimeError):
@@ -40,7 +43,23 @@ def _settings():
     """Lazy import to avoid circular deps."""
     from .settings import get_settings
 
-    return get_settings()
+    settings = get_settings()
+    book_id = _active_book_id.get()
+    return settings.get_effective(book_id) if book_id else settings
+
+
+@contextmanager
+def llm_book_context(book_id: str):
+    """Resolve model slots using the selected book's overrides.
+
+    ContextVar keeps concurrent books isolated. Executor bridges below copy
+    this context into their worker thread so sync and async LLM paths agree.
+    """
+    token = _active_book_id.set(book_id or "")
+    try:
+        yield
+    finally:
+        _active_book_id.reset(token)
 
 
 def get_mode() -> str:
@@ -87,9 +106,9 @@ def model_for(task: str) -> str:
 def _resolve(task: str) -> tuple:
     """Return (provider_id, model_name) for the given task."""
     try:
-        from .settings import get_settings, task_to_type
+        from .settings import task_to_type
 
-        s = get_settings()
+        s = _settings()
         mode = s.mode
 
         if mode == "quality":
@@ -171,9 +190,7 @@ def _get_client_for_provider(provider_id: str) -> OpenAI:
 def get_client() -> OpenAI:
     """Legacy: return client for the default (pro) provider."""
     try:
-        from .settings import get_settings
-
-        s = get_settings()
+        s = _settings()
         return _get_client_for_provider(s.slot_pro.provider_id)
     except (AttributeError, KeyError):
         pass
@@ -191,6 +208,12 @@ def get_client() -> OpenAI:
             http_client=_make_httpx_client(),
         )
     return _clients["_legacy"]
+
+
+def get_client_for_task(task: str) -> tuple[OpenAI, str]:
+    """Return the effective Provider client and model for a task."""
+    provider_id, model = _resolve(task)
+    return _get_client_for_provider(provider_id), model
 
 
 def reload_clients():
@@ -237,11 +260,9 @@ def _prose_completion_kwargs(task: str, fallback_temperature: float) -> dict:
 
 
 def _provider_rejected_optional_params(exc: Exception, kwargs: dict) -> bool:
-    """Detect OpenAI-compatible gateways that omit sampling parameters."""
-    if not any(key in kwargs for key in ("top_p", "frequency_penalty", "presence_penalty")):
-        return False
+    """Detect gateways that need a smaller, portable parameter set."""
     text = str(exc).lower()
-    return any(
+    optional_rejected = any(key in kwargs for key in ("top_p", "frequency_penalty", "presence_penalty")) and any(
         marker in text
         for marker in (
             "unsupported parameter",
@@ -252,11 +273,26 @@ def _provider_rejected_optional_params(exc: Exception, kwargs: dict) -> bool:
             "not support",
         )
     )
+    max_tokens_rejected = "max_tokens" in text and any(
+        marker in text
+        for marker in (
+            "maximum",
+            "max allowed",
+            "must be less",
+            "less than or equal",
+            "too large",
+            "out of range",
+            "invalid",
+        )
+    )
+    return optional_rejected or max_tokens_rejected
 
 
 def _portable_completion_kwargs(kwargs: dict) -> dict:
     """Keep universal controls when a gateway rejects optional tuning."""
-    return {key: value for key, value in kwargs.items() if key in ("temperature", "max_tokens")}
+    portable = {key: value for key, value in kwargs.items() if key in ("temperature", "max_tokens")}
+    portable["max_tokens"] = min(int(portable.get("max_tokens", 16384)), 16384)
+    return portable
 
 
 def chat(prompt: str, system: str = "", temperature: float = 0.3, task: str = "general") -> str:
@@ -423,9 +459,14 @@ async def chat_with_tools_async(
     messages: list[dict], tools: list[dict] | None = None, temperature: float = 0.3, task: str = "general"
 ) -> LLMResponse:
     loop = asyncio.get_running_loop()
+    context = copy_context()
 
     async def _call():
-        return await loop.run_in_executor(None, lambda: chat_with_tools(messages, tools, temperature, task))
+        return await loop.run_in_executor(
+            None,
+            context.run,
+            lambda: chat_with_tools(messages, tools, temperature, task),
+        )
 
     return await with_retry(_call)
 
@@ -521,17 +562,21 @@ async def chat_with_tools_stream_async(
     for attempt in range(max_stream_retries + 1):
         loop = asyncio.get_running_loop()
         queue: asyncio.Queue[StreamEvent | None] = asyncio.Queue()
+        context = copy_context()
+
+        def _enqueue(item: StreamEvent | None):
+            loop.call_soon_threadsafe(queue.put_nowait, item)
 
         def _run_stream():
             try:
                 for event in chat_with_tools_stream(messages, tools, temperature, task):
-                    queue.put_nowait(event)
+                    _enqueue(event)
             except Exception as e:
-                queue.put_nowait(StreamEvent(type="error", data={"error": str(e), "exception": e}))
+                _enqueue(StreamEvent(type="error", data={"error": str(e), "exception": e}))
             finally:
-                queue.put_nowait(None)
+                _enqueue(None)
 
-        loop.run_in_executor(None, _run_stream)
+        loop.run_in_executor(None, context.run, _run_stream)
         # Note: asyncio.Future.cancel() cannot interrupt a running thread.
         # The _run_stream thread uses queue.put_nowait which never blocks
         # (unbounded asyncio.Queue), so it runs to completion regardless.

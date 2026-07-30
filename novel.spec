@@ -64,6 +64,7 @@ a = Analysis(
         ('styles', 'styles'),
         ('reviewers', 'reviewers'),
         ('skills', 'skills'),
+        ('src/core/prompts', 'core/prompts'),
         ('pyproject.toml', '.'),
         ('LICENSE', '.'),
         # tiktoken encoding plugins (namespace package, not auto-detected)

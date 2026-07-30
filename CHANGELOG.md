@@ -35,6 +35,24 @@
 
 ### 修复
 
+- **Provider 测试成功但聊天完全不调用模型**：修复 macOS 冻结包遗漏
+  `tiktoken_ext.openai_public` 的问题；自然语言 Agent 不再在首次请求前因
+  `Unknown encoding cl100k_base` 退出，并加入 UTF-8 Token 保守估算作为第二道兜底
+- **打包版遗漏提取提示词**：Windows/macOS 构建同时携带 `core/prompts`，
+  `/s` 和知识提取不再退化为空提示词或持续记录 `Prompt template not found`
+- **新增 Provider 后仍使用无 Key 默认项**：保存第一个可用 Provider 时，如 Pro/Flash
+  仍指向无 Key、无模型或已失效的槽位，会自动分配新 Provider 的首个已选模型；不会覆盖
+  已经正常工作的现有槽位
+- **当前书籍无法选择 Provider**：“书籍覆盖”页新增 Pro/Flash 的 Provider 与模型选择器，
+  普通 Agent、`/s`、`/w` 会解析当前书籍的有效模型设置；保存时校验 Provider/模型组合
+- **`/w` 失败后界面无任何反应**：后台工作线程改为线程安全地投递流事件，异常也会发送
+  `done` 和具体错误；前端不再只读取正文 chunk 而吞掉失败终态
+- **`/s` 重复扣费与空白完成**：直接复用流式提取的 KnowledgeProposal 入库，不再对同一文本
+  再调用一次模型；没有新实体时也会显示明确的完成说明
+- **超大输出上限在计费前被网关拒绝**：最大输出 Token 从不现实的 384000 规范化为 65536；
+  网关仍拒绝 `max_tokens` 或可选采样参数时，自动使用 16384 的便携参数重试
+- **后台线程直接写 asyncio.Queue**：模型流与聊天快捷指令统一改用
+  `loop.call_soon_threadsafe`，避免偶发无唤醒、卡住或丢失结束事件
 - **Auto 重写已导入章节**：新章工具命中已存在章节编号时从程序层拒绝覆盖；无“第 N 章”
   格式的创意标题按导入顺序纳入已存在章节边界
 - **章节号误判**：不再把“写 2500 字”中的 `2500` 当成第 2500 章；正确识别“第十一章”
@@ -76,12 +94,15 @@
 ### 验证
 
 - `ruff check src tests`：0 errors
-- `pytest`：690 passed，3 skipped（含独立窗口信号、单实例锁、版本握手与优雅退出测试）
+- `pytest`：697 passed，3 skipped（新增冻结编码器兜底、Provider 自动分配、书籍模型覆盖、
+  `/s` 结果复用和 `/w` 错误可见性回归测试）
 - TypeScript `tsc --noEmit` 与 Vite 生产构建通过
 - ESLint：0 errors（原项目 141 warnings，低于 CI 上限）
 - Skills 与 GitHub Actions YAML 解析通过；全部系统 Skill 的工具名均已注册
 - macOS 3.2.0 arm64 DMG/ZIP 已重新生成；从 DMG 挂载的冻结应用通过深度签名校验并实际显示
   独立窗口。重复启动仅保留一个进程，关闭窗口后 Supervisor、Scheduler 和监听端口均正常退出
+- 新 macOS 冻结包使用隔离数据目录与本机模拟 OpenAI API 完成端到端回归：自然语言 Agent、
+  `/w`、`/s` 均产生模型请求；`llm_calls=1`，日志中无编码器或提示词资源缺失错误
 - `/api/health`、版本、桌面唤醒、Skills 和生成参数接口均返回 200
 - Windows 源码构建流程由 `windows-latest` 负责生成 EXE、便携 ZIP 与 Inno Setup 安装器
 

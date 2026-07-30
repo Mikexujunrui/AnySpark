@@ -13,7 +13,7 @@ from core.compaction import compact_messages_async, needs_compaction
 from core.config import DATA_DIR
 from core.event_bus import Event, EventType, bus
 from core.event_store import event_store
-from core.extractor import accept_proposal, extract_from_text, extract_stream
+from core.extractor import accept_proposal, extract_stream, proposal_from_dict
 from core.graph_store import GraphStore, get_store
 from core.question import manager as question_manager
 from core.session_state import run_state
@@ -197,9 +197,9 @@ async def chat_with_agent(req: MessageRequest):
                 return {"type": "error", "message": "执行写作技能需要 Write 模式。"}
             msg = skill_manager.render_instruction(command, remainder)
 
-    from core.settings import validate_runtime_settings
+    from core.settings import get_settings, validate_runtime_settings
 
-    config_errors = validate_runtime_settings()
+    config_errors = validate_runtime_settings(get_settings().get_effective(req.book_id))
     if config_errors:
         from fastapi import HTTPException
 
@@ -222,7 +222,7 @@ async def chat_with_agent(req: MessageRequest):
         return EventSourceResponse(_write_shortcut(instruction, mode, req.book_id, req.session_id, msg))
 
     # ── Flash 快捷路由：仅高确定性的生成类意图 ──
-    intent, _ = await _classify_intent(msg)
+    intent, _ = await _classify_intent(msg, req.book_id)
 
     if intent == "generate_outline":
         return EventSourceResponse(_tool_shortcut("generate_outline", {}, req, msg))
@@ -265,7 +265,7 @@ INTENT_CLASSIFY_SYSTEM = """你是小说写作助手的意图分类器。仅分�
 只输出 JSON，不要加 markdown 代码块。"""
 
 
-async def _classify_intent(msg: str) -> tuple[str, dict]:
+async def _classify_intent(msg: str, book_id: str = "") -> tuple[str, dict]:
     import asyncio
     import json
 
@@ -287,22 +287,23 @@ async def _classify_intent(msg: str) -> tuple[str, dict]:
     if not any(keyword in msg.lower() for keyword in classifier_keywords):
         return "general", {}
 
-    from core.llm_client import MODELS, get_client
+    from core.llm_client import get_client_for_task, llm_book_context
     from tools.executor import get_executor
 
     loop = asyncio.get_running_loop()
 
     def _call():
-        client = get_client()
-        r = client.chat.completions.create(
-            model=MODELS["flash"],
-            messages=[
-                {"role": "system", "content": INTENT_CLASSIFY_SYSTEM},
-                {"role": "user", "content": msg[:400]},
-            ],
-            temperature=0.0,
-            max_tokens=50,
-        )
+        with llm_book_context(book_id):
+            client, model = get_client_for_task("general")
+            r = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": INTENT_CLASSIFY_SYSTEM},
+                    {"role": "user", "content": msg[:400]},
+                ],
+                temperature=0.0,
+                max_tokens=50,
+            )
         return r.choices[0].message.content or ""
 
     raw = await loop.run_in_executor(get_executor(), _call)
@@ -324,9 +325,12 @@ async def _tool_shortcut(tool_name: str, extra_args: dict, req, original_msg: st
     queue = asyncio.Queue()
 
     async def _run():
-        result = await execute_tool_streaming(
-            loop, tool_name, extra_args, kb, req.book_id, original_msg, req.session_id, queue
-        )
+        from core.llm_client import llm_book_context
+
+        with llm_book_context(req.book_id):
+            result = await execute_tool_streaming(
+                loop, tool_name, extra_args, kb, req.book_id, original_msg, req.session_id, queue
+            )
         await queue.put(result)
         await queue.put(None)
 
@@ -824,15 +828,21 @@ async def _extract_shortcut(text: str, kb, book_id: str, session_id: str = "", o
     q = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
+    def enqueue(item):
+        loop.call_soon_threadsafe(q.put_nowait, item)
+
     def run():
+        from core.llm_client import llm_book_context
+
         try:
-            for e in extract_stream(text, existing_knowledge=kb.get_knowledge_summary(), book_id=book_id):
-                q.put_nowait(e)
+            with llm_book_context(book_id):
+                for e in extract_stream(text, existing_knowledge=kb.get_knowledge_summary(), book_id=book_id):
+                    enqueue(e)
         except Exception as exc:
             logger.warning("extract_stream failed for /s command: %s", exc)
-            q.put_nowait({"event": "error", "data": {"message": str(exc)[:200]}})
+            enqueue({"event": "error", "data": {"message": str(exc)[:200]}})
         finally:
-            q.put_nowait(None)
+            enqueue(None)
 
     loop.run_in_executor(executor, run)
 
@@ -848,17 +858,21 @@ async def _extract_shortcut(text: str, kb, book_id: str, session_id: str = "", o
                 "data": json.dumps({"stage": "正在保存...", "detail": "入库图数据库"}, ensure_ascii=False),
             }
             try:
-                proposal = await loop.run_in_executor(executor, extract_from_text, text, "", book_id)
+                # extract_stream already performed the full LLM extraction.
+                # Reusing its proposal avoids a duplicate request and prevents
+                # the saved knowledge from disagreeing with the shown result.
+                proposal = proposal_from_dict(evt["data"])
                 result = await loop.run_in_executor(executor, accept_proposal, proposal, book_id)
                 entities = kb.list_entities()
                 json_store.update_book_stats(book_id, entity_count=len(entities))
-                done_msg = f"{result}\n实体: {len(proposal.entities)} | 关系: {len(proposal.relations)} | 伏笔: {len(proposal.foreshadows)}"
+                result_text = str(result).strip() or "设定提取完成，未发现需要新增或更新的知识。"
+                done_msg = f"{result_text}\n实体: {len(proposal.entities)} | 关系: {len(proposal.relations)} | 伏笔: {len(proposal.foreshadows)}"
                 _persist_turn(book_id, session_id, original_msg, done_msg, mode="write")
                 yield {
                     "event": "done",
                     "data": json.dumps(
                         {
-                            "message": result,
+                            "message": result_text,
                             "totalEntities": len(proposal.entities),
                             "totalRelations": len(proposal.relations),
                             "totalForeshadows": len(proposal.foreshadows),
@@ -894,22 +908,48 @@ async def _write_shortcut(instruction: str, mode: str, book_id: str, session_id:
     loop = asyncio.get_running_loop()
     full_text = []
 
+    def enqueue(item):
+        loop.call_soon_threadsafe(q.put_nowait, item)
+
     def run():
+        from core.llm_client import llm_book_context
+
         try:
-            for chunk in write_stream(instruction, mode=mode, project_id=book_id):
-                q.put_nowait(chunk)
+            with llm_book_context(book_id):
+                for chunk in write_stream(instruction, mode=mode, project_id=book_id):
+                    enqueue(("chunk", chunk))
+        except Exception as exc:
+            logger.warning("write_stream failed for /w command: %s", exc)
+            enqueue(("error", str(exc)[:300]))
         finally:
-            q.put_nowait(None)
+            enqueue(("end", None))
 
     loop.run_in_executor(executor, run)
+    error_message = ""
     while True:
-        chunk = await q.get()
-        if chunk is None:
+        kind, value = await q.get()
+        if kind == "end":
             break
-        full_text.append(chunk)
-        yield {"event": "chunk", "data": chunk}
+        if kind == "error":
+            error_message = value
+            continue
+        full_text.append(value)
+        yield {"event": "chunk", "data": value}
 
-    _persist_turn(book_id, session_id, original_msg, "".join(full_text), mode="write")
+    if error_message:
+        final_text = f"❌ 写作请求失败：{error_message}"
+    elif full_text:
+        final_text = "".join(full_text)
+    else:
+        final_text = "⚠️ 模型请求已完成，但没有返回正文。请检查模型名称、输出上限或 Provider 日志。"
+    _persist_turn(book_id, session_id, original_msg, final_text, mode="write")
+    yield {
+        "event": "done",
+        "data": json.dumps(
+            {"message": "" if full_text and not error_message else final_text, "success": not error_message},
+            ensure_ascii=False,
+        ),
+    }
 
 
 @router.post("/write")
@@ -923,19 +963,33 @@ def write_text(data: WriteRequest):
         q = asyncio.Queue()
         loop = asyncio.get_running_loop()
 
+        def enqueue(item):
+            loop.call_soon_threadsafe(q.put_nowait, item)
+
         def run():
+            from core.llm_client import llm_book_context
+
             try:
-                for chunk in write_stream(instruction, mode=mode, project_id=book_id):
-                    q.put_nowait(chunk)
+                with llm_book_context(book_id):
+                    for chunk in write_stream(instruction, mode=mode, project_id=book_id):
+                        enqueue(("chunk", chunk))
+            except Exception as exc:
+                enqueue(("error", str(exc)[:300]))
             finally:
-                q.put_nowait(None)
+                enqueue(("end", None))
 
         loop.run_in_executor(executor, run)
         while True:
-            chunk = await q.get()
-            if chunk is None:
+            kind, value = await q.get()
+            if kind == "end":
                 break
-            yield {"event": "chunk", "data": chunk}
+            if kind == "error":
+                yield {
+                    "event": "done",
+                    "data": json.dumps({"message": f"❌ 写作请求失败：{value}", "success": False}, ensure_ascii=False),
+                }
+                continue
+            yield {"event": "chunk", "data": value}
 
     return EventSourceResponse(event_generator())
 
