@@ -13,11 +13,11 @@ import json
 import logging
 from pathlib import Path
 
+from core.config import DATA_DIR
+
 from .models import MemoryEntry
 
 logger = logging.getLogger(__name__)
-
-DATA_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data"
 
 USER_PREFERENCES_FILE = DATA_DIR / "user_preferences.json"
 

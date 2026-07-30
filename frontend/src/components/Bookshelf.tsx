@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import CreateBookModal from './CreateBookModal'
@@ -21,6 +21,8 @@ export default function Bookshelf() {
   const [tab, setTab] = useState('books')
   const [deleteBookId, setDeleteBookId] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
+  const [importingSpark, setImportingSpark] = useState(false)
+  const sparkInputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -47,6 +49,25 @@ export default function Bookshelf() {
     } catch (e) {
       showToast('创建失败', 'error')
     }
+  }
+
+  async function handleImportSpark(file?: File) {
+    if (!file) return
+    if (!file.name.toLowerCase().endsWith('.spark')) {
+      showToast('请选择 .spark 项目归档', 'error')
+      return
+    }
+    setImportingSpark(true)
+    try {
+      const result = await api.importSparkProject(file)
+      await loadBooks()
+      showToast(`《${result.book.title}》导入成功`, 'success')
+      navigate(`/book/${result.book.id}`)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '项目导入失败', 'error')
+    }
+    setImportingSpark(false)
+    if (sparkInputRef.current) sparkInputRef.current.value = ''
   }
 
   async function handleDelete() {
@@ -167,6 +188,16 @@ export default function Bookshelf() {
               <p className="text-zinc-500 mt-1 text-sm">每个项目拥有独立的知识库与写作空间</p>
             </div>
             <div className="flex gap-2">
+              <input ref={sparkInputRef} type="file" accept=".spark" className="hidden"
+                onChange={e => handleImportSpark(e.target.files?.[0])} />
+              <button
+                onClick={() => sparkInputRef.current?.click()}
+                disabled={importingSpark}
+                className="bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 active:scale-95 text-zinc-400 px-3 py-2.5 rounded-lg transition-all text-sm flex items-center gap-2"
+                title="从另一台电脑导出的 .spark 项目归档恢复"
+              >
+                <Icon name="upload" size={16} /> {importingSpark ? '导入中...' : '导入项目'}
+              </button>
               <button
                 onClick={() => setShowSettings(true)}
                 className="bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-400 px-3 py-2.5 rounded-lg transition-all text-sm flex items-center gap-2"

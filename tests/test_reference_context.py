@@ -36,6 +36,7 @@ class TestBuildReferenceContext:
         from core.writer import _build_reference_context
 
         mock_store.get_reference_books.return_value = ["ref_123"]
+        mock_store.get_reference_profiles.return_value = {"ref_123": "canon"}
         mock_store.get_book.return_value = {"title": "原著小说"}
 
         # Mock entity

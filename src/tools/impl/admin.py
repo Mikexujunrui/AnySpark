@@ -284,24 +284,18 @@ def _manage_permissions(args: dict) -> str:
         lines.append(f"- 自主模式: {'✅ 已启用' if permission_manager.autonomous_mode else '❌ 已关闭'}")
         lines.append(f"- 会话批准: {len(permission_manager._session_approved)} 个工具")
         if permission_manager.autonomous_mode:
-            lines.append("\n⚠️ **自主模式启用中** — Agent 可直接执行删除章节/实体等危险操作，无需用户确认。")
-            lines.append("使用 `action='disable'` 关闭自主模式恢复确认机制。")
+            lines.append("\n✅ **安全自主模式启用中** — 常规步骤自动执行；删除、整章覆盖和批量改稿仍会确认。")
         else:
             lines.append("\n💡 Agent 执行危险操作前会弹出确认提示。")
-            lines.append("如果需要批量操作（如删除多个章节），使用 `action='enable'` 暂时关闭确认。")
+            lines.append("开启自主模式可减少常规步骤打断，但不会关闭原稿保护。")
         return "\n".join(lines)
 
     elif action == "enable":
         permission_manager.autonomous_mode = True
         return (
-            "✅ **自主模式已启用**\n\n"
-            "从现在起，Agent 可以直接执行以下操作而无需每次确认：\n"
-            "- 删除章节 (delete_chapter / delete_all_chapters)\n"
-            "- 删除实体 (delete_entity)\n"
-            "- 删除世界观条目/时间线事件/伏笔\n"
-            "- 批量编辑章节\n"
-            "- 清除版本历史\n\n"
-            "⚠️ 请谨慎使用。完成批量操作后建议关闭。"
+            "✅ **安全自主模式已启用**\n\n"
+            "读取、分析、评审和创建新草稿可以连续执行；"
+            "删除、整章覆盖、批量修改和清理历史仍必须由你明确确认。"
         )
 
     elif action == "disable":

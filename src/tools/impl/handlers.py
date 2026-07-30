@@ -311,11 +311,20 @@ def _handle_materials(name: str, args: dict, book_id: str) -> str:
         ref_ids = json_store.get_reference_books(book_id)
         if not ref_ids:
             return "当前项目未设置参考书。使用 set_reference_books 指定。"
+        profiles = json_store.get_reference_profiles(book_id)
         from core.graph_store import GraphStore
 
         lines = [f"# 参考书搜索: {query}\n"]
         found = 0
         for ref_id in ref_ids:
+            if profiles.get(ref_id, "style") == "style":
+                try:
+                    ref_book = json_store.get_book(ref_id)
+                    title = ref_book.get("title", ref_id)
+                except Exception:
+                    title = ref_id
+                lines.append(f"## {title}\n- 已跳过事实搜索：此参考书设为“只学文风”。")
+                continue
             try:
                 ref_book = json_store.get_book(ref_id)
                 ref_kb = GraphStore(ref_id)
@@ -349,6 +358,12 @@ def _handle_materials(name: str, args: dict, book_id: str) -> str:
         ref_ids = json_store.get_reference_books(book_id)
         if ref_book_id not in ref_ids:
             return f"错误: {ref_book_id} 不是当前书的参考书（当前参考书: {ref_ids}）"
+        usage = json_store.get_reference_profiles(book_id).get(ref_book_id, "style")
+        if usage == "style":
+            return (
+                "⛔ 参考书隔离：该书设为“只学文风”，禁止迁移人物、地点和剧情事实。"
+                "如确实属于同一原著世界，请先在参考书面板把用途改为“只作原著设定”或“文风＋设定”。"
+            )
         from core.graph_store import GraphStore
 
         try:

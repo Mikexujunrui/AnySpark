@@ -1,15 +1,17 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
-      - 'v*'
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
-  build:
+  windows:
+    name: Windows x64
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -17,31 +19,100 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.12"
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Read version
+        shell: pwsh
+        run: |
+          $version = python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])"
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build frontend
         run: |
-          cd frontend
-          npm ci
-          npm run build
+          npm ci --prefix frontend
+          npm run build --prefix frontend
 
-      - name: Build PyInstaller package
+      - name: Build Windows application
         run: |
-          pip install -r requirements.txt
-          pip install pyinstaller
-          pyinstaller novel.spec
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-desktop.txt
+          python -m PyInstaller --noconfirm --clean novel.spec
 
-      - name: Create ZIP archive
+      - name: Create portable ZIP
+        shell: pwsh
         run: |
-          Compress-Archive -Path dist/NovelAgent/* -DestinationPath "NovelAgent_${{ github.ref_name }}.zip"
+          Compress-Archive -Path "dist\AnySpark\*" -DestinationPath "dist\AnySpark_${env:APP_VERSION}_Windows_x64_portable.zip"
 
-      - name: Upload Release Asset
+      - name: Install Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Create Windows installer
+        shell: pwsh
+        run: |
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" "/DMyAppVersion=$env:APP_VERSION" "packaging\windows\AnySpark.iss"
+
+      - name: Upload Windows release assets
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: NovelAgent_*.zip
+          files: |
+            dist/AnySpark_*_Windows_x64_portable.zip
+            dist/installer/AnySpark_*_Windows_x64_Setup.exe
           generate_release_notes: true
+
+      - name: Keep Windows artifacts on this workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnySpark-${{ env.APP_VERSION }}-Windows-x64
+          path: |
+            dist/AnySpark_*_Windows_x64_portable.zip
+            dist/installer/AnySpark_*_Windows_x64_Setup.exe
+          if-no-files-found: error
+
+  macos:
+    name: macOS
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build macOS application
+        env:
+          PYTHON_BIN: python3
+        run: bash scripts/build_macos.sh
+
+      - name: Upload macOS release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/AnySpark_*_macOS_*.dmg
+            dist/AnySpark_*_macOS_*.zip
+          generate_release_notes: true
+
+      - name: Keep macOS artifacts on this workflow run
+        uses: actions/upload-artifact@v4
+        with:
+          name: AnySpark-macOS
+          path: |
+            dist/AnySpark_*_macOS_*.dmg
+            dist/AnySpark_*_macOS_*.zip
+          if-no-files-found: error

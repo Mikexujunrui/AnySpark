@@ -36,10 +36,17 @@ WRITER_SUGGEST_SYSTEM = """你是一位小说续写助手。
 
 
 def _build_reference_context(book_id: str, ref_chapters: list[str] | None = None) -> str:
-    """Build context from reference books: entities + optional full chapters."""
+    """Build role-aware context from reference books.
+
+    ``style`` references contribute only style evidence; ``canon`` references
+    contribute only world/character facts; ``both`` contributes both.  This
+    prevents an author's unrelated novel from leaking its characters into the
+    current story merely because it was added as a style sample.
+    """
     ref_ids = json_store.get_reference_books(book_id)
     if not ref_ids:
         return ""
+    profiles = json_store.get_reference_profiles(book_id)
 
     sections = []
     from .graph_store import GraphStore
@@ -48,32 +55,39 @@ def _build_reference_context(book_id: str, ref_chapters: list[str] | None = None
         try:
             ref_book = json_store.get_book(ref_id)
             book_title = ref_book.get("title", ref_id)
-            ref_sections = [f"## 参考书: {book_title}"]
+            usage = profiles.get(ref_id, "style")
+            usage_label = {
+                "style": "只学习作者文风，不引入人物设定",
+                "canon": "只作为同世界观/原著事实",
+                "both": "同时参考文风与原著事实",
+            }.get(usage, "只学习作者文风")
+            ref_sections = [f"## 参考书: {book_title}（{usage_label}）"]
 
             # Load entities from reference book
-            ref_kb = GraphStore(ref_id)
-            ref_kb.init_schema()
-            entities = ref_kb.list_entities()
-            if entities:
-                char_lines = []
-                loc_lines = []
-                for e in entities[:30]:  # Limit to avoid context overflow
-                    brief = ", ".join(f"{k}: {str(v)[:40]}" for k, v in list(e.data.items())[:3] if v)
-                    line = f"- **{e.name}** [{e.type}]"
-                    if brief:
-                        line += f" — {brief}"
-                    if e.type == "character":
-                        char_lines.append(line)
-                    elif e.type == "location":
-                        loc_lines.append(line)
+            if usage in ("canon", "both"):
+                ref_kb = GraphStore(ref_id)
+                ref_kb.init_schema()
+                entities = ref_kb.list_entities()
+                if entities:
+                    char_lines = []
+                    loc_lines = []
+                    for e in entities[:30]:  # Limit to avoid context overflow
+                        brief = ", ".join(f"{k}: {str(v)[:40]}" for k, v in list(e.data.items())[:3] if v)
+                        line = f"- **{e.name}** [{e.type}]"
+                        if brief:
+                            line += f" — {brief}"
+                        if e.type == "character":
+                            char_lines.append(line)
+                        elif e.type == "location":
+                            loc_lines.append(line)
 
-                if char_lines:
-                    ref_sections.append("\n### 原著角色")
-                    ref_sections.extend(char_lines)
-                if loc_lines:
-                    ref_sections.append("\n### 原著地点")
-                    ref_sections.extend(loc_lines)
-            ref_kb.close()
+                    if char_lines:
+                        ref_sections.append("\n### 原著角色")
+                        ref_sections.extend(char_lines)
+                    if loc_lines:
+                        ref_sections.append("\n### 原著地点")
+                        ref_sections.extend(loc_lines)
+                ref_kb.close()
 
             # Load specific chapters if requested
             if ref_chapters:
@@ -103,14 +117,22 @@ def _build_reference_context(book_id: str, ref_chapters: list[str] | None = None
             try:
                 from .reference_analyzer import load_analysis
 
-                structure_data = load_analysis("structure", ref_id)
-                if structure_data:
-                    ref_sections.append(_format_structure_constraints(structure_data))
+                if usage in ("style", "both"):
+                    structure_data = load_analysis("structure", ref_id)
+                    if structure_data:
+                        ref_sections.append(_format_structure_constraints(structure_data))
 
-                # Inject style fingerprint (if cached)
-                style_data = load_analysis("style_fingerprint", ref_id)
-                if style_data:
-                    ref_sections.append(_format_style_constraints(style_data))
+                    style_data = load_analysis("style_fingerprint", ref_id)
+                    if style_data:
+                        ref_sections.append(_format_style_constraints(style_data))
+
+                    deep_style = _format_deep_style_constraints(ref_id)
+                    if deep_style:
+                        ref_sections.append(deep_style)
+
+                    exemplars = _build_style_exemplars(ref_id)
+                    if exemplars:
+                        ref_sections.append(exemplars)
             except Exception:
                 pass  # analysis injection is best-effort
 
@@ -119,6 +141,86 @@ def _build_reference_context(book_id: str, ref_chapters: list[str] | None = None
             sections.append(f"## 参考书 {ref_id} (加载失败: {str(e)[:50]})")
 
     return "\n".join(sections) if sections else ""
+
+
+def _build_style_exemplars(ref_book_id: str, excerpt_chars: int = 550) -> str:
+    """Select small, distributed prose samples without an LLM/token call."""
+    chapters = [c for c in json_store.load_chapters(ref_book_id) if not c.get("is_extra")]
+    if not chapters:
+        return ""
+    positions = sorted({0, len(chapters) // 2, len(chapters) - 1})
+    samples = []
+    for position in positions:
+        view = json_store._chapter_view(chapters[position])
+        content = view.get("content", "").strip()
+        if len(content) < 100:
+            continue
+        # Avoid always sampling chapter openings; take a stable passage near
+        # the first third, then align to paragraph boundaries where possible.
+        start = min(max(0, len(content) // 3), max(0, len(content) - excerpt_chars))
+        para_start = content.rfind("\n", 0, start)
+        if para_start >= 0:
+            start = para_start + 1
+        excerpt = content[start : start + excerpt_chars].strip()
+        if excerpt:
+            samples.append(f"[{view.get('title', f'样本{position + 1}')}]\n{excerpt}")
+    if not samples:
+        return ""
+    return (
+        "\n### 作者风格证据样本（仅学习方法）\n"
+        "只分析这些样本的句式、叙事距离、节奏、对话组织和词汇倾向；"
+        "不得复用具体句子、人物、地点或情节。\n\n"
+        + "\n\n".join(samples)
+    )
+
+
+def _format_deep_style_constraints(ref_book_id: str) -> str:
+    from .reference_analyzer import load_analysis
+
+    rhythm = load_analysis("sentence_rhythm", ref_book_id) or {}
+    rhetoric = load_analysis("rhetoric_density", ref_book_id) or {}
+    prophecy = load_analysis("prophecy_signature", ref_book_id) or {}
+    pov = load_analysis("narrative_pov", ref_book_id) or {}
+    if not any((rhythm, rhetoric, prophecy, pov)):
+        return ""
+
+    def number(value, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    lines = ["\n### 深层文风约束"]
+    if rhythm:
+        lines.append(
+            "句式："
+            f"长短句交替 {number(rhythm.get('long_short_alternation')):.2f}，"
+            f"对仗占比 {number(rhythm.get('parallel_ratio')):.1%}，"
+            f"文言标记 {number(rhythm.get('classical_marker_density')):.2f}/千字。"
+        )
+    if rhetoric:
+        lines.append(
+            "修辞："
+            f"比喻标记 {number(rhetoric.get('metaphor_marker_density')):.2f}，"
+            f"用典 {number(rhetoric.get('allusion_density')):.2f}/万字，"
+            f"含蓄/反讽 {number(rhetoric.get('understatement_density')):.2f}。"
+        )
+    if prophecy:
+        lines.append(
+            "伏笔语言："
+            f"预叙/暗示 {number(prophecy.get('avg_prophecy_per_chapter')):.2f}/章，"
+            f"诗词谶语 {int(number(prophecy.get('poem_prophecy_count')))} 处，"
+            f"梦兆/预感 {int(number(prophecy.get('dream_omen_count')))} 处。"
+        )
+    if pov:
+        lines.append(
+            "视角："
+            f"限知段落 {int(number(pov.get('limited_pov_sections')))}，"
+            f"视角切换 {number(pov.get('pov_shift_frequency')):.2f}/章，"
+            f"叙述者干预 {int(number(pov.get('narrator_intervention_count')))} 次。"
+        )
+    lines.append("匹配这些统计倾向，但不得机械堆砌指标或复制样本原句。")
+    return "\n".join(lines)
 
 
 def _format_structure_constraints(structure: dict) -> str:
@@ -194,12 +296,17 @@ def _build_write_prompt(
             chapter_number=chapter_number,
         )
     system = WRITER_STRICT_SYSTEM if mode == "strict" else WRITER_SUGGEST_SYSTEM
+    from .creative_constitution import build_constitution_system_section
+
+    constitution_section = build_constitution_system_section(project_id)
+    if constitution_section:
+        system = f"{system}\n\n{constitution_section}"
     system = plugin_manager.call_hook_chain("modify_system_prompt", system, context="writing")
     # Build reference book context if available
     ref_context = _build_reference_context(project_id, ref_chapters)
     ref_section = ""
     if ref_context:
-        ref_section = "---\n\n以下是参考书（原著）的设定和章节，写作时请参考：\n\n" + ref_context
+        ref_section = "---\n\n以下是按用途隔离后的参考证据；严格遵守每本书标注的用途：\n\n" + ref_context
     knowledge_hint = ""
     if "（知识库为空" in knowledge_text:
         knowledge_hint = "（注意：知识库目前为空或极小，请用 suggest 模式写作）"

@@ -126,7 +126,7 @@ async def _import_reference_chapters(loop, args: dict, kb, book_id: str) -> str:
         return f"导入完成：无需导入，所有目标章节已存在{skip_info}"
 
     # ── Batch import: one load, one save, one FTS rebuild ──
-    json_store.batch_add_chapters(book_id, chapters_data)
+    json_store.batch_add_chapters(book_id, chapters_data, origin="reference_import", protected=True)
 
     titles = ", ".join(cd["title"][:30] for cd in chapters_data[:5])
     result = f"成功导入 {len(chapters_data)} 个章节：{titles}"
@@ -161,7 +161,7 @@ async def _import_chapters(loop, args: dict, kb, book_id: str, session_id: str) 
         return "未检测到章节结构。请确认文档格式，或手动指定章节。"
 
     # 批量导入：一次加载、一次保存，1281章也从O(n²)降到O(n)
-    json_store.batch_add_chapters(book_id, chapters_data)
+    json_store.batch_add_chapters(book_id, chapters_data, origin="document_import", protected=True)
 
     total_chars = sum(len(cd["content"]) for cd in chapters_data)
     titles = ", ".join(cd["title"][:20] for cd in chapters_data[:5])

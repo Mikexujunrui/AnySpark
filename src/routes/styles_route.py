@@ -145,6 +145,9 @@ def _skill_to_response(s: dict) -> dict:
         "description": s["description"],
         "triggers": s["triggers"],
         "steps": s["steps"],
+        "instructions": s.get("instructions", ""),
+        "guardrails": s.get("guardrails", []),
+        "outputs": s.get("outputs", []),
         "source": s["source"],
     }
 
