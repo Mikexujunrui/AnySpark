@@ -79,3 +79,6 @@ data_backup_*/
 
 # git 历史清理备份（临时）
 .git_backup_*/
+
+# 章节数据（外部自动化工具管理，禁止入库）
+chapters/
