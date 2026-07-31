@@ -249,7 +249,7 @@ class _SQLiteBase:
 
         If the query looks like Cypher (starts with MATCH, CREATE, etc.),
         silently return empty for backward compatibility with any remaining
-        Neo4j-dependent callers (e.g. impact_propagator.py).
+        graph-store callers (e.g. impact_propagator.py).
         """
         stripped = sql.strip().lower()
         first_word = stripped.split()[0] if stripped else ""
