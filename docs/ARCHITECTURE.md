@@ -506,3 +506,42 @@ Cancel 请求 → RunState.cancel → 设置 cancelled flag → 循环内 check 
 4. supervisor.record_activity：server.py lifespan 订阅 TASK_STEP_COMPLETED 事件
 
 **system_prompt 增强:** sitrep 注入全书摘要（book_summary）+ 活跃 Task 概要 + audit_mode
+
+---
+
+## v3.2.1 重构要点（2026-07-31，见 .pi/plan.md M0-M9）
+
+本节是"现状锚点"——上述历史记录多为旧架构，读代码时以本节为准。
+
+### Agent 引擎（重构后）
+
+| 模块 | 现状 | 说明 |
+|------|------|------|
+| `core/agent_loop.py` | 1730 行（原 1904） | while-loop 骨架；`_process_tool_result` 已纯分发化（<40 行） |
+| `core/flows/` | **领域结果分发** | 7 种结果类型（plot_cards/question/writing_result/patch_result/review_result/autopilot_plan/task_list）各自独立 flow；`RESULT_FLOWS` 分发表注册。**加新交互=加 flow，不动 agent_loop** |
+| `core/loop_event.py` | SSE 事件独立模块 | 从 agent_loop 抽出，避免 flows↔loop 循环依赖 |
+| `core/question.py` | `_await_answer` 在此 | 权限确认等待（300s 单次，三态 confirmed/cancelled/timeout；修复了 10s 轮询误判取消 bug） |
+| `core/loop_state.py` | 含 `consecutive_confirm_cancels` | 连续取消熔断 |
+
+### 存储层（重构后定论）
+
+| 存储 | 文件 | 角色 |
+|------|------|------|
+| JSON | `data/chapters_*.json` 等 | 事实源（章节+版本历史/会话/消息/世界观），用户数据 |
+| SQLite | `data/novel.db` | 事实源（图谱：entities/relations/foreshadows/timeline/snapshots/constraints） |
+| SQLite | `data/search_fts.db` | **派生索引，可重建**（`python scripts/rebuild_fts.py`） |
+
+**关键约定**：
+- `SQLiteStore._run()` 返回 **`list[dict]`**（行可 `.get()`），**不接收 Cypher**（Cypher 开头静默返回空——Neo4j 时代残留，剩余调用方见 ONBOARDING 第 6 节专项）
+- `graph_store.py` 只是 `sqlite_store` 的兼容别名
+
+### 工程纪律（重构后）
+
+- **check gate**：`python scripts/check.py` = ruff + mypy gate + pytest + tsc + eslint（CI 同款）；mypy 增量门禁 `.mypy-baseline`（当前 282）
+- **依赖**：全部 pin `==` + `requirements.lock`（pip-compile）+ pre-commit 锁文件守卫
+- **git**：禁止 `add -A`；`data/`/`chapters/`/`data_backup_*` 入库被 pre-commit 钩子拦截；历史已清理（v3.0 代码史 + M0-M9 重构链，~40 提交）
+- **发布**：`scripts/release.py`（bump→changelog→check→tag，`--dry-run` 先行）
+
+### 测试现状
+
+747 tests / 3 skipped，覆盖率 39%（gate 38）。核心行为测试：`test_await_answer.py`（权限确认三态）、`test_tool_mutex.py`（互斥+熔断）、`test_agent_loop_e2e.py`（mock LLM 循环）、`test_flows.py`（领域 flow）。

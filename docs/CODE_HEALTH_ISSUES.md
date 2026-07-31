@@ -2,20 +2,24 @@
 
 > 生成日期：2026-07-21 | 版本：v2.7.0 | 状态：持续消化中
 >
-> 最近更新：2026-07-31（v3.2.1 重构批次，见「〇、最近进展」）
+> 最近更新：2026-07-31（v3.2.1 重构批次 M0-M9 完成 + SQLite 专项进行中，见「〇、最近进展」）
 
 ---
 
-## 〇、最近进展（2026-07-31）
+## 〇、最近进展（2026-07-31 重构 M0-M9）
 
 | 项目 | 结果 |
 |------|------|
-| `core/sqlite_store.py`（2649 行单体） | ✅ 拆分为 `core/sqlite_store/` 子包（base/crud/graph/analytics/search mixins + `__init__`），每文件 ≤ 676 行 |
-| `core/tools.py`（2135 行单体） | ✅ 拆分为 `core/tool_registry.py` + `core/tool_defs/`（9 个领域模块）+ 门面 `core/tools.py`，118 个工具完整注册 |
-| `data/stores/*.py` Mixin 类型可见性 | ✅ 各 Mixin 继承 `BaseStore`/链式继承，`JsonStore` 组合类 MRO 修正 |
-| mypy 错误数 | ⚠️ 786 → **290**（在 `mypy_path=src` 正确解析下统计；修复了 mixin 链、`_read_json` 泛型、`_cached` 泛型、`with_retry` 泛型、`ToolRegistry.list` 遮蔽内建 `list` 等系统性问题） |
-| CI mypy | ✅ 从 `|| true` 放行改为**增量门禁**（`scripts/mypy_gate.sh` + `.mypy-baseline`），只允许存量，禁止新增 |
-| 工具接线 | ✅ 新工具 `manage_inspirations` 补注册到 executor；修复灵感 ID 截断回查与 FTS `index_material` 调用签名两个真实 bug |
+| mypy 错误数 | 786 → **282**（v3.2.1 各批次累计修复：mixin 链、search/parts/settings/styles cast、_MEIPASS getattr 化等） |
+| 权限确认 bug | ✅ 修复 `_await_answer` 10s 轮询误判取消（改为 300s 单次三态），新增 5 测试 |
+| 工具互斥/熔断 | ✅ 补行为测试（test_tool_mutex/test_agent_loop_e2e） |
+| FTS 重复索引 | ✅ 修复（18213→1848 行）；新增 `scripts/rebuild_fts.py` 重建脚本 |
+| agent_loop 划边界 | ✅ 7 个领域 case → `core/flows/`；`_process_tool_result` 纯分发化 |
+| SQLite `_run` | ✅ 返回 `list[dict]`（修复 Row.get 运行时崩溃） |
+| **SQLite 迁移专项** | 🔴 **进行中**：约 40 处 Cypher 调用静默空转（已修 impact_propagator/character_agent/narrator_agent；剩余见 ONBOARDING 第 6 节）；SQLiteStore 缺 ~40 方法（schedule_foreshadow 等）待验证 |
+| 覆盖率 | 37% → **39%**（747 tests，gate 38） |
+| 供应链 | ✅ 依赖 pin + requirements.lock + pre-commit 锁守卫 + chapters/data 入库拦截 |
+| git 历史 | ✅ 1004→~40 提交（数据提交清除，保留 v3.0 代码史 + M0-M9 审计链） |
 
 ---
 
