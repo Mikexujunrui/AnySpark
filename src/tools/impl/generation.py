@@ -512,11 +512,9 @@ async def _generate_location_map(loop, args: dict, kb, book_id: str, msg: str = 
                 if loc_b.name in loc_a.name and len(loc_b.name) >= 2:
                     # Only add if no existing LOCATED_IN/BELONGS_TO edge
                     existing = kb._run(
-                        """
-                        MATCH (a:Entity {id: $aid, project_id: $pid})-[r:LOCATED_IN|BELONGS_TO]->(b:Entity {id: $bid, project_id: $pid})
-                        RETURN count(r) as cnt
-                    """,
-                        {"aid": loc_a.id, "bid": loc_b.id, "pid": kb.project_id},
+                        "SELECT COUNT(*) c FROM relations WHERE from_entity=? AND to_entity=? "
+                        "AND type IN ('LOCATED_IN','BELONGS_TO') AND project_id=?",
+                        (loc_a.id, loc_b.id, kb.project_id),
                     )
                     if existing and existing[0]["cnt"] == 0:
                         from core.knowledge import Relation, RelationType
@@ -833,7 +831,7 @@ def _add_entity_tool(args: dict, book_id: str) -> str:
     store = get_store(book_id)
     # Check existing
     existing = store._run(
-        "MATCH (e:Entity {name: $name, project_id: $pid}) RETURN e.id AS id", {"name": name, "pid": book_id}
+        "SELECT id FROM entities WHERE name=? AND project_id=? LIMIT 1", (name, book_id)
     )
     if existing:
         store.update_entity(existing[0]["id"], data)
@@ -860,8 +858,8 @@ def _add_relation_tool(args: dict, book_id: str) -> str:
     # Resolve names to IDs
     def resolve(name_or_id):
         r = store._run(
-            "MATCH (e:Entity {project_id: $pid}) WHERE e.id = $v OR e.name = $v RETURN e.id AS id LIMIT 1",
-            {"v": name_or_id, "pid": book_id},
+            "SELECT id FROM entities WHERE (id=? OR name=?) AND project_id=? LIMIT 1",
+            (name_or_id, name_or_id, book_id),
         )
         return r[0]["id"] if r else name_or_id
 

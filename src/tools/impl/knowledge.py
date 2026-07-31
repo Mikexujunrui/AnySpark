@@ -438,14 +438,25 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
                     loc_id = loc_entities.get(location_name.lower())
                     if loc_id:
                         try:
-                            kb._run(
-                                """
-                                MATCH (t:Timeline {id: $tid, project_id: $pid})
-                                MATCH (l:Entity {id: $lid, project_id: $pid})
-                                MERGE (t)-[:OCCURRED_AT]->(l)
-                            """,
-                                {"tid": evt_id, "lid": loc_id, "pid": book_id},
+                            rel_exists = kb._run(
+                                "SELECT id FROM relations WHERE from_entity=? AND to_entity=? "
+                                "AND type='OCCURRED_AT' AND project_id=?",
+                                (evt_id, loc_id, book_id),
                             )
+                            if not rel_exists:
+                                import uuid as _uuid
+
+                                from core.knowledge import Relation, RelationType
+
+                                kb.add_relation(
+                                    Relation(
+                                        id=str(_uuid.uuid4())[:8],
+                                        from_entity=evt_id,
+                                        to_entity=loc_id,
+                                        type=RelationType.OCCURRED_AT,
+                                        data={},
+                                    )
+                                )
                         except Exception:
                             pass
 

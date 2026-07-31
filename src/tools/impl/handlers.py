@@ -571,7 +571,7 @@ def _handle_knowledge_edit(name: str, args: dict, book_id: str) -> str:
             return "错误: 需要 foreshadow_id 参数"
         kb = GraphStore(book_id)
         kb.init_schema()
-        kb._run("MATCH (f:Fore {id: $id, project_id: $pid}) DETACH DELETE f", {"id": fid, "pid": book_id})
+        kb._run("DELETE FROM foreshadows WHERE id=? AND project_id=?", (fid, book_id))
         return f"已删除伏笔 (id: {fid})"
 
     elif name == "plan_foreshadow":
