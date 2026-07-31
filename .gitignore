@@ -11,6 +11,8 @@ __pycache__/
 
 # Data (runtime) — all user-generated data, private to each deployment
 data/*.db
+# 用户数据根目录（含嵌套 .git 残留，整体禁止入库）
+data/
 data/*.json
 data/uploads/
 data/styles/
@@ -79,6 +81,9 @@ data_backup_*/
 
 # git 历史清理备份（临时）
 .git_backup_*/
+
+# 覆盖率临时产物
+.cov_data/
 
 # 章节数据（外部自动化工具管理，禁止入库）
 chapters/

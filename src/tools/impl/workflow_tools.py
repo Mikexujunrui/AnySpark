@@ -73,7 +73,7 @@ async def _execute_workflow_streaming(loop, args: dict, kb, book_id: str, msg: s
     dynamic_params = args.get("params") or {}
     context.update(dynamic_params)
     wf.status = "running"
-    results = []
+    results: list[dict] = []
     lines = [f"开始执行工作流「{wf.name}」({len(wf.steps)} 步):\n"]
 
     # Emit workflow start event with all steps
@@ -256,31 +256,31 @@ async def _handle_workflow_tool(name: str, args: dict, book_id: str) -> str:
         from core.workflow_engine import engine as wf_engine
 
         # Try to get workflow from active engine or rebuild from storage
-        wf = wf_engine._active.get(wid)
-        if not wf:
+        flow = wf_engine._active.get(wid)
+        if not flow:
             # Try to load from storage and rebuild
             try:
                 wf_data = json_store.get_workflow(wid)
-                wf = wf_engine.build(wid, {"name": wf_data.get("name", "工作流"), "steps": wf_data.get("steps", [])})
+                flow = wf_engine.build(wid, {"name": wf_data.get("name", "工作流"), "steps": wf_data.get("steps", [])})
             except Exception:
                 return f"工作流不存在: {wid}"
 
-        context = {"book_id": book_id}
+        exec_context = {"book_id": book_id}
         # Merge dynamic params from args into context
         dynamic_params = args.get("params") or {}
-        context.update(dynamic_params)
-        wf.status = "running"
-        results = []
-        lines = [f"开始执行工作流「{wf.name}」({len(wf.steps)} 步):\n"]
+        exec_context.update(dynamic_params)
+        flow.status = "running"
+        results: list[dict] = []
+        lines = [f"开始执行工作流「{flow.name}」({len(flow.steps)} 步):\n"]
 
-        for i, step in enumerate(wf.steps):
-            wf.current_step = i
+        for i, step in enumerate(flow.steps):
+            flow.current_step = i
             step.status = "running"
-            lines.append(f"  [{i + 1}/{len(wf.steps)}] {step.label}...")
+            lines.append(f"  [{i + 1}/{len(flow.steps)}] {step.label}...")
             try:
                 handler = wf_engine.handlers.get(step.type)
                 if handler:
-                    result = await handler(step.config, context, results)
+                    result = await handler(step.config, exec_context, results)
                     step.status = "completed"
                     results.append({"step": step.label, "result": result, "id": step.id})
                     lines.append("    ✓ 完成")
@@ -295,10 +295,10 @@ async def _handle_workflow_tool(name: str, args: dict, book_id: str) -> str:
                 results.append({"step": step.label, "error": error_msg, "id": step.id})
                 lines.append(f"    ✗ {error_msg}")
 
-        wf.status = "completed"
+        flow.status = "completed"
         wf_engine._results[wid] = results
-        completed = sum(1 for s in wf.steps if s.status == "completed")
-        lines.append(f"\n工作流执行完毕: {completed}/{len(wf.steps)} 步成功")
+        completed = sum(1 for s in flow.steps if s.status == "completed")
+        lines.append(f"\n工作流执行完毕: {completed}/{len(flow.steps)} 步成功")
         return "\n".join(lines)
 
     elif name == "update_workflow":

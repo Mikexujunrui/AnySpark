@@ -292,7 +292,7 @@ def _guard_new_chapter_target(book_id: str, args: dict, instruction: str = "") -
     }
 
 
-async def _write_chapter(loop, args: dict, book_id: str, msg: str) -> str:
+async def _write_chapter(loop, args: dict, book_id: str, msg: str) -> str | dict:
     from core.writer import write as wr
 
     guard = _guard_new_chapter_target(book_id, args, args.get("instruction", msg))
@@ -336,7 +336,7 @@ async def _write_chapter(loop, args: dict, book_id: str, msg: str) -> str:
     return _format_chapter_result(book_id, chapter["id"], title, result)
 
 
-async def _write_chapter_streaming(loop, args: dict, kb, book_id: str, msg: str, queue=None) -> str:
+async def _write_chapter_streaming(loop, args: dict, kb, book_id: str, msg: str, queue=None) -> str | dict:
     from core.writer import write_stream as write_stream_fn
 
     instruction = args.get("instruction", msg)
@@ -576,7 +576,7 @@ async def _write_by_nodes(
     return full_text, write_error
 
 
-async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: str, queue=None) -> str:
+async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: str, queue=None) -> str | dict:
     from core.knowledge_scope import ExposureLevel, WritingKnowledgeScope, scope_manager
 
     instruction = args.get("instruction", msg)
@@ -983,7 +983,7 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
     }
 
 
-async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: str = "", queue=None) -> str:
+async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: str = "", queue=None) -> str | dict:
     """Rewrite chapter by plot chain, node by node with streaming output."""
     # Late import to avoid circular dependency with executor.py
     from tools.executor import _split_paragraphs, apply_edit_ops
@@ -1257,7 +1257,7 @@ async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: s
     }
 
 
-def _store_chapter(args: dict, book_id: str, msg: str) -> str:
+def _store_chapter(args: dict, book_id: str, msg: str) -> str | dict:
     title = args.get("title", "章节")
     content = args.get("content", msg)
     is_extra = bool(args.get("is_extra", False))
@@ -1287,7 +1287,7 @@ def _store_chapter(args: dict, book_id: str, msg: str) -> str:
     return _format_chapter_result(book_id, chapter["id"], title, content)
 
 
-async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str, msg: str) -> str:
+async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str, msg: str) -> str | dict:
     from core.context_manager import ContextManager
     from core.knowledge_scope import ExposureLevel, WritingKnowledgeScope, scope_manager
 
