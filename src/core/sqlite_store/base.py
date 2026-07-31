@@ -244,7 +244,7 @@ class _SQLiteBase:
 
     _CYPHER_START = frozenset({"match", "create", "merge", "unwind", "call", "with", "return"})
 
-    def _run(self, sql: str, params: tuple | dict | None = None) -> list[sqlite3.Row]:
+    def _run(self, sql: str, params: tuple | dict | None = None) -> list[dict]:
         """Execute SQL and return all rows (compatible with original _run API).
 
         If the query looks like Cypher (starts with MATCH, CREATE, etc.),
@@ -261,12 +261,12 @@ class _SQLiteBase:
                 cursor = self._conn.execute(sql, params)
             else:
                 cursor = self._conn.execute(sql, params or ())
-            return list(cursor.fetchall())
+            return [dict(r) for r in cursor.fetchall()]
         except Exception as e:
             logger.warning("SQLite query failed: %s\nSQL: %s", e, sql[:200])
             return []
 
-    def _run_single(self, sql: str, params: tuple | dict | None = None) -> sqlite3.Row | None:
+    def _run_single(self, sql: str, params: tuple | dict | None = None) -> dict | None:
         """Execute SQL and return the first row, or None."""
         rows = self._run(sql, params)
         return rows[0] if rows else None

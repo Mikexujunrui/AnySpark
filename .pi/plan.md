@@ -268,5 +268,5 @@ M8 ──→ M9 反向审计
 | 前端工作量估计不准 | 中 | M7.1 先审计，工作量以审计为准 |
 | 数据迁移边界情况 | 中 | M0.2 全量备份；迁移脚本 dry-run 先行 |
 | **双 RunHandle/CancelledError 重复实现（session_state/run_state）** | 中 | ✅ 已解决（M5 后清理）：run_state.py 无生产引用，已删除，2 个测试改引 session_state |
-| **SQLite 迁移功能缺陷（mypy 暴露）**：`_run` 对 Cypher 查询静默返回空；~40 处调用方引用 SQLiteStore 不存在的 `schedule_foreshadow` 等方法；`Row.get` 在 sqlite3.Row 上运行时 AttributeError | 🔴 高 | **专项**：逐个验证调用方（死代码删/缺方法实现/Row 改 dict 索引） |
+| **SQLite 迁移功能缺陷**：① `_run` 对 Cypher 静默返回空（**实证确认**，约 50 处 Cypher 功能空转）；② SQLiteStore 缺 ~40 个方法（schedule_foreshadow 等）；③ Row.get 崩溃 | 🔴 高 | ① 专项中：**Row.get 已修**（`_run` 返回 dict，747 测试绿）；Cypher→SQL 重写进行中（impact_propagator 起步）；② 待逐个验证；③ ✅ 已修 |
 | **并发 session git 冲突（2026-07-31）**：外部自动化进程在重构期间多次 `git add -A` 并提交 chapters 数据（create: 章一 / delete 等 7+ 提交），曾把 HEAD 移出代码树。已恢复至 34f6dee（含全部代码，732 测试绿）。**需主人协调**：建议自动化提交工具停止 `git add -A` 且只在 data/ 子目录内操作，或改用独立 git 仓库 |
