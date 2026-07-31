@@ -179,17 +179,15 @@ class CharacterAgent:
         try:
             rows = self.graph._run(
                 """
-                MATCH (e:Entity {id: $cid, project_id: $pid})-[:HAS_PHASE]->(s:Snapshot)
-                RETURN s
-                ORDER BY
-                    CASE WHEN s.is_current = true THEN 0 ELSE 1 END,
-                    s.time_order DESC
+                SELECT * FROM snapshots
+                WHERE character_id=? AND project_id=?
+                ORDER BY CASE WHEN is_current THEN 0 ELSE 1 END, time_order DESC
                 LIMIT 1
                 """,
-                {"cid": character_id, "pid": self.book_id},
+                (character_id, self.book_id),
             )
             if rows:
-                snap = dict(rows[0]["s"])
+                snap = dict(rows[0])
                 return snap
         except Exception as e:
             logger.debug("Failed to get phase for %s: %s", character_id, e)
@@ -202,12 +200,13 @@ class CharacterAgent:
             # Outgoing relationships
             rows = self.graph._run(
                 """
-                MATCH (c:Entity {id: $cid, project_id: $pid})-[r]->(other:Entity {project_id: $pid})
-                WHERE other:Character
-                RETURN other.name AS name, type(r) AS rel_type, 'outgoing' AS direction,
-                       other.id AS target_id
+                SELECT e.name AS name, r.type AS rel_type, 'outgoing' AS direction,
+                       e.id AS target_id
+                FROM relations r
+                JOIN entities e ON e.id = r.to_entity
+                WHERE r.from_entity=? AND r.project_id=? AND e.entity_type='character'
                 """,
-                {"cid": character_id, "pid": self.book_id},
+                (character_id, self.book_id),
             )
             for row in rows:
                 rels.append(
@@ -222,11 +221,13 @@ class CharacterAgent:
             # Incoming relationships
             rows = self.graph._run(
                 """
-                MATCH (other:Entity:Character {project_id: $pid})-[r]->(c:Entity {id: $cid, project_id: $pid})
-                RETURN other.name AS name, type(r) AS rel_type, 'incoming' AS direction,
-                       other.id AS target_id
+                SELECT e.name AS name, r.type AS rel_type, 'incoming' AS direction,
+                       e.id AS target_id
+                FROM relations r
+                JOIN entities e ON e.id = r.from_entity
+                WHERE r.to_entity=? AND r.project_id=? AND e.entity_type='character'
                 """,
-                {"cid": character_id, "pid": self.book_id},
+                (character_id, self.book_id),
             )
             for row in rows:
                 rels.append(
