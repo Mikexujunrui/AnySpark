@@ -753,7 +753,7 @@ def accept_proposal(proposal: KnowledgeProposal, project_id: str = "default") ->
         evt_id = f"evt_ch{_to_str}"
         # Check if this timeline event already exists
         existing_tl = store._run(
-            "MATCH (t:Timeline {id: $tid, project_id: $pid}) RETURN t", {"tid": evt_id, "pid": project_id}
+            "SELECT id FROM timeline_events WHERE id=? AND project_id=?", (evt_id, project_id)
         )
         if not existing_tl:
             from .knowledge import TimelineEvent
@@ -798,14 +798,20 @@ def accept_proposal(proposal: KnowledgeProposal, project_id: str = "default") ->
             loc_id = name_to_id.get(loc_name) or name_to_id.get(loc_name.lower())
             if loc_id:
                 try:
-                    store._run(
-                        """
-                        MATCH (t:Timeline {id: $tid, project_id: $pid})
-                        MATCH (l:Entity {id: $lid, project_id: $pid})
-                        MERGE (t)-[:OCCURRED_AT]->(l)
-                    """,
-                        {"tid": evt_id, "lid": loc_id, "pid": project_id},
+                    rel_exists = store._run(
+                        "SELECT id FROM relations WHERE from_entity=? AND to_entity=? AND type='OCCURRED_AT' AND project_id=?",
+                        (evt_id, loc_id, project_id),
                     )
+                    if not rel_exists:
+                        store.add_relation(
+                            Relation(
+                                id=str(uuid.uuid4())[:8],
+                                from_entity=evt_id,
+                                to_entity=loc_id,
+                                type=RelationType.OCCURRED_AT,
+                                data={},
+                            )
+                        )
                 except Exception:
                     pass
 
@@ -836,36 +842,57 @@ def accept_proposal(proposal: KnowledgeProposal, project_id: str = "default") ->
     # ── Fix LOCATED_IN direction errors + transitive containment ──
     if spatial_created > 0:
         try:
-            # Fix cycles: if A→B and B→A, keep only correct direction
-            store._run(
+            # Fix cycles: if A→B and B→A, keep only correct direction.
+            # Heuristic (mirrors original Cypher): the entity whose name
+            # contains the other's name (or has the longer name) is the child;
+            # keep child→parent and delete the reverse edge.
+            cycles = store._run(
                 """
-                MATCH (a:Entity:Location {project_id: $pid})-[r1:LOCATED_IN]->(b:Entity:Location {project_id: $pid})-[r2:LOCATED_IN]->(a)
-                WHERE a.id < b.id
-                WITH a, b, r1, r2,
-                    CASE
-                        WHEN a.data CONTAINS b.name THEN 'a_is_child'
-                        WHEN b.data CONTAINS a.name THEN 'b_is_child'
-                        WHEN size(a.name) > size(b.name) THEN 'a_is_child'
-                        ELSE 'b_is_child'
-                    END AS correct_direction
-                FOREACH (_ IN CASE WHEN correct_direction = 'a_is_child' THEN [1] ELSE [] END |
-                    DELETE r2
-                )
-                FOREACH (_ IN CASE WHEN correct_direction = 'b_is_child' THEN [1] ELSE [] END |
-                    DELETE r1
-                )
-            """,
-                {"pid": project_id},
+                SELECT r1.id AS r1_id, r2.id AS r2_id, r1.from_entity AS a_id, r1.to_entity AS b_id
+                FROM relations r1
+                JOIN relations r2 ON r1.from_entity = r2.to_entity AND r1.to_entity = r2.from_entity
+                WHERE r1.type='LOCATED_IN' AND r2.type='LOCATED_IN'
+                  AND r1.from_entity < r1.to_entity AND r1.project_id=?
+                """,
+                (project_id,),
             )
-            # Transitive closure
-            store._run(
-                """
-                MATCH (a:Entity:Location {project_id: $pid})-[:LOCATED_IN]->(b:Entity:Location {project_id: $pid})-[:LOCATED_IN]->(c:Entity:Location {project_id: $pid})
-                WHERE a.id <> c.id AND NOT (a)-[:LOCATED_IN]->(c)
-                MERGE (a)-[:LOCATED_IN]->(c)
-            """,
-                {"pid": project_id},
+            for cyc in cycles:
+                a_id, b_id = cyc["a_id"], cyc["b_id"]
+                names = {
+                    nid: (store._run("SELECT name FROM entities WHERE id=? AND project_id=?", (nid, project_id)) or [{}])[0].get("name", "")
+                    for nid in (a_id, b_id)
+                }
+                na, nb = names.get(a_id, ""), names.get(b_id, "")
+                a_is_child = (na and nb and na in nb) or len(na) > len(nb)
+                # keep child→parent: if a is child, keep r2 (b→a), delete r1 (a→b)
+                del_id = cyc["r2_id"] if a_is_child else cyc["r1_id"]
+                store._run("DELETE FROM relations WHERE id=? AND project_id=?", (del_id, project_id))
+            # Transitive closure: if A→B→C and A→C missing, add A→C.
+            edges = store._run(
+                "SELECT from_entity, to_entity FROM relations WHERE type='LOCATED_IN' AND project_id=?",
+                (project_id,),
             )
+            pairs = {(e["from_entity"], e["to_entity"]) for e in edges}
+            added = set()
+            for e in edges:
+                a, b = e["from_entity"], e["to_entity"]
+                third = store._run(
+                    "SELECT to_entity AS c FROM relations WHERE from_entity=? AND type='LOCATED_IN' AND project_id=?",
+                    (b, project_id),
+                )
+                for row in third:
+                    c = row["c"]
+                    if a != c and (a, c) not in pairs and (a, c) not in added:
+                        store.add_relation(
+                            Relation(
+                                id=str(uuid.uuid4())[:8],
+                                from_entity=a,
+                                to_entity=c,
+                                type=RelationType.LOCATED_IN,
+                                data={},
+                            )
+                        )
+                        added.add((a, c))
         except Exception:
             pass
 
