@@ -3,8 +3,8 @@
 import logging
 import sqlite3
 import threading
-from typing import cast
 from pathlib import Path
+from typing import cast
 
 from .config import DATA_DIR
 

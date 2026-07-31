@@ -23,8 +23,8 @@ Design notes
 
 from __future__ import annotations
 
-from typing import cast
 from dataclasses import dataclass, field
+from typing import cast
 
 # ── Part types ───────────────────────────────────────────────────────────────
 

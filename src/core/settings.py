@@ -7,7 +7,6 @@ to `data/settings.json`. Falls back to `.env` defaults on first run.
 import json
 import logging
 import os
-from typing import cast
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
