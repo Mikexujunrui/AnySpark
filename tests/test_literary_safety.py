@@ -192,7 +192,7 @@ async def test_one_model_response_can_prepare_only_one_full_chapter_writer():
     from core.agent_loop import AgentConfig, _prepare_tool_calls
     from core.llm_client import LLMResponse, ToolCall
     from core.loop_state import LoopState
-    from core.run_state import RunHandle
+    from core.session_state import RunHandle
 
     response = LLMResponse(
         tool_calls=[

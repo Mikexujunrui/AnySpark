@@ -13,7 +13,7 @@ import core.agent_loop as agent_loop
 from core.agent_loop import AgentConfig
 from core.llm_client import LLMResponse, ToolCall
 from core.loop_state import LoopState
-from core.run_state import RunHandle
+from core.session_state import RunHandle
 
 
 def _cfg(book_id: str = "b1") -> AgentConfig:
