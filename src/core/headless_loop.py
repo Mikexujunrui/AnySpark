@@ -16,11 +16,12 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
+from typing import cast
 
 from .agent_loop import AgentConfig, run_agent_loop
 from .config import config
 from .event_bus import Event, EventType, bus
-from .task_queue import TaskStatus
+from .task_queue import TaskQueue, TaskStatus
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +40,7 @@ class StepContextAccumulator:
         self._results: dict[str, dict] = {}  # step_id → result
         self._chapter_outputs: dict[int, str] = {}  # chapter_index → text summary
         self._recent_steps: list[tuple[str, str, str]] = []  # (step_id, label, result_summary)
+        self._intervention_queue: list[str] = []  # user intervention messages (set by routes/chat.py)
 
     def record(self, step_id: str, step, result: dict):
         """Record a completed step's result."""
@@ -62,7 +64,7 @@ class StepContextAccumulator:
         """Extract a concise summary from a step result."""
         if not result:
             return ""
-        text = result.get("text", "")
+        text = cast(str, result.get("text", ""))
         if not text:
             return ""
         if len(text) > max_len:
@@ -322,25 +324,26 @@ def _persist_headless_turn(
             json_store.save_sessions(book_id, sessions)
 
         # Persist as a normal turn (compatible with _load_history_as_llm_messages)
-        turn = {
-            "session_id": session_id,
-            "role": "user",
-            "text": user_text,
-            "mode": mode,
-            "timestamp": datetime.now().isoformat(),
-        }
-        json_store.append_message(session_id, turn, book_id=book_id)
+        ts = datetime.now().strftime("%H:%M")
+        from core.book_locks import book_lock
 
-        response_turn = {
-            "session_id": session_id,
-            "role": "assistant",
-            "text": agent_text,
-            "mode": mode,
-            "timestamp": datetime.now().isoformat(),
-            "parts": parts,
-            "source": source,
-        }
-        json_store.append_message(session_id, response_turn, book_id=book_id)
+        with book_lock(session_id):
+            history = json_store.load_messages(session_id)
+            history.append(
+                {"role": "user", "text": user_text, "ts": ts, "mode": mode}
+            )
+            agent_record: dict[str, object] = {
+                "role": "agent",
+                "text": agent_text,
+                "ts": ts,
+                "mode": mode,
+            }
+            if parts:
+                agent_record["parts"] = parts
+                agent_record["user_text"] = user_text
+                agent_record["final_text"] = agent_text
+            history.append(agent_record)
+            json_store.save_messages(book_id, session_id, history)
 
     except Exception as e:
         logger.warning("Failed to persist headless turn: %s", e)
@@ -357,7 +360,7 @@ class TaskRunner:
     so online SSE connections can relay it to the frontend.
     """
 
-    def __init__(self, task_queue):
+    def __init__(self, task_queue: TaskQueue):
         self._queue = task_queue
         self._running: dict[str, asyncio.Task] = {}  # task_id → asyncio.Task
         self._cancel_flags: dict[str, asyncio.Event] = {}  # task_id → cancel event

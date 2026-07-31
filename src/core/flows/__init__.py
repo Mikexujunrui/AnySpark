@@ -13,7 +13,7 @@ Adding a new interaction type = adding one entry to ``RESULT_FLOWS``,
 no edits to the loop.
 """
 
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 
 from core.loop_event import LoopEvent
 
@@ -22,7 +22,7 @@ from .user_interaction import flow_ask_user, flow_plot_cards
 from .work_product import flow_patch_result, flow_review_result, flow_writing_result
 
 FlowOutcome = tuple[list[LoopEvent], str, bool, str | None]
-FlowHandler = Callable[[dict, str], FlowOutcome]
+FlowHandler = Callable[[dict, str], Awaitable[FlowOutcome]]
 
 # ── Dispatch table: result type → flow handler ──
 # The single place where a result type is bound to its handler.

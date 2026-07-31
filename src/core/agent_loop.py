@@ -17,6 +17,7 @@ import traceback
 from collections import defaultdict, deque
 from collections.abc import AsyncGenerator, Callable
 from dataclasses import dataclass
+from typing import Any, cast
 
 from .agent_context import AgentContext
 from .compaction import handle_context_overflow, needs_compaction, prune_stale_tool_results
@@ -113,13 +114,13 @@ def _extract_last_tool_summary(messages: list[dict]) -> str:
         if msg.get("role") == "tool":
             content = msg.get("content", "")
             if content and not _is_trivial_done(content):
-                return content[:800]
+                return cast(str, content[:800])
     # Fallback: return last tool message even if trivial
     for msg in reversed(messages):
         if msg.get("role") == "tool":
             content = msg.get("content", "")
             if content:
-                return content[:500]
+                return cast(str, content[:500])
     return ""
 
 
@@ -157,7 +158,7 @@ class AgentConfig:
     @property
     def task_label(self) -> str:
         defaults = config.agent.per_type.get(self.agent_type, {})
-        return defaults.get("task_label", "general")
+        return cast(str, defaults.get("task_label", "general"))
 
 
 async def run_agent_loop(
@@ -741,7 +742,7 @@ async def _stream_llm_with_retry(
     agent_config: AgentConfig,
     handle: RunHandle,
     state: LoopState,
-) -> AsyncGenerator[tuple[str, object], None]:
+) -> AsyncGenerator[tuple[str, Any], None]:
     """Stream one LLM call with retry for transient errors.
 
     Retry policy:
@@ -841,7 +842,13 @@ def _extract_exception(error_str: str | None) -> Exception | None:
     return Exception(error_str)
 
 
-async def _stream_llm_response(messages, tools, agent_config: AgentConfig, handle, temperature: float | None = None):
+async def _stream_llm_response(
+    messages,
+    tools,
+    agent_config: AgentConfig,
+    handle,
+    temperature: float | None = None,
+) -> AsyncGenerator[tuple[str, Any], None]:
     response = LLMResponse()
     streamed_text = ""
     queue: asyncio.Queue = asyncio.Queue()
@@ -1073,17 +1080,17 @@ async def _handle_tool_calls(
             for t in gather_tasks:
                 t.cancel()
             raise
-        for p, result in zip(parallel_tasks, results, strict=False):
+        for p, res in zip(parallel_tasks, results, strict=False):
             tc = p["tc"]
-            if isinstance(result, BaseException):
-                if isinstance(result, asyncio.CancelledError):
+            if isinstance(res, BaseException):
+                if isinstance(res, asyncio.CancelledError):
                     raise
-                result = f"工具 {tc.name} 出错: {str(result)[:100]}"
-            elif isinstance(result, Exception):
-                result = f"工具 {tc.name} 出错: {str(result)[:100]}"
-            async for ev in _process_tool_result(tc, result, agent_config, state, messages):
+                res = f"工具 {tc.name} 出错: {str(res)[:100]}"
+            elif isinstance(res, Exception):
+                res = f"工具 {tc.name} 出错: {str(res)[:100]}"
+            async for ev in _process_tool_result(tc, res, agent_config, state, messages):
                 yield ev
-            _collect_result_parts(tc, result, state, messages)
+            _collect_result_parts(tc, res, state, messages)
 
     # Treat one assistant tool-call response as an atomic protocol batch.
     # This also backfills calls skipped by cancellation/terminal tools before
