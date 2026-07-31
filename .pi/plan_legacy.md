@@ -64,7 +64,10 @@ L4.0 git污染协调（贯穿，需主人配合外部进程）
   - 验证：tsc 全绿 + eslint 0 error + vite build 通过
 - [x] **L3.2** ChaptersPanel 1329 行拆分 → **994 行（-335）**：Find-Replace→ChapterFindReplace、Outline→ChapterOutlinePanel、Sidebar→ChapterSidebar；tab 管理（tabStore）/ 历史（ChapterHistoryPanel）已是独立组件
   - 验证：tsc 全绿 + eslint 0 error + vite build 通过
-- [ ] **L3.3** 其他巨型组件（ChatPanel 1156 / SettingsModal 1045）按需拆分
+- [x] **L3.3** 其他巨型组件（ChatPanel 1156 / SettingsModal 1045）按需拆分
+  - SettingsModal 1045→903（拆出 SettingsAboutTab + SettingsSlotsTab，Memory 原已独立）
+  - ChatPanel 1156：JSX 已高度组件化（MessageList/MessageInput/ContextBar/RunLedger/AutopilotConsole 均独立组件），剩余行数主要是事件处理逻辑非 JSX，无需再拆
+  - 验证：tsc 全绿 + eslint 0 error + build 通过
   - 验证：`npx tsc --noEmit` 全绿 + `npm run build` 通过 + 手动回归
 
 ## L4：收尾
