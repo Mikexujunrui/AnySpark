@@ -17,8 +17,10 @@ cd "$(dirname "$0")/.."
 # Allow overriding the interpreter (Windows/WSL may need `PYTHON=...`)
 PYTHON=${PYTHON:-python}
 
-if ! command -v "$PYTHON" >/dev/null 2>&1; then
-    echo "::error::mypy gate 无法运行: 找不到 $PYTHON。"
+# Probe by actually running it: `command -v` fails for absolute Windows
+# paths (e.g. C:/Python313/python.exe) even when they are executable.
+if ! "$PYTHON" --version >/dev/null 2>&1; then
+    echo "::error::mypy gate 无法运行: $PYTHON 不可用。"
     echo "        请设置 PYTHON 指向含 mypy 的解释器（如 PYTHON=C:/Python313/python.exe bash scripts/mypy_gate.sh）。"
     exit 1
 fi
