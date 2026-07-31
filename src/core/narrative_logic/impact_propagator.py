@@ -115,42 +115,35 @@ class ImpactPropagator:
         pid = self._store.project_id
         if source.source_type == "entity":
             rows = self._store._run(
-                """
-                MATCH (e:Entity {id: $eid, project_id: $pid})
-                RETURN elementId(e) as nid
-            """,
-                {"eid": source.source_id, "pid": pid},
+                "SELECT id FROM entities WHERE id=? AND project_id=?",
+                (source.source_id, pid),
             )
         elif source.source_type == "timeline_event":
             rows = self._store._run(
-                """
-                MATCH (t:Timeline {id: $tid, project_id: $pid})
-                RETURN elementId(t) as nid
-            """,
-                {"tid": source.source_id, "pid": pid},
+                "SELECT id FROM timeline_events WHERE id=? AND project_id=?",
+                (source.source_id, pid),
             )
         elif source.source_type == "foreshadow":
             rows = self._store._run(
-                """
-                MATCH (f:Fore {id: $fid, project_id: $pid})
-                RETURN elementId(f) as nid
-            """,
-                {"fid": source.source_id, "pid": pid},
+                "SELECT id FROM foreshadows WHERE id=? AND project_id=?",
+                (source.source_id, pid),
             )
         else:
             return None
 
-        return rows[0]["nid"] if rows else None
+        return rows[0]["id"] if rows else None
 
     def _get_neighbors(self, node_id: str) -> list[tuple[str, str, float]]:
         """Get (neighbor_id, edge_type, weight) for all edges of node_id."""
         rows = self._store._run(
             """
-            MATCH (n)-[r]-(m)
-            WHERE elementId(n) = $nid
-            RETURN elementId(m) as mid, type(r) as rtype
-        """,
-            {"nid": node_id},
+            SELECT to_entity AS mid, type AS rtype FROM relations
+            WHERE from_entity=? AND project_id=?
+            UNION
+            SELECT from_entity AS mid, type AS rtype FROM relations
+            WHERE to_entity=? AND project_id=?
+            """,
+            (node_id, self._store.project_id, node_id, self._store.project_id),
         )
         result = []
         for r in rows:
@@ -240,36 +233,40 @@ class ImpactPropagator:
         """Batch-fetch name/type/id for a list of graph-store element ids."""
         if not node_ids:
             return {}
-        # The store doesn't support parameterizing elementId lists in older
-        # versions, so we query in chunks.
-        details = {}
-        # Build a Cypher query with elementId matching
-        id_list = ", ".join([f'"{nid}"' for nid in node_ids])
-        # Note: elementId values are strings like "4:xxxx:123" — safe to
-        # inline since they come from our own queries, not user input.
+        pid = self._store.project_id
+        placeholders = ",".join("?" for _ in node_ids)
+        params = node_ids + [pid]
+        # Union across the node tables; source_type column emulates Neo4j labels.
         query = f"""
-            MATCH (n)
-            WHERE elementId(n) IN [{id_list}]
-            RETURN elementId(n) as nid, n.name as name, labels(n) as labels,
-                   n.id as id, n.entity_type as etype, n.label as label,
-                   n.resolved as resolved, n.chapter_ref as cr
+            SELECT id, name, entity_type AS ntype, 'Entity' AS src_type, NULL AS resolved, NULL AS cr
+              FROM entities WHERE id IN ({placeholders}) AND project_id=?
+            UNION ALL
+            SELECT id, label AS name, NULL AS ntype, 'Timeline' AS src_type, NULL AS resolved, chapter_ref AS cr
+              FROM timeline_events WHERE id IN ({placeholders}) AND project_id=?
+            UNION ALL
+            SELECT id, text AS name, NULL AS ntype, 'Fore' AS src_type, resolved, NULL AS cr
+              FROM foreshadows WHERE id IN ({placeholders}) AND project_id=?
+            UNION ALL
+            SELECT id, label AS name, NULL AS ntype, 'Snapshot' AS src_type, NULL AS resolved, NULL AS cr
+              FROM snapshots WHERE id IN ({placeholders}) AND project_id=?
         """
-        rows = self._store._run(query)
+        rows = self._store._run(query, tuple(params * 4))
+        details: dict[str, dict] = {}
         for r in rows:
-            labels = r.get("labels", [])
-            if "Entity" in labels:
-                ntype = r.get("etype", "unknown")
-            elif "Timeline" in labels:
+            src = r.get("src_type", "")
+            if src == "Entity":
+                ntype = r.get("ntype") or "unknown"
+            elif src == "Timeline":
                 ntype = "timeline"
-            elif "Fore" in labels:
+            elif src == "Fore":
                 ntype = "foreshadow"
-            elif "Snapshot" in labels:
+            elif src == "Snapshot":
                 ntype = "snapshot"
             else:
-                ntype = labels[0] if labels else "unknown"
-            details[r["nid"]] = {
+                ntype = "unknown"
+            details[r["id"]] = {
                 "id": r.get("id", ""),
-                "name": r.get("name") or r.get("label") or r.get("id", "?"),
+                "name": r.get("name") or r.get("id", "?"),
                 "type": ntype,
                 "resolved": r.get("resolved", False),
                 "chapter_ref": r.get("cr", ""),
