@@ -856,13 +856,12 @@ class NarratorAgent:
         try:
             results = self.graph._run(
                 """
-                MATCH (f:Fore)
-                WHERE f.resolved = false OR f.resolved IS NULL
-                RETURN f ORDER BY f.created_at DESC LIMIT 10
+                SELECT * FROM foreshadows
+                WHERE (resolved = 0 OR resolved IS NULL)
+                ORDER BY created_at DESC LIMIT 10
                 """,
-                {},
             )
-            return [dict(r["f"]) for r in results]
+            return [dict(r) for r in results]
         except Exception:
             return []
 
@@ -899,26 +898,32 @@ class NarratorAgent:
         try:
             rows = self.graph._run(
                 """
-                MATCH (t:Timeline {id: $eid, project_id: $pid})
-                OPTIONAL MATCH (t)-[:INVOLVES]->(c:Entity:Character {project_id: $pid})
-                RETURN t.id AS id, t.label AS label, t.description AS desc,
-                       t.time_label AS time_label, t.chapter_ref AS cr,
-                       t.time_order AS tord,
-                       collect(c.name) AS characters
+                SELECT id, label, description, time_label, chapter_ref, time_order
+                FROM timeline_events WHERE id=? AND project_id=?
                 """,
-                {"eid": event_id, "pid": self.book_id},
+                (event_id, self.book_id),
             )
             if not rows:
                 return None
             r = rows[0]
+            # 参与角色（INVOLVES 关系；Cypher 时代亦为空，保持行为）
+            char_rows = self.graph._run(
+                """
+                SELECT e.name AS name FROM relations r
+                JOIN entities e ON e.id = r.to_entity
+                WHERE r.from_entity=? AND r.type='INVOLVES' AND r.project_id=?
+                """,
+                (event_id, self.book_id),
+            )
+            characters = [c["name"] for c in char_rows if c.get("name")]
             return {
                 "id": r.get("id", event_id),
                 "label": r.get("label", ""),
-                "description": r.get("desc", ""),
+                "description": r.get("description", ""),
                 "time_label": r.get("time_label", ""),
-                "chapter_ref": r.get("cr", ""),
-                "time_order": r.get("tord", 0),
-                "characters": [c for c in r.get("characters", []) if c],
+                "chapter_ref": r.get("chapter_ref", ""),
+                "time_order": r.get("time_order", 0),
+                "characters": characters,
             }
         except Exception as e:
             logger.debug("Failed to load timeline event %s: %s", event_id, e)

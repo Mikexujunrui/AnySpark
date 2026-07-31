@@ -274,8 +274,8 @@ async def test_narrator_pov_turn_parallel_characters(narrator, mock_store):
 def test_get_open_foreshadows(narrator):
     """Test fetching open foreshadows."""
     narrator.graph._run.return_value = [
-        {"f": {"id": "fore_1", "text": "神秘信物", "resolved": False}},
-        {"f": {"id": "fore_2", "text": "失踪的师妹", "resolved": False}},
+        {"id": "fore_1", "text": "神秘信物", "resolved": False},
+        {"id": "fore_2", "text": "失踪的师妹", "resolved": False},
     ]
     foreshadows = narrator._get_open_foreshadows()
     assert len(foreshadows) == 2
