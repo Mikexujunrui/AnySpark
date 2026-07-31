@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
+from typing import Any
 
 from core.config import DATA_DIR
 
@@ -57,7 +58,7 @@ def _project_memory_file(book_id: str) -> Path:
     return DATA_DIR / f"project_memory_{book_id}.json"
 
 
-def load_project_memory(book_id: str) -> dict:
+def load_project_memory(book_id: str) -> dict[str, Any]:
     """Load project memory data for a specific book.
 
     Returns a dict with default fields if the file doesn't exist.

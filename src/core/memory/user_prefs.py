@@ -233,7 +233,7 @@ class UserPreferenceHelper:
         if not all_entries:
             return ""
 
-        sections = {}
+        sections: dict[str, list[MemoryEntry]] = {}
         for e in all_entries:
             top = e.category.split(".")[0] if "." in e.category else e.category
             sections.setdefault(top, []).append(e)

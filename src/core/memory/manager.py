@@ -11,6 +11,7 @@ returns a ``NullMemoryManager`` whose every method is a no-op.
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from .injector import MemoryInjector
 from .models import MemoryEntry
@@ -47,29 +48,29 @@ class MemoryManager:
 
     def inject_tier0(self, book_id: str = "") -> str:
         """~50 token presence marker."""
-        return self._injector.format_tier0(book_id)
+        return cast(str, self._injector.format_tier0(book_id))
 
     def inject_tier1(self, book_id: str = "", session_mode: str = "normal") -> str:
         """Full index for build_dynamic_context injection."""
-        return self._injector.format_tier1(book_id, session_mode)
+        return cast(str, self._injector.format_tier1(book_id, session_mode))
 
     def inject_tier2(self, input_keywords: list[str]) -> str:
         """Keyword-matched preference details for ContextManager injection."""
-        return self._injector.format_tier2(input_keywords)
+        return cast(str, self._injector.format_tier2(input_keywords))
 
     @property
     def project(self) -> ProjectMemoryHelper:
-        return self._project_helper
+        return cast(ProjectMemoryHelper, self._project_helper)
 
     @property
     def preferences(self) -> UserPreferenceHelper:
-        return self._pref_helper
+        return cast(UserPreferenceHelper, self._pref_helper)
 
     @property
     def triggers(self) -> MemoryTriggerEngine:
-        return self._triggers
+        return cast(MemoryTriggerEngine, self._triggers)
 
-    def get_category_counts(self, book_id: str = "") -> dict:
+    def get_category_counts(self, book_id: str = "") -> dict[str, int]:
         """Return {note_count, decision_count, pref_confirmed, pref_pending}."""
         proj_data = self._project_helper.get_full_snapshot(book_id)
         notes = proj_data.get("notes", [])
@@ -120,7 +121,7 @@ class NullMemoryManager:
     def triggers(self):
         return _NULL_TRIGGER_ENGINE
 
-    def get_category_counts(self, book_id: str = "") -> dict:
+    def get_category_counts(self, book_id: str = "") -> dict[str, int]:
         return {"notes": 0, "decisions": 0, "pref_confirmed": 0, "pref_pending": 0, "pref_total": 0}
 
 

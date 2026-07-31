@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
+from typing import cast
 
 from .store import load_project_memory, save_project_memory
 
@@ -33,7 +34,7 @@ class ProjectMemoryHelper:
     @staticmethod
     def get_premise(book_id: str) -> str:
         data = load_project_memory(book_id)
-        return data.get("premise", "")
+        return cast(str, data.get("premise", ""))
 
     @staticmethod
     def set_premise(book_id: str, premise: str):
@@ -46,7 +47,7 @@ class ProjectMemoryHelper:
     @staticmethod
     def get_notes(book_id: str) -> list[dict]:
         data = load_project_memory(book_id)
-        return data.get("notes", [])
+        return cast(list[dict], data.get("notes", []))
 
     @staticmethod
     def add_note(book_id: str, title: str, content: str) -> dict:
@@ -79,7 +80,7 @@ class ProjectMemoryHelper:
     @staticmethod
     def get_decisions(book_id: str) -> list[dict]:
         data = load_project_memory(book_id)
-        return data.get("creative_decisions", [])
+        return cast(list[dict], data.get("creative_decisions", []))
 
     @staticmethod
     def record_decision(book_id: str, title: str, rationale: str) -> dict:
@@ -112,7 +113,7 @@ class ProjectMemoryHelper:
     @staticmethod
     def get_progress_notes(book_id: str) -> list[dict]:
         data = load_project_memory(book_id)
-        return data.get("progress_notes", [])
+        return cast(list[dict], data.get("progress_notes", []))
 
     @staticmethod
     def add_progress_note(book_id: str, content: str) -> dict:
@@ -144,7 +145,7 @@ class ProjectMemoryHelper:
     @staticmethod
     def get_tags(book_id: str) -> list[str]:
         data = load_project_memory(book_id)
-        return data.get("custom_tags", [])
+        return cast(list[str], data.get("custom_tags", []))
 
     @staticmethod
     def set_tags(book_id: str, tags: list[str]):

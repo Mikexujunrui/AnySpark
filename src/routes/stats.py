@@ -108,27 +108,27 @@ def writing_stats(book_id: str):
     avg = round(total_words / len(regular)) if regular else 0
 
     active_days: list[str] = sorted({d for d, v in daily.items() if v["wordsCreated"] or v["wordsEdited"]})
-    current_streak = 0
+    current_streak: int = 0
     if active_days:
         d = now.isoformat()
         while d in active_days:
             current_streak += 1
             d = (datetime.fromisoformat(d).date() - timedelta(days=1)).isoformat()
 
-    best_streak = 0
+    best_streak: int = 0
     if active_days:
-        cur = 1
+        run_len = 1
         for prev, nxt in zip(active_days, active_days[1:], strict=False):
             try:
                 gap = (datetime.fromisoformat(nxt).date() - datetime.fromisoformat(prev).date()).days
             except ValueError:
                 continue
             if gap == 1:
-                cur += 1
+                run_len += 1
             else:
-                best_streak = max(best_streak, cur)
-                cur = 1
-        best_streak = max(best_streak, cur)
+                best_streak = max(best_streak, run_len)
+                run_len = 1
+        best_streak = max(best_streak, run_len)
 
     daily_list = [daily[d] for d in days]
 
