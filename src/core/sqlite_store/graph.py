@@ -676,6 +676,131 @@ class GraphMixin(CrudMixin):
         return rows[0]["c"] if rows else 0
 
 
+    # ── Missing-method debt (Neo4j→SQLite migration) ──
+
+    def schedule_foreshadow(self, foreshadow_id: str, chapter: str) -> None:
+        """Plan a foreshadow to resolve at a chapter (scheduled_chapter)."""
+        self._run(
+            "UPDATE foreshadows SET scheduled_chapter=?, status='planned', planned_resolve_arc=? WHERE id=?",
+            (chapter, chapter, foreshadow_id),
+        )
+
+    def postpone_foreshadow(self, foreshadow_id: str) -> None:
+        """Move a 'due' foreshadow back to 'planned' (keep planned arc)."""
+        self._run(
+            "UPDATE foreshadows SET status='planned' WHERE id=?",
+            (foreshadow_id,),
+        )
+
+    def list_scheduled_foreshadows(self, chapter: str) -> list[dict]:
+        """Foreshadows scheduled to resolve at this chapter."""
+        rows = self._run(
+            "SELECT * FROM foreshadows WHERE scheduled_chapter=?",
+            (chapter,),
+        )
+        return [dict(r) for r in rows]
+
+    def update_snapshot(self, snapshot_id: str, payload: dict) -> None:
+        """Update snapshot fields (whitelisted keys only)."""
+        allowed = {"label", "phase", "phase_key", "data", "description", "is_current", "time_point"}
+        sets = []
+        params = []
+        for k, v in payload.items():
+            if k in allowed:
+                sets.append(f"{k}=?")
+                params.append(v)
+        if sets:
+            params.append(snapshot_id)
+            self._run(f"UPDATE snapshots SET {', '.join(sets)} WHERE id=?", tuple(params))
+
+    def add_temporal_relation(self, from_id: str, to_id: str, rel_type: str, since_chapter: str) -> None:
+        """Time-annotated relationship edge (data.since_chapter)."""
+        import uuid as _uuid
+
+        from core.knowledge import Relation
+
+        self.add_relation(
+            Relation(
+                id=str(_uuid.uuid4())[:8],
+                from_entity=from_id,
+                to_entity=to_id,
+                type=rel_type,
+                data={"since_chapter": since_chapter},
+            )
+        )
+
+    def add_foreshadow_dependency(self, from_id: str, to_id: str) -> None:
+        """DEPENDS_ON edge between foreshadows (stored in relations)."""
+        import uuid as _uuid
+
+        from core.knowledge import Relation
+
+        self.add_relation(
+            Relation(
+                id=str(_uuid.uuid4())[:8],
+                from_entity=from_id,
+                to_entity=to_id,
+                type="DEPENDS_ON",
+                data={},
+            )
+        )
+
+    def get_entity_state_at_time(self, entity_id: str, time_order: int, track_id: str = "") -> dict | None:
+        """Best snapshot state at or before time_order."""
+        rows = self._run(
+            "SELECT * FROM snapshots WHERE character_id=? AND time_order<=? "
+            "ORDER BY time_order DESC LIMIT 1",
+            (entity_id, time_order),
+        )
+        return dict(rows[0]) if rows else None
+
+    # ── Legacy analysis endpoints: minimal SQLite implementation ──
+
+    def get_pov_subgraph(self, character_id: str) -> dict:
+        """Relations involving a character (pov subgraph)."""
+        rels = self._run(
+            "SELECT * FROM relations WHERE (from_entity=? OR to_entity=?) AND project_id=?",
+            (character_id, character_id, self.project_id),
+        )
+        return {"character_id": character_id, "relations": [dict(r) for r in rels], "nodes": []}
+
+    def get_character_knowledge(self, character_id: str, at_chapter: str = "") -> dict:
+        """What this character is linked to (entities + snapshots)."""
+        rels = self._run(
+            "SELECT * FROM relations WHERE (from_entity=? OR to_entity=?) AND project_id=?",
+            (character_id, character_id, self.project_id),
+        )
+        snaps = self._run(
+            "SELECT * FROM snapshots WHERE character_id=? AND project_id=? ORDER BY time_order DESC LIMIT 5",
+            (character_id, self.project_id),
+        )
+        return {"relations": [dict(r) for r in rels], "snapshots": [dict(s) for s in snaps]}
+
+    def detect_foreshadow_cycles(self) -> list[dict]:
+        """Detect cycles in DEPENDS_ON relations (2-node self-cycles only)."""
+        rows = self._run(
+            """
+            SELECT r1.from_entity AS a, r1.to_entity AS b
+            FROM relations r1 JOIN relations r2
+              ON r1.from_entity = r2.to_entity AND r1.to_entity = r2.from_entity
+            WHERE r1.type='DEPENDS_ON' AND r2.type='DEPENDS_ON'
+              AND r1.from_entity < r1.to_entity AND r1.project_id=?
+            """,
+            (self.project_id,),
+        )
+        return [{"from": r["a"], "to": r["b"], "cycle": True} for r in rows]
+
+    def get_foreshadow_resolution_order(self) -> list[dict]:
+        """Foreshadows ordered by scheduled resolution chapter."""
+        rows = self._run(
+            "SELECT id, text, status, scheduled_chapter FROM foreshadows "
+            "WHERE project_id=? AND scheduled_chapter IS NOT NULL AND scheduled_chapter != '' "
+            "ORDER BY scheduled_chapter",
+            (self.project_id,),
+        )
+        return [dict(r) for r in rows]
+
+
 def _count_entity_refs(event, entity_ids: list[str], counter: dict[str, int]) -> None:
     """Count how many timeline events reference each entity ID."""
     for eid in entity_ids:

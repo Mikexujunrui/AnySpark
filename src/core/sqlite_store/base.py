@@ -50,8 +50,8 @@ CREATE INDEX IF NOT EXISTS idx_entities_name ON entities(name);
 
 CREATE TABLE IF NOT EXISTS relations (
     id TEXT PRIMARY KEY,
-    from_entity TEXT NOT NULL REFERENCES entities(id),
-    to_entity TEXT NOT NULL REFERENCES entities(id),
+    from_entity TEXT NOT NULL,
+    to_entity TEXT NOT NULL,
     type TEXT NOT NULL,
     data TEXT NOT NULL DEFAULT '{}',
     project_id TEXT NOT NULL REFERENCES projects(id),
@@ -230,6 +230,7 @@ class _SQLiteBase:
         """Create tables and indexes if they don't exist (idempotent)."""
         conn = sqlite3.connect(str(self._db_path))
         conn.executescript(SCHEMA_SQL)
+        _migrate_relations_fk(conn)
         conn.commit()
         conn.close()
 
@@ -426,3 +427,38 @@ class _SQLiteBase:
     # ════════════════════════════════════════════════════════════════
     # Graph traversal (Python BFS/DFS replacing Cypher)
     # ════════════════════════════════════════════════════════════════
+
+# ── Migration: relations FK loosened (any-node edges) ──
+def _migrate_relations_fk(conn) -> None:
+    """Rebuild relations without from/to FK (Neo4j allowed any-node edges;
+    the FK-to-entities blocked timeline/foreshadow relations entirely)."""
+    fks = conn.execute("PRAGMA foreign_key_list(relations)").fetchall()
+    has_entity_fk = any(r[2] == "entities" for r in fks)
+    if not has_entity_fk:
+        return
+    conn.execute("PRAGMA foreign_keys=OFF")
+    try:
+        conn.execute("ALTER TABLE relations RENAME TO relations_old")
+        conn.execute("""
+            CREATE TABLE relations (
+                id TEXT PRIMARY KEY,
+                from_entity TEXT NOT NULL,
+                to_entity TEXT NOT NULL,
+                type TEXT NOT NULL,
+                data TEXT NOT NULL DEFAULT '{}',
+                project_id TEXT NOT NULL REFERENCES projects(id),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+        """)
+        conn.execute("""
+            INSERT INTO relations SELECT id, from_entity, to_entity, type, data, project_id, created_at, updated_at
+            FROM relations_old
+        """)
+        conn.execute("DROP TABLE relations_old")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_relations_from ON relations(from_entity)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_relations_to ON relations(to_entity)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_relations_type ON relations(type)")
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA foreign_keys=ON")
