@@ -55,18 +55,16 @@ def test_build_profile_with_phase(agent, mock_graph):
     """Test profile building with phase snapshot."""
     mock_graph._run.return_value = [
         {
-            "s": {
-                "phase": "第一部·觉醒",
-                "label": "觉醒",
-                "data": {
-                    "personality": "经历变故后更加沉稳",
-                    "motivation": "寻找失散的师妹",
-                    "appearance": "一身黑衣",
-                    "growth_note": "从冲动少年成长为沉稳剑客",
-                },
-                "is_current": True,
-                "time_order": 2,
-            }
+            "phase": "第一部·觉醒",
+            "label": "觉醒",
+            "data": {
+                "personality": "经历变故后更加沉稳",
+                "motivation": "寻找失散的师妹",
+                "appearance": "一身黑衣",
+                "growth_note": "从冲动少年成长为沉稳剑客",
+            },
+            "is_current": True,
+            "time_order": 2,
         }
     ]
 
