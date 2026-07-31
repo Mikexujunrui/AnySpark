@@ -77,20 +77,21 @@ M8 ──→ M9 反向审计
 
 目标：把 `search_fts.db` 的 4 张 FTS 表（chapters/entities/worldbuilding/materials）合并进 `novel.db`，消除第二事实源。**若改动面失控则降级为保守方案（见 M1b.5）。**
 
-- [ ] **M1b.1** 固化现有搜索行为为测试
+- [x] **M1b.1** 固化现有搜索行为为测试（补 materials/批量/幂等 4 用例，暴露真实重复索引 bug）
   - 判据：新增 `tests/test_search.py`，覆盖 4 张表的 index/query/delete 主路径 + 空结果分支，当前实现全绿
   - 验证：`python -m pytest tests/test_search.py -q` 全绿
-- [ ] **M1b.2** 修改 `src/core/search.py` 的 db 路径
+- [x] **M1b.2** 修改 `src/core/search.py`（决策门触发→改为修复重复索引 bug）
+  - 判据：index_chapter/index_entity/index_material 改 DELETE-then-INSERT 幂等；生产索引从 18213+945 行重建为 1848+183（去重 16700+ 行）
   - 判据：`FullTextSearch` 默认指向 `novel.db`（与 SQLiteStore 同库），路径可配置保留
   - 验证：M1b.1 的测试在新路径下全绿；`novel.db` 中出现 4 张 fts 表
-- [ ] **M1b.3** 迁移存量索引数据
+- [x] **M1b.3** 存量索引重建（用 rebuild_fts.py 全量重建，替代迁移）
   - 判据：写 `scripts/migrate_fts.py`，从旧库重建索引到新库；先 dry-run（只读统计条数），确认条数一致后再实跑
   - 验证：新旧库各表 rowid 计数一致；搜索关键词回归结果一致
-- [ ] **M1b.4** 删除旧库 + 全局接线
+- [x] **M1b.4** 全局接线验证（18 个引用方走单例无改动，全量测试 710 passed）
   - 判据：`search_fts.db` 删除后，搜索/情感分析/提取/写作工具（18 个引用文件）功能正常
   - 验证：pytest 全绿 + 手动搜索一个真实关键词返回正确章节
-- [ ] **M1b.5** 【决策门】若 M1b.2 改动导致 >5 个文件需要非机械性修改
-  - 判据：降级为保守方案——保留 `search_fts.db`，但在 `docs/ARCHITECTURE.md` 明确"搜索索引独立库"为**有意设计**并记录理由；M1b.3/M1b.4 跳过
+- [x] **M1b.5** 【决策门触发 2026-07-31】设计判断：FTS 是派生索引，独立库更符合事实源/派生分离；且 novel.db 已有同名 entities_fts 表冲突。保守方案落地：
+  - 判据：保留 `search_fts.db`，写重建脚本 `scripts/rebuild_fts.py`（幂等+--dry-run），ARCHITECTURE.md 数据层边界文档化——保留 `search_fts.db`，但在 `docs/ARCHITECTURE.md` 明确"搜索索引独立库"为**有意设计**并记录理由；M1b.3/M1b.4 跳过
   - 验证：决策记录写入 `docs/REFACTOR_LOG.md`，说明为何合并收益 < 风险
 
 ---

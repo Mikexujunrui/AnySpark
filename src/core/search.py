@@ -52,8 +52,15 @@ class FullTextSearch:
         ch_id = chapter.get("id", "")
         if not content and not title:
             return
+        # DELETE-then-INSERT keeps the index idempotent: FTS5 has no primary
+        # key, so plain INSERT/INSERT OR REPLACE would accumulate duplicate
+        # rows on every chapter edit (observed in production).
         conn.execute(
-            "INSERT OR REPLACE INTO chapters_fts(book_id, chapter_id, title, content) VALUES (?, ?, ?, ?)",
+            "DELETE FROM chapters_fts WHERE book_id = ? AND chapter_id = ?",
+            (book_id, ch_id),
+        )
+        conn.execute(
+            "INSERT INTO chapters_fts(book_id, chapter_id, title, content) VALUES (?, ?, ?, ?)",
             (book_id, ch_id, title, content),
         )
         conn.commit()
@@ -91,7 +98,11 @@ class FullTextSearch:
         aliases_str = " ".join(aliases)
         data_str = " ".join(str(v) for v in data.values() if v)
         conn.execute(
-            "INSERT OR REPLACE INTO entities_fts(book_id, entity_id, name, type, aliases, data) VALUES (?, ?, ?, ?, ?, ?)",
+            "DELETE FROM entities_fts WHERE book_id = ? AND entity_id = ?",
+            (book_id, entity_id),
+        )
+        conn.execute(
+            "INSERT INTO entities_fts(book_id, entity_id, name, type, aliases, data) VALUES (?, ?, ?, ?, ?, ?)",
             (book_id, entity_id, name, etype, aliases_str, data_str),
         )
         conn.commit()
@@ -132,8 +143,9 @@ class FullTextSearch:
 
     def index_material(self, mat: dict):
         conn = self._get_conn()
+        conn.execute("DELETE FROM materials_fts WHERE mat_id = ?", (mat["id"],))
         conn.execute(
-            "INSERT OR REPLACE INTO materials_fts(mat_id, title, tags, content) VALUES (?, ?, ?, ?)",
+            "INSERT INTO materials_fts(mat_id, title, tags, content) VALUES (?, ?, ?, ?)",
             (mat["id"], mat.get("title", ""), " ".join(mat.get("tags", [])), mat.get("content", "")),
         )
         conn.commit()

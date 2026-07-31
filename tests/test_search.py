@@ -72,3 +72,35 @@ def test_clear_book(search):
     results = search.search("testbook", "name_cl")
     assert len(results["entities"]) == 0
     assert len(results["chapters"]) == 0
+
+
+def test_index_and_search_material(search):
+    search.index_material({"id": "m1", "title": "素材一", "tags": ["tag1", "tag2"], "content": "unique material body text"})
+    results = search.search_materials("unique material", limit=5)
+    assert any(r["id"] == "m1" for r in results)
+
+
+def test_remove_material(search):
+    search.index_material({"id": "m_rm", "title": "待删素材", "tags": [], "content": "materialToBeRemovedXYZ"})
+    search.remove_material("m_rm")
+    results = search.search_materials("materialToBeRemoved", limit=5)
+    assert all(r["id"] != "m_rm" for r in results)
+
+
+def test_index_chapters_batch(search):
+    chapters = [
+        {"id": f"chb{i}", "title": f"批量章{i}", "content": f"batch content {i} unique seed"}
+        for i in range(3)
+    ]
+    search.index_chapters_batch("batchbook", chapters)
+    for i in range(3):
+        results = search.search("batchbook", f"{i} unique")
+        assert any(r["id"] == f"chb{i}" for r in results["chapters"])
+
+
+def test_rebuild_is_idempotent(search):
+    """Indexing the same content twice must not duplicate results (INSERT OR REPLACE)."""
+    search.index_chapter("book", {"id": "dup1", "title": "去重", "content": "dedup unique content abc"})
+    search.index_chapter("book", {"id": "dup1", "title": "去重", "content": "dedup unique content abc"})
+    results = search.search("book", "dedup")
+    assert len(results["chapters"]) == 1

@@ -88,7 +88,8 @@ graph TB
     end
 
     subgraph 数据层["数据持久化"]
-        KGraph[(知识图谱<br/>SQLite)]
+        KGraph[(知识图谱<br/>novel.db SQLite)]
+        FTS[(全文搜索索引<br/>search_fts.db)]
         JSONStore[(JSON 文件存储<br/>会话/章节/消息)]
         FS[(文件系统<br/>上传文档)]
     end
@@ -138,6 +139,16 @@ graph TB
 ---
 
 ## 分层说明
+
+### 数据层边界（v3.2.1 定论）
+
+| 存储 | 文件 | 角色 | 可重建 |
+|------|------|------|--------|
+| 事实源（文档型） | `data/chapters_*.json`、`worldbuilding_*.json`、`sessions_*`、`messages_*`、`books.json`、`materials.json` | 章节正文+版本历史、世界观、会话、消息 | ❌（用户数据） |
+| 事实源（图谱） | `data/novel.db` | entities/relations/foreshadows/timeline/snapshots/constraints + entities_fts | ❌（用户数据，但可从 JSON 部分重建） |
+| **派生索引** | `data/search_fts.db` | 4 张 FTS 表（chapters/entities/worldbuilding/materials） | ✅ `python scripts/rebuild_fts.py` |
+
+原则：**事实源与派生索引分离**。search_fts.db 只是可重建的搜索索引，损坏或丢失时用重建脚本恢复（`python scripts/rebuild_fts.py`，幂等，含 --dry-run）。曾考虑把 FTS 合并进 novel.db 以缩减文件数，但 FTS5 表名冲突（novel.db 已有同名 entities_fts）与“派生索引不应混入事实源”的架构原则使其不成立，保持独立库并文档化边界。
 
 ### Agent 引擎（核心）
 
