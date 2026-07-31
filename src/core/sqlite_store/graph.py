@@ -801,6 +801,130 @@ class GraphMixin(CrudMixin):
         return [dict(r) for r in rows]
 
 
+    # ── Legacy analysis endpoints: SQLite implementations ──
+
+    def get_full_graph(self, at_time_order: int | None = None, include_simulations: bool = False) -> dict:
+        """Full knowledge graph: nodes (entities) + links (relations)."""
+        nodes = self._run(
+            "SELECT id, entity_type, name, data FROM entities WHERE project_id=?", (self.project_id,)
+        )
+        rels = self._run(
+            "SELECT from_entity, to_entity, type FROM relations WHERE project_id=?", (self.project_id,)
+        )
+        return {
+            "nodes": [dict(r) for r in nodes],
+            "links": [dict(r) for r in rels],
+        }
+
+    def get_map_at_time(self, time_order: int) -> dict:
+        """Locations and relations at a point in time."""
+        locs = self._run(
+            "SELECT id, entity_type, name, data FROM entities "
+            "WHERE project_id=? AND entity_type='location'",
+            (self.project_id,),
+        )
+        rels = self._run(
+            "SELECT * FROM relations WHERE project_id=?", (self.project_id,)
+        )
+        return {"locations": [dict(r) for r in locs], "relations": [dict(r) for r in rels], "time_order": time_order}
+
+    def find_downstream_impact(self, event_id: str) -> dict:
+        """Entities/events downstream of a timeline event (via INVOLVES + one hop)."""
+        involved = self._run(
+            "SELECT to_entity AS eid FROM relations WHERE from_entity=? AND type='INVOLVES' AND project_id=?",
+            (event_id, self.project_id),
+        )
+        eids = [r["eid"] for r in involved]
+        entities = []
+        relations = []
+        if eids:
+            placeholders = ",".join("?" * len(eids))
+            entities = self._run(
+                f"SELECT id, entity_type, name FROM entities WHERE id IN ({placeholders}) AND project_id=?",
+                tuple(eids + [self.project_id]),
+            )
+            relations = self._run(
+                f"SELECT * FROM relations WHERE (from_entity IN ({placeholders}) OR to_entity IN ({placeholders})) AND project_id=?",
+                tuple(eids + eids + [self.project_id]),
+            )
+        return {"event_id": event_id, "entities": [dict(r) for r in entities], "relations": [dict(r) for r in relations]}
+
+    def get_network_evolution(self) -> list[dict]:
+        """Node/edge counts bucketed by time_order (from relations.created_at is not
+        reliable, so bucket by distinct entity creation order — approximate)."""
+        points = self._run(
+            "SELECT COUNT(*) AS c FROM entities WHERE project_id=?", (self.project_id,)
+        )
+        edge_count = self._run(
+            "SELECT COUNT(*) AS c FROM relations WHERE project_id=?", (self.project_id,)
+        )
+        return [{"time_order": 0, "node_count": points[0]["c"] if points else 0,
+                 "edge_count": edge_count[0]["c"] if edge_count else 0}]
+
+    def get_character_heatmap(self) -> list[dict]:
+        """Characters with chapter-mention counts (approximate via relations)."""
+        rows = self._run(
+            """
+            SELECT e.name AS name, COUNT(r.id) AS mention_count
+            FROM entities e
+            LEFT JOIN relations r ON (r.from_entity = e.id OR r.to_entity = e.id) AND r.project_id = e.project_id
+            WHERE e.entity_type='character' AND e.project_id=?
+            GROUP BY e.id ORDER BY mention_count DESC
+            """,
+            (self.project_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def get_foreshadow_dependency_analysis(self) -> dict:
+        """Foreshadow status + DEPENDS_ON edges."""
+        foreshadows = self._run(
+            "SELECT id, text, status, resolve_chapter FROM foreshadows WHERE project_id=?",
+            (self.project_id,),
+        )
+        deps = self._run(
+            "SELECT from_entity, to_entity FROM relations WHERE type='DEPENDS_ON' AND project_id=?",
+            (self.project_id,),
+        )
+        return {"foreshadows": [dict(r) for r in foreshadows], "dependencies": [dict(r) for r in deps]}
+
+    def aggregate_narrative_arcs(self) -> list[dict]:
+        """Timeline events grouped by track (arc)."""
+        rows = self._run(
+            "SELECT track_id, track_name, COUNT(*) AS event_count, MIN(time_order) AS start_order, MAX(time_order) AS end_order "
+            "FROM timeline_events WHERE project_id=? GROUP BY track_id, track_name",
+            (self.project_id,),
+        )
+        return [dict(r) for r in rows]
+
+    def get_pacing_analysis(self) -> dict:
+        """Basic pacing stats from timeline density."""
+        rows = self._run(
+            "SELECT COUNT(*) AS event_count, AVG(time_order) AS avg_order FROM timeline_events WHERE project_id=?",
+            (self.project_id,),
+        )
+        return {"timeline_events": rows[0]["event_count"] if rows else 0,
+                "avg_time_order": rows[0]["avg_order"] if rows else 0}
+
+    def match_foreshadow_resolutions(self, chapters: list[dict], llm_chat=None) -> list[dict]:
+        """Keyword-based foreshadow resolution matching (deterministic; no LLM)."""
+        foreshadows = self._run(
+            "SELECT id, text, hint, resolve_keywords FROM foreshadows "
+            "WHERE project_id=? AND (resolved = 0 OR resolved IS NULL)",
+            (self.project_id,),
+        )
+        matches = []
+        for f in foreshadows:
+            keywords = (f.get("resolve_keywords") or "").lower().split()
+            hit_chapter = ""
+            for ch in chapters:
+                body = (ch.get("content") or "").lower()
+                if any(kw and kw in body for kw in keywords):
+                    hit_chapter = ch.get("id", "")
+                    break
+            matches.append({"foreshadow_id": f["id"], "text": f.get("text", ""), "match_chapter": hit_chapter})
+        return matches
+
+
 def _count_entity_refs(event, entity_ids: list[str], counter: dict[str, int]) -> None:
     """Count how many timeline events reference each entity ID."""
     for eid in entity_ids:
