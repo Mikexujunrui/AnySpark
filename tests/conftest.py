@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 def tmp_data_dir(tmp_path, monkeypatch):
     """Redirect all data-file paths to a temp directory.
 
-    json_store / task_queue / scheduler / git_store all import DATA_DIR
+    json_store / task_queue / scheduler all import DATA_DIR
     from core.config at module level. Simply replacing core.config.DATA_DIR
     does NOT affect those modules' own references.  We force-import each
     module before monkeypatching to ensure the right DATA_DIR is captured.
