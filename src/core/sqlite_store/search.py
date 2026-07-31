@@ -9,6 +9,7 @@ import json
 import logging
 import uuid
 from datetime import datetime
+from typing import Any
 
 from ..graph_schema import get_symmetric_types
 from .analytics import AnalyticsMixin
@@ -155,7 +156,7 @@ class SearchMixin(AnalyticsMixin):
     # Auto-complete relations (graph reasoning)
     # ════════════════════════════════════════════════════════════════
 
-    def auto_complete_relations(self) -> dict:
+    def auto_complete_relations(self) -> dict[str, Any]:
         """Auto-complete missing relationships via graph reasoning.
 
         Returns a dict with counts of each type of completion:

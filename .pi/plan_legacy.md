@@ -39,8 +39,8 @@ L4.0 git污染协调（贯穿，需主人配合外部进程）
 - [x] **L1.2** workflow_tools.py（16 条）：`Workflow` 变量被标注为 dict，类型注解修正（flow/exec_context 改名 + results 注解）
 - [x] **L1.3** context_manager.py（16 条）：dict 返回值/变量注解（foreshadow 对象化修复链，见 L1.4）
 - [x] **L1.4** sqlite_store（13+ 条）：`_row_to_*` 签名 `sqlite3.Row`→`dict[str, Any]`（与 `_run` 返回 `list[dict]` 对齐）；`list_scheduled_foreshadows` 改返回真 `Foreshadow` 对象（此前调用方对象属性访问实际拿到 dict，是静默 bug 隐患）；`Relation.type` 两处 str→RelationType
-- [ ] **L1.5** desktop_launcher.py（12 条）：`_MEIPASS`/类型注解
-- [ ] **L1.6** handlers.py + plot.py + extractor.py（28 条）
+- [x] **L1.5** desktop_launcher.py（12 条）：`_MEIPASS`/类型注解（window: Any、fcntl 平台 ignore、bool cast）
+- [x] **L1.6** handlers.py + plot.py + extractor.py（28 条）：handler 变量名冲突（c/names/e 复用）；**修复 list_snapshots(character_entity_id=) 无效参数真实 bug（阶段计数曾统计全部角色）**；extractor 修复 `EntityType.value` 真实崩溃 bug（str 子类无 .value，spaCy NER 分支未测覆盖）；plot 返回类型 str|dict + llm_chat cast
 - [ ] **L1.7** agent_loop/headless_loop/flows（22 条）
 - [ ] **L1.8** 其余散落（routes/*、tools/impl/* 余量 ~140 条）
 - [ ] **L1.9** baseline 归零：`.mypy-baseline` 写 0；`scripts/mypy_gate.sh` 实跑通过

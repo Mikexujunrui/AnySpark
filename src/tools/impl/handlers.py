@@ -69,9 +69,9 @@ def _handle_volume(name: str, args: dict, book_id: str) -> str:
         volumes = json_store.load_volumes(book_id)
         chapters = json_store.load_chapters(book_id)
         chapter_map = {c["id"]: json_store._chapter_view(c).get("title", "") for c in chapters}
-        grouped_ids = set()
+        grouped_ids: set[str] = set()
         for v in volumes:
-            grouped_ids.update(v.get("chapters", []))
+            grouped_ids.update(str(cid) for cid in v.get("chapters", []))
 
         if not volumes:
             return "当前书籍还没有分卷。使用 create_volume 创建第一个分卷。"
@@ -80,14 +80,14 @@ def _handle_volume(name: str, args: dict, book_id: str) -> str:
         from collections import Counter
 
         title_counts = Counter(v.get("title", "") for v in volumes)
-        duplicates = {t: c for t, c in title_counts.items() if c > 1}
+        duplicates = {t: cnt for t, cnt in title_counts.items() if cnt > 1}
 
         lines = [f"# 分卷结构 ({len(volumes)} 卷)\n"]
         if duplicates:
             lines.append("⚠️ 警告: 存在同名分卷，请使用 delete_volume 清理重复项：")
-            for t, c in duplicates.items():
+            for t, cnt in duplicates.items():
                 dup_ids = [v["id"] for v in volumes if v.get("title") == t]
-                lines.append(f"  - 「{t}」重复 {c} 次 (IDs: {', '.join(dup_ids)})")
+                lines.append(f"  - 「{t}」重复 {cnt} 次 (IDs: {', '.join(dup_ids)})")
             lines.append("")
 
         for v in sorted(volumes, key=lambda x: x.get("order", 0)):
@@ -335,9 +335,9 @@ def _handle_materials(name: str, args: dict, book_id: str) -> str:
                 ]
                 if matching:
                     lines.append(f"## {ref_book.get('title', ref_id)}")
-                    for e in matching[:10]:
-                        data_preview = ", ".join(f"{k}: {str(v)[:30]}" for k, v in list(e.data.items())[:4] if v)
-                        lines.append(f"- **{e.name}** [{e.type}]")
+                    for ent in matching[:10]:
+                        data_preview = ", ".join(f"{k}: {str(v)[:30]}" for k, v in list(ent.data.items())[:4] if v)
+                        lines.append(f"- **{ent.name}** [{ent.type}]")
                         if data_preview:
                             lines.append(f"  {data_preview}")
                     found += len(matching)
@@ -379,8 +379,8 @@ def _handle_materials(name: str, args: dict, book_id: str) -> str:
             matching = [e for e in entities if entity_name.lower() in e.name.lower()]
             ref_kb.close()
             if matching:
-                names = ", ".join(e.name for e in matching[:10])
-                return f"未找到精确匹配 '{entity_name}'。可能的匹配: {names}"
+                match_names = ", ".join(ent.name for ent in matching[:10])
+                return f"未找到精确匹配 '{entity_name}'。可能的匹配: {match_names}"
             return f"参考书「{ref_book.get('title', ref_book_id)}」中未找到实体: {entity_name}"
 
         # Build the new entity (copy with new ID, optionally modified)
@@ -499,7 +499,7 @@ def _handle_knowledge_edit(name: str, args: dict, book_id: str) -> str:
 
         # Auto-generate stable phase_key if caller didn't supply one.
         phase_key = args.get("phase_key", "") or (
-            f"arc{sum(1 for s in kb.list_snapshots(character_entity_id=entity.id) if s.phase) + 1}"
+            f"arc{sum(1 for s in kb.list_snapshots(character_id=entity.id) if s.phase) + 1}"
         )
         # New phases default to "current" — phase selection is order-based
         # (is_current / time_order) and decoupled from chapters, so the latest
@@ -508,7 +508,7 @@ def _handle_knowledge_edit(name: str, args: dict, book_id: str) -> str:
         description = args.get("description", "") or ""
 
         # time_order = previous max + 1, so the new phase sorts after existing ones.
-        existing = kb.list_snapshots(character_entity_id=entity.id)
+        existing = kb.list_snapshots(character_id=entity.id)
         next_order = (max((s.time_order for s in existing), default=-1) + 1) if existing else 0
 
         import uuid as _uuid
@@ -528,7 +528,7 @@ def _handle_knowledge_edit(name: str, args: dict, book_id: str) -> str:
             is_current=is_current,
         )
         kb.add_snapshot(snap)
-        arc_count = sum(1 for s in kb.list_snapshots(character_entity_id=entity.id) if s.phase)
+        arc_count = sum(1 for s in kb.list_snapshots(character_id=entity.id) if s.phase)
         suffix = " (当前阶段)" if is_current else ""
         return (
             f"已为角色「{entity.name}」创建阶段「{phase_name}」"

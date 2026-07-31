@@ -18,7 +18,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 # Match server.py's bootstrap so top-level core/routes imports work when frozen.
 if getattr(sys, "frozen", False):
@@ -82,12 +82,12 @@ def _health_payload(timeout: float = 0.8) -> dict:
 
 def _is_anyspark_running(timeout: float = 0.8) -> bool:
     payload = _health_payload(timeout)
-    return payload.get("status") == "ok" and payload.get("app") == "AnySpark"
+    return bool(payload.get("status") == "ok" and payload.get("app") == "AnySpark")
 
 
 def _is_desktop_server_ready(timeout: float = 0.8) -> bool:
     payload = _health_payload(timeout)
-    return (
+    return bool(
         payload.get("status") == "ok"
         and payload.get("app") == "AnySpark"
         and payload.get("desktop_shell") is True
@@ -101,7 +101,7 @@ def _activate_existing(timeout: float = 0.8) -> bool:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        return payload.get("status") == "ok"
+        return bool(payload.get("status") == "ok")
     except (OSError, ValueError, urllib.error.URLError):
         return False
 
@@ -152,7 +152,7 @@ class InstanceLock:
             else:
                 import fcntl
 
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)  # type: ignore[attr-defined]
         except (OSError, BlockingIOError):
             lock_file.close()
             return False
@@ -172,7 +172,7 @@ class InstanceLock:
             else:
                 import fcntl
 
-                fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)
+                fcntl.flock(self._file.fileno(), fcntl.LOCK_UN)  # type: ignore[attr-defined]
         except OSError:
             pass
         self._file.close()
@@ -185,7 +185,7 @@ class DesktopController:
     def __init__(self) -> None:
         self.server: uvicorn.Server | None = None
         self.server_thread: threading.Thread | None = None
-        self.window = None
+        self.window: Any = None
         self._shutdown_started = threading.Event()
         self._server_error = ""
 

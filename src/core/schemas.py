@@ -1,6 +1,7 @@
 # 实体分层结构模板
 # 每个实体类型分为多个区块 (block)，每区块含多个字段 (field)
 # 字段值可为 string / string[] / embedded object
+from typing import Any
 
 CHARACTER_SCHEMA = {
     "基本": {
@@ -284,7 +285,8 @@ EVENT_SCHEMA = {
 }
 
 # 供 LLM 使用的类型→Schema 映射
-SCHEMAS = {
+# fields 值可为 string / string[] / embedded object，故外层类型放宽为 Any
+SCHEMAS: dict[str, dict[str, dict[str, Any]]] = {
     "character": CHARACTER_SCHEMA,
     "location": LOCATION_SCHEMA,
     "item": ITEM_SCHEMA,

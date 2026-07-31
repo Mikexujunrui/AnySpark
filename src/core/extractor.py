@@ -70,11 +70,11 @@ def _ner_prescan(text: str, existing_names: set[str]) -> list[dict]:
             continue
         if name.lower() in existing_names:
             continue
-        dedup_key = f"{entity_type.value}:{name}"
+        dedup_key = f"{entity_type}:{name}"
         if dedup_key in seen:
             continue
         seen.add(dedup_key)
-        candidates.append({"type": entity_type.value, "name": name})
+        candidates.append({"type": entity_type, "name": name})
     return candidates
 
 
@@ -137,7 +137,7 @@ def _ner_augmented_scan(text: str, existing_knowledge: str, book_id: str) -> Kno
     ner_candidates = _ner_prescan(text, existing_names)
     ner_hint = ""
     if ner_candidates:
-        by_type = {}
+        by_type: dict[str, list[str]] = {}
         for c in ner_candidates:
             by_type.setdefault(c["type"], []).append(c["name"])
         ner_lines = ["NER预扫描发现的候选实体:"]
@@ -302,11 +302,11 @@ def _extract_batch(entities: list, text: str) -> list[Entity]:
 
     entity_list = "\n".join(f"- [{e.type}] {e.name}" for e in entities)
 
-    schemas_needed = {}
+    schemas_needed: dict[str, str] = {}
     for e in entities:
         if e.type not in schemas_needed:
             blocks = []
-            e_schema = ALL_SCHEMAS.get(e.type, {})
+            e_schema = ALL_SCHEMAS.get(str(e.type), {})
             for bk, bv in e_schema.items():
                 blocks.append(f"  {bk}（{bv['label']}）: {', '.join(bv['fields'].keys())}")
             schemas_needed[e.type] = "\n".join(blocks)
@@ -403,7 +403,7 @@ def _extract_split_stream(text: str, existing_knowledge: str, book_id: str):
     ner_candidates = _ner_prescan(text, existing_names)
     ner_hint = ""
     if ner_candidates:
-        by_type = {}
+        by_type: dict[str, list[str]] = {}
         for c in ner_candidates:
             by_type.setdefault(c["type"], []).append(c["name"])
         ner_lines = ["NER候选实体:"]
@@ -646,7 +646,7 @@ def _parse_single_entity(response: str) -> dict:
     json_str = extract_json_from_response(response)
     try:
         data = json.loads(json_str)
-        return data.get("data", data)
+        return dict(data.get("data", data))
     except json.JSONDecodeError:
         return {}
 
@@ -872,10 +872,10 @@ def accept_proposal(proposal: KnowledgeProposal, project_id: str = "default") ->
                 "SELECT from_entity, to_entity FROM relations WHERE type='LOCATED_IN' AND project_id=?",
                 (project_id,),
             )
-            pairs = {(e["from_entity"], e["to_entity"]) for e in edges}
+            pairs = {(edge["from_entity"], edge["to_entity"]) for edge in edges}
             added = set()
-            for e in edges:
-                a, b = e["from_entity"], e["to_entity"]
+            for edge in edges:
+                a, b = edge["from_entity"], edge["to_entity"]
                 third = store._run(
                     "SELECT to_entity AS c FROM relations WHERE from_entity=? AND type='LOCATED_IN' AND project_id=?",
                     (b, project_id),
@@ -951,8 +951,8 @@ def accept_proposal(proposal: KnowledgeProposal, project_id: str = "default") ->
             parts.append(f"LLM建议 +{ac['llm_suggested']}")
         lines.append(f"关系补全: {', '.join(parts)}")
     if ac.get("anomalies"):
-        names = ", ".join(a["name"] for a in ac["anomalies"][:3])
-        lines.append(f"⚠ 异常: {names} 等出场多但关系少，可能漏提取")
+        anomaly_names = ", ".join(anom["name"] for anom in ac["anomalies"][:3])
+        lines.append(f"⚠ 异常: {anomaly_names} 等出场多但关系少，可能漏提取")
 
     from .event_bus import Event, EventType, bus
 

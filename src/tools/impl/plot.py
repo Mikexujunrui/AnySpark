@@ -9,6 +9,7 @@ import logging
 import re as _re
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from core.config import config
 from core.knowledge import Entity, EntityType
@@ -45,7 +46,7 @@ PLOT_DIRECTIONS_SYSTEM = """你是小说剧情设计师。根据当前故事状�
 5. risk帮助作者评估每个方向的难度"""
 
 
-async def _suggest_plot_directions(loop, args: dict, kb, book_id: str) -> dict:
+async def _suggest_plot_directions(loop, args: dict, kb, book_id: str) -> str | dict:
 
     instruction = args.get("instruction", "")
     chapter_ref = args.get("chapter_ref", "")
@@ -235,13 +236,16 @@ logger = logging.getLogger(__name__)
 async def _compare_versions(loop, args: dict, kb, msg: str) -> str:
     text = args.get("text", msg)
     kb_text = kb.get_knowledge_summary()[:2000]
-    return await loop.run_in_executor(
-        _ai_executor,
-        llm_chat,
-        f"对比知识库与新文本:\nKB:{kb_text}\n\nNew:{text[:2000]}\n列出冲突和新增",
-        "",
-        0.1,
-        "extraction",
+    return cast(
+        str,
+        await loop.run_in_executor(
+            _ai_executor,
+            llm_chat,
+            f"对比知识库与新文本:\nKB:{kb_text}\n\nNew:{text[:2000]}\n列出冲突和新增",
+            "",
+            0.1,
+            "extraction",
+        ),
     )
 
 
@@ -378,7 +382,7 @@ async def _decompose_chapter(loop, args: dict, msg: str, book_id: str) -> str:
         return "\n".join(lines)
 
     # Fallback: return raw result
-    return result
+    return cast(str, result)
 
 
 def _annotate_chain(args: dict, book_id: str) -> str:
@@ -544,13 +548,16 @@ async def _compare_plot(loop, args: dict) -> str:
 3. 忠实度评分 (0-100)
 4. 结构变化说明
 输出JSON格式。"""
-    return await loop.run_in_executor(
-        _ai_executor,
-        llm_chat,
-        f"原文大纲:\n{orig[:3000]}\n\n复写大纲:\n{new[:3000]}\n\n对比分析:",
-        system,
-        0.1,
-        "extraction",
+    return cast(
+        str,
+        await loop.run_in_executor(
+            _ai_executor,
+            llm_chat,
+            f"原文大纲:\n{orig[:3000]}\n\n复写大纲:\n{new[:3000]}\n\n对比分析:",
+            system,
+            0.1,
+            "extraction",
+        ),
     )
 
 
