@@ -56,7 +56,9 @@ def test_prune_stale_tool_results_keeps_tail(fixed_context):
     assert any(len(m["content"]) >= len("工具输出内容很长的一段" * 4) for m in tool_msgs[-2:])
 
 
-def test_compact_messages_reduces_size(fixed_context):
+def test_compact_messages_reduces_size(fixed_context, monkeypatch):
+    # 不访问 LLM：summary 由假实现提供（CI 无 API key）。
+    monkeypatch.setattr(fixed_context, "chat", lambda *a, **k: "[模拟摘要]")
     messages = []
     for i in range(10):
         messages.append(_msg(f"第{i}轮问题", "user"))
