@@ -191,7 +191,7 @@
 |------|------|
 | **工作流引擎** | 15 种步骤类型（read / decompose / annotate / rewrite / ask_user / search / compare_plot / diff / generate_outline 等），上下文自动传递 |
 | **技能系统** | YAML 定义可执行复合工作流，支持指令/护栏/强制输出，预装 11 个系统 Skill |
-| **创作宪法** | 每本书独立的项目级硬约束，覆盖普通对话、正文写作、修改、评审和 Auto |
+| **创作宪法** | 每本书独立的项目级硬约束（可选启用/关闭），覆盖普通对话、正文写作、修改、评审和 Auto |
 | **正文生成参数** | 可视化设置 Temperature、Top P、重复惩罚与输出上限，不扰动工具调用稳定性 |
 | **文风系统** | 系统默认 + 用户自定义双源分离，每本书独立活跃风格，支持 CRUD 管理 |
 | **插件系统** | Python 钩子插件（on_write / on_extract / modify_system_prompt），支持自定义提取器和写作风格 |
