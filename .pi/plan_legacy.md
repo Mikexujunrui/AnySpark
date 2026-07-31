@@ -51,12 +51,12 @@ L4.0 git污染协调（贯穿，需主人配合外部进程）
 
 目标：补大文件测试，覆盖率 ≥40%，CI gate 同步升到 40。
 
-- [ ] **L2.1** 覆盖率缺口清单（writing.py 724 missed / knowledge.py 685 / generation.py 554 等）
-- [ ] **L2.2** 补 writing.py 测试（+7% 目标，写主路径 + 错误分支，mock LLM）
-- [ ] **L2.3** 补 knowledge.py 测试（+2%）
-- [ ] **L2.4** 补 routes/chat.py + extractor.py 测试
-- [ ] **L2.5** gate 升 40：`--cov-fail-under=40` 实跑通过
-  - 验证：`pytest --cov=src --cov-fail-under=40` 全绿
+- [x] **L2.1** 覆盖率缺口清单（writing.py 724 missed / knowledge.py 685 / generation.py 554 等）
+- [x] **L2.2** 补 writing.py 测试（+7% 目标，写主路径 + 错误分支，mock LLM）→ test_writing_helpers 16→49 用例
+- [x] **L2.3** 补 knowledge.py 测试（_call_edit_llm 拒绝/审查/空响应 6 用例）
+- [x] **L2.4** 补 routes/chat.py + extractor.py 测试（_parse_proposal/_parse_batch_result/_proposal_to_dict 序列化 + main CLI 20 用例 0→20%）
+- [x] **L2.5** gate 升 40：`--cov-fail-under=40` 实跑通过（40.05%）
+  - 验证：`pytest --cov=src --cov-fail-under=40` 全绿；793 passed
 
 ## L3：前端拆分（中高风险）
 
