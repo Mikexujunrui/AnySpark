@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # In EXE: resources live under sys._MEIPASS
 # In dev:  resources live under PROJECT_ROOT
 if getattr(sys, "frozen", False):
-    SYSTEM_REVIEWERS_DIR = Path(sys._MEIPASS) / "reviewers"
+    SYSTEM_REVIEWERS_DIR = Path(getattr(sys, "_MEIPASS", "")) / "reviewers"
 else:
     SYSTEM_REVIEWERS_DIR = PROJECT_ROOT / "reviewers"
 USER_REVIEWERS_DIR = DATA_DIR / "reviewers"

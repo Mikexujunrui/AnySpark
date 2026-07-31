@@ -11,7 +11,7 @@ from pathlib import Path
 # In PyInstaller EXE, source files live under sys._MEIPASS.
 # In development, __file__ resolves to the src/ directory.
 if getattr(sys, "frozen", False):
-    sys.path.insert(0, str(Path(sys._MEIPASS)))
+    sys.path.insert(0, str(Path(getattr(sys, "_MEIPASS", ""))))
 else:
     sys.path.insert(0, str(Path(__file__).parent))
 
@@ -183,7 +183,7 @@ app = FastAPI(title="小说写作辅助 API", lifespan=lifespan)
 # In PyInstaller EXE: frontend is at sys._MEIPASS/frontend/dist/
 # In development: frontend is at project_root/frontend/dist/
 if getattr(sys, "frozen", False):
-    _frontend_dist = Path(sys._MEIPASS) / "frontend" / "dist"
+    _frontend_dist = Path(getattr(sys, "_MEIPASS", "")) / "frontend" / "dist"
 else:
     _frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
 if _frontend_dist.is_dir():
