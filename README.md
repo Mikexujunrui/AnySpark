@@ -447,7 +447,7 @@ cp .env .env.backup
 ```
 ├── src/                         # 后端源码
 │   ├── server.py                # FastAPI 入口
-│   ├── core/                    # 核心引擎 (61 模块, 含 2 子包)
+│   ├── core/                    # 核心引擎 (110 模块, 含 7 子包)
 │   │   ├── agent_loop.py        #   Agent 自主循环 (8 阶段处理器)
 │   │   ├── autopilot_runner.py  #   Autopilot 自主写作引擎
 │   │   ├── autopilot/           #   Autopilot 子包 (配置 + 规划器)
@@ -458,7 +458,8 @@ cp .env .env.backup
 │   │   ├── system_prompt.py     #   分层动态 System Prompt
 │   │   ├── compaction.py        #   两阶段上下文压缩
 │   │   ├── knowledge.py         #   知识库管理器
-│   │   ├── graph_store.py       #   Neo4j 图存储（已弃用，由 sqlite_store.py 替代）
+│   │   ├── graph_store.py       #   兼容 shim（将 SQLiteStore 伪装为旧 GraphStore API）
+│   │   ├── sqlite_store/        #   SQLite 图存储子包（base/crud/graph/analytics/search mixins）
 │   │   ├── graph_search.py      #   图搜索与路径分析
 │   │   ├── context_manager.py   #   写作上下文构建
 │   │   ├── review_panel.py      #   评审团编排 (14 位评审员)
@@ -469,24 +470,27 @@ cp .env .env.backup
 │   │   ├── config.py            #   集中配置管理
 │   │   ├── event_bus.py         #   类型化事件总线
 │   │   ├── book_locks.py        #   Book 级写锁
+│   │   ├── tools.py             #   工具注册门面（转发到 tool_registry + tool_defs）
+│   │   ├── tool_registry.py     #   工具注册表基础设施 (Tool/ToolRegistry/registry)
+│   │   ├── tool_defs/           #   工具定义子包 (9 个领域模块, 118 个工具)
 │   │   └── ...                  #   更多核心模块
-│   ├── routes/                  # 22+ API 路由模块
-│   ├── tools/                   # Agent 工具集 (16 文件, 含 impl/ 子包)
-│   │   ├── impl/                #   工具实现 (13 文件)
+│   ├── routes/                  # 27 个 API 路由模块
+│   ├── tools/                   # Agent 工具集 (19 文件, 含 impl/ 子包)
+│   │   ├── impl/                #   工具实现 (15 文件)
 │   │   ├── executor.py          #   工具执行器
 │   │   └── chapter_tools.py     #   章节变换工具
 │   └── data/                    # 数据层 (stores/ 子包, Git 版本存储)
 ├── frontend/                    # React 19 + TypeScript 6 + Vite 8
-│   └── src/components/          # 68 前端组件 (含 chat/ editor/ panels/ ui/ 子目录)
+│   └── src/components/          # 75 前端组件 (含 chat/ editor/ panels/ ui/ 子目录)
 ├── plugins/                     # 插件目录 (Python 钩子)
 ├── skills/                      # 技能配置 (YAML, 系统默认)
 ├── styles/                      # 文风模板 (YAML, 系统默认)
 ├── reviewers/                   # 评审员人设 (YAML, 系统默认)
 ├── data/                        # 运行时用户数据 (.gitignore)
-├── tests/                       # pytest 测试套件 (34 测试文件, 451 用例)
-├── scripts/                     # 运维脚本
+├── tests/                       # pytest 测试套件 (58 测试文件, 704 用例)
+├── scripts/                     # 运维脚本 (含 mypy 增量门禁)
 ├── docs/                        # 技术文档
-├── .github/workflows/           # CI/CD (ci.yml)
+├── .github/workflows/           # CI/CD (ci.yml + 增量类型检查门禁)
 ├── start.ps1                     # Windows 一键启动
 └── pyproject.toml               # Python 项目配置
 ```

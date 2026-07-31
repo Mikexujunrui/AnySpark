@@ -77,6 +77,7 @@ from tools.impl.imports import (
     _import_reference_chapters,
     _manage_notes,
 )
+from tools.impl.inspirations import _manage_inspirations
 from tools.impl.knowledge import (
     _extract_chapter,
     _finalize_chapter,
@@ -330,6 +331,7 @@ def _build_dispatch() -> None:
     _register_in_dispatch(D, _search_knowledge, "search_knowledge")
     _register_in_dispatch(D, _extract_knowledge, "extract_knowledge")
     _register_in_dispatch(D, _manage_notes, "manage_notes")
+    _register_in_dispatch(D, _manage_inspirations, "manage_inspirations")
     _register_in_dispatch(D, _write_chapter, "write_chapter")
     _register_in_dispatch(D, _store_chapter, "store_chapter")
     _register_in_dispatch(D, _import_chapters, "import_chapters")

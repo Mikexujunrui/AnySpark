@@ -11,12 +11,13 @@ from core.book_locks import book_lock
 from core.config import DATA_DIR
 from core.errors import NotFoundError
 from core.event_bus import Event, EventType, bus
+from data.stores.session_store import SessionStoreMixin
 
 logger = logging.getLogger(__name__)
 
 
-class BookStoreMixin:
-    """Mixin providing book management methods.  Requires BaseStore."""
+class BookStoreMixin(SessionStoreMixin):
+    """Mixin providing book management methods."""
 
     # ── Books ──
 
@@ -184,7 +185,7 @@ class BookStoreMixin:
     def get_reference_books(self, book_id: str) -> list[str]:
         try:
             book = self.get_book(book_id)
-            return book.get("referenceBookIds", [])
+            return list(book.get("referenceBookIds", []))
         except (KeyError, TypeError):
             return []
 

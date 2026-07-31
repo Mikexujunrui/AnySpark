@@ -9,18 +9,21 @@ from collections.abc import AsyncGenerator, Generator
 from contextlib import contextmanager
 from contextvars import ContextVar, copy_context
 from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 from httpx import Timeout
-from openai import OpenAI
+from openai import OpenAI, Stream
+from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 
 from .config import config
 from .retry import calculate_delay, is_connection_error, is_context_overflow, is_retryable, with_retry
+from .settings import AppSettings
 
 logger = logging.getLogger(__name__)
 
 # ── Provider client cache ──────────────────────────────────────────────────
-_clients: dict = {}  # provider_id → OpenAI client instance
+_clients: dict[str, OpenAI] = {}  # provider_id → OpenAI client instance
 
 # Legacy MODELS dict — kept for backward compat (mode.py, system_prompt, etc.)
 MODELS = {
@@ -39,7 +42,7 @@ class LLMConfigurationError(RuntimeError):
 # ── Mode helpers ────────────────────────────────────────────────────────────
 
 
-def _settings():
+def _settings() -> AppSettings:
     """Lazy import to avoid circular deps."""
     from .settings import get_settings
 
@@ -103,7 +106,7 @@ def model_for(task: str) -> str:
     return model
 
 
-def _resolve(task: str) -> tuple:
+def _resolve(task: str) -> tuple[str, str]:
     """Return (provider_id, model_name) for the given task."""
     try:
         from .settings import task_to_type
@@ -146,7 +149,7 @@ def _make_httpx_client() -> httpx.Client:
     Users who need a proxy can set LLM_PROXY env var explicitly.
     """
     proxy_url = os.getenv("LLM_PROXY", "")
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "timeout": Timeout(connect=10.0, read=180.0, write=30.0, pool=10.0),
     }
     if proxy_url:
@@ -302,7 +305,7 @@ def chat(prompt: str, system: str = "", temperature: float = 0.3, task: str = "g
         try:
             provider_id, model = _resolve(task)
             client = _get_client_for_provider(provider_id)
-            messages = []
+            messages: list[ChatCompletionMessageParam] = []
             if system:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
@@ -351,13 +354,13 @@ def chat_stream(
         try:
             provider_id, model = _resolve(task)
             client = _get_client_for_provider(provider_id)
-            messages = []
+            messages: list[ChatCompletionMessageParam] = []
             if system:
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
             kwargs = _prose_completion_kwargs(task, temperature)
             try:
-                stream = client.chat.completions.create(
+                stream: Stream[ChatCompletionChunk] = client.chat.completions.create(
                     model=model,
                     messages=messages,
                     stream=True,
@@ -431,7 +434,7 @@ def chat_with_tools(
 ) -> LLMResponse:
     provider_id, model = _resolve(task)
     client = _get_client_for_provider(provider_id)
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
@@ -476,7 +479,7 @@ def chat_with_tools_stream(
 ) -> Generator[StreamEvent, None, None]:
     provider_id, model = _resolve(task)
     client = _get_client_for_provider(provider_id)
-    kwargs = {
+    kwargs: dict[str, Any] = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
@@ -486,7 +489,7 @@ def chat_with_tools_stream(
         kwargs["tools"] = [{"type": "function", "function": t} for t in tools]
         kwargs["tool_choice"] = "auto"
 
-    stream = client.chat.completions.create(**kwargs)
+    stream: Stream[ChatCompletionChunk] = client.chat.completions.create(**kwargs)
 
     current_tool_calls: dict[int, ToolCall] = {}
     content_started = False

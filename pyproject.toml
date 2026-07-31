@@ -1,6 +1,6 @@
 [project]
 name = "novel-agent"
-version = "3.2.0"
+version = "3.2.1"
 description = "AI 小说写作辅助 Agent — AnySpark（火花）"
 license = "AGPL-3.0-or-later"
 requires-python = ">=3.11"
@@ -71,6 +71,11 @@ python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 ignore_missing_imports = true
+# The src/ layout maps top-level `core`/`data` imports onto src/core and
+# src/data. Declaring mypy_path lets mypy resolve those imports the same way
+# a `pip install -e .` does in CI (without relying on the editable finder).
+mypy_path = ["src"]
+explicit_package_bases = true
 
 [build-system]
 requires = ["setuptools>=68.0"]

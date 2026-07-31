@@ -9,26 +9,17 @@ This module keeps the module-level helper functions and the singleton instance.
 
 import re
 
-from .stores._base import BaseStore
-from .stores.book_store import BookStoreMixin
-from .stores.chapter_store import ChapterStoreMixin
 from .stores.meta_store import MetaStoreMixin
-from .stores.session_store import SessionStoreMixin
-from .stores.worldbuilding_store import WorldbuildingStoreMixin
 
 
-class JsonStore(
-    BaseStore,
-    BookStoreMixin,
-    ChapterStoreMixin,
-    SessionStoreMixin,
-    WorldbuildingStoreMixin,
-    MetaStoreMixin,
-):
+class JsonStore(MetaStoreMixin):
     """Unified JSON file storage facade.
 
-    All entity CRUD methods are inherited from store mixin classes.
-    Direct instantiation is discouraged; use the module-level `json_store` singleton.
+    MetaStoreMixin already composes the full store surface (it inherits
+    ChapterStoreMixin → BookStoreMixin → SessionStoreMixin, plus
+    WorldbuildingStoreMixin), so a single base keeps the MRO consistent.
+    Direct instantiation is discouraged; use the module-level `json_store`
+    singleton.
     """
 
 

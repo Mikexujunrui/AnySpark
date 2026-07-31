@@ -7,11 +7,14 @@ import json
 import logging
 import threading
 from pathlib import Path
+from typing import Any, TypeVar, overload
 
 from core.config import DATA_DIR
 from core.errors import StorageError
 
 logger = logging.getLogger(__name__)
+
+_T = TypeVar("_T")
 
 
 class BaseStore:
@@ -110,7 +113,13 @@ class BaseStore:
 
     # ── JSON I/O ──
 
-    def _read_json(self, path: Path, default=None):
+    @overload
+    def _read_json(self, path: Path, default: _T) -> _T: ...
+
+    @overload
+    def _read_json(self, path: Path) -> list: ...
+
+    def _read_json(self, path: Path, default: Any = None) -> Any:
         if default is None:
             default = []
         if path.exists():

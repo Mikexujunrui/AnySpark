@@ -9,12 +9,13 @@ from pathlib import Path
 
 from core.book_locks import book_lock
 from core.errors import NotFoundError
+from data.stores._base import BaseStore
 
 logger = logging.getLogger(__name__)
 
 
-class SessionStoreMixin:
-    """Mixin providing session/message/document methods.  Requires BaseStore."""
+class SessionStoreMixin(BaseStore):
+    """Mixin providing session/message/document methods."""
 
     def load_sessions(self, book_id: str) -> list[dict]:
         return self._read_json(self._sessions_file(book_id))

@@ -165,7 +165,7 @@
 | 依赖 | SQLite Store、JSON 文件存储 |
 | 难度 | 中等 |
 | 状态 | ✅ 已实现 |
-| 实现 | `src/core/knowledge.py`, `src/core/graph_store.py`, `src/core/graph/entity_store.py`, `src/core/graph/relation_store.py`, `src/core/graph/analysis_store.py` |
+| 实现 | `src/core/knowledge.py`, `src/core/graph_store.py`, `src/core/sqlite_store/`（base/crud/graph/analytics/search mixins） |
 
 ---
 

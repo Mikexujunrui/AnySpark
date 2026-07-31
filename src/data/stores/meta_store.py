@@ -10,12 +10,16 @@ from pathlib import Path
 from core.book_locks import book_lock
 from core.config import DATA_DIR
 from core.errors import NotFoundError
+from data.stores.book_store import BookStoreMixin
+from data.stores.chapter_store import ChapterStoreMixin
+from data.stores.session_store import SessionStoreMixin
+from data.stores.worldbuilding_store import WorldbuildingStoreMixin
 
 logger = logging.getLogger(__name__)
 
 
-class MetaStoreMixin:
-    """Mixin providing review/volume/material/workflow/plot-chain/task methods.  Requires BaseStore."""
+class MetaStoreMixin(ChapterStoreMixin, BookStoreMixin, SessionStoreMixin, WorldbuildingStoreMixin):
+    """Mixin providing review/volume/material/workflow/plot-chain/task methods."""
 
     def load_reviews(self, book_id: str) -> list[dict]:
         return self._read_json(self._reviews_file(book_id))
@@ -176,7 +180,7 @@ class MetaStoreMixin:
     def get_reference_books(self, book_id: str) -> list[str]:
         try:
             book = self.get_book(book_id)
-            return book.get("referenceBookIds", [])
+            return list(book.get("referenceBookIds", []))
         except (KeyError, TypeError):
             return []
 
@@ -401,8 +405,8 @@ class MetaStoreMixin:
     # ── Agent Tasks (待办清单) ──
 
     def load_task_lists(self, book_id: str) -> list[dict]:
-        data = self._read_json(self._tasks_file(book_id), {"task_lists": []})
-        return data.get("task_lists", [])
+        data: dict = self._read_json(self._tasks_file(book_id), {"task_lists": []})
+        return list(data.get("task_lists", []))
 
     def _save_task_lists(self, book_id: str, lists: list[dict]):
         self._write_json(self._tasks_file(book_id), {"task_lists": lists})
