@@ -69,8 +69,7 @@ python scripts/check.py                    # 完整：+ pytest + tsc + eslint
 
 | 问题 | 状态 | 说明 |
 |------|------|------|
-| **SQLite 迁移不完整** | 🔴 进行中 | 约 40 处 Cypher 调用仍静默空转（extractor/foreshadow_matcher/search/confidence_scorer 等）。已修：impact_propagator、character_agent、narrator_agent（推演系统恢复）。**搜 `MATCH` 找剩余** |
-| SQLiteStore 缺方法 | 🔴 | `schedule_foreshadow` 等 ~40 个方法被调用但未实现（Neo4j 遗留）——需逐个验证（死代码删/实现） |
+| **SQLite 迁移专项** | ✅ 已完成 | 22 处 Cypher 全部重写为 SQL/Python（impact/character/narrator/extractor/confidence/generation/handlers/knowledge 等）；relations FK 重构（允许 timeline/foreshadow 边，OCCURRED_AT/DEPENDS_ON 实证可存）；20 个缺方法全部实现（CRUD+查询+分析端点） |
 | mypy 存量 | 🟡 282 | `.mypy-baseline` 兜底；清零是专项 |
 | 覆盖率 | 🟡 39% | CI gate 38；40% 目标需补大文件测试 |
 | 前端 | 🟡 | api.ts 已拆 http/sse，api 对象全量拆分/巨型组件（ChaptersPanel 1329 行）待做 |
