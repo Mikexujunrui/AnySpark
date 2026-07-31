@@ -148,16 +148,16 @@ M8 ──→ M9 反向审计
 
 目标：依赖从"浮动+双锁"变为"pin+单锁+可审计"。
 
-- [ ] **M4.1** pin Python 依赖
+- [x] **M4.1** pin Python 依赖（全部 == 精确版本）
   - 判据：`pyproject.toml` + `requirements.txt` 全部 `==` 精确版本（从当前环境 `pip freeze` 取实际版本）
   - 验证：`pip check` 无冲突；pytest 全绿
-- [ ] **M4.2** 生成 lockfile
+- [x] **M4.2** 生成 lockfile（requirements.lock，127 项 pip-compile）
   - 判据：`uv pip compile` 或 `pip-tools` 生成 `requirements.lock`，纳入版本库
   - 验证：lockfile 存在；全新 venv 按 lockfile 安装后可跑 pytest
-- [ ] **M4.3** 前端统一锁文件
+- [x] **M4.3** 前端统一锁文件（删 pnpm-lock.yaml，无 pnpm 引用）
   - 判据：删除 `frontend/pnpm-lock.yaml`；确认 CI 与本地构建均用 `package-lock.json`（`npm ci`）
   - 验证：`ls frontend/ | grep lock` 只剩 package-lock.json；`npm ci && npm run build` 通过
-- [ ] **M4.4** pre-commit 锁文件守卫
+- [x] **M4.4** pre-commit 锁文件守卫（scripts/check_lockfile_change.py，ALLOW_LOCKFILE_CHANGE=1 放行）
   - 判据：`.pre-commit-config.yaml` 增加钩子：锁文件变更需 `ALLOW_LOCKFILE_CHANGE=1` 才放行（仿 pi 的机制）
   - 验证：故意改 lockfile 提交被挡；带环境变量时放行
 
@@ -186,7 +186,7 @@ M8 ──→ M9 反向审计
 
 目标：本地一条命令 = CI 全绿。
 
-- [ ] **M6.1** 写 `scripts/check.py`
+- [x] **M6.1** 写 `scripts/check.py`（ruff+mypy gate+pytest+tsc+eslint 聚合，--fast/--py-only）
   - 判据：聚合 ruff → mypy gate → pytest → tsc → eslint，任一步失败即退出码非 0
   - 验证：本机实跑通过；故意引入一个 lint 错误验证退出码非 0
 - [ ] **M6.2** CI 统一入口
