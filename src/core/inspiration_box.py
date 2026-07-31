@@ -122,10 +122,12 @@ def add_inspiration(
     # Index in FTS
     try:
         fts_engine.index_material(
-            book_id,
-            insp["id"],
-            insp["content"],
-            ", ".join(insp["tags"]),
+            {
+                "id": insp["id"],
+                "title": insp["content"][:50],
+                "tags": insp["tags"],
+                "content": insp["content"],
+            }
         )
     except Exception:
         pass  # FTS indexing is best-effort
@@ -144,10 +146,26 @@ def list_inspirations(
     return inspirations
 
 
+def _resolve_inspiration(inspirations: list[dict], inspiration_id: str) -> dict | None:
+    """Find an inspiration by exact ID, then fall back to a unique prefix match.
+
+    Handles truncated IDs (e.g. the 12-char prefix echoed by list outputs)
+    being fed back by the Agent for lookups. Returns None on zero or
+    multiple prefix matches.
+    """
+    exact = next((i for i in inspirations if i.get("id") == inspiration_id), None)
+    if exact:
+        return exact
+    prefix_matches = [i for i in inspirations if str(i.get("id", "")).startswith(inspiration_id)]
+    if len(prefix_matches) == 1:
+        return prefix_matches[0]
+    return None
+
+
 def get_inspiration(book_id: str, inspiration_id: str) -> dict | None:
     """Get a single inspiration by ID."""
     inspirations = _load_inspirations(book_id)
-    return next((i for i in inspirations if i.get("id") == inspiration_id), None)
+    return _resolve_inspiration(inspirations, inspiration_id)
 
 
 def update_inspiration(book_id: str, inspiration_id: str, updates: dict) -> dict | None:
@@ -155,7 +173,10 @@ def update_inspiration(book_id: str, inspiration_id: str, updates: dict) -> dict
     with book_lock(book_id):
         inspirations = _load_inspirations(book_id)
         for i, insp in enumerate(inspirations):
-            if insp.get("id") == inspiration_id:
+            if insp.get("id") == inspiration_id or str(insp.get("id", "")).startswith(inspiration_id):
+                prefix_matches = [x for x in inspirations if str(x.get("id", "")).startswith(inspiration_id)]
+                if len(prefix_matches) > 1:
+                    continue
                 insp.update(updates)
                 _save_inspirations(book_id, inspirations)
                 return insp
@@ -180,13 +201,13 @@ def link_inspiration(
 
     with book_lock(book_id):
         inspirations = _load_inspirations(book_id)
-        for insp in inspirations:
-            if insp.get("id") == inspiration_id:
-                links = insp.setdefault(field_name, [])
-                if target_id not in links:
-                    links.append(target_id)
-                _save_inspirations(book_id, inspirations)
-                return insp
+        insp = _resolve_inspiration(inspirations, inspiration_id)
+        if insp:
+            links = insp.setdefault(field_name, [])
+            if target_id not in links:
+                links.append(target_id)
+            _save_inspirations(book_id, inspirations)
+            return insp
     return None
 
 
@@ -203,13 +224,13 @@ def promote_inspiration(
     """
     with book_lock(book_id):
         inspirations = _load_inspirations(book_id)
-        for insp in inspirations:
-            if insp.get("id") == inspiration_id:
-                insp["status"] = "promoted"
-                insp["promoted_to"] = target_type
-                insp["promoted_at"] = datetime.now().isoformat()
-                _save_inspirations(book_id, inspirations)
-                return insp
+        insp = _resolve_inspiration(inspirations, inspiration_id)
+        if insp:
+            insp["status"] = "promoted"
+            insp["promoted_to"] = target_type
+            insp["promoted_at"] = datetime.now().isoformat()
+            _save_inspirations(book_id, inspirations)
+            return insp
     return {"error": "Inspiration not found"}
 
 
@@ -222,26 +243,36 @@ def delete_inspiration(book_id: str, inspiration_id: str) -> bool:
     """Permanently delete an inspiration card."""
     with book_lock(book_id):
         inspirations = _load_inspirations(book_id)
-        filtered = [i for i in inspirations if i.get("id") != inspiration_id]
+        target = _resolve_inspiration(inspirations, inspiration_id)
+        if not target:
+            return False
+        filtered = [i for i in inspirations if i.get("id") != target["id"]]
         if len(filtered) < len(inspirations):
             _save_inspirations(book_id, filtered)
             return True
     return False
 
 
+def _string_search(inspirations: list[dict], query: str) -> list[dict]:
+    """Simple case-insensitive substring search over content and tags."""
+    q = query.lower()
+    return [
+        i
+        for i in inspirations
+        if q in i.get("content", "").lower() or any(q in t.lower() for t in i.get("tags", []))
+    ]
+
+
 def search_inspirations(book_id: str, query: str) -> list[dict]:
     """Search inspirations by content/tags using FTS5."""
+    inspirations = _load_inspirations(book_id)
     try:
         results = fts_engine.search_materials(query, limit=20)
         insp_ids = {r.get("mat_id") for r in results}
-        inspirations = _load_inspirations(book_id)
-        return [i for i in inspirations if i.get("id") in insp_ids]
+        hits = [i for i in inspirations if i.get("id") in insp_ids]
+        if hits:
+            return hits
     except Exception:
-        # Fallback to simple string search
-        inspirations = _load_inspirations(book_id)
-        q = query.lower()
-        return [
-            i
-            for i in inspirations
-            if q in i.get("content", "").lower() or any(q in t.lower() for t in i.get("tags", []))
-        ]
+        pass
+    # Fallback to simple string search (also covers un-indexed cards)
+    return _string_search(inspirations, query)

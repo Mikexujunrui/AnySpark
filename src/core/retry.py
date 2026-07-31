@@ -1,7 +1,7 @@
 import asyncio
 import logging
-from collections.abc import AsyncGenerator, Callable
-from typing import Any, TypeVar
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from typing import TypeVar, cast
 
 from openai import APIConnectionError, APIError, APIStatusError, APITimeoutError, RateLimitError
 
@@ -12,11 +12,11 @@ T = TypeVar("T")
 RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504, 529}
 MAX_RETRIES = 5
 
-CONN_INITIAL_DELAY = 1.0
-CONN_MAX_DELAY = 15.0
+CONN_INITIAL_DELAY: float = 1.0
+CONN_MAX_DELAY: float = 15.0
 
-RATE_INITIAL_DELAY = 2.0
-RATE_MAX_DELAY = 30.0
+RATE_INITIAL_DELAY: float = 2.0
+RATE_MAX_DELAY: float = 30.0
 
 
 def is_retryable(error: Exception) -> bool:
@@ -66,19 +66,21 @@ def calculate_delay(attempt: int, error: Exception | None = None) -> float:
                 pass
 
     if error and is_connection_error(error):
-        return min(CONN_INITIAL_DELAY * (2**attempt), CONN_MAX_DELAY)
+        return float(min(CONN_INITIAL_DELAY * (2**attempt), CONN_MAX_DELAY))
 
-    return min(RATE_INITIAL_DELAY * (2**attempt), RATE_MAX_DELAY)
+    return float(min(RATE_INITIAL_DELAY * (2**attempt), RATE_MAX_DELAY))
 
 
-async def with_retry(fn: Callable[..., Any], *args, max_retries: int = MAX_RETRIES, **kwargs) -> Any:
+async def with_retry(
+    fn: Callable[..., T | Awaitable[T]], *args, max_retries: int = MAX_RETRIES, **kwargs
+) -> T:
     last_error = None
     for attempt in range(max_retries + 1):
         try:
             result = fn(*args, **kwargs)
             if asyncio.iscoroutine(result):
-                return await result
-            return result
+                return await cast(Awaitable[T], result)
+            return cast(T, result)
         except Exception as e:
             last_error = e
             if not is_retryable(e):

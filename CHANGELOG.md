@@ -2,6 +2,39 @@
 
 本文档记录项目的所有重要变更。格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.0.0/)。
 
+## [3.2.1] - 2026-07-31
+
+> 工程重构批次：拆分两个巨型单体、打通 mypy 增量门禁、补齐工具接线。
+
+### 工程
+
+- **拆分 `core/sqlite_store.py`（2649 行单体）**：按领域拆为 `core/sqlite_store/` 子包
+  （`base`/`crud`/`graph`/`analytics`/`search` Mixin + `__init__` 组合类），
+  每文件不超过 676 行；`graph_store.py` 兼容 shim 保持不变，全部 25+ 调用方无感。
+- **拆分 `core/tools.py`（2135 行单体）**：基础设施移至 `core/tool_registry.py`，
+  118 个工具定义按 9 个领域拆入 `core/tool_defs/`，`core/tools.py` 变为门面，
+  保持 `from core.tools import ...` 完全兼容；`ToolRegistry.list` 更名为
+  `list_tools`（无调用方，原方法遮蔽内建 `list` 导致类型错误）。
+- **mypy 类型质量**：修复 store Mixin 继承链（`JsonStore` MRO 修正）、`_read_json`/
+  `_cached`/`with_retry` 泛型化、`llm_client` 的 httpx kwargs 与 OpenAI 消息类型、
+  `config` 的 `Path` 注解等系统性问题，真实错误数 786 → 290（`mypy_path=src` 解析下）。
+- **CI 增量类型门禁**：`scripts/mypy_gate.sh` + `.mypy-baseline`（320，含容差）替换
+  原先的 `mypy || true` 放行——只允许存量错误，新增类型错误会让 CI 失败。
+- `pyproject.toml` 增加 `mypy_path`/`explicit_package_bases`，使本地 mypy 与 CI
+  （`pip install -e .`）解析一致。
+- `docs/CODE_HEALTH_ISSUES.md` 移出 `.gitignore`，纳入版本控制并刷新为当前状态。
+
+### 功能
+
+- **灵感工具正式接线**：`manage_inspirations` 工具此前未注册进 executor，现已补入
+  Tool 定义、executor 分发与测试；并修复两个真实 bug——
+  截断灵感 ID 无法回查（新增前缀匹配解析）、FTS 索引调用签名错误
+  （`index_material` 传参不匹配导致索引从未写入，搜索长期依赖字符串回退）。
+
+### 测试
+
+- 新增灵感工具实现测试（4 个用例）。测试套件现为 **58 文件 / 704 用例**。
+
 ## [3.2.0] - 2026-07-30
 
 > 今晚整合最终版。安装包包含 3.1.0 的模型自动拉取、`.spark` 跨电脑导入、

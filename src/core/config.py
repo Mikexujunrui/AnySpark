@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 #   Linux app: ${XDG_DATA_HOME:-~/.local/share}/AnySpark
 #   development: repository root
 if getattr(sys, "frozen", False):
-    RESOURCE_ROOT = Path(sys._MEIPASS).resolve()
+    RESOURCE_ROOT = Path(sys._MEIPASS).resolve()  # type: ignore[attr-defined]
 else:
     RESOURCE_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -163,12 +163,12 @@ _migrated_from = _migrate_legacy_frozen_data(_project_root)
 load_dotenv(_project_root / ".env")
 # Also try sys._MEIPASS (for PyInstaller EXE where .env might be bundled)
 if getattr(sys, "frozen", False):
-    load_dotenv(Path(sys._MEIPASS) / ".env")
+    load_dotenv(Path(sys._MEIPASS) / ".env")  # type: ignore[attr-defined]
 # Also try CWD (for users who place .env in working directory)
 load_dotenv(Path.cwd() / ".env")
 
-PROJECT_ROOT = _project_root
-DATA_DIR = PROJECT_ROOT / "data"
+PROJECT_ROOT: Path = _project_root
+DATA_DIR: Path = PROJECT_ROOT / "data"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 UPGRADE_BACKUP_PATH = _backup_data_before_upgrade(PROJECT_ROOT, DATA_DIR)
 UPLOAD_DIR = DATA_DIR / "uploads"

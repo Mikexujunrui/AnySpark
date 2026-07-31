@@ -7,6 +7,7 @@ import logging
 import re
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from core.book_locks import book_lock
 from core.config import DATA_DIR, config
@@ -14,6 +15,7 @@ from core.errors import NotFoundError, StorageError
 from core.event_bus import Event, EventType, bus
 from core.search import fts as fts_engine
 from data.stores._base import _fuzzy_find, _locate_in_paragraph, _split_paragraphs
+from data.stores.book_store import BookStoreMixin
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +26,8 @@ def _is_extra_title(title: str) -> bool:
     return bool(re.match(r'^番外', stripped))
 
 
-class ChapterStoreMixin:
-    """Mixin providing chapter + version management.  Requires BaseStore."""
+class ChapterStoreMixin(BookStoreMixin):
+    """Mixin providing chapter + version management."""
 
     def load_chapters(self, book_id: str) -> list[dict]:
         raw = self._read_json(self._chapters_file(book_id))
@@ -276,9 +278,9 @@ class ChapterStoreMixin:
         cur_id = ch.get("current_version", "")
         for v in ch.get("versions", []):
             if v["id"] == cur_id:
-                return v
+                return cast(dict, v)
         if ch.get("versions"):
-            return ch["versions"][-1]
+            return cast(dict, ch["versions"][-1])
         # Fallback: if no versions, use top-level content/title directly
         top_content = ch.get("content", "")
         if top_content:
@@ -687,7 +689,7 @@ class ChapterStoreMixin:
         v = next((v for v in ch["versions"] if v["id"] == version_id or v["id"].startswith(version_id)), None)
         if not v:
             raise NotFoundError(f"版本不存在: {version_id}")
-        return v
+        return cast(dict, v)
 
     def delete_version(self, book_id: str, chapter_id: str, version_id: str) -> dict:
         with book_lock(book_id):

@@ -18,10 +18,10 @@ jobs:
         run: pip install ruff mypy
       - name: Ruff lint check
         run: python -m ruff check src/ tests/ --output-format=github
-      - name: Mypy type check
-        # TODO: 项目有 435 个 mypy 错误待修复，暂时允许失败
-        # 修复后移除此行恢复严格检查
-        run: python -m mypy src/ --ignore-missing-imports --no-strict-optional || true
+      - name: Mypy type check (incremental gate)
+        # 存量错误由 .mypy-baseline 兜底：仅当错误数超过基线时失败，
+        # 保证新增代码不引入新的类型错误。修复存量后按 .mypy-baseline 注释刷新基线。
+        run: bash scripts/mypy_gate.sh
 
   test-backend:
     runs-on: ubuntu-latest

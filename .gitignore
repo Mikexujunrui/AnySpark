@@ -51,7 +51,6 @@ data/*.db-wal
 data/analyses/
 
 # Internal working docs (not part of source distribution)
-docs/CODE_HEALTH_ISSUES.md
 data/simulations/
 data/annotations/
 

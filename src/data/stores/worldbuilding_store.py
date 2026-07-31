@@ -6,15 +6,17 @@
 
 import logging
 from datetime import datetime
+from typing import cast
 
 from core.book_locks import book_lock
 from core.errors import NotFoundError
+from data.stores._base import BaseStore
 
 logger = logging.getLogger(__name__)
 
 
-class WorldbuildingStoreMixin:
-    """Mixin providing worldbuilding/outline/timeline/notes methods.  Requires BaseStore."""
+class WorldbuildingStoreMixin(BaseStore):
+    """Mixin providing worldbuilding/outline/timeline/notes methods."""
 
     def load_worldbuilding(self, book_id: str) -> dict:
         return self._read_json(self._worldbuilding_file(book_id), default={})
@@ -222,7 +224,7 @@ class WorldbuildingStoreMixin:
             if e.get("id") == event_id or e.get("id", "").startswith(event_id):
                 e.update(data)
                 self.save_timeline(book_id, tl)
-                return e
+                return cast(dict, e)
         raise NotFoundError(f"Timeline event not found: {event_id}")
 
     def delete_timeline_event(self, book_id: str, event_id: str):

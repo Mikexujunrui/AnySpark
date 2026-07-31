@@ -142,3 +142,54 @@ class TestInspirationPromotion:
         monkeypatch.setattr(inspiration_box, "_INSPIRATIONS_DIR", tmp_path)
         result = promote_inspiration("book1", "nonexistent", "outline_node")
         assert "error" in result
+
+
+class TestInspirationTool:
+    """Test the Agent-facing manage_inspirations tool implementation."""
+
+    def _run_tool(self, args: dict, tmp_path, monkeypatch) -> str:
+        from core import inspiration_box
+        from tools.impl.inspirations import _manage_inspirations
+
+        monkeypatch.setattr(inspiration_box, "_INSPIRATIONS_DIR", tmp_path)
+        return _manage_inspirations(args, "book1", "")
+
+    def test_add_and_list(self, tmp_path, monkeypatch):
+        out = self._run_tool({"action": "add", "content": "灵感A", "tags": ["主线"]}, tmp_path, monkeypatch)
+        assert "灵感已添加" in out
+
+        out = self._run_tool({"action": "list"}, tmp_path, monkeypatch)
+        assert "灵感A" in out
+        assert "[inbox]" in out
+
+    def test_get_and_update(self, tmp_path, monkeypatch):
+        out = self._run_tool({"action": "add", "content": "灵感B"}, tmp_path, monkeypatch)
+        insp_id = out.split("(id: ")[1].split(")")[0]
+
+        out = self._run_tool({"action": "get", "inspiration_id": insp_id}, tmp_path, monkeypatch)
+        assert "灵感B" in out
+
+        out = self._run_tool({"action": "update", "inspiration_id": insp_id, "status": "archived"}, tmp_path, monkeypatch)
+        assert "已更新" in out
+
+        out = self._run_tool({"action": "list", "status": "archived"}, tmp_path, monkeypatch)
+        assert "灵感B" in out
+
+    def test_search_delete_unknown_action(self, tmp_path, monkeypatch):
+        self._run_tool({"action": "add", "content": "命运轮回"}, tmp_path, monkeypatch)
+        out = self._run_tool({"action": "search", "query": "命运"}, tmp_path, monkeypatch)
+        assert "命运轮回" in out
+
+        out = self._run_tool({"action": "list"}, tmp_path, monkeypatch)
+        insp_id = out.split("[")[1].split("]")[0]
+        out = self._run_tool({"action": "delete", "inspiration_id": insp_id}, tmp_path, monkeypatch)
+        assert "已删除" in out
+
+        out = self._run_tool({"action": "bogus"}, tmp_path, monkeypatch)
+        assert "未知操作" in out
+
+    def test_missing_required_params(self, tmp_path, monkeypatch):
+        out = self._run_tool({"action": "add"}, tmp_path, monkeypatch)
+        assert "content" in out
+        out = self._run_tool({"action": "delete"}, tmp_path, monkeypatch)
+        assert "inspiration_id" in out
