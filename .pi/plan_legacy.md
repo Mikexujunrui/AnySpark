@@ -63,6 +63,8 @@ L4.0 git污染协调（贯穿，需主人配合外部进程）
 - [x] **L3.1** api.ts 全量拆分（按后端 route 域拆 `api/books.ts` 等 7 模块 + types.ts；api.ts 保留 re-export 门面）
   - 验证：tsc 全绿 + eslint 0 error + vite build 通过
 - [ ] **L3.2** ChaptersPanel 1329 行拆分（tab 管理 / 章节列表 / 编辑器 / 历史 / diff 预览抽离）
+  - ✅ 已完成：Find-Replace 面板抽离为 ChapterFindReplace.tsx（1329→1275，-54 行）；tab 管理（tabStore）/ 历史（ChapterHistoryPanel）已是独立组件
+  - 剩余：sidebar 章节列表 + outline panel 状态耦合度高，拆分风险中等，待评估
 - [ ] **L3.3** 其他巨型组件（ChatPanel 1156 / SettingsModal 1045）按需拆分
   - 验证：`npx tsc --noEmit` 全绿 + `npm run build` 通过 + 手动回归
 
