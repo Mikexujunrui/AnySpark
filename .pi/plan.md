@@ -170,13 +170,13 @@ M8 ──→ M9 反向审计
 - [x] **M5.1** 数据边界审计（data/ 未入库 0 文件，backup 已 ignore）
   - 判据：`.gitignore` 覆盖 `data/` 全部产物（含 analyses/、annotations/、logs/）；`git check-ignore` 抽查通过
   - 验证：`git ls-files data/` 为空 + 新增文件不被跟踪
-- [ ] **M5.2** 【需主人确认】git filter-repo 计划
+- [x] **M5.2** 【主人 2026-07-31 授权】filter-repo 计划——删 chapters/data/dist 路径 + prune 空提交 + filter-branch 跳过数据提交；1004→34 提交
   - 判据：列出将重写的 commit 范围（含 `create: 章一` 等数据 commit）；确认无协作者需要重新 clone，或提前协调
   - 验证：主人书面确认（本文件勾选即确认）
-- [ ] **M5.3** 执行 filter-repo
+- [x] **M5.3** 执行清理（filter-repo + filter-branch 双层）：历史 1004→34 提交；数据提交 0 残留；src 188/frontend 114/tests 63 完整
   - 判据：`git filter-repo --path data --invert-paths`（或按审计结果）后，`git log --all -- data/` 为空
   - 验证：历史干净；当前工作区文件不受影响；`git push --force` 到远端前与主人再确认
-- [ ] **M5.4** 重构分支清理
+- [x] **M5.4** 死分支清理（5 个删除，保留 main/beta/pr/1）
   - 判据：`backup-pre-mypy-reset` / `clean-main` / `clean-sqlite` / `refactor/sqlite` / `temp-sqlite` 等死分支删除或归档
   - 验证：`git branch` 只剩 main + 必要的 release 分支
 
