@@ -9,6 +9,7 @@
 # so the local gate and CI cannot drift apart.
 
 import argparse
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -16,10 +17,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def run(cmd: list[str], cwd: Path, label: str) -> bool:
+def run(cmd: list[str], cwd: Path, label: str, env: dict | None = None) -> bool:
     print(f"\n── {label} ──")
     try:
-        r = subprocess.run(cmd, cwd=cwd)
+        r = subprocess.run(cmd, cwd=cwd, env=env)
     except FileNotFoundError as e:
         print(f"  ✗ 命令不可用: {e}")
         return False
@@ -38,7 +39,11 @@ def main() -> int:
 
     ok = True
     ok &= run([sys.executable, "-m", "ruff", "check", "src/", "tests/"], ROOT, "ruff lint")
-    ok &= run(["bash", "scripts/mypy_gate.sh"], ROOT, "mypy gate")
+    # mypy gate needs a working interpreter with mypy installed; on WSL pass
+    # the same interpreter that's running this script.
+    env = dict(os.environ)
+    env.setdefault("PYTHON", sys.executable)
+    ok &= run(["bash", "scripts/mypy_gate.sh"], ROOT, "mypy gate", env=env)
     if not args.fast:
         ok &= run([sys.executable, "-m", "pytest", "tests/", "-q"], ROOT, "pytest")
     if not args.py_only:
