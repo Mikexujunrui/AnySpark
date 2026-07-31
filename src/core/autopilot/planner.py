@@ -15,6 +15,33 @@ from .config import INTENT_PATTERNS, AutopilotConfig, PlanIntent
 
 logger = logging.getLogger(__name__)
 
+_CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+
+
+def _parse_chinese_number(value: str) -> int:
+    """Parse common Chinese chapter numerals without an LLM round-trip."""
+    if not value:
+        return 0
+    if value.isdigit():
+        return int(value)
+    if all(char in _CN_DIGITS for char in value):
+        return int("".join(str(_CN_DIGITS[char]) for char in value))
+    total = section = current = 0
+    for char in value:
+        if char in _CN_DIGITS:
+            current = _CN_DIGITS[char]
+        elif char in {"十", "百", "千", "万"}:
+            unit = {"十": 10, "百": 100, "千": 1000, "万": 10000}[char]
+            if unit == 10000:
+                total += (section + current) * unit
+                section = current = 0
+            else:
+                section += (current or 1) * unit
+                current = 0
+        else:
+            return 0
+    return total + section + current
+
 
 def _classify_intent(instruction: str, book_state: dict) -> PlanIntent:
     """Classify user instruction into a structured PlanIntent.
@@ -41,6 +68,20 @@ def _classify_intent(instruction: str, book_state: dict) -> PlanIntent:
 
     # Parse chapter indices from instruction (e.g., "#3-#8", "第3-8章", "#3,#5,#7")
     chapter_indices = _parse_chapter_indices(instruction)
+
+    # A writing request may also ask to "check after writing".  The earlier
+    # score-only classifier treated the word 检查 as a pure analysis task,
+    # creating text in task logs without ever saving a chapter.  An explicit
+    # chapter target plus a writing verb wins unless the user clearly asks to
+    # edit an existing chapter.
+    explicit_write = bool(
+        chapter_indices
+        and re.search(r"(?:续写|撰写|创作|生成|开始写|完成|写).{0,12}(?:第|#)", instruction)
+    )
+    explicit_edit = bool(re.search(r"(?:重写|改写|修改|精修|优化|调整|替换)", instruction))
+    if explicit_write and not explicit_edit:
+        best_intent = "write_new"
+        best_score = max(best_score, 3)
 
     # Determine scope
     scope = "all"
@@ -128,10 +169,15 @@ def _parse_chapter_indices(instruction: str) -> list:
         indices = list(range(start, end + 1))
         return indices
 
-    # Match "第N-M章" pattern
-    cn_range_match = re.search(r"第(\d+)\s*[-~到至]\s*(\d+)章", instruction)
+    cn_num = r"[零〇一二两三四五六七八九十百千万\d]+"
+
+    # Match "第N-M章" pattern, including 第三到第八章.
+    cn_range_match = re.search(rf"第({cn_num})\s*[-~到至]\s*(?:第)?({cn_num})章", instruction)
     if cn_range_match:
-        start, end = int(cn_range_match.group(1)), int(cn_range_match.group(2))
+        start = _parse_chinese_number(cn_range_match.group(1))
+        end = _parse_chinese_number(cn_range_match.group(2))
+        if start <= 0 or end < start:
+            return []
         indices = list(range(start, end + 1))
         return indices
 
@@ -142,9 +188,10 @@ def _parse_chapter_indices(instruction: str) -> list:
         return sorted(set(indices))
 
     # Match "第N章" single chapter
-    cn_single = re.search(r"第(\d+)章", instruction)
+    cn_single = re.search(rf"第({cn_num})章", instruction)
     if cn_single:
-        indices = [int(cn_single.group(1))]
+        parsed = _parse_chinese_number(cn_single.group(1))
+        indices = [parsed] if parsed > 0 else []
         return indices
 
     return indices
@@ -334,7 +381,7 @@ class AutopilotPlanner:
 
     def _plan_write_new(self, prefix: str, config: AutopilotConfig, book_state: dict, intent: PlanIntent) -> dict:
         """Plan for sequential chapter writing."""
-        chapters_to_write = self._determine_chapters(book_state, config)
+        chapters_to_write = self._determine_chapters(book_state, config, intent)
         if not chapters_to_write:
             return {
                 "plan_summary": (
@@ -516,12 +563,26 @@ class AutopilotPlanner:
             "intent_type": "write_new",
         }
 
-    def _determine_chapters(self, book_state: dict, config: AutopilotConfig) -> list[dict]:
+    def _determine_chapters(
+        self, book_state: dict, config: AutopilotConfig, intent: PlanIntent | None = None
+    ) -> list[dict]:
         """Figure out which chapters need to be written."""
         existing = book_state["existing_indices"]
         outline_chs = book_state["outline_chapters"]
 
         chapters = []
+
+        # Explicit chapter targets are authoritative, but existing prose is
+        # immutable in a write-new workflow.  Silently skipping an existing
+        # index is safer than letting Auto reinterpret it as a rewrite.
+        if intent and intent.chapter_indices:
+            for idx in intent.chapter_indices:
+                if idx in existing:
+                    continue
+                outline_row = outline_chs[idx - 1] if 0 < idx <= len(outline_chs) else {}
+                title = outline_row.get("title", outline_row.get("name", f"第{idx}章"))
+                chapters.append({"index": idx, "title": title})
+            return chapters[: config.max_chapters_per_run]
 
         if outline_chs:
             for i, ch in enumerate(outline_chs):
@@ -1412,6 +1473,9 @@ class AutopilotPlanner:
 
 注意：
 - prompt 要具体，告诉 agent 使用什么工具
+- category=write 必须有整数 chapter_index，且 prompt 必须明确调用 write_chapter 或 delegate_writing
+- category=write 的 max_rounds 不得小于 10；不得将模型聊天输出当作已保存章节
+- 不得对已有章节使用 write 类步骤，如需改稿必须使用 edit 类工具
 - 可用工具：delegate_writing, patch_chapter, read_chapter, extract_knowledge,
   find_replace_book, apply_directive_globally, batch_edit_chapters,
   restyle_book, transform_chapters_batch, search_knowledge,
@@ -1436,13 +1500,22 @@ class AutopilotPlanner:
                 json_str = re.sub(r"\s*```$", "", json_str)
 
             plan_data = json.loads(json_str)
-            steps = self._parse_llm_plan_steps(prefix, plan_data)
+            steps = self._parse_llm_plan_steps(prefix, plan_data, config.instruction)
+            if not any(s.type == "agent_loop" for s in steps):
+                logger.warning("LLM plan contained no safe executable steps; using deterministic write plan")
+                return self._plan_write_new(prefix, config, book_state, intent)
 
             return {
                 "plan_summary": plan_data.get("plan_summary", f"智能规划：{config.instruction[:30]}"),
                 "chapters": [],
                 "steps": steps,
-                "estimated_chapters": len([s for s in steps if s.config.get("chapter_index")]),
+                "estimated_chapters": len(
+                    {
+                        s.config.get("chapter_index")
+                        for s in steps
+                        if s.config.get("step_category") == "write" and s.config.get("chapter_index") is not None
+                    }
+                ),
                 "total_steps": len(steps),
                 "intent_type": "mixed",
             }
@@ -1469,25 +1542,58 @@ class AutopilotPlanner:
 
         return "\n".join(lines)
 
-    def _parse_llm_plan_steps(self, prefix: str, plan_data: dict) -> list[TaskStep]:
-        """Parse LLM-generated plan JSON into TaskStep objects."""
+    def _parse_llm_plan_steps(self, prefix: str, plan_data: dict, instruction: str = "") -> list[TaskStep]:
+        """Parse and safety-normalize LLM-generated task steps.
+
+        An LLM plan is untrusted control data.  In particular, prose printed in
+        chat is not a saved chapter: every write step must identify its target
+        and explicitly use a chapter-writing tool.
+        """
         steps = []
+        last_write_index = None
         for i, step_data in enumerate(plan_data.get("steps", [])):
             category = step_data.get("category", "write")
             step_type = "checkpoint" if category == "checkpoint" else "agent_loop"
+            label = step_data.get("label", f"步骤 {i + 1}")
+            prompt = step_data.get("prompt", "")
+            chapter_index = step_data.get("chapter_index")
+            if chapter_index is not None:
+                try:
+                    chapter_index = int(str(chapter_index).lstrip("#"))
+                except (TypeError, ValueError):
+                    chapter_index = None
+            if chapter_index is None:
+                parsed = _parse_chapter_indices(f"{label} {prompt} {instruction}")
+                chapter_index = parsed[0] if parsed else None
+
+            if category == "write":
+                if chapter_index is None:
+                    logger.warning("Dropping unsafe LLM write step without chapter_index: %s", label)
+                    continue
+                if not any(tool in prompt for tool in ("write_chapter", "delegate_writing")):
+                    prompt = (
+                        f"{prompt}\n\n必须调用 write_chapter 或 delegate_writing 写入第{chapter_index}章；"
+                        "只在聊天中输出正文不算完成。"
+                    )
+                last_write_index = chapter_index
+
+            if category == "checkpoint" and chapter_index is None:
+                chapter_index = last_write_index
 
             step = TaskStep(
                 id=f"{prefix}_llm_s{i}",
                 type=step_type,
-                label=step_data.get("label", f"步骤 {i + 1}"),
+                label=label,
                 config={
-                    "prompt": step_data.get("prompt", ""),
+                    "prompt": prompt,
                     "agent_type": step_data.get("agent_type", "write"),
                     "mode": step_data.get("mode", "write"),
                     "temperature": step_data.get("temperature", 0.3),
-                    "max_rounds": step_data.get("max_rounds", 30),
+                    "max_rounds": max(10, int(step_data.get("max_rounds", 30)))
+                    if category == "write"
+                    else int(step_data.get("max_rounds", 30)),
                     "step_category": category,
-                    "chapter_index": step_data.get("chapter_index"),
+                    "chapter_index": chapter_index,
                 },
             )
             steps.append(step)
@@ -1499,9 +1605,13 @@ class AutopilotPlanner:
                     id=f"{prefix}_llm_final",
                     type="checkpoint",
                     label="任务完成",
-                    config={"final": True},
+                    config={"final": True, "chapter_index": last_write_index},
                 )
             )
+
+        checkpoints = [s for s in steps if s.type == "checkpoint"]
+        if checkpoints:
+            checkpoints[-1].config["final"] = True
 
         return steps
 
@@ -1536,8 +1646,9 @@ class AutopilotPlanner:
 
 请根据当前情况，输出调整后的剩余步骤序列。
 可以: 增加步骤、删除步骤、修改步骤的 prompt、调整步骤顺序。
-格式同初始规划（JSON 数组，每个元素包含 category/label/prompt/agent_type/mode/max_rounds）。
-如果当前状态已经足够好，可以输出空数组 [] 表示直接完成。
+格式同初始规划（JSON 数组，每个元素包含 category/label/prompt/agent_type/mode/max_rounds/chapter_index）。
+写作步骤必须指定 chapter_index、调用 write_chapter 或 delegate_writing，且 max_rounds>=10。
+如果是因为失败或未保存章节而重规划，禁止输出空数组宣称完成。
 只输出 JSON 数组。"""
 
         try:
@@ -1560,37 +1671,14 @@ class AutopilotPlanner:
             if not isinstance(steps_data, list):
                 steps_data = steps_data.get("steps", [])
 
-            new_steps = []
-            for i, step_data in enumerate(steps_data):
-                category = step_data.get("category", "write")
-                step_type = "checkpoint" if category == "checkpoint" else "agent_loop"
-                new_steps.append(
-                    TaskStep(
-                        id=f"{prefix}_rp_s{i}",
-                        type=step_type,
-                        label=step_data.get("label", f"调整步骤 {i + 1}"),
-                        config={
-                            "prompt": step_data.get("prompt", ""),
-                            "agent_type": step_data.get("agent_type", "write"),
-                            "mode": step_data.get("mode", "write"),
-                            "max_rounds": step_data.get("max_rounds", 30),
-                            "step_category": category,
-                            "chapter_index": step_data.get("chapter_index"),
-                        },
-                    )
-                )
-
-            # Ensure at least a final checkpoint
-            if not any(s.type == "checkpoint" for s in new_steps):
-                new_steps.append(
-                    TaskStep(
-                        id=f"{prefix}_rp_final",
-                        type="checkpoint",
-                        label="调整后任务完成",
-                        config={"final": True},
-                    )
-                )
-
+            if not steps_data:
+                return []
+            new_steps = self._parse_llm_plan_steps(prefix, {"steps": steps_data}, instruction)
+            if any(item.get("category") == "write" for item in steps_data) and not any(
+                step.config.get("step_category") == "write" for step in new_steps
+            ):
+                logger.warning("Rejecting replan: all write steps failed safety validation")
+                return []
             return new_steps
 
         except (json.JSONDecodeError, Exception) as e:

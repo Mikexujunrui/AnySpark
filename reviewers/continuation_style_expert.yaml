@@ -3,7 +3,9 @@
   avatar: pen
   category: continuation
   active: false
-  needs_knowledge: false
+  # 文风一致性判断必须看到当前书知识、既有正文样本和参考书文风证据。
+  # 缺少这些证据时要求模型判断“原著如何”会诱发作品名和引文幻觉。
+  needs_knowledge: true
   persona: |
     你是一位小说续写的文风评审专家。你的任务是评估续文的语言风格是否与原文保持一致。
 

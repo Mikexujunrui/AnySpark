@@ -5,6 +5,152 @@ import asyncio
 from core.review_panel import ReviewResult
 from data.json_store import json_store
 
+_CURRENT_BOOK_SAMPLE_CHARS = 2400
+_REFERENCE_SAMPLE_CHARS = 1800
+
+
+def _chapter_excerpt(text: str, limit: int) -> str:
+    """Keep both ends of a source chapter so style evidence is representative."""
+    text = (text or "").strip()
+    if len(text) <= limit:
+        return text
+    half = max(limit // 2, 1)
+    return text[:half] + "\n...（样本中段省略）...\n" + text[-half:]
+
+
+def _build_review_evidence(book_id: str, chapter_ref: str, kb=None) -> str:
+    """Build provenance-labelled evidence for reviewers.
+
+    Reviewers used to receive a short knowledge summary and, in many cases,
+    no source prose at all.  Yet their personas asked them to compare against
+    the "original work".  That missing evidence encouraged the model to fill
+    in a famous work from its priors.  Keep current-book canon, current-book
+    prose, and reference-book material in explicitly separated sections.
+    """
+    parts: list[str] = []
+
+    try:
+        book = json_store.get_book(book_id)
+    except Exception:
+        book = {}
+    book_title = book.get("title", book_id) if isinstance(book, dict) else book_id
+    parts.append(
+        "# 评审证据边界\n"
+        f"- 当前项目：{book_title}\n"
+        f"- 待评审目标：{chapter_ref or '直接提供的文本'}\n"
+        "- 只能依据下列带来源标签的材料判断；不得自行猜测作品名、作者、角色或所谓原著事实。\n"
+        "- [当前书正文] 可用于当前作品的事实与文风对照。\n"
+        "- [参考书·只学文风] 只能比较句式、节奏、视角和措辞，绝不是当前作品的原著事实。\n"
+        "- 没有相应证据时必须写“证据不足”，不得引用模型记忆补齐。"
+    )
+
+    if kb:
+        try:
+            summary = kb.get_knowledge_summary()
+            if summary and "知识库为空" not in summary:
+                parts.append(f"# [当前书知识库·事实]\n{summary[:4000]}")
+        except Exception:
+            pass
+
+    # Provide actual existing prose from the current book.  Exclude the
+    # reviewed chapter when it can be resolved, otherwise avoid a duplicate
+    # by comparing chapter ids/titles best-effort.
+    try:
+        chapters = json_store.load_chapters(book_id)
+        target_id = ""
+        try:
+            target = json_store.get_chapter(book_id, chapter_ref) if chapter_ref else None
+            if target:
+                target_id = str(target.get("id", ""))
+        except Exception:
+            pass
+
+        source_views = []
+        for raw in chapters:
+            view = json_store._chapter_view(raw)
+            if target_id and str(view.get("id", "")) == target_id:
+                continue
+            content = view.get("content", "")
+            if content:
+                source_views.append(view)
+        for view in source_views[-3:]:
+            excerpt = _chapter_excerpt(view.get("content", ""), _CURRENT_BOOK_SAMPLE_CHARS)
+            parts.append(f"# [当前书正文·文风/事实样本] {view.get('title', '?')}\n{excerpt}")
+    except Exception:
+        pass
+
+    # Reference books are labelled by their configured role.  Include a real
+    # prose sample as well as cached analysis/knowledge, rather than relying on
+    # a title and asking the model to imagine the rest.
+    try:
+        ref_ids = json_store.get_reference_books(book_id) or []
+        profiles = json_store.get_reference_profiles(book_id) or {}
+        for ref_id in ref_ids:
+            usage = profiles.get(ref_id, "style")
+            try:
+                ref_book = json_store.get_book(ref_id)
+                ref_title = ref_book.get("title", ref_id)
+            except Exception:
+                ref_title = ref_id
+
+            if usage == "style":
+                label = "参考书·只学文风·不得作为当前书原著事实"
+            elif usage == "canon":
+                label = "参考书·原著事实源·不自动代表当前书文风"
+            else:
+                label = "参考书·文风与原著事实源"
+
+            ref_sections = [f"# [{label}] {ref_title}"]
+            try:
+                ref_chapters = json_store.load_chapters(ref_id)
+                sample_views = []
+                for raw in ref_chapters:
+                    view = json_store._chapter_view(raw)
+                    if view.get("content"):
+                        sample_views.append(view)
+                # A beginning and a later sample reduce first-chapter bias.
+                chosen = sample_views[:1]
+                if len(sample_views) > 1:
+                    chosen.append(sample_views[-1])
+                for view in chosen:
+                    excerpt = _chapter_excerpt(view.get("content", ""), _REFERENCE_SAMPLE_CHARS)
+                    ref_sections.append(f"## 文本样本：{view.get('title', '?')}\n{excerpt}")
+            except Exception:
+                pass
+
+            if usage in ("canon", "both"):
+                try:
+                    from core.graph_store import GraphStore
+
+                    ref_kb = GraphStore(ref_id)
+                    ref_kb.init_schema()
+                    ref_summary = ref_kb.get_knowledge_summary()
+                    ref_kb.close()
+                    if ref_summary and "知识库为空" not in ref_summary:
+                        ref_sections.append(f"## 原著事实摘要\n{ref_summary[:2500]}")
+                except Exception:
+                    pass
+
+            if usage in ("style", "both"):
+                try:
+                    from core.writer import _build_reference_context
+
+                    analyzed = _build_reference_context(book_id)
+                    marker = f"## 参考书: {ref_title}"
+                    if marker in analyzed:
+                        section = analyzed.split(marker, 1)[1]
+                        if "\n## 参考书:" in section:
+                            section = section.split("\n## 参考书:", 1)[0]
+                        ref_sections.append(f"## 已缓存文风分析\n{section[:3500]}")
+                except Exception:
+                    pass
+
+            parts.append("\n".join(ref_sections))
+    except Exception:
+        pass
+
+    return "\n\n---\n\n".join(parts)
+
 
 async def _patch_slow_reviews(report_id: str, book_id: str, pending_tasks: dict, queue):
 
@@ -127,42 +273,7 @@ async def _run_review(loop, args: dict, kb, book_id: str, msg: str = "", queue=N
     if not chapter_text or len(chapter_text) < 50:
         return "错误: 需要提供章节内容。请指定章节序号（如 #1）或直接传入文本。"
 
-    knowledge_context = ""
-    if kb:
-        try:
-            parts = [kb.get_knowledge_summary()[:3000]]
-            ref_ids = json_store.get_reference_books(book_id)
-            ref_profiles = json_store.get_reference_profiles(book_id)
-            if ref_ids:
-                from core.graph_store import GraphStore
-
-                for ref_id in ref_ids:
-                    if ref_profiles.get(ref_id, "style") not in ("canon", "both"):
-                        continue
-                    try:
-                        ref_kb = GraphStore(ref_id)
-                        ref_kb.init_schema()
-                        ref_summary = ref_kb.get_knowledge_summary()[:2000]
-                        if ref_summary and "知识库为空" not in ref_summary:
-                            ref_title = json_store.get_book(ref_id).get("title", ref_id)
-                            parts.append(f"\n---\n# 参考书: {ref_title}\n{ref_summary}")
-                        ref_kb.close()
-                    except Exception:
-                        pass
-                # Style-only references contribute style evidence but never
-                # unrelated character/world facts.
-                if any(ref_profiles.get(ref_id, "style") in ("style", "both") for ref_id in ref_ids):
-                    try:
-                        from core.writer import _build_reference_context
-
-                        style_context = _build_reference_context(book_id)
-                        if style_context:
-                            parts.append(f"\n---\n# 参考书文风证据\n{style_context[:7000]}")
-                    except Exception:
-                        pass
-            knowledge_context = "\n".join(parts)
-        except Exception:
-            pass
+    knowledge_context = _build_review_evidence(book_id, chapter_ref, kb)
 
     reviewer_ids = None
     if reviewers_str:

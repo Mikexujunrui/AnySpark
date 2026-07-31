@@ -127,7 +127,12 @@ class AutopilotExecutor:
         # Count completed chapters
         chapters_completed = 0
         for step in task.steps:
-            if step.type == "checkpoint" and step.config.get("final") and step.status == "completed":
+            if (
+                step.type == "checkpoint"
+                and step.config.get("final")
+                and step.config.get("chapter_index") is not None
+                and step.status == "completed"
+            ):
                 chapters_completed += 1
 
         return {

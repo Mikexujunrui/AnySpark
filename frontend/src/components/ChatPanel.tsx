@@ -71,6 +71,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const [skillCommands, setSkillCommands] = useState([])
   const [contextUsage, setContextUsage] = useState(null)
   const [writingState, setWritingState] = useState(null)
+  const [sidePanelWidth, setSidePanelWidth] = useState(45)
   const [taskList, setTaskList] = useState(null)
   const [workflowData, setWorkflowData] = useState(null)
   const [patchData, setPatchData] = useState(null)
@@ -175,16 +176,29 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         setWritingState({ chapterTitle: data.chapter_title, text: '', saved: false })
         setMessages(prev => [...prev, { role: 'agent', text: `[写作] 开始: ${data.chapter_title}（见右侧预览）` }])
       } else if (data.type === 'end') {
-        // Writing ended — update state and add chat notification
-        setWritingState(prev => ({ ...prev, saved: true, wordCount: data.word_count, partial: data.partial }))
-        const status = data.partial ? '[部分保存]' : '[已保存]'
-        setMessages(prev => [...prev, { role: 'agent', text: `${status}到 ${data.chapter_title}，共 ${data.word_count || 0} 字` }])
-        // Auto-hide side panel after 5s
+        const saved = Boolean(data.saved)
+        const error = String(data.error || '')
+        setWritingState(prev => ({
+          ...(prev || {}),
+          chapterTitle: data.chapter_title || prev?.chapterTitle,
+          saved,
+          failed: !saved,
+          error,
+          wordCount: data.word_count,
+          partial: data.partial,
+        }))
+        const status = saved ? (data.partial ? '[部分保存]' : '[已保存]') : '[写作失败·未保存]'
+        const detail = saved
+          ? `到 ${data.chapter_title || '章节'}，共 ${data.word_count || 0} 字`
+          : (error || '写作工具未生成可保存的章节')
+        setMessages(prev => [...prev, { role: 'agent', text: `${status} ${detail}` }])
         clearTimeout(hideTimerRef.current)
-        hideTimerRef.current = setTimeout(() => {
-          setWritingState(null)
-          setTaskList(null)
-        }, 5000)
+        if (saved) {
+          hideTimerRef.current = setTimeout(() => {
+            setWritingState(null)
+            setTaskList(null)
+          }, 5000)
+        }
       } else if (data.text) {
         // Streaming chunk — append to preview
         setWritingState(prev => prev ? { ...prev, text: prev.text + data.text } : null)
@@ -773,7 +787,27 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     streamingRef.current = false
     await sseCancel()
     setProgress(null)
+    setWritingState(prev => prev && !prev.saved
+      ? { ...prev, failed: true, error: '用户已中止，本次预览内容未保证写入章节。' }
+      : prev)
     setMessages(prev => [...prev, { role: 'agent', text: '操作已中止' }])
+  }
+
+  function handlePanelResizeStart(e) {
+    e.preventDefault()
+    const root = e.currentTarget.parentElement
+    if (!root) return
+    const rect = root.getBoundingClientRect()
+    const onMove = (event) => {
+      const width = ((rect.right - event.clientX) / rect.width) * 100
+      setSidePanelWidth(Math.min(70, Math.max(28, width)))
+    }
+    const onUp = () => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
   }
 
   async function handleRetry() {
@@ -878,7 +912,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   }
 
   const hasAutopilot = autopilotState && autopilotState.status !== 'completed'
-  const hasSidePanel = hasAutopilot || writingState || (taskList && taskList.length > 0) || workflowData
+  const hasSidePanel = Boolean(hasAutopilot || writingState || (taskList && taskList.length > 0) || workflowData)
 
   const filteredMessages = searchQuery
     ? messages.filter(m => (m.text || '').toLowerCase().includes(searchQuery.toLowerCase()))
@@ -887,7 +921,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   return (
     <div className="h-full flex">
       {/* Main chat column */}
-      <div className={`h-full flex flex-col transition-all duration-300 ${hasSidePanel ? 'w-[55%]' : 'w-full'}`}>
+      <div className="h-full min-w-0 flex flex-col" style={{ width: hasSidePanel ? `${100 - sidePanelWidth}%` : '100%' }}>
         <MessageList
           messages={filteredMessages}
           streaming={streaming}
@@ -1095,7 +1129,15 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
 
       {/* Right side panel */}
       {hasSidePanel && (
-        <div className="w-[45%] h-full border-l border-zinc-800 bg-zinc-950 flex flex-col overflow-hidden">
+        <>
+        <div
+          role="separator"
+          aria-label="调整右侧面板宽度"
+          onPointerDown={handlePanelResizeStart}
+          className="w-1 h-full shrink-0 cursor-col-resize bg-zinc-900 hover:bg-sky-700 transition-colors"
+          title="拖动调整右侧面板宽度"
+        />
+        <div className="h-full min-w-0 bg-zinc-950 flex flex-col overflow-hidden" style={{ width: `${sidePanelWidth}%` }}>
           {hasAutopilot && autopilotState ? (
             <AutopilotConsole
               state={autopilotState}
@@ -1119,7 +1161,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
           {writingState && (
             <>
               <div className="shrink-0">
-                <WritingPreview data={writingState} />
+                <WritingPreview data={writingState} onClose={() => setWritingState(null)} />
               </div>
               <div className="flex-1 overflow-y-auto">
                 {taskList && taskList.length > 0 && <TaskListPanel items={taskList} />}
@@ -1134,6 +1176,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
             </>
           )}
         </div>
+        </>
       )}
 
       <BookTransformPanel

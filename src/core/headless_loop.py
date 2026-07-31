@@ -21,7 +21,7 @@ from typing import cast
 from .agent_loop import AgentConfig, run_agent_loop
 from .config import config
 from .event_bus import Event, EventType, bus
-from .task_queue import TaskQueue, TaskStatus
+from .task_queue import TaskQueue
 
 logger = logging.getLogger(__name__)
 
@@ -205,6 +205,7 @@ async def run_agent_loop_headless(
     turn_parts = None
     total_rounds = 0
     metrics_data = {}
+    loop_error = ""
 
     try:
         async for event in run_agent_loop(instruction, agent_config, history_messages):
@@ -233,15 +234,8 @@ async def run_agent_loop_headless(
             elif event.type == "text" and not final_text:
                 final_text = event.data.get("content", "")
             elif event.type == "error":
-                final_text = event.data.get("message", "处理出错")
-                return HeadlessResult(
-                    success=False,
-                    text=final_text,
-                    session_id=session_id,
-                    rounds=total_rounds,
-                    error=final_text,
-                    metrics=metrics_data,
-                )
+                loop_error = event.data.get("message", "处理出错")
+                final_text = loop_error
 
     except asyncio.CancelledError:
         logger.info("Headless loop cancelled for session %s", session_id)
@@ -262,6 +256,22 @@ async def run_agent_loop_headless(
             error=str(e)[:300],
         )
 
+    finish_reason = str(metrics_data.get("finish_reason", ""))
+    failure_reasons = {
+        "llm_error",
+        "llm_empty",
+        "abnormal_exit",
+        "token_budget_reached",
+        "round_limit_reached",
+        "task_incomplete_done",
+    }
+    success = not loop_error and bool(final_text.strip()) and finish_reason not in failure_reasons
+    if not success and not loop_error:
+        loop_error = (
+            f"Agent 未完成任务（finish_reason={finish_reason or 'missing'}）。"
+            "本步不会被标记为成功。"
+        )
+
     # Persist the turn so it appears in session history
     if final_text:
         _persist_headless_turn(
@@ -277,19 +287,21 @@ async def run_agent_loop_headless(
                 "book_id": book_id,
                 "session_id": session_id,
                 "source": source,
-                "stage": "completed",
+                "stage": "completed" if success else "failed",
                 "text_preview": final_text[:200],
                 "rounds": total_rounds,
+                "error": loop_error,
             },
             source="headless_loop",
         )
     )
 
     return HeadlessResult(
-        success=True,
+        success=success,
         text=final_text,
         session_id=session_id,
         rounds=total_rounds,
+        error=loop_error,
         metrics=metrics_data,
     )
 
@@ -327,7 +339,7 @@ def _persist_headless_turn(
         ts = datetime.now().strftime("%H:%M")
         from core.book_locks import book_lock
 
-        with book_lock(session_id):
+        with book_lock(book_id):
             history = json_store.load_messages(session_id)
             history.append(
                 {"role": "user", "text": user_text, "ts": ts, "mode": mode}
@@ -520,6 +532,9 @@ class TaskRunner:
                 result = None
                 try:
                     result = await self._execute_step(task_id, step)
+                    if result is None or result.get("success") is False or result.get("error"):
+                        error_detail = (result or {}).get("error") or "步骤未返回成功结果"
+                        raise RuntimeError(str(error_detail)[:300])
                     # Check if skip was requested during step execution
                     if self._skip_flags.pop(task_id, None):
                         self._queue.mark_step_completed(task_id, step.id, {"skipped": True, "reason": "用户跳过"})
@@ -707,6 +722,12 @@ class TaskRunner:
             else:
                 enriched_prompt = base_prompt
 
+            chapter_index = cfg.get("chapter_index")
+            if cfg.get("step_category") == "write" and chapter_index is None:
+                raise RuntimeError("安全拦截：写章步骤没有 chapter_index，拒绝执行以免覆盖错误章节。")
+            if cfg.get("step_category") == "write" and self._chapter_has_content(task.book_id, chapter_index):
+                raise RuntimeError(f"原稿保护：第{chapter_index}章已存在，Auto 写新章步骤禁止覆盖。")
+
             result = await run_agent_loop_headless(
                 book_id=task.book_id,
                 instruction=enriched_prompt,
@@ -725,6 +746,13 @@ class TaskRunner:
                 "error": result.error,
             }
 
+            if result.success and cfg.get("step_category") == "write":
+                if not self._chapter_has_content(task.book_id, chapter_index):
+                    raise RuntimeError(
+                        f"写作步骤声称完成，但第{chapter_index}章未写入章节库；已阻止“假完成”。"
+                    )
+                step_result["chapter_index"] = int(chapter_index)
+
             # ── Quality gate: if this step is flagged as a quality review ──
             gate_level = cfg.get("quality_gate")
             if gate_level and result.success:
@@ -740,12 +768,7 @@ class TaskRunner:
 
                             chapter = json_store.get_chapter(task.book_id, chapter_ref)
                             if chapter:
-                                current = chapter.get("current_version")
-                                if current and chapter.get("versions"):
-                                    for v in chapter["versions"]:
-                                        if v["id"] == current:
-                                            chapter_text = v.get("content", "")
-                                            break
+                                chapter_text = chapter.get("content", "")
                         except Exception:
                             pass
                     if not chapter_text:
@@ -793,8 +816,15 @@ class TaskRunner:
             return step_result
 
         elif step_type == "checkpoint":
-            # Simple state persistence — already handled by task_queue advance
-            return {"checkpointed": True, "step_index": task.current_step_index}
+            chapter_index = cfg.get("chapter_index")
+            if chapter_index is not None and not self._chapter_has_content(task.book_id, chapter_index):
+                raise RuntimeError(f"检查点失败：第{chapter_index}章不存在或正文为空。")
+            return {
+                "checkpointed": True,
+                "step_index": task.current_step_index,
+                "chapter_index": int(chapter_index) if chapter_index is not None else None,
+                "success": True,
+            }
 
         elif step_type == "user_confirm":
             # In autonomous mode: auto-confirm; in hard mode: wait for user
@@ -872,6 +902,19 @@ class TaskRunner:
             max_rounds=max_rounds,
         )
 
+    @staticmethod
+    def _chapter_has_content(book_id: str, chapter_index) -> bool:
+        """Return True only when the requested chapter exists and has prose."""
+        if chapter_index is None:
+            return False
+        try:
+            from data.json_store import json_store
+
+            chapter = json_store.get_chapter(book_id, f"#{int(chapter_index)}")
+            return bool(str(chapter.get("content", "")).strip())
+        except Exception:
+            return False
+
     async def _maybe_replan(self, task_id: str, step, error_msg: str, accumulator: "StepContextAccumulator") -> bool:
         """Check if replan should be triggered and apply it.
 
@@ -912,16 +955,8 @@ class TaskRunner:
             new_steps = await planner.replan(task, f"步骤 '{step.label}' 失败: {error_msg[:200]}", accumulator)
 
             if not new_steps:
-                logger.info("Task %s: replan returned empty steps — task is complete", task_id)
-                self._queue.update_task_status(task_id, TaskStatus.COMPLETED)
-                await bus.emit(
-                    Event(
-                        type=EventType.TASK_COMPLETED,
-                        data={"task_id": task_id, "progress": self._queue.get_progress(task_id)},
-                        source="task_runner",
-                    )
-                )
-                return True  # let the loop see no steps and complete cleanly
+                logger.warning("Task %s: replan returned no safe steps; keeping failure visible", task_id)
+                return False
 
             # Apply replan: replace remaining steps
             if self._queue.replace_remaining_steps(task_id, new_steps):

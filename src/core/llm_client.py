@@ -236,7 +236,8 @@ def reload_clients():
 
 # ── Sync calls ──────────────────────────────────────────────────────────────
 
-_STREAM_MAX_RETRIES = 5
+_SYNC_MAX_RETRIES = 1
+_STREAM_MAX_RETRIES = 2
 
 
 def _prose_completion_kwargs(task: str, fallback_temperature: float) -> dict:
@@ -301,7 +302,7 @@ def _portable_completion_kwargs(kwargs: dict) -> dict:
 def chat(prompt: str, system: str = "", temperature: float = 0.3, task: str = "general") -> str:
     """Sync chat with retry on transient connection errors."""
     last_error = None
-    for attempt in range(_STREAM_MAX_RETRIES + 1):
+    for attempt in range(_SYNC_MAX_RETRIES + 1):
         try:
             provider_id, model = _resolve(task)
             client = _get_client_for_provider(provider_id)
@@ -328,12 +329,12 @@ def chat(prompt: str, system: str = "", temperature: float = 0.3, task: str = "g
             return response.choices[0].message.content or ""
         except Exception as e:
             last_error = e
-            if not is_retryable(e) or attempt >= _STREAM_MAX_RETRIES:
+            if not is_retryable(e) or attempt >= _SYNC_MAX_RETRIES:
                 raise
             delay = calculate_delay(attempt, e)
             err_type = "连接" if is_connection_error(e) else "服务"
             logger.warning(
-                f"[{err_type}错误] 重试 {attempt + 1}/{_STREAM_MAX_RETRIES}: {e!s:.80s} → {delay:.1f}s 后重试"
+                f"[{err_type}错误] 重试 {attempt + 1}/{_SYNC_MAX_RETRIES}: {e!s:.80s} → {delay:.1f}s 后重试"
             )
             time.sleep(delay)
     raise last_error  # unreachable
