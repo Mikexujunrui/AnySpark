@@ -274,7 +274,7 @@ def generate_ontology(
 
 
 def _to_pascal_case(name: str) -> str:
-    """Convert snake_case to PascalCase for Neo4j labels."""
+    """Convert snake_case to PascalCase for graph labels."""
     parts = name.split("_")
     return "".join(p.capitalize() for p in parts if p)
 

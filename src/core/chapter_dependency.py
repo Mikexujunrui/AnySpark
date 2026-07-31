@@ -5,7 +5,7 @@
 
 Builds a directed graph where an edge A→B means "chapter B references content
 first introduced in chapter A". This is complementary to the narrative_logic
-impact_propagator (which tracks constraint-level impacts at the Neo4j layer).
+impact_propagator (which tracks constraint-level impacts at the graph layer).
 
 Dependency types:
 - entity_reference: entity X first appears in A, referenced again in B

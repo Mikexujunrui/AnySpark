@@ -177,7 +177,7 @@ def import_spark(book_id: str, archive_path: str) -> dict:
 
 
 def _export_graph_to_sqlite(store: GraphStore, book_id: str, db_path: Path) -> None:
-    """Export Neo4j graph data to a SQLite database."""
+    """Export graph data to a SQLite dump."""
     conn = sqlite3.connect(str(db_path))
     conn.execute("PRAGMA journal_mode=WAL")
 
@@ -274,7 +274,7 @@ def _export_graph_to_sqlite(store: GraphStore, book_id: str, db_path: Path) -> N
 
 
 def _import_graph_from_sqlite(book_id: str, db_path: Path) -> dict:
-    """Import graph data from SQLite into Neo4j."""
+    """Import graph data from a legacy SQLite dump into the live store."""
     store = GraphStore(book_id)
     store.init_schema()
     stats = {}

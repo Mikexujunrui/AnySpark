@@ -188,7 +188,7 @@ def apply_state_ops(state: dict, ops: list) -> dict:
 class SimulationStore:
     """推演会话存储 — JSONL append-only 事件流.
 
-    不再使用 Neo4j 存储推演数据。每个会话一个 JSONL 文件，
+    不再使用图数据库存储推演数据。每个会话一个 JSONL 文件，
     append-only 写入，读取时顺序扫描重建状态。
     """
 
@@ -647,7 +647,7 @@ class SimulationStore:
     # ── Promote to Timeline ──
 
     def promote_to_timeline(self, event_id: str, timeline_data: dict) -> dict:
-        """Promote a turn event to a canonical Timeline node via Neo4j."""
+        """Promote a turn event to a canonical Timeline node via the graph store."""
         tl_id = str(uuid.uuid4())
         now = datetime.now(UTC).isoformat()
         self.graph._run(

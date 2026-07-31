@@ -58,16 +58,16 @@ M8 ──→ M9 反向审计
 
 目标：删掉所有"已死但还在"的 Neo4j 引用，消除配置/文档/代码的不一致。
 
-- [ ] **M1a.1** 确认 Neo4j 确实已死
+- [x] **M1a.1** 确认 Neo4j 确实已死
   - 判据：`grep -rn "neo4j\|Neo4j" src/ --include="*.py"` 的输出逐条分类：可删 / 需保留（如 git 历史无关）
   - 验证：分类清单写入 `docs/REFACTOR_LOG.md`
-- [ ] **M1a.2** 删除死代码
-  - 判据：`grep -rn "neo4j" src/ --include="*.py"` 返回 0（注释、密码 `novel_agent_2024!`、死分支全部清除）
+- [x] **M1a.2** 删除死代码/过时引用（A 类：行为相关）
+  - 判据：`graph_search.py` legacy Neo4j 分支已删；`archive.py` 过时 docstring 已改；`main.py` 错误消息不再提 Neo4j；**Cypher 兼容层（impact_propagator/simulation 的 `_run` Cypher）保留**——它们是 SQLiteStore 模拟 Neo4j API 的真实功能
   - 验证：pytest 全绿 + ruff 全绿
-- [ ] **M1a.3** 清理 config
-  - 判据：`src/core/config.py` 及相关配置文件中 Neo4j 配置项删除；`.env.example` 同步
-  - 验证：`grep -rn "neo4j" src/ .env.example` 返回 0
-- [ ] **M1a.4** 文档同步
+- [x] **M1a.3** 注释/配置清理（B 类：纯文档）
+  - 判据：`graph_schema.py` 文件头、`server.py` 无用的 neo4j logger 设置、`modules.yaml` 依赖声明、各处 docstring 中“Neo4j”改写为准确描述（Cypher 兼容层语境保留“graph store”）；`grep -rn "neo4j" src/ modules.yaml` 仅剩模拟层准确注释
+  - 验证：pytest 全绿
+- [x] **M1a.4** 文档同步
   - 判据：`docs/ARCHITECTURE.md`、`docs/TECH_STACK.md` 中 Neo4j 相关描述改写为 SQLite 事实
   - 验证：`grep -rn "Neo4j" docs/` 返回 0（或仅剩"已移除"的历史注记）
 

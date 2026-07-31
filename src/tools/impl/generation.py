@@ -463,7 +463,7 @@ def _add_worldbuilding_entry_tool(args: dict, book_id: str) -> str:
 
 
 async def _generate_location_map(loop, args: dict, kb, book_id: str, msg: str = "", queue=None) -> str:
-    """Read location map from Neo4j; auto-create and supplement connections.
+    """Read location map from the graph store; auto-create and supplement connections.
 
     Knowledge extraction creates Location entities but may not create
     relationships between them. This tool:
@@ -732,7 +732,7 @@ def _update_detailed_outline(args: dict, book_id: str) -> str:
 
 
 async def _generate_timeline(loop, args: dict, kb, book_id: str, msg: str = "", queue=None) -> str:
-    """Read timeline from Neo4j. Timeline events are auto-created during knowledge extraction.
+    """Read timeline from the graph store. Timeline events are auto-created during knowledge extraction.
 
     This is a pure read tool — no backfill or chapter scanning.
     """

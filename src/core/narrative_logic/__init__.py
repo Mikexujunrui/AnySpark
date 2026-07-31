@@ -3,7 +3,7 @@
 
 """Narrative logic engine — constraint checking, impact propagation, confidence scoring.
 
-This package is a **read-mostly** consumer of the existing Neo4j graph.
+This package is a **read-mostly** consumer of the existing graph.
 It does not modify Entity / Relation / Timeline / Foreshadow nodes.
 The only write operations are on :Constraint nodes (an independent label).
 

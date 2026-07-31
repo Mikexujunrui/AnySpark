@@ -60,10 +60,8 @@ async def lifespan(app: FastAPI):
     root_logger.addHandler(console_handler)
 
     # Silence noisy loggers that drown out actionable signal in server.log.
-    # neo4j.notifications spams "index already exists" on every schema init;
     # httpx logs every HTTP request as INFO. Demote them so real warnings /
     # errors (agent_loop, tool failures, exceptions) stay visible.
-    logging.getLogger("neo4j.notifications").setLevel(logging.WARNING)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     # ── Connection diagnostics logger (separate file for easy monitoring) ──

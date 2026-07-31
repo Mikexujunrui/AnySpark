@@ -96,7 +96,7 @@ modules:
       - name: validateAgainstKnowledge
         input: "{ text, knowledgeRefs }"
         output: "ValidationResult"
-    dependencies: [知识图谱（Neo4j）, SQLite FTS5]
+    dependencies: [知识图谱（SQLite）, SQLite FTS5]
     difficulty: 困难
     estimated_effort: 10 人天
     notes: 核心组件，决定"知识约束写作"能否真正落地
@@ -161,7 +161,7 @@ modules:
       - name: getRelated
         input: "{ entityId, relationTypes, depth }"
         output: "{ entities, relations }"
-    dependencies: [Neo4j, JSON 文件存储]
+    dependencies: [SQLite 图谱, JSON 文件存储]
     difficulty: 中等
     estimated_effort: 8 人天
 

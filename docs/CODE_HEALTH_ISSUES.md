@@ -122,7 +122,7 @@
 
 | 文件 | 行号 | 问题 | 风险 |
 |------|------|------|------|
-| `src/core/graph_store.py` | 42 | 硬编码 Neo4j 密码 `"novel_agent_2024!"` | 🔴 低（生产通过 `.env` 覆盖，但代码中留有明文密码） |
+| `src/core/graph_store.py` | 42 | ~~硬编码 Neo4j 密码 `"novel_agent_2024!"`~~ | ✅ 已解决（v3.x SQLite 重构时随 Neo4j 驱动一并移除，2026-07-31 复查确认） |
 
 ---
 

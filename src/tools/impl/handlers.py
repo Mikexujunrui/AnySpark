@@ -562,7 +562,7 @@ def _handle_knowledge_edit(name: str, args: dict, book_id: str) -> str:
         try:
             kb.delete_timeline_event(eid)
         except Exception:
-            logger.warning("Failed to delete timeline event %s from Neo4j (may already be removed)", eid)
+            logger.warning("Failed to delete timeline event %s from the graph store (may already be removed)", eid)
         return f"已删除时间线事件 (id: {eid})"
 
     elif name == "delete_foreshadow":

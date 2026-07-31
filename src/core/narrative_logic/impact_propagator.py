@@ -70,7 +70,7 @@ class ImpactPropagator:
     def propagate(self, source: ImpactSource) -> ImpactReport:
         """Trace the impact of modifying *source* through the graph."""
 
-        # Resolve source node id to a Neo4j internal id for traversal
+        # Resolve source node id to a graph-store internal id for traversal
         source_node_id = self._resolve_source_node(source)
         if not source_node_id:
             return ImpactReport(
@@ -111,7 +111,7 @@ class ImpactPropagator:
     # ── Internal helpers ──
 
     def _resolve_source_node(self, source: ImpactSource) -> str | None:
-        """Resolve the source element to a Neo4j element id for traversal."""
+        """Resolve the source element to a graph-store element id for traversal."""
         pid = self._store.project_id
         if source.source_type == "entity":
             rows = self._store._run(
@@ -237,10 +237,10 @@ class ImpactPropagator:
         )
 
     def _fetch_node_details(self, node_ids: list[str]) -> dict[str, dict]:
-        """Batch-fetch name/type/id for a list of Neo4j element ids."""
+        """Batch-fetch name/type/id for a list of graph-store element ids."""
         if not node_ids:
             return {}
-        # Neo4j doesn't support parameterizing elementId lists in older
+        # The store doesn't support parameterizing elementId lists in older
         # versions, so we query in chunks.
         details = {}
         # Build a Cypher query with elementId matching

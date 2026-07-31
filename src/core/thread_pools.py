@@ -1,6 +1,6 @@
 """Dedicated thread pools for I/O and CPU-bound operations.
 
-Separate pools prevent long-running I/O operations (Neo4j queries, file I/O,
+Separate pools prevent long-running I/O operations (graph queries, file I/O,
 LLM calls) from starving the default asyncio thread pool, which is shared
 with internal asyncio operations.
 """
@@ -9,7 +9,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 
 # Separate pools with different sizing strategies:
-# - io_pool: file I/O, Neo4j sync queries (I/O bound, many workers)
+# - io_pool: file I/O, graph sync queries (I/O bound, many workers)
 # - llm_pool: LLM API calls (network bound, moderate workers)
 # - cpu_pool: CPU-bound operations like text processing (few workers)
 

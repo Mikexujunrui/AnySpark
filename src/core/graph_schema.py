@@ -1,4 +1,4 @@
-"""Neo4j Graph Schema — node labels, relationship types, constraints."""
+"""Graph Schema — node labels, relationship types, constraints."""
 
 import re
 
@@ -48,7 +48,7 @@ def get_active_relationship_types() -> list[str]:
 
 
 def entity_label(entity_type: str) -> str:
-    """Convert entity type string to Neo4j label (CamelCase). Custom types auto-capitalized.
+    """Convert entity type string to graph label (CamelCase). Custom types auto-capitalized.
     Validated to prevent Cypher injection."""
     # Check dynamic overrides first, then built-in
     active = get_active_entity_labels()
@@ -58,7 +58,7 @@ def entity_label(entity_type: str) -> str:
     # Sanitize custom types: only allow alphanumeric + underscore
     label = entity_type.title().replace("_", "")
     if not re.match(r"^[A-Za-z][A-Za-z0-9]*$", label):
-        raise ValueError(f"Invalid entity type for Neo4j label: {entity_type!r}")
+        raise ValueError(f"Invalid entity type for graph label: {entity_type!r}")
     return label
 
 

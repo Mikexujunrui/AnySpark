@@ -13,7 +13,7 @@ from .search import SearchMixin
 
 
 class SQLiteStore(SearchMixin):
-    """SQLite-backed store providing the same public API as Neo4j GraphStore.
+    """SQLite-backed graph store.
 
     Uses a single database file (data/novel.db) with per-project isolation
     via project_id foreign keys.  Graph algorithms run in Python.

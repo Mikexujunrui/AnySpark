@@ -565,7 +565,7 @@ def cmd_graph_insights(project_id: str = DEFAULT_PROJECT):
     try:
         insights = store.get_graph_insights()
     except Exception:
-        p("\n图谱查询失败（Neo4j 可能未运行）", "yellow")
+        p("\n图谱查询失败", "yellow")
         return
     if not insights:
         p("\n暂无图谱数据", "yellow")
@@ -724,7 +724,7 @@ def _execute_command(user_input: str, project_id: str):
     # 移除可能的 BOM 字符
     user_input = user_input.lstrip("\ufeff").strip()
 
-    # Auto-create book entry for CLI projects (Neo4j + JSON dual-store sync)
+    # Auto-create book entry for CLI projects (graph + JSON dual-store sync)
     _ensure_book(project_id)
 
     if user_input.startswith("/s "):

@@ -103,46 +103,28 @@ class GraphSearchResponse:
 def _execute_query(store, sql: str, params: dict) -> tuple[list[dict], str]:
     """Execute a SQL query with error handling.
 
-    Works with both SQLiteStore (tuple params) and legacy Neo4j GraphStore (dict params).
+    Works with SQLiteStore (tuple/named params). The legacy graph-store path was removed in the v3.x SQLite consolidation.
     """
     try:
-        # SQLiteStore._run expects tuple; legacy GraphStore._run expects dict
-        # Try tuple first (SQLite), fall back to dict (Neo4j)
-        if hasattr(store, "_conn") and hasattr(store._conn, "execute"):
-            # It's an SQLiteStore — convert params dict to tuple
-            # Extract known params like project_id, limit, name
-            pid = params.get("pid", store.project_id)
-            limit = params.get("limit", 50)
-            name = params.get("name", "")
+        # SQLiteStore._run expects tuple; convert params dict to tuple
+        # Extract known params like project_id, limit, name
+        pid = params.get("pid", store.project_id)
+        limit = params.get("limit", 50)
+        name = params.get("name", "")
 
-            # Try to execute with positional params
-            import sqlite3
+        # Try to execute with positional params
+        import sqlite3
 
-            try:
-                cursor = store._conn.execute(sql, (pid, limit, name))
-                rows = cursor.fetchall()
-            except sqlite3.Error:
-                # Fall back to named params
-                cursor = store._conn.execute(sql, params)
-                rows = cursor.fetchall()
+        try:
+            cursor = store._conn.execute(sql, (pid, limit, name))
+            rows = cursor.fetchall()
+        except sqlite3.Error:
+            # Fall back to named params
+            cursor = store._conn.execute(sql, params)
+            rows = cursor.fetchall()
 
-            # Convert to plain dicts
-            result = [dict(r) for r in rows]
-        else:
-            # Legacy Neo4j path
-            rows = store._run(sql, params)
-            result = []
-            for row in rows:
-                d = {}
-                for key, value in row.items():
-                    if hasattr(value, "_properties"):
-                        d[key] = dict(value._properties)
-                        d[key]["_labels"] = list(value.labels) if hasattr(value, "labels") else []
-                    elif isinstance(value, (list, dict)):
-                        d[key] = value
-                    else:
-                        d[key] = str(value) if value is not None else None
-                result.append(d)
+        # Convert to plain dicts
+        result = [dict(r) for r in rows]
         return result, ""
     except Exception as e:
         return [], f"Query execution error: {str(e)[:120]}"

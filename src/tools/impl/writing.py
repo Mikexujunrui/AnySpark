@@ -20,7 +20,7 @@ def _post_write_constraint_check(kb, book_id: str) -> str:
     """Run constraint check after writing, return warning text if violations found.
 
     Returns empty string if no violations or if constraint checking is
-    unavailable (e.g. Neo4j down, no constraints defined).
+    unavailable (e.g. graph store unavailable, no constraints defined).
     """
     try:
         from core.narrative_logic import ConstraintChecker, ConstraintStore

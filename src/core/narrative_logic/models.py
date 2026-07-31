@@ -3,7 +3,7 @@
 
 """Data models for the narrative logic engine.
 
-All dataclasses are plain data containers — no business logic, no Neo4j
+All dataclasses are plain data containers — no business logic, no graph-db specifics
 calls.  This keeps the storage / scoring / propagation modules decoupled
 from the data shape, making them independently testable.
 """
@@ -17,7 +17,7 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Constraint:
-    """A narrative constraint rule stored as a :Constraint node in Neo4j."""
+    """A narrative constraint rule stored as a :Constraint node in the graph."""
 
     id: str
     description: str  # natural-language rule

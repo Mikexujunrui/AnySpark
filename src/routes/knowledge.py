@@ -703,7 +703,7 @@ def get_link_prediction(book_id: str, response: Response, top_n: int = 20):
 
 @router.get("/books/{book_id}/graph/timeline")
 def get_graph_timeline(book_id: str):
-    """Return timeline data from Neo4j for TimelineView.
+    """Return timeline data from the graph store for TimelineView.
 
     Format: {tracks: [{id, name, color}], events: [{id, track_id, label, time_label, description, chapter_ref, order, characters}]}
     """
@@ -713,7 +713,7 @@ def get_graph_timeline(book_id: str):
 
 @router.get("/books/{book_id}/graph/location-map")
 def get_graph_location_map(book_id: str):
-    """Return location map data from Neo4j for WorldMap.
+    """Return location map data from the graph store for WorldMap.
 
     Format: {nodes: [{id, name, type, description, parent}], connections: [{from, to, type, label}]}
     """
