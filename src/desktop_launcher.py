@@ -148,7 +148,7 @@ class InstanceLock:
             if os.name == "nt":
                 import msvcrt
 
-                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)  # type: ignore[attr-defined]
             else:
                 import fcntl
 
@@ -168,7 +168,7 @@ class InstanceLock:
             if os.name == "nt":
                 import msvcrt
 
-                msvcrt.locking(self._file.fileno(), msvcrt.LK_UNLCK, 1)
+                msvcrt.locking(self._file.fileno(), msvcrt.LK_UNLCK, 1)  # type: ignore[attr-defined]
             else:
                 import fcntl
 

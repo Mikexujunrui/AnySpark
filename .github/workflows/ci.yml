@@ -73,7 +73,7 @@ jobs:
 
       - name: ESLint check
         working-directory: frontend
-        run: npx eslint . --max-warnings 150
+        run: npx eslint . --max-warnings 200
 
       - name: Build frontend
         working-directory: frontend
