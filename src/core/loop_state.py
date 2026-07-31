@@ -182,6 +182,11 @@ class LoopState:
     kb_mutation_streak: int = 0
     non_kb_rounds: int = 0
 
+    # permission-confirmation fuse: consecutive cancels/timeouts. When the
+    # agent's writes keep getting cancelled it must stop retrying the same
+    # change and ask the user directly, instead of looping cancel→retry→ask.
+    consecutive_confirm_cancels: int = 0
+
     # writing-mode / temperature
     has_writing_output: bool = False
     rounds_since_writing: int = 0

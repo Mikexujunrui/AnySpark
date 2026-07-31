@@ -1200,10 +1200,24 @@ async def _prepare_tool_calls(
                 )
                 yield LoopEvent(type="question", data={"id": q_req.id, "questions": q_req.questions})
                 confirmed = await _await_answer(q_req.id)
-                if not confirmed:
-                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": f"用户取消了 {tc.name}。"})
+                if confirmed != "confirmed":
+                    state.consecutive_confirm_cancels += 1
+                    if confirmed == "timeout":
+                        msg = (
+                            f"权限确认超时（5分钟未收到回复），已跳过 {tc.name}。"
+                            "这不是用户取消，只是没有及时点击确认。若确需执行请重新发起。"
+                        )
+                    else:
+                        msg = f"用户取消了 {tc.name}。"
+                    if state.consecutive_confirm_cancels >= 2:
+                        msg += (
+                            f"\n⚠ 注意：已连续 {state.consecutive_confirm_cancels} 次确认被取消/超时。"
+                            "请停止反复尝试同一修改，直接向用户简要说明当前情况并询问下一步指示。"
+                        )
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": msg})
                     processed_ids.add(tc.id)
                     continue
+                state.consecutive_confirm_cancels = 0
                 permission_manager.approve_once(tc.name)
 
             if tc.name in FULL_CHAPTER_GENERATION_TOOLS:
@@ -1259,23 +1273,35 @@ async def _prepare_tool_calls(
                 )
 
 
-async def _await_answer(question_id: str) -> bool:
+async def _await_answer(question_id: str, timeout: float = 300) -> str:
+    """Wait for the user's permission-confirmation answer.
+
+    Returns one of:
+      "confirmed" — user clicked 确认执行
+      "cancelled" — user clicked 取消 (or gave a non-confirming answer)
+      "timeout"   — no answer within the wait window
+
+    Uses a single ``timeout`` wait (default 300s, same as ask_user) instead
+    of the old 10s-polling loop. The polling loop was broken: the first
+    10s timeout cancelled ``wait_for_answer`` which pops its future in
+    ``finally``, so the second iteration saw no pending future and returned
+    ``[["已取消"]]`` immediately — anyone who answered the preceding
+    ask_user but didn't click the permission dialog within ~10s was
+    mis-reported as having cancelled their own write.
+    """
     try:
-        # Check every 10s for cancellation instead of blocking 300s straight
-        remaining = 300
-        while remaining > 0:
-            chunk = min(10, remaining)
-            try:
-                answers = await asyncio.wait_for(question_manager.wait_for_answer(question_id), timeout=chunk)
-                return bool(answers and answers[0] and "确认" in answers[0][0])
-            except TimeoutError:
-                remaining -= chunk
-                await asyncio.sleep(0)  # yield to allow cancellation
-        return False
+        answers = await asyncio.wait_for(
+            question_manager.wait_for_answer(question_id), timeout=timeout
+        )
+        if answers and answers[0] and "确认" in answers[0][0]:
+            return "confirmed"
+        return "cancelled"
+    except TimeoutError:
+        return "timeout"
     except asyncio.CancelledError:
         raise  # Let cancellation propagate normally
     except Exception:
-        return False
+        return "cancelled"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1363,7 +1389,7 @@ async def _process_tool_result(
         )
         yield LoopEvent(type="question", data={"id": q_req.id, "questions": q_req.questions})
         confirmed = await _await_answer(q_req.id)
-        if confirmed:
+        if confirmed == "confirmed":
             from core.autopilot_runner import autopilot as ap
 
             ok = await ap.confirm_start(task_id)
@@ -1378,7 +1404,10 @@ async def _process_tool_result(
             else:
                 result_str = "Autopilot 启动失败，请重试。"
         else:
-            result_str = "用户取消了 Autopilot 启动。如需调整参数，请重新发起。"
+            if confirmed == "timeout":
+                result_str = "Autopilot 启动确认超时（5分钟未收到回复），未启动。如需启动请重新发起。"
+            else:
+                result_str = "用户取消了 Autopilot 启动。如需调整参数，请重新发起。"
             from core.task_queue import task_queue as tq
 
             tq.cancel_task(task_id)
