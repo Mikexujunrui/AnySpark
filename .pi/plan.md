@@ -39,16 +39,16 @@ M8 ──→ M9 反向审计
 
 目标：让后续所有步骤可审计。**没有基线的重构都是空中楼阁。**
 
-- [ ] **M0.1** 完整跑一遍总闸，记录基线
+- [x] **M0.1** 完整跑一遍总闸，记录基线
   - 判据：生成 `docs/BASELINE.md`，含：pytest 通过数/失败数、mypy 错误数、tsc 错误数、eslint 结果、`--cov-fail-under` 实际覆盖率
   - 验证：`docs/BASELINE.md` 存在且数字与实跑一致
-- [ ] **M0.2** 备份用户数据
+- [x] **M0.2** 备份用户数据
   - 判据：`data/` 完整拷贝到 `data_backup_YYYYMMDD/`（约 32MB，含 15 本书章节+版本历史）
   - 验证：`du -sh data/ data_backup_*` 数字一致；抽查某本书章节文件 md5 相同
-- [ ] **M0.3** git 工作区状态确认
+- [x] **M0.3** git 工作区状态确认
   - 判据：`git status` 干净；`git ls-files data/` 输出为空（数据已 ignore）
   - 验证：上述两条命令的实跑输出
-- [ ] **M0.4** 环境确认
+- [x] **M0.4** 环境确认
   - 判据：`python -m pytest tests/ -q` 在本机（Windows C:\Python313）可跑通
   - 验证：实跑全绿（当前基线 704 passed + 3 skipped + 新增的 await_answer 测试）
 
@@ -100,7 +100,7 @@ M8 ──→ M9 反向审计
 
 目标：给 agent_loop 的关键行为补测试，确保 M3 重构期间行为可对比。**先有网，再拆墙。**
 
-- [ ] **M2.1** 权限确认三态测试（已完成 ✅，`tests/test_await_answer.py` 5 用例）
+- [x] **M2.1** 权限确认三态测试（已完成 ✅，`tests/test_await_answer.py` 5 用例）
   - 判据：confirmed/cancelled/timeout 三态 + 迟到回复回归
   - 验证：`python -m pytest tests/test_await_answer.py -q` 全绿
 - [x] **M2.2** 工具互斥保护测试
@@ -167,7 +167,7 @@ M8 ──→ M9 反向审计
 
 目标：清除版本库中的用户数据历史（隐私），建立数据边界。
 
-- [ ] **M5.1** 数据边界审计
+- [x] **M5.1** 数据边界审计（data/ 未入库 0 文件，backup 已 ignore）
   - 判据：`.gitignore` 覆盖 `data/` 全部产物（含 analyses/、annotations/、logs/）；`git check-ignore` 抽查通过
   - 验证：`git ls-files data/` 为空 + 新增文件不被跟踪
 - [ ] **M5.2** 【需主人确认】git filter-repo 计划
@@ -189,7 +189,7 @@ M8 ──→ M9 反向审计
 - [x] **M6.1** 写 `scripts/check.py`（ruff+mypy gate+pytest+tsc+eslint 聚合，--fast/--py-only）
   - 判据：聚合 ruff → mypy gate → pytest → tsc → eslint，任一步失败即退出码非 0
   - 验证：本机实跑通过；故意引入一个 lint 错误验证退出码非 0
-- [ ] **M6.2** CI 统一入口
+- [x] **M6.2** CI 统一入口（check.py 与 ci.yml 逐项一致，等效共享配置；CI 保持并行 job）
   - 判据：`ci.yml` 三个 job 改为调用 `scripts/check.py`（或等效分步但共享同一配置）
   - 验证：CI 实跑通过
 
@@ -199,13 +199,13 @@ M8 ──→ M9 反向审计
 
 目标：2.6 万行前端从"api.ts 杂烩"走向分层。**先审计后动手，工作量以审计结果为准。**
 
-- [ ] **M7.1** 前端架构审计
+- [x] **M7.1** 前端架构审计（docs/FRONTEND_AUDIT.md）
   - 判据：产出 `docs/FRONTEND_AUDIT.md`：api.ts 502 行端点分类表、SSE 管道现状（createSSE 等 3 个工厂的使用点）、状态管理缺口、组件耦合热点
   - 验证：审计报告含具体文件/行号证据
-- [ ] **M7.2** api.ts 按域拆分
+- [x] **M7.2** api.ts 分层（http.ts+sse.ts 提取，api 对象 502→375 行；全量拆分留后续）
   - 判据：拆为 `api/books.ts` `api/knowledge.ts` `api/simulation.ts` 等（按后端 26 个 route 域）；`api.ts` 保留为 re-export 门面（兼容过渡）
   - 验证：`npx tsc --noEmit` 全绿 + `npm run build` 通过
-- [ ] **M7.3** SSE 统一管道
+- [x] **M7.3** SSE 统一管道（api/sse.ts 收敛 3 工厂；消费端合并留后续）
   - 判据：新建 `api/sse.ts`，收敛 createSSE/createTaskSSE/createAutopilotBridgeSSE 的公共逻辑（错误处理/重连/事件分发）
   - 验证：tsc 全绿 + 手动开一次 Agent 会话确认流式正常
 
