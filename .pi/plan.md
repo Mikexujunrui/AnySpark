@@ -103,16 +103,16 @@ M8 ──→ M9 反向审计
 - [ ] **M2.1** 权限确认三态测试（已完成 ✅，`tests/test_await_answer.py` 5 用例）
   - 判据：confirmed/cancelled/timeout 三态 + 迟到回复回归
   - 验证：`python -m pytest tests/test_await_answer.py -q` 全绿
-- [ ] **M2.2** 工具互斥保护测试
+- [x] **M2.2** 工具互斥保护测试
   - 判据：新增 `tests/test_tool_mutex.py`，验证"同一响应含多个全章写入工具时只执行第一个，其余收到互斥提示"
   - 验证：测试覆盖 `_prepare_tool_calls` 的 `FULL_CHAPTER_GENERATION_TOOLS` 分支
-- [ ] **M2.3** 连续取消熔断测试
+- [x] **M2.3** 连续取消熔断测试
   - 判据：新增测试验证 `consecutive_confirm_cancels >= 2` 时 agent 消息含"停止反复尝试"提示，且 confirmed 后计数归零
   - 验证：测试全绿
-- [ ] **M2.4** 最小循环端到端测试（mock LLM）
+- [x] **M2.4** 最小循环端到端测试（mock LLM）
   - 判据：新增 `tests/test_agent_loop_e2e.py`，用 fake LLM 客户端（固定返回 tool_calls/终止）驱动 `_loop_inner`，验证：正常终止 / 工具互斥 / 取消路径
   - 验证：3 条路径各 1 个用例全绿；不触网（mock 所有 LLM 调用）
-- [ ] **M2.5** compaction 触发边界测试
+- [x] **M2.5** compaction 触发边界测试
   - 判据：新增测试验证 token 超阈值触发 prune→summarize 两阶段，阈值边界（恰好低于/高于）行为正确
   - 验证：测试全绿
 
