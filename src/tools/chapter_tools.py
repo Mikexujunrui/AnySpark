@@ -244,7 +244,7 @@ async def apply_directive_globally(loop, args: dict, book_id: str) -> str:
         # Parallel execution (like batch_edit_chapters)
         CONCURRENCY = 3
         semaphore = asyncio.Semaphore(CONCURRENCY)
-        results = [None] * len(target_indices)
+        results: list[str | None] = [None] * len(target_indices)
         completed = 0
         len(target_indices)
 

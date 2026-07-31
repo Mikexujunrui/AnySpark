@@ -107,7 +107,7 @@ def writing_stats(book_id: str):
 
     avg = round(total_words / len(regular)) if regular else 0
 
-    active_days = sorted({d for d, v in daily.items() if v["wordsCreated"] or v["wordsEdited"]})
+    active_days: list[str] = sorted({d for d, v in daily.items() if v["wordsCreated"] or v["wordsEdited"]})
     current_streak = 0
     if active_days:
         d = now.isoformat()

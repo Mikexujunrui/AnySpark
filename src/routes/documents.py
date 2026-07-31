@@ -4,6 +4,7 @@ import re
 import shutil
 from datetime import datetime
 from pathlib import Path, PurePosixPath
+from typing import cast
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
@@ -263,15 +264,15 @@ async def batch_extract_after_import(book_id: str, doc_id: str, data: BatchExtra
             if not text.strip():
                 continue
             try:
-                result = extract_from_text(book_id, text[:3000])
-                if result and result.get("entities"):
-                    for entity in result["entities"]:
+                result = extract_from_text(text[:3000], book_id=book_id)
+                if result and result.entities:
+                    for entity in result.entities:
                         try:
                             store.add_entity(entity)
                             all_extracted.append(
                                 {
-                                    "name": entity.get("name", ""),
-                                    "type": entity.get("type", ""),
+                                    "name": entity.name,
+                                    "type": entity.type,
                                 }
                             )
                         except Exception:
@@ -348,20 +349,25 @@ def _split_by_pattern(full_text: str, pattern: str) -> list[dict]:
 
 
 def _split_by_titles(full_text: str, titles: list[str]) -> list[dict]:
-    positions = []
+    positions: list[dict[str, object]] = []
     for title in titles:
         idx = full_text.find(title)
         if idx >= 0:
             positions.append({"title": title, "pos": idx})
-    positions.sort(key=lambda x: x["pos"])
-    positions = [p for i, p in enumerate(positions) if i == 0 or p["pos"] - positions[i - 1]["pos"] > 200]
+    positions.sort(key=lambda x: cast(int, x["pos"]))
+    positions = [
+        p
+        for i, p in enumerate(positions)
+        if i == 0 or cast(int, p["pos"]) - cast(int, positions[i - 1]["pos"]) > 200
+    ]
     if len(positions) < 2:
         return []
     chapters_data = []
     for i, p in enumerate(positions):
-        start = p["pos"] + len(p["title"])
-        end = positions[i + 1]["pos"] if i + 1 < len(positions) else len(full_text)
+        title = cast(str, p["title"])
+        start = cast(int, p["pos"]) + len(title)
+        end = cast(int, positions[i + 1]["pos"]) if i + 1 < len(positions) else len(full_text)
         content = full_text[start:end].strip()
         if len(content) > 200:
-            chapters_data.append({"title": p["title"], "content": content[: config.storage.max_chapter_chars]})
+            chapters_data.append({"title": title, "content": content[: config.storage.max_chapter_chars]})
     return chapters_data

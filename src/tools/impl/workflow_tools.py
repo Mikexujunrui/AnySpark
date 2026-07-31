@@ -8,7 +8,7 @@ import json
 from data.json_store import json_store
 
 
-async def _generate_workflow_streaming(loop, args: dict, kb, book_id: str, msg: str = "", queue=None):
+async def _generate_workflow_streaming(loop, args: dict, kb, book_id: str, msg: str = "", queue=None) -> str:
     """Streaming version of generate_workflow — emits workflow definition event."""
     desc = args.get("description", "")
     if not desc:

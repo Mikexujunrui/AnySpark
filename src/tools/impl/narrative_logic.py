@@ -74,7 +74,9 @@ async def _define_constraint(loop, args: dict, kb, book_id: str, msg: str = "") 
 
     try:
         response = await loop.run_in_executor(_ai_executor, llm_chat, prompt, system, 0.1, "extraction")
-        parsed = extract_json_from_response(response)
+        parsed = json.loads(extract_json_from_response(response))
+        if not isinstance(parsed, dict):
+            parsed = {}
         if not parsed:
             # Fallback: store as custom with no violation query
             parsed = {

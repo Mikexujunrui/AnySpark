@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from typing import cast
 
 from core.config import config
 from core.llm_client import chat as llm_chat
@@ -276,7 +277,7 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
             batch_fs = 0
 
             for res in results:
-                if isinstance(res, Exception):
+                if isinstance(res, BaseException):
                     failed += 1
                     chapter_logs.append(f"  ❌ 异常: {str(res)[:40]}")
                     continue
@@ -379,16 +380,16 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
         if kb is not None:
             from core.knowledge import TimelineEvent
 
-            existing_tl_ids = {e.id for e in kb.list_timeline_events()}
+            existing_tl_ids = {ent.id for ent in kb.list_timeline_events()}
             all_entities = kb.list_entities()
             name_to_id = {}
-            for e in all_entities:
-                name_to_id[e.name] = e.id
-                name_to_id[e.name.lower()] = e.id
-                for alias in e.aliases:
-                    name_to_id[alias] = e.id
-                    name_to_id[alias.lower()] = e.id
-            loc_entities = {e.name.lower(): e.id for e in all_entities if e.type == "location"}
+            for ent in all_entities:
+                name_to_id[ent.name] = ent.id
+                name_to_id[ent.name.lower()] = ent.id
+                for alias in ent.aliases:
+                    name_to_id[alias] = ent.id
+                    name_to_id[alias.lower()] = ent.id
+            loc_entities = {ent.name.lower(): ent.id for ent in all_entities if ent.type == "location"}
 
             # First: process LLM-extracted timeline events (with location, sub-events)
             for te in collected_tl_events:
@@ -576,7 +577,7 @@ async def _batch_edit_chapters(loop, args: dict, kb, book_id: str, msg: str = ""
     CONCURRENCY = 3
     HEARTBEAT = 15
     semaphore = asyncio.Semaphore(CONCURRENCY)
-    results = [None] * len(target_indices)
+    results: list[str | None] = [None] * len(target_indices)
     completed = 0
     total = len(target_indices)
 
@@ -644,7 +645,7 @@ async def _batch_edit_chapters(loop, args: dict, kb, book_id: str, msg: str = ""
             else:
                 return (ch_idx, None, f"⚠️ #{idx + 1} {title[:15]}: 空响应，跳过")
 
-    tasks = [_edit_one(i, target_indices[i]) for i in range(len(target_indices))]
+    tasks = [asyncio.create_task(_edit_one(i, target_indices[i])) for i in range(len(target_indices))]
     edited = skipped = failed = 0
 
     for coro in asyncio.as_completed(tasks):
@@ -887,8 +888,8 @@ async def _prepare_writing(loop, args: dict, kb, book_id: str, msg: str = "") ->
 
     bridges = insights.get("bridge_characters", [])
     if bridges:
-        names = ", ".join(b.get("entity_name", "?") for b in bridges[:3])
-        lines.append(f"\n🔗 **桥接角色**: {names}")
+        bridge_names = ", ".join(b.get("entity_name", "?") for b in bridges[:3])
+        lines.append(f"\n🔗 **桥接角色**: {bridge_names}")
 
     # 5. Continuity cards — inject previous 3 chapters' end states
     cards = _js.get_recent_continuity_cards(book_id, chapter_index, count=3)
@@ -964,7 +965,7 @@ async def _generate_continuity_card(loop, chapter_text: str, chapter_index: int,
         card["chapter_index"] = chapter_index
         card["chapter_title"] = chapter_title
         card["generated_at"] = datetime.now().isoformat()
-        return card
+        return cast(dict, card)
     except Exception:
         return None
 

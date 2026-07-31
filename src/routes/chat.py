@@ -3,6 +3,7 @@ import json
 import logging
 import re
 import time
+from typing import cast
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
@@ -39,7 +40,7 @@ _autopilot_sessions_file = DATA_DIR / "autopilot_sessions.json"
 def _load_autopilot_sessions() -> dict[str, str]:
     try:
         if _autopilot_sessions_file.exists():
-            return json.loads(_autopilot_sessions_file.read_text(encoding="utf-8"))
+            return cast(dict[str, str], json.loads(_autopilot_sessions_file.read_text(encoding="utf-8")))
     except (json.JSONDecodeError, OSError):
         pass
     return {}
@@ -322,7 +323,7 @@ async def _tool_shortcut(tool_name: str, extra_args: dict, req, original_msg: st
     kb = GraphStore(req.book_id)
     kb.init_schema()
     loop = asyncio.get_running_loop()
-    queue = asyncio.Queue()
+    queue: asyncio.Queue = asyncio.Queue()
 
     async def _run():
         from core.llm_client import llm_book_context
@@ -807,7 +808,7 @@ def _persist_turn(
     with book_lock(session_id):
         history = json_store.load_messages(session_id)
         history.append({"role": "user", "text": user_text, "ts": ts, "mode": mode})
-        agent_record = {"role": "agent", "text": agent_text, "ts": ts, "mode": mode}
+        agent_record: dict[str, object] = {"role": "agent", "text": agent_text, "ts": ts, "mode": mode}
         if parts is not None:
             agent_record["parts"] = parts
             agent_record["user_text"] = user_text
@@ -825,7 +826,7 @@ async def _extract_shortcut(text: str, kb, book_id: str, session_id: str = "", o
     """
     executor = get_executor()
     yield {"event": "progress", "data": json.dumps({"stage": "准备中...", "detail": "加载知识库"}, ensure_ascii=False)}
-    q = asyncio.Queue()
+    q: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
 
     def enqueue(item):
@@ -904,7 +905,7 @@ async def _extract_shortcut(text: str, kb, book_id: str, session_id: str = "", o
 
 async def _write_shortcut(instruction: str, mode: str, book_id: str, session_id: str = "", original_msg: str = ""):
     executor = get_executor()
-    q = asyncio.Queue()
+    q: asyncio.Queue = asyncio.Queue()
     loop = asyncio.get_running_loop()
     full_text = []
 
@@ -1072,7 +1073,7 @@ async def _autopilot_bridge_sse(task_id: str, book_id: str, session_id: str, req
 
     Periodically checks for client disconnection to avoid CLOSE_WAIT socket leaks.
     """
-    event_queue = asyncio.Queue()
+    event_queue: asyncio.Queue = asyncio.Queue()
 
     conn_logger.info(
         "[SSE-START] _autopilot_bridge_sse | task=%s | book=%s | session=%s",

@@ -43,6 +43,7 @@ L4.0 git污染协调（贯穿，需主人配合外部进程）
 - [x] **L1.6** handlers.py + plot.py + extractor.py（28 条）：handler 变量名冲突（c/names/e 复用）；**修复 list_snapshots(character_entity_id=) 无效参数真实 bug（阶段计数曾统计全部角色）**；extractor 修复 `EntityType.value` 真实崩溃 bug（str 子类无 .value，spaCy NER 分支未测覆盖）；plot 返回类型 str|dict + llm_chat cast
 - [x] **L1.7** agent_loop/headless_loop/flows（22 条）：`_stream_llm_response`/`_stream_llm_with_retry` 返回类型 object→Any（消费端解包修复）；**FlowHandler 标注同步但 flow 全 async（真实类型 bug，改 Awaitable）**；**headless_loop append_message 不存在（真实 bug，改用 load+append+save_messages 持久化，与 chat.py 对齐）**；_intervention_queue 显式初始化；TaskQueue 类型标注；变理名 result→res 泄漏修复
 - [ ] **L1.8** 其余散落（routes/*、tools/impl/* 余量 ~140 条）
+  - ✅ 已修：documents/executor/narrative_logic/knowledge/chapter_tools/stats/chat（139→100）；**修复真实 bug：documents.py extract_from_text 参数顺序错位+KnowledgeProposal 当 dict 用；narrative_logic extract_json_from_response 未 json.loads（str.get() 必崩）；knowledge.py asyncio.as_completed 内 t.cancel() 对 coroutine 无效（改 create_task）**
 - [ ] **L1.9** baseline 归零：`.mypy-baseline` 写 0；`scripts/mypy_gate.sh` 实跑通过
   - 验证：`bash scripts/mypy_gate.sh` 输出 errors: 0
 

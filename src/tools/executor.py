@@ -27,6 +27,7 @@ import re
 import traceback
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any, cast
 
 from core.agent_context import AgentContext
 from core.errors import ToolExecutionError
@@ -305,7 +306,7 @@ async def _call_handler(
     result = handler(**params)
     if inspect.iscoroutine(result):
         result = await result
-    return result
+    return cast(str | dict[str, Any], result)
 
 
 def _register_in_dispatch(
@@ -524,7 +525,7 @@ def _fmt_tool_error(name: str, err: BaseException, detail: str = "") -> str:
         return f"⏱ 工具 {name} 超时: 请求超过180秒未响应。可重试或缩短输入内容。"
     if any(k in err_lower for k in ["content_filter", "content filter", "sensitive", "policy", "moderation"]):
         return f"🚫 工具 {name} 被内容审查拦截: {err_str[:100]}。可尝试调整指令措辞。"
-    if "rate" in err_lower or "429" in err or "too many" in err_lower:
+    if "rate" in err_lower or "429" in err_str or "too many" in err_lower:
         return f"⚠️ 工具 {name} 速率限制: {err_str[:80]}。请稍后重试。"
     if any(k in err_lower for k in ["connection", "network", "refused", "reset", "eof"]):
         return f"🌐 工具 {name} 网络错误: {err_str[:80]}。请检查网络后重试。"
@@ -576,7 +577,7 @@ async def execute_tool_streaming(
         # Streaming dispatch map (tools that emit progress via queue)
         if name in _STREAMING_DISPATCH:
             fn = _STREAMING_DISPATCH[name]
-            return await fn(loop, args, kb, book_id, msg, queue)
+            return cast(str | dict[str, Any], await fn(loop, args, kb, book_id, msg, queue))
 
         # Fallback to non-streaming dispatch
         return await execute_tool(loop, name, args, kb, book_id, msg, session_id, context=context)
@@ -772,7 +773,7 @@ async def _manage_workflows_streaming(loop, args: dict, kb, book_id: str, msg: s
     action = args.get("action", "list")
     if action == "generate":
         return await _generate_workflow_streaming(loop, args, kb, book_id, msg, queue)
-    return await _handle_workflow_tool(action, args, book_id)
+    return cast(str, await _handle_workflow_tool(action, args, book_id))
 
 
 async def _web_search(loop, args: dict, book_id: str) -> str:
@@ -782,7 +783,10 @@ async def _web_search(loop, args: dict, book_id: str) -> str:
     if not query:
         return "错误: 需要 query 参数"
     num_results = int(args.get("num_results", 8))
-    return await loop.run_in_executor(_ai_executor, web_search_sync, query, book_id, num_results)
+    return cast(
+        str,
+        await loop.run_in_executor(_ai_executor, web_search_sync, query, book_id, num_results),
+    )
 
 
 async def _web_fetch(loop, args: dict) -> str:
@@ -814,7 +818,10 @@ async def _web_fetch(loop, args: dict) -> str:
     timeout = int(args.get("timeout", 30))
     if timeout > 60:
         timeout = 60  # cap timeout
-    return await loop.run_in_executor(_ai_executor, web_fetch_sync, url, fmt, timeout)
+    return cast(
+        str,
+        await loop.run_in_executor(_ai_executor, web_fetch_sync, url, fmt, timeout),
+    )
 
 
 async def _run_sub_agent(args: dict, book_id: str, session_id: str, context: AgentContext | None = None) -> str:
@@ -981,7 +988,7 @@ async def _extract_knowledge(loop, args: dict, kb, book_id: str, msg: str) -> st
         result = await loop.run_in_executor(_ai_executor, accept_proposal, proposal, book_id)
         entities = kb.list_entities()
         json_store.update_book_stats(book_id, entity_count=len(entities))
-        return result
+        return cast(str, result)
     return "未检测到可提取的设定信息"
 
 
