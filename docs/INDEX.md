@@ -14,8 +14,10 @@
 | [FRONTEND.md](FRONTEND.md) | 前端开发者 | 前端架构设计、组件目录、状态管理、SSE 交互模式、开发指引 |
 | [TESTING.md](TESTING.md) | 贡献者 | 测试分层策略、运行命令、编写规范、Mock 模式 |
 | [EXTENDING.md](EXTENDING.md) | 开发者 | 扩展开发指南：插件系统、YAML 技能、文风模板、评审员自定义 |
-| [ROADMAP.md](ROADMAP.md) | 项目经理、贡献者 | 开发路线图（历史规划）与版本历史（v4-v12 实施记录） |
+| [BASELINE.md](BASELINE.md) | 开发者 | 重构基线：测试/覆盖率/lint 实测数字，重构行为的对照锚 |
+| [FRONTEND_AUDIT.md](FRONTEND_AUDIT.md) | 前端开发者 | 前端架构审计：api.ts 单体/巨型组件/SSE 分散三债务点 |
 | [IMPROVEMENTS.md](IMPROVEMENTS.md) | 贡献者 | 改进跟踪 (36/36 项已完成)，变更日志与新增文件清单 |
+| [archive/](archive/) | 历史 | 归档文档（ROADMAP/CLI_TEST_PLAN/MULTI_GENRE_ROADMAP/发布笔记）——历史记录保留不更新 |
 
 ## 阅读顺序建议
 

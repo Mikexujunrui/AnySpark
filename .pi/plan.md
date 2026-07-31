@@ -215,13 +215,13 @@ M8 ──→ M9 反向审计
 
 目标：可复现发布 + 存量债务递减。
 
-- [ ] **M8.1** 发布一条龙脚本
+- [x] **M8.1** 发布一条龙脚本（scripts/release.py，--dry-run 已验证无副作用）
   - 判据：`scripts/release.py` 支持 `--dry-run`：bump 版本 → 更新 CHANGELOG → 跑 check → 打 tag；dry-run 不实际改动文件
   - 验证：`python scripts/release.py --dry-run` 输出完整流程且无副作用
-- [ ] **M8.2** mypy 存量递减
+- [x] **M8.2** mypy baseline 刷新 320→295（实测；WSL gate 假象已识别；存量 295 遗留，未达 -30% 目标，记入遗留）
   - 判据：在 M1/M3 删除死代码后，`scripts/mypy_gate.sh` 刷新 baseline，错误数较 M0 基线下降（目标 -30%）
   - 验证：baseline 文件数字变化可审计
-- [ ] **M8.3** 文档治理
+- [x] **M8.3** 文档治理（4 份计划/历史文档移入 docs/archive/，INDEX.md 更新）
   - 判据：`docs/` 分类标记——真实文档（ARCHITECTURE/EXTENDING/FRONTEND）与计划文档（ROADMAP/IMPROVEMENTS 等）分开目录或加状态头；过时文档（TECH_STACK 等）修正或归档
   - 验证：`docs/INDEX.md` 更新为新结构
 
