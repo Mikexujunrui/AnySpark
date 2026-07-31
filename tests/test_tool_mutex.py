@@ -22,9 +22,9 @@ def _cfg(book_id: str = "b1") -> AgentConfig:
 
 def _prepared(state: LoopState, tool_calls: list[ToolCall], monkeypatch, perm="allow", ack="confirmed"):
     """Run _prepare_tool_calls once and return (prepared, messages)."""
-    agent_loop.permission_manager.check = lambda name: perm  # type: ignore[assignment]
+    monkeypatch.setattr(agent_loop.permission_manager, "check", lambda name: perm)
     if perm == "ask":
-        agent_loop._await_answer = _FakeAwait(ack)  # type: ignore[assignment]
+        monkeypatch.setattr(agent_loop, "_await_answer", _FakeAwait(ack))
     response = LLMResponse(tool_calls=tool_calls)
     messages: list[dict] = []
     prepared: list[dict] = []
@@ -87,8 +87,8 @@ def test_confirm_cancel_fuse_increments_and_warns(monkeypatch):
     """Two consecutive cancels → counter reaches 2 and the tool message warns the agent."""
     state = LoopState()
     fake = _FakeAwait("cancelled")
-    agent_loop.permission_manager.check = lambda name: "ask"  # type: ignore[assignment]
-    agent_loop._await_answer = fake  # type: ignore[assignment]
+    monkeypatch.setattr(agent_loop.permission_manager, "check", lambda name: "ask")
+    monkeypatch.setattr(agent_loop, "_await_answer", fake)
 
     tool = ToolCall(id="t1", name="edit_chapter", arguments='{"chapter_id": "#1", "content": "新内容"}')
     response = LLMResponse(tool_calls=[tool])
@@ -117,8 +117,8 @@ def test_confirm_cancel_fuse_resets_on_confirm(monkeypatch):
     state = LoopState()
     state.consecutive_confirm_cancels = 2  # simulate prior cancels
     fake = _FakeAwait("confirmed")
-    agent_loop.permission_manager.check = lambda name: "ask"  # type: ignore[assignment]
-    agent_loop._await_answer = fake  # type: ignore[assignment]
+    monkeypatch.setattr(agent_loop.permission_manager, "check", lambda name: "ask")
+    monkeypatch.setattr(agent_loop, "_await_answer", fake)
 
     tool = ToolCall(id="t1", name="edit_chapter", arguments='{"chapter_id": "#1", "content": "新内容"}')
     response = LLMResponse(tool_calls=[tool])
@@ -141,8 +141,8 @@ def test_confirm_timeout_is_distinguished_from_cancel(monkeypatch):
     misread a slow user as a dissatisfied one (the original bug class)."""
     state = LoopState()
     fake = _FakeAwait("timeout")
-    agent_loop.permission_manager.check = lambda name: "ask"  # type: ignore[assignment]
-    agent_loop._await_answer = fake  # type: ignore[assignment]
+    monkeypatch.setattr(agent_loop.permission_manager, "check", lambda name: "ask")
+    monkeypatch.setattr(agent_loop, "_await_answer", fake)
 
     tool = ToolCall(id="t1", name="edit_chapter", arguments='{"chapter_id": "#1", "content": "新内容"}')
     response = LLMResponse(tool_calls=[tool])
