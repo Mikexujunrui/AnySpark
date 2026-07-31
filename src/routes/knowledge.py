@@ -320,12 +320,8 @@ def update_relation(book_id: str, relation_id: str, update: RelationUpdate):
     if update.label:
         data["label"] = update.label
     kb._run(
-        """
-        MATCH ()-[r {id: $rid, project_id: $pid}]->()
-        SET r.data = $data
-        RETURN r
-    """,
-        {"rid": relation_id, "pid": book_id, "data": json.dumps(data, ensure_ascii=False)},
+        "UPDATE relations SET data=? WHERE id=? AND project_id=?",
+        (json.dumps(data, ensure_ascii=False), relation_id, book_id),
     )
     return {"ok": True}
 
@@ -431,7 +427,7 @@ def match_foreshadow_resolutions(book_id: str):
 @router.delete("/books/{book_id}/foreshadows/{fs_id}")
 def delete_foreshadow(book_id: str, fs_id: str):
     kb = get_store(book_id)
-    kb._run("MATCH (f:Fore {id: $id, project_id: $pid}) DETACH DELETE f", {"id": fs_id, "pid": book_id})
+    kb._run("DELETE FROM foreshadows WHERE id=? AND project_id=?", (fs_id, book_id))
     return {"ok": True}
 
 
@@ -453,15 +449,15 @@ def clear_all_knowledge(book_id: str):
     stats = {"entities": 0, "timeline": 0, "foreshadows": 0, "snapshots": 0}
     # Clear timeline first (has INVOLVES edges)
     stats["timeline"] = kb.clear_all_timeline_events()
-    # Clear snapshots
-    r = kb._run("MATCH (s:Snapshot {project_id: $pid}) DETACH DELETE s RETURN count(s) as cnt", {"pid": book_id})
-    stats["snapshots"] = r[0]["cnt"] if r else 0
-    # Clear foreshadows
-    r = kb._run("MATCH (f:Fore {project_id: $pid}) DETACH DELETE f RETURN count(f) as cnt", {"pid": book_id})
-    stats["foreshadows"] = r[0]["cnt"] if r else 0
-    # Clear entities (DETACH DELETE also removes all their relations)
-    r = kb._run("MATCH (e:Entity {project_id: $pid}) DETACH DELETE e RETURN count(e) as cnt", {"pid": book_id})
-    stats["entities"] = r[0]["cnt"] if r else 0
+    # Clear snapshots / foreshadows / entities (relations first due to FK)
+    for tbl in ("snapshots", "foreshadows"):
+        r = kb._run(f"SELECT COUNT(*) c FROM {tbl} WHERE project_id=?", (book_id,))
+        kb._run(f"DELETE FROM {tbl} WHERE project_id=?", (book_id,))
+        stats[tbl] = r[0]["c"] if r else 0
+    r = kb._run("SELECT COUNT(*) c FROM entities WHERE project_id=?", (book_id,))
+    kb._run("DELETE FROM relations WHERE project_id=?", (book_id,))
+    kb._run("DELETE FROM entities WHERE project_id=?", (book_id,))
+    stats["entities"] = r[0]["c"] if r else 0
     return {"ok": True, "stats": stats}
 
 

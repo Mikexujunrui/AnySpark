@@ -662,6 +662,20 @@ class GraphMixin(CrudMixin):
 # ── Module-level helpers ──
 
 
+    def clear_all_timeline_events(self, project_id: str | None = None) -> int:
+        """Delete all timeline events and their INVOLVES edges."""
+        pid = project_id or self.project_id
+        # Timeline nodes are relation sources (INVOLVES / OCCURRED_AT edges).
+        self._run(
+            "DELETE FROM relations WHERE from_entity IN "
+            "(SELECT id FROM timeline_events WHERE project_id=?) AND project_id=?",
+            (pid, pid),
+        )
+        rows = self._run("SELECT COUNT(*) c FROM timeline_events WHERE project_id=?", (pid,))
+        self._run("DELETE FROM timeline_events WHERE project_id=?", (pid,))
+        return rows[0]["c"] if rows else 0
+
+
 def _count_entity_refs(event, entity_ids: list[str], counter: dict[str, int]) -> None:
     """Count how many timeline events reference each entity ID."""
     for eid in entity_ids:
