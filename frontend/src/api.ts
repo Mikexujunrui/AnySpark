@@ -1,377 +1,202 @@
-// API 层入口 — 各域函数集中于此；HTTP 基础设施见 api/http.ts，SSE 见 api/sse.ts。
-import { assertOk, del, diagLog, get, post, put } from './api/http'
-
-const API = ''
+// API 层门面 — 各域函数已拆分至 api/ 子模块；本文件保留聚合对象
+// 与类型 re-export，兼容既有消费方。HTTP 基础设施见 api/http.ts，SSE 见 api/sse.ts。
 import { createAutopilotBridgeSSE, createSSE, createTaskSSE } from './api/sse'
 export { createAutopilotBridgeSSE, createSSE, createTaskSSE }
 
-export interface UpdateStatus {
-  current_version: string
-  update_check_enabled: boolean
-}
+// ── 类型 re-export ──
+export type {
+  AnalysisSummaryData,
+  AutopilotStatusData,
+  AutopilotTaskData,
+  BookData,
+  ProviderData,
+  SessionData,
+  SettingsData,
+  SkillData,
+  SkillsListData,
+  StructureReportData,
+  StyleFingerprintData,
+  StylesListData,
+  UpdateCheckResult,
+  UpdateStatus,
+} from './api/types'
 
-export interface UpdateCheckResult {
-  current_version: string
-  latest_version: string | null
-  has_update: boolean
-  release_url: string
-  release_notes: string | null
-  published_at: string | null
-  error: string | null
-  message?: string
-  update_check_enabled?: boolean
-}
+// ── 域函数 re-export ──
+import * as books from './api/books'
+import * as chapters from './api/chapters'
+import * as knowledge from './api/knowledge'
+import * as tasks from './api/tasks'
+import * as settings from './api/settings'
+import * as memory from './api/memory'
+import { batchExtractKnowledge, detectChapters, importChapters, uploadDocument } from './api/import'
 
-export interface BookData {
-  id: string
-  title: string
-  description: string
-  entityCount: number
-  chapterCount: number
-  createdAt: string
-  updatedAt: string
-}
+export { books, chapters, knowledge, tasks, settings, memory, uploadDocument, detectChapters, importChapters, batchExtractKnowledge }
 
-export interface SessionData {
-  id: string
-  title: string
-  createdAt: string
-  updatedAt: string
-  messageCount: number
-}
-
-export interface ProviderData {
-  id: string
-  name: string
-  type: string
-  api_key?: string
-  base_url?: string
-  models: string[]
-}
-
-export interface AutopilotTaskData {
-  task_id: string
-  status: string
-  audit_mode: string
-  progress: number
-  chapters_completed: number
-  total_chapters: number
-}
-
-export interface AutopilotStatusData {
-  active: boolean
-  tasks: AutopilotTaskData[]
-}
-
-export interface StylesListData {
-  styles: unknown[]
-}
-
-export interface StructureReportData {
-  book_id: string
-  chapter_count: number
-  total_words: number
-  avg_chapter_length: number
-  chapter_length_distribution: number[]
-  dialogue_ratio_distribution: number[]
-  avg_dialogue_ratio: number
-  paragraph_stats: { avg_per_chapter: number; avg_length: number }
-  sentence_stats: { avg_per_chapter: number; avg_length: number }
-  pacing_curve: { chapter: number; title: string; word_count: number; dialogue_ratio: number; pace_score: number }[]
-  pov_distribution: Record<string, number>
-}
-
-export interface StyleFingerprintData {
-  book_id: string
-  sentence_length_distribution: Record<string, number>
-  vocabulary_richness_ttr: number
-  punctuation_pattern: Record<string, number>
-  four_char_idiom_density: number
-  paragraph_length_stats: { mean: number; median: number; std: number }
-  dialogue_density: number
-}
-
-export interface AnalysisSummaryData {
-  ref_book_id: string
-  structure?: { chapter_count: number; total_words: number; avg_chapter_length: number; avg_dialogue_ratio: number }
-  style_fingerprint?: { vocabulary_richness_ttr: number; dialogue_density: number; four_char_idiom_density: number }
-  deep_style?: { dimensions_analyzed: number }
-  emotional_curve?: { chapter_count: number }
-}
-
-export interface SkillsListData {
-  skills: SkillData[]
-}
-
-export interface SkillData {
-  name: string
-  description: string
-  steps: unknown[]
-}
-
-export interface SettingsData {
-  mode: string
-  providers: ProviderData[]
-  slot_pro?: { provider_id: string; model: string }
-  slot_flash?: { provider_id: string; model: string }
-  custom_map?: Record<string, string>
-}
-
-
+// ── 聚合对象（兼容历史消费方 `api.xxx`）──
 export const api = {
   // Books
-  getBooks: (): Promise<BookData[]> => get('/api/books'),
-  getBook: (id: string): Promise<BookData> => get(`/api/books/${id}`),
-  createBook: (data: Partial<BookData>): Promise<BookData> => post('/api/books', data),
-  updateBook: (id: string, data: Partial<BookData>): Promise<BookData> => put(`/api/books/${id}`, data),
-  deleteBook: (id: string): Promise<unknown> => del(`/api/books/${id}`),
-  importSparkProject: async (file: File): Promise<{ ok: boolean; book: BookData; stats: Record<string, unknown> }> => {
-    const formData = new FormData()
-    formData.append('file', file)
-    const res = await fetch('/api/books/import-spark', { method: 'POST', body: formData })
-    await assertOk(res)
-    return res.json()
-  },
+  getBooks: books.getBooks,
+  getBook: books.getBook,
+  createBook: books.createBook,
+  updateBook: books.updateBook,
+  deleteBook: books.deleteBook,
+  importSparkProject: books.importSparkProject,
 
   // Sessions
-  getSessions: (bookId: string): Promise<SessionData[]> => get(`/api/books/${bookId}/sessions`),
-  createSession: (bookId: string, title: string): Promise<SessionData> => post(`/api/books/${bookId}/sessions`, { title }),
-  deleteSession: (bookId: string, sessionId: string): Promise<unknown> => del(`/api/books/${bookId}/sessions/${sessionId}`),
+  getSessions: books.getSessions,
+  createSession: books.createSession,
+  deleteSession: books.deleteSession,
 
   // Materials
-  getMaterials: (bookId?: string): Promise<unknown[]> => get(`/api/materials?book_id=${bookId || ''}`),
-  searchMaterials: (q: string, bookId?: string): Promise<unknown[]> => get(`/api/materials/search?q=${encodeURIComponent(q)}&book_id=${bookId || ''}`),
-  createMaterial: (data: unknown): Promise<unknown> => post('/api/materials', data),
-  deleteMaterial: (id: string): Promise<unknown> => del(`/api/materials/${id}`),
-  subscribeMaterial: (bookId: string, materialId: string): Promise<unknown> => post(`/api/books/${bookId}/material-subs`, { material_id: materialId }),
-  unsubscribeMaterial: (bookId: string, materialId: string): Promise<unknown> => del(`/api/books/${bookId}/material-subs/${materialId}`),
+  getMaterials: books.getMaterials,
+  searchMaterials: books.searchMaterials,
+  createMaterial: books.createMaterial,
+  deleteMaterial: books.deleteMaterial,
+  subscribeMaterial: books.subscribeMaterial,
+  unsubscribeMaterial: books.unsubscribeMaterial,
 
   // Reference books
-  getReferences: (bookId: string): Promise<unknown> => get(`/api/books/${bookId}/references`),
-  setReferences: (bookId: string, bookIds: string[]): Promise<unknown> => put(`/api/books/${bookId}/references`, { book_ids: bookIds }),
-  setReferenceUsage: (bookId: string, refBookId: string, usage: 'style' | 'canon' | 'both'): Promise<unknown> =>
-    put(`/api/books/${bookId}/references/${refBookId}/usage`, { usage }),
+  getReferences: books.getReferences,
+  setReferences: books.setReferences,
+  setReferenceUsage: books.setReferenceUsage,
 
   // Reference work analysis
-  triggerStructureAnalysis: (bookId: string, refBookId?: string): Promise<StructureReportData> =>
-    post(`/api/books/${bookId}/analyses/structure${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
-  getStructureAnalysis: (bookId: string, refBookId?: string): Promise<StructureReportData> =>
-    get(`/api/books/${bookId}/analyses/structure${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
-  triggerStyleAnalysis: (bookId: string, refBookId?: string): Promise<StyleFingerprintData> =>
-    post(`/api/books/${bookId}/analyses/style${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
-  getStyleAnalysis: (bookId: string, refBookId?: string): Promise<StyleFingerprintData> =>
-    get(`/api/books/${bookId}/analyses/style${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
-  listAnalyses: (bookId: string): Promise<{ analyses: AnalysisSummaryData[] }> =>
-    get(`/api/books/${bookId}/analyses`),
+  triggerStructureAnalysis: books.triggerStructureAnalysis,
+  getStructureAnalysis: books.getStructureAnalysis,
+  triggerStyleAnalysis: books.triggerStyleAnalysis,
+  getStyleAnalysis: books.getStyleAnalysis,
+  listAnalyses: books.listAnalyses,
 
   // Styles
-  getStyles: (): Promise<StylesListData> => get('/api/styles'),
-  getStyle: (name: string): Promise<unknown> => get(`/api/styles/${name}`),
-  createStyle: (data: unknown): Promise<unknown> => post('/api/styles/custom', data),
-  updateStyle: (name: string, data: unknown): Promise<unknown> => put(`/api/styles/custom/${name}`, data),
-  deleteStyle: (name: string): Promise<unknown> => del(`/api/styles/custom/${name}`),
-  getActiveStyle: (bookId: string): Promise<unknown> => get(`/api/books/${bookId}/style`),
-  setActiveStyle: (bookId: string, name: string): Promise<unknown> => put(`/api/books/${bookId}/style`, { name }),
+  getStyles: knowledge.getStyles,
+  getStyle: knowledge.getStyle,
+  createStyle: knowledge.createStyle,
+  updateStyle: knowledge.updateStyle,
+  deleteStyle: knowledge.deleteStyle,
+  getActiveStyle: knowledge.getActiveStyle,
+  setActiveStyle: knowledge.setActiveStyle,
 
   // Skills
-  getSkills: (): Promise<SkillsListData> => get('/api/skills'),
+  getSkills: knowledge.getSkills,
 
   // Workflows (global pool)
-  getGlobalWorkflows: (): Promise<unknown[]> => get('/api/workflows'),
-  deleteGlobalWorkflow: (wfId: string): Promise<unknown> => del(`/api/workflows/${wfId}`),
+  getGlobalWorkflows: knowledge.getGlobalWorkflows,
+  deleteGlobalWorkflow: knowledge.deleteGlobalWorkflow,
 
   // Stats
-  getWritingStats: (bookId: string): Promise<unknown> => get(`/api/books/${bookId}/stats`),
+  getWritingStats: knowledge.getWritingStats,
 
   // Character mentions (heatmap)
-  getCharacterMentions: (bookId: string): Promise<unknown> => get(`/api/books/${bookId}/character-mentions`),
-  refreshCharacterMentions: (bookId: string): Promise<unknown> => post(`/api/books/${bookId}/character-mentions/refresh`, {}),
+  getCharacterMentions: knowledge.getCharacterMentions,
+  refreshCharacterMentions: knowledge.refreshCharacterMentions,
 
   // Knowledge
-  getSummary: (bookId: string): Promise<unknown> => get(`/api/books/${bookId}/knowledge/summary`),
-  deleteEntity: (bookId: string, entityId: string): Promise<unknown> => del(`/api/books/${bookId}/knowledge/entity/${entityId}`),
-  updateEntity: (bookId: string, entityId: string, payload: unknown): Promise<unknown> => put(`/api/books/${bookId}/knowledge/entity/${entityId}`, payload),
+  getSummary: knowledge.getSummary,
+  deleteEntity: knowledge.deleteEntity,
+  updateEntity: knowledge.updateEntity,
 
   // Extract
-  extract: (text: string, bookId: string): Promise<unknown> => post('/api/extract', { text, book_id: bookId }),
+  extract: knowledge.extract,
 
   // Tasks
-  getTasks: (bookId: string, status?: string): Promise<unknown[]> => get(`/api/books/${bookId}/tasks${status ? `?status=${status}` : ''}`),
-  getTask: (bookId: string, taskId: string): Promise<unknown> => get(`/api/books/${bookId}/tasks/${taskId}`),
-  createTask: (bookId: string, data: unknown): Promise<unknown> => post(`/api/books/${bookId}/tasks`, data),
-  startTask: (bookId: string, taskId: string): Promise<unknown> => post(`/api/books/${bookId}/tasks/${taskId}/start`, {}),
-  pauseTask: (bookId: string, taskId: string): Promise<unknown> => post(`/api/books/${bookId}/tasks/${taskId}/pause`, {}),
-  resumeTask: (bookId: string, taskId: string): Promise<unknown> => post(`/api/books/${bookId}/tasks/${taskId}/resume`, {}),
-  cancelTask: (bookId: string, taskId: string): Promise<unknown> => post(`/api/books/${bookId}/tasks/${taskId}/cancel`, {}),
-  retryTask: (bookId: string, taskId: string): Promise<unknown> => post(`/api/books/${bookId}/tasks/${taskId}/retry`, {}),
-  setAuditMode: (bookId: string, taskId: string, mode: string): Promise<unknown> => put(`/api/books/${bookId}/tasks/${taskId}/audit-mode`, { mode }),
+  getTasks: tasks.getTasks,
+  getTask: tasks.getTask,
+  createTask: tasks.createTask,
+  startTask: tasks.startTask,
+  pauseTask: tasks.pauseTask,
+  resumeTask: tasks.resumeTask,
+  cancelTask: tasks.cancelTask,
+  retryTask: tasks.retryTask,
+  setAuditMode: tasks.setAuditMode,
 
   // Autopilot
-  startAutopilot: (bookId: string, config: unknown): Promise<unknown> => post(`/api/books/${bookId}/autopilot/start`, config),
-  confirmAutopilot: (bookId: string, taskId: string): Promise<unknown> => post(`/api/books/${bookId}/autopilot/${taskId}/confirm`, {}),
-  stopAutopilot: (bookId: string, taskId: string): Promise<unknown> => post(`/api/books/${bookId}/autopilot/${taskId}/stop`, {}),
-  getAutopilotStatus: (bookId: string): Promise<AutopilotStatusData> => get(`/api/books/${bookId}/autopilot/status`),
-  getAutopilotTaskStatus: (bookId: string, taskId: string): Promise<unknown> => get(`/api/books/${bookId}/autopilot/${taskId}/status`),
+  startAutopilot: tasks.startAutopilot,
+  confirmAutopilot: tasks.confirmAutopilot,
+  stopAutopilot: tasks.stopAutopilot,
+  getAutopilotStatus: tasks.getAutopilotStatus,
+  getAutopilotTaskStatus: tasks.getAutopilotTaskStatus,
 
   // Supervisor
-  getSupervisorStatus: (): Promise<unknown> => get('/api/supervisor/status'),
-  triggerRecovery: (): Promise<unknown> => post('/api/supervisor/recover', {}),
+  getSupervisorStatus: tasks.getSupervisorStatus,
+  triggerRecovery: tasks.triggerRecovery,
 
   // Settings
-  getSettings: (): Promise<SettingsData> => get('/api/settings'),
-  updateProvider: (provider: unknown): Promise<SettingsData> => post('/api/settings/providers', provider),
-  deleteProvider: (id: string): Promise<SettingsData> => del(`/api/settings/providers/${id}`),
-  updateSlots: (slots: unknown): Promise<SettingsData> => post('/api/settings/slots', slots),
-  switchMode: (mode: string, customMap?: Record<string, string>): Promise<SettingsData> => post('/api/settings/mode', { mode, custom_map: customMap }),
-  testProvider: (providerId: string): Promise<unknown> => post('/api/settings/test', { provider_id: providerId }),
+  getSettings: settings.getSettings,
+  updateProvider: settings.updateProvider,
+  deleteProvider: settings.deleteProvider,
+  updateSlots: settings.updateSlots,
+  switchMode: settings.switchMode,
+  testProvider: settings.testProvider,
 
   // Book-level settings (config layering)
-  getBookSettings: (bookId: string): Promise<Record<string, unknown>> => get(`/api/books/${bookId}/settings`),
-  updateBookSettings: (bookId: string, data: Record<string, unknown>): Promise<Record<string, unknown>> => put(`/api/books/${bookId}/settings`, data),
-  deleteBookSettings: (bookId: string): Promise<unknown> => del(`/api/books/${bookId}/settings`),
-  getEffectiveSettings: (bookId: string): Promise<SettingsData> => get(`/api/settings/effective/${bookId}`),
+  getBookSettings: settings.getBookSettings,
+  updateBookSettings: settings.updateBookSettings,
+  deleteBookSettings: settings.deleteBookSettings,
+  getEffectiveSettings: settings.getEffectiveSettings,
 
   // Update check
-  getUpdateStatus: (): Promise<UpdateStatus> => get('/api/update/status'),
-  checkForUpdate: (): Promise<UpdateCheckResult> => get('/api/update/check'),
-  toggleUpdateCheck: (enabled: boolean): Promise<{ update_check_enabled: boolean }> => post('/api/update/toggle', { enabled }),
+  getUpdateStatus: settings.getUpdateStatus,
+  checkForUpdate: settings.checkForUpdate,
+  toggleUpdateCheck: settings.toggleUpdateCheck,
 
-  // ── Chapters ──
-  getChapters: (bookId: string): Promise<unknown[]> => get(`/api/books/${bookId}/chapters`),
-  createChapter: (bookId: string, data: unknown): Promise<unknown> =>
-    post(`/api/books/${bookId}/chapters`, data),
-  updateChapter: (bookId: string, chapterId: string, data: unknown): Promise<unknown> =>
-    put(`/api/books/${bookId}/chapters/${chapterId}`, data),
-  deleteChapter: (bookId: string, chapterId: string): Promise<unknown> =>
-    del(`/api/books/${bookId}/chapters/${chapterId}`),
+  // Chapters
+  getChapters: chapters.getChapters,
+  createChapter: chapters.createChapter,
+  updateChapter: chapters.updateChapter,
+  deleteChapter: chapters.deleteChapter,
 
-  // ── Volumes ──
-  getVolumes: (bookId: string): Promise<{ volumes: unknown[] }> => get(`/api/books/${bookId}/volumes`),
+  // Volumes
+  getVolumes: chapters.getVolumes,
 
-  // ── Chapter reorder ──
-  reorderChapters: (bookId: string, order: string[]): Promise<{ ok: boolean; count: number }> =>
-    post(`/api/books/${bookId}/chapters/reorder`, { order }),
+  // Chapter reorder
+  reorderChapters: chapters.reorderChapters,
 
-  // ── Notes ──
-  getNotes: (bookId: string): Promise<unknown[]> => get(`/api/books/${bookId}/notes`),
-  addBookNote: (bookId: string, content: string, tags?: string[]): Promise<unknown> =>
-    post(`/api/books/${bookId}/notes`, { content, tags }),
-  deleteBookNote: (bookId: string, noteId: string): Promise<unknown> =>
-    del(`/api/books/${bookId}/notes/${noteId}`),
+  // Notes
+  getNotes: chapters.getNotes,
+  addBookNote: chapters.addBookNote,
+  deleteBookNote: chapters.deleteBookNote,
 
-  // ── Export ──
-  exportBook: (bookId: string, format?: string): Promise<Response> => {
-    const url = `/api/books/${bookId}/export?format=${format || 'txt'}`
-    diagLog.info(`GET ${url} — 导出请求`)
-    return fetch(API + url)
-  },
+  // Export
+  exportBook: chapters.exportBook,
 
-  // ── Chapter status ──
-  promoteChapter: (bookId: string, chapterId: string): Promise<{ status: string }> =>
-    post(`/api/books/${bookId}/chapters/${chapterId}/promote`, {}),
-  demoteChapter: (bookId: string, chapterId: string): Promise<{ status: string }> =>
-    post(`/api/books/${bookId}/chapters/${chapterId}/demote`, {}),
+  // Chapter status
+  promoteChapter: chapters.promoteChapter,
+  demoteChapter: chapters.demoteChapter,
 
-  // ── Outline ──
-  getOutline: (bookId: string): Promise<unknown> => get(`/api/books/${bookId}/outline`),
-  getDetailedOutline: (bookId: string): Promise<unknown> => get(`/api/books/${bookId}/detailed-outline`),
+  // Outline
+  getOutline: chapters.getOutline,
+  getDetailedOutline: chapters.getDetailedOutline,
 
-  // ── Chapter history / versions ──
-  getChapterHistory: (bookId: string, chapterId: string): Promise<unknown[]> =>
-    get(`/api/books/${bookId}/chapters/${chapterId}/history`),
-  getChapterVersion: (bookId: string, chapterId: string, versionId: string): Promise<unknown> =>
-    get(`/api/books/${bookId}/chapters/${chapterId}/versions/${versionId}`),
-  revertChapter: (bookId: string, chapterId: string, versionId: string): Promise<unknown> =>
-    post(`/api/books/${bookId}/chapters/${chapterId}/revert`, { version_id: versionId }),
-  deleteChapterVersion: (bookId: string, chapterId: string, versionId: string): Promise<unknown> =>
-    del(`/api/books/${bookId}/chapters/${chapterId}/versions/${versionId}`),
+  // Chapter history / versions
+  getChapterHistory: chapters.getChapterHistory,
+  getChapterVersion: chapters.getChapterVersion,
+  revertChapter: chapters.revertChapter,
+  deleteChapterVersion: chapters.deleteChapterVersion,
 
-  // ── Deep style analysis ──
-  triggerDeepStyle: (bookId: string, analysisType: string, refBookId?: string): Promise<Record<string, unknown>> =>
-    post(`/api/books/${bookId}/analyses/deep-style?analysis_type=${analysisType}${refBookId ? `&ref_book_id=${refBookId}` : ''}`),
-  getDeepStyle: (bookId: string, analysisType: string, refBookId?: string): Promise<Record<string, unknown>> =>
-    get(`/api/books/${bookId}/analyses/deep-style?analysis_type=${analysisType}${refBookId ? `&ref_book_id=${refBookId}` : ''}`),
+  // Deep style analysis
+  triggerDeepStyle: chapters.triggerDeepStyle,
+  getDeepStyle: chapters.getDeepStyle,
 
-  // ── Emotional curve ──
-  triggerEmotionalCurve: (bookId: string, refBookId?: string): Promise<Record<string, unknown>> =>
-    post(`/api/books/${bookId}/analyses/emotional-curve${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
-  getEmotionalCurve: (bookId: string, refBookId?: string): Promise<Record<string, unknown>> =>
-    get(`/api/books/${bookId}/analyses/emotional-curve${refBookId ? `?ref_book_id=${refBookId}` : ''}`),
+  // Emotional curve
+  triggerEmotionalCurve: chapters.triggerEmotionalCurve,
+  getEmotionalCurve: chapters.getEmotionalCurve,
 
-  // ── Worldbuilding entry edit ──
-  updateWorldbuildingEntry: (bookId: string, entryId: string, data: Record<string, unknown>): Promise<unknown> =>
-    put(`/api/books/${bookId}/worldbuilding/entries/${entryId}`, data),
+  // Worldbuilding entry edit
+  updateWorldbuildingEntry: chapters.updateWorldbuildingEntry,
 
-  // ── Memory system ──
-  getMemoryStats: (bookId: string): Promise<{ project: Record<string, unknown>; stats: Record<string, number>; tier0_preview: string }> =>
-    get(`/api/memory/stats/${bookId}`),
-  getProjectMemory: (bookId: string): Promise<Record<string, unknown>> =>
-    get(`/api/memory/project/${bookId}`),
-  updateProjectMemory: (bookId: string, data: Record<string, unknown>): Promise<Record<string, unknown>> =>
-    put(`/api/memory/project/${bookId}`, data),
-  addNote: (bookId: string, title: string, content: string): Promise<{ ok: boolean; note: unknown }> =>
-    post(`/api/memory/project/${bookId}/note`, { title, content }),
-  deleteNote: (bookId: string, noteId: string): Promise<{ ok: boolean }> =>
-    del(`/api/memory/project/${bookId}/note/${noteId}`),
-  recordDecision: (bookId: string, title: string, rationale: string): Promise<{ ok: boolean; decision: unknown }> =>
-    post(`/api/memory/project/${bookId}/decision`, { title, rationale }),
-  deleteDecision: (bookId: string, decisionId: string): Promise<{ ok: boolean }> =>
-    del(`/api/memory/project/${bookId}/decision/${decisionId}`),
-  addProgress: (bookId: string, content: string): Promise<{ ok: boolean; note: unknown }> =>
-    post(`/api/memory/project/${bookId}/progress`, { content }),
-  deleteProgress: (bookId: string, noteId: string): Promise<{ ok: boolean }> =>
-    del(`/api/memory/project/${bookId}/progress/${noteId}`),
-  getPreferences: (): Promise<{ total: number; entries: unknown[]; category_counts: Record<string, number> }> =>
-    get('/api/memory/preferences'),
-  createPreference: (data: Record<string, unknown>): Promise<{ ok: boolean; entry: unknown }> =>
-    post('/api/memory/preferences', data),
-  confirmPreference: (entryId: string): Promise<{ ok: boolean; entry: unknown }> =>
-    post(`/api/memory/preferences/${entryId}/confirm`, {}),
-  deletePreference: (entryId: string): Promise<{ ok: boolean }> =>
-    del(`/api/memory/preferences/${entryId}`),
-  toggleMemory: (enabled: boolean): Promise<{ ok: boolean; enabled: boolean; message: string }> =>
-    post('/api/memory/toggle', { enabled }),
-}
-
-// ── Document Import ──
-
-export async function uploadDocument(bookId: string, file: File, sessionId?: string): Promise<unknown> {
-  const url = `/api/books/${bookId}/upload`
-  diagLog.info(`POST ${url} — 上传文档 | name=%s | size=%d`, file.name, file.size)
-  const formData = new FormData()
-  formData.append('file', file)
-  if (sessionId) formData.append('session_id', sessionId)
-  const startTime = performance.now()
-  try {
-    const res = await fetch(API + url, {
-      method: 'POST',
-      body: formData,
-    })
-    const elapsed = Math.round(performance.now() - startTime)
-    if (!res.ok) {
-      diagLog.warn(`POST ${url} — 失败 %d | %dms`, res.status, elapsed)
-    } else {
-      diagLog.info(`POST ${url} — 成功 | %dms`, elapsed)
-    }
-    await assertOk(res)
-    return res.json()
-  } catch (e) {
-    const elapsed = Math.round(performance.now() - startTime)
-    diagLog.error(`POST ${url} — 异常 | %dms | %s`, elapsed, e instanceof Error ? e.message : String(e))
-    throw e
-  }
-}
-
-export async function detectChapters(bookId: string, docId: string, sessionId?: string): Promise<unknown> {
-  const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
-  return post(`/api/books/${bookId}/documents/${docId}/detect-chapters${query}`, {})
-}
-
-export async function importChapters(bookId: string, docId: string, data: unknown, sessionId?: string): Promise<unknown> {
-  const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
-  return post(`/api/books/${bookId}/documents/${docId}/import-chapters${query}`, data)
-}
-
-export async function batchExtractKnowledge(bookId: string, docId: string, chapterIds: string[]): Promise<unknown> {
-  return post(`/api/books/${bookId}/documents/${docId}/import-chapters/batch-extract`, { chapter_ids: chapterIds })
+  // Memory system
+  getMemoryStats: memory.getMemoryStats,
+  getProjectMemory: memory.getProjectMemory,
+  updateProjectMemory: memory.updateProjectMemory,
+  addNote: memory.addNote,
+  deleteNote: memory.deleteNote,
+  recordDecision: memory.recordDecision,
+  deleteDecision: memory.deleteDecision,
+  addProgress: memory.addProgress,
+  deleteProgress: memory.deleteProgress,
+  getPreferences: memory.getPreferences,
+  createPreference: memory.createPreference,
+  confirmPreference: memory.confirmPreference,
+  deletePreference: memory.deletePreference,
+  toggleMemory: memory.toggleMemory,
 }
