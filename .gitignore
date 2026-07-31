@@ -76,3 +76,6 @@ AnySpark_*.zip
 
 # 重构备份（临时）
 data_backup_*/
+
+# git 历史清理备份（临时）
+.git_backup_*/
