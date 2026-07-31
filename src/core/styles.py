@@ -71,7 +71,7 @@ POV视角: {self.pov}
 # In EXE: resources live under sys._MEIPASS
 # In dev:  resources live under PROJECT_ROOT
 if getattr(sys, "frozen", False):
-    SYSTEM_STYLES_DIR = Path(sys._MEIPASS) / "styles"
+    SYSTEM_STYLES_DIR = Path(getattr(sys, "_MEIPASS", "")) / "styles"
 else:
     SYSTEM_STYLES_DIR = PROJECT_ROOT / "styles"
 USER_STYLES_DIR = DATA_DIR / "styles"
@@ -251,7 +251,7 @@ class StyleManager:
         try:
             if ACTIVE_STYLES_FILE.exists():
                 data = json.loads(ACTIVE_STYLES_FILE.read_text(encoding="utf-8"))
-                return data.get(book_id, "")
+                return str(data.get(book_id, ""))
         except (json.JSONDecodeError, OSError):
             pass
         return ""

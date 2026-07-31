@@ -7,6 +7,7 @@ to `data/settings.json`. Falls back to `.env` defaults on first run.
 import json
 import logging
 import os
+from typing import cast
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -101,7 +102,7 @@ class BookOverrides:
 
 @dataclass
 class AppSettings:
-    providers: list = field(default_factory=list)  # list[ProviderConfig]
+    providers: list[ProviderConfig] = field(default_factory=list)
     slot_pro: ModelSlot = field(default_factory=ModelSlot)
     slot_flash: ModelSlot = field(default_factory=ModelSlot)
     mode: str = "split"  # quality | split | flash | custom

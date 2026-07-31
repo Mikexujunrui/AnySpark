@@ -3,6 +3,7 @@
 import logging
 import sqlite3
 import threading
+from typing import cast
 from pathlib import Path
 
 from .config import DATA_DIR
@@ -22,7 +23,7 @@ class FullTextSearch:
             self._local.conn = sqlite3.connect(str(self._db_path))
             self._local.conn.execute("PRAGMA journal_mode=WAL")
             self._init_tables()
-        return self._local.conn
+        return cast(sqlite3.Connection, self._local.conn)
 
     def _init_tables(self):
         conn = self._get_conn()
@@ -228,11 +229,11 @@ class FullTextSearch:
 
     def search_entities(self, book_id: str, query: str, limit: int = 10) -> list[dict]:
         result = self.search(book_id, query, limit)
-        return result.get("entities", [])
+        return cast(list, result.get("entities", []))
 
     def search_chapters(self, book_id: str, query: str, limit: int = 10) -> list[dict]:
         result = self.search(book_id, query, limit)
-        return result.get("chapters", [])
+        return cast(list, result.get("chapters", []))
 
     @staticmethod
     def _sanitize_query(query: str) -> str:

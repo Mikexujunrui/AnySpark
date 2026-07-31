@@ -23,6 +23,7 @@ Design notes
 
 from __future__ import annotations
 
+from typing import cast
 from dataclasses import dataclass, field
 
 # ── Part types ───────────────────────────────────────────────────────────────
@@ -115,7 +116,8 @@ _PART_CLASSES = {
 
 def part_from_dict(d: dict) -> Part:
     cls = _PART_CLASSES.get(d.get("type", ""), TextPart)
-    return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+    fields = getattr(cls, "__dataclass_fields__", {})
+    return cast(Part, cls(**{k: v for k, v in d.items() if k in fields}))
 
 
 # ── Turn: one complete agent turn ────────────────────────────────────────────

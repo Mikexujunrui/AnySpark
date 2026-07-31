@@ -20,7 +20,7 @@ from .config import DATA_DIR, PROJECT_ROOT
 # In EXE: resources live under sys._MEIPASS
 # In dev:  resources live under PROJECT_ROOT
 if getattr(sys, "frozen", False):
-    SYSTEM_SKILLS_DIR = Path(sys._MEIPASS) / "skills"
+    SYSTEM_SKILLS_DIR = Path(getattr(sys, "_MEIPASS", "")) / "skills"
 else:
     SYSTEM_SKILLS_DIR = PROJECT_ROOT / "skills"
 USER_SKILLS_DIR = DATA_DIR / "skills"
