@@ -188,9 +188,9 @@ class TestConfidenceScorerFormula:
         # First call is _count_timeline_mentions, second is _count_relations
         # We need to differentiate based on the query content
         def mock_run_smart(query, params=None):
-            if "Timeline" in query and "INVOLVES" in query:
+            if "COUNT(DISTINCT t.id)" in query or "INVOLVES" in query:
                 return [{"cnt": mention_count}]
-            elif "Entity" in query and "-[r]-" in query:
+            elif "COUNT(*) AS cnt FROM relations" in query or "from_entity=? OR to_entity=?" in query:
                 return [{"cnt": relation_count}]
             return []
 

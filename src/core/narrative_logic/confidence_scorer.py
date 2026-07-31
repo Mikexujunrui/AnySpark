@@ -107,10 +107,10 @@ class ConfidenceScorer:
         """Count all relationships (incoming + outgoing) for this entity."""
         rows = self._store._run(
             """
-            MATCH (e:Entity {id: $eid, project_id: $pid})-[r]-(other:Entity {project_id: $pid})
-            RETURN count(DISTINCT r) as cnt
-        """,
-            {"pid": self._store.project_id, "eid": entity_id},
+            SELECT COUNT(*) AS cnt FROM relations
+            WHERE project_id=? AND (from_entity=? OR to_entity=?)
+            """,
+            (self._store.project_id, entity_id, entity_id),
         )
         return rows[0]["cnt"] if rows else 0
 
