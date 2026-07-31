@@ -1,0 +1,24 @@
+#!/bin/sh
+# Reject commits that touch chapter data files (chapters/*.md, data/*).
+# Defense against the external agent session that keeps committing
+# chapters data into this repo with `git add -A`.
+#
+# This is a git-native hook (installed via core.hooksPath=.githooks), so it
+# runs on EVERY commit regardless of which tool/session makes it
+# (only `git commit --no-verify` bypasses it).
+
+if git rev-parse --verify HEAD >/dev/null 2>&1; then
+    against=HEAD
+else
+    against=$(git hash-object -t tree /dev/null)
+fi
+
+blocked=$(git diff --cached --name-only --diff-filter=ACMRT | grep -E '^(chapters/|data/|data_backup_/)' || true)
+if [ -n "$blocked" ]; then
+    echo "⛔ pre-commit 钩子拦截：章节/数据文件禁止入库"
+    echo "$blocked"
+    echo "章节数据由外部工具管理，请勿提交到本仓库。如需强制提交：git commit --no-verify"
+    exit 1
+fi
+
+exit 0
