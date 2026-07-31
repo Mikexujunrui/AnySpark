@@ -6,6 +6,7 @@ Extracted from executor.py to keep module sizes manageable.
 import json
 import logging
 import re
+from typing import cast
 
 from core.config import config
 from core.llm_client import chat as llm_chat
@@ -210,7 +211,7 @@ def _regex_split_chapters(full_text: str) -> list[dict]:
     if not valid_matches:
         return []
 
-    candidates = []
+    candidates: list[dict[str, object]] = []
     for i, m in enumerate(valid_matches):
         # New regex groups: 1=ch_heading|special, 2=title, 3=Chapter/Volume, 4=title,
         # 5=numbered, 6=title, 7=roman, 8=title
@@ -233,19 +234,19 @@ def _regex_split_chapters(full_text: str) -> list[dict]:
         candidates.append({"title": title, "content": content, "chars": len(content)})
 
     min_chapter_chars = 500
-    best_by_title: dict[str, dict] = {}
+    best_by_title: dict[str, dict[str, object]] = {}
     for c in candidates:
-        if c["chars"] < min_chapter_chars:
+        if cast(int, c["chars"]) < min_chapter_chars:
             continue
-        norm_title = re.sub(r"\s+", "", c["title"])
+        norm_title = re.sub(r"\s+", "", cast(str, c["title"]))
         existing = best_by_title.get(norm_title)
-        if not existing or c["chars"] > existing["chars"]:
+        if not existing or cast(int, c["chars"]) > cast(int, existing["chars"]):
             best_by_title[norm_title] = c
 
     chapters_data = []
     seen = set()
     for c in candidates:
-        norm_title = re.sub(r"\s+", "", c["title"])
+        norm_title = re.sub(r"\s+", "", cast(str, c["title"]))
         if norm_title in seen:
             continue
         best = best_by_title.get(norm_title)
@@ -254,8 +255,8 @@ def _regex_split_chapters(full_text: str) -> list[dict]:
         seen.add(norm_title)
         chapters_data.append(
             {
-                "title": best["title"],
-                "content": best["content"][: config.storage.max_chapter_chars],
+                "title": cast(str, best["title"]),
+                "content": cast(str, best["content"])[: config.storage.max_chapter_chars],
             }
         )
 

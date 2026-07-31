@@ -21,6 +21,7 @@ MAX_HOPS (3) hops.
 from __future__ import annotations
 
 import logging
+from typing import cast
 
 from core.graph_store import GraphStore
 
@@ -131,7 +132,7 @@ class ImpactPropagator:
         else:
             return None
 
-        return rows[0]["id"] if rows else None
+        return cast(str | None, rows[0]["id"] if rows else None)
 
     def _get_neighbors(self, node_id: str) -> list[tuple[str, str, float]]:
         """Get (neighbor_id, edge_type, weight) for all edges of node_id."""

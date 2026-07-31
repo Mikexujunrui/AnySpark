@@ -12,6 +12,7 @@ to stay well within GitHub's unauthenticated rate limit (60 req/h).
 import logging
 import time
 import tomllib
+from typing import Any, cast
 
 import httpx
 
@@ -36,7 +37,7 @@ def get_local_version() -> str:
     try:
         with open(PYPROJECT, "rb") as f:
             data = tomllib.load(f)
-        return data.get("project", {}).get("version", "0.0.0")
+        return cast(str, data.get("project", {}).get("version", "0.0.0"))
     except Exception as e:
         logger.warning("Failed to read local version from %s: %s", PYPROJECT, e)
         return "0.0.0"
@@ -76,7 +77,7 @@ def fetch_latest_release() -> dict | None:
     """
     now = time.time()
     if _cache and now - _cache.get("_ts", 0) < _CACHE_TTL:
-        return _cache.get("data")
+        return cast(dict[str, Any] | None, _cache.get("data"))
 
     try:
         with httpx.Client(timeout=10.0, follow_redirects=True) as client:
@@ -98,7 +99,7 @@ def fetch_latest_release() -> dict | None:
     _cache.clear()
     _cache["_ts"] = now
     _cache["data"] = data
-    return data
+    return cast(dict[str, Any] | None, data)
 
 
 def check_for_update() -> dict:

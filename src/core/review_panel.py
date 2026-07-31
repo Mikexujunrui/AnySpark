@@ -85,6 +85,7 @@ class ReviewReport:
     top_suggestions: list[str] = field(default_factory=list)
     individual_reviews: list[dict] = field(default_factory=list)
     reviewer_count: int = 0
+    _pending_tasks: dict = field(default_factory=dict)
 
 
 class ReviewPanel:

@@ -18,6 +18,8 @@ Endpoints:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
@@ -172,7 +174,7 @@ async def trigger_deep_style_analysis(
             analyze_sentence_rhythm,
         )
 
-        analyzers = {
+        analyzers: dict[str, Callable[[str], Any]] = {
             "sentence_rhythm": analyze_sentence_rhythm,
             "rhetoric_density": analyze_rhetoric_density,
             "prophecy_signature": analyze_prophecy_signature,

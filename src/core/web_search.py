@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 from html.parser import HTMLParser
+from typing import cast
 from urllib.parse import urlparse
 
 import httpx
@@ -55,7 +56,7 @@ def _parse_mcp_response(body: str) -> str | None:
         content = data.get("result", {}).get("content", [])
         for item in content:
             if item.get("type") == "text" and item.get("text"):
-                return item["text"]
+                return cast(str, item["text"])
         return None
     except (json.JSONDecodeError, KeyError, TypeError):
         pass
@@ -69,7 +70,7 @@ def _parse_mcp_response(body: str) -> str | None:
                 content = data.get("result", {}).get("content", [])
                 for item in content:
                     if item.get("type") == "text" and item.get("text"):
-                        return item["text"]
+                        return cast(str, item["text"])
             except (json.JSONDecodeError, KeyError, TypeError):
                 continue
 
@@ -183,7 +184,7 @@ def web_fetch_sync(url: str, fmt: str = "text", timeout: int = 0) -> str:
             if "image/" in content_type and "svg" not in content_type:
                 return "该 URL 指向图片文件，无法提取文本。"
 
-            body = resp.text
+            body = cast(str, resp.text)
             if len(resp.content) > MAX_FETCH_BYTES:
                 return f"页面过大（{len(resp.content)} 字节），超过 5MB 限制。"
 
@@ -197,7 +198,7 @@ def web_fetch_sync(url: str, fmt: str = "text", timeout: int = 0) -> str:
                         },
                     )
                     if resp2.status_code == 200 and not _is_cloudflare_challenge(resp2.text):
-                        body = resp2.text
+                        body = cast(str, resp2.text)
 
                 if fmt == "text":
                     return _html_to_text(body)

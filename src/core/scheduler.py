@@ -6,12 +6,13 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from typing import cast
 
 from .config import DATA_DIR
 
 logger = logging.getLogger(__name__)
 
-TASK_TEMPLATES = {
+TASK_TEMPLATES: dict[str, dict[str, object]] = {
     "consolidate_memory": {
         "name": "记忆合并",
         "description": "定期整理知识库，合并重复实体，清理过期状态",
@@ -90,7 +91,7 @@ class Scheduler:
     def _load_runs(self) -> list[dict]:
         if self._runs_file.exists():
             try:
-                return json.loads(self._runs_file.read_text(encoding="utf-8-sig"))
+                return cast(list[dict], json.loads(self._runs_file.read_text(encoding="utf-8-sig")))
             except Exception:
                 return []
         return []
@@ -105,10 +106,10 @@ class Scheduler:
         self._recompute_next_runs()
 
     def list_tasks(self, book_id: str = "") -> list[dict]:
-        tasks = self._tasks.values()
+        task_list = list(self._tasks.values())
         if book_id:
-            tasks = [t for t in tasks if t.book_id == book_id]
-        return [t.__dict__ for t in tasks]
+            task_list = [t for t in task_list if t.book_id == book_id]
+        return [t.__dict__ for t in task_list]
 
     def get_task(self, task_id: str) -> dict | None:
         t = self._tasks.get(task_id)
@@ -197,7 +198,7 @@ class Scheduler:
     # ── Execution ──
 
     async def _execute_task(self, task: ScheduledTask) -> str:
-        steps = task.steps or TASK_TEMPLATES.get(task.template, {}).get("steps", [])
+        steps = task.steps or cast(list, TASK_TEMPLATES.get(task.template, {}).get("steps", []))
         if not steps:
             return f"任务 {task.name} 没有可执行的步骤"
 

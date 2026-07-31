@@ -29,7 +29,7 @@ class QuestionRequest:
 
 class QuestionManager:
     def __init__(self):
-        self._pending: dict[str, asyncio.Future] = {}
+        self._pending: dict[str, asyncio.Future[list[list[str]]]] = {}
         self._requests: dict[str, QuestionRequest] = {}
 
     def create_question(self, questions: list[dict], book_id: str = "") -> QuestionRequest:

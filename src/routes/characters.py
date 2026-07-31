@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import cast
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -171,7 +172,7 @@ def get_character_gallery(book_id: str):
                 }
             )
 
-        char_snapshots = [
+        char_snapshots: list[dict[str, object]] = [
             {
                 "id": s.id,
                 "timePoint": s.time_point,
@@ -187,7 +188,7 @@ def get_character_gallery(book_id: str):
             for s in snapshots
             if s.character_entity_id == c.id
         ]
-        char_snapshots.sort(key=lambda x: x["timeOrder"])
+        char_snapshots.sort(key=lambda x: cast(int, x["timeOrder"]))
 
         result.append(
             {

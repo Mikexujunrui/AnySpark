@@ -132,14 +132,12 @@ async def expand_single_level(
     # For levels 3-4, try to inject knowledge context
     if book_id and level >= 3:
         try:
-            from core.context_manager import context_manager
+            from core.context_manager import ContextManager
 
-            ctx = context_manager.buildWritingContext(
-                task="outline_expansion",
-                book_id=book_id,
-            )
-            if ctx and ctx.system_prompt:
-                prompt = ctx.system_prompt + "\n\n" + prompt
+            cm = ContextManager(book_id)
+            ctx = cm.build_writing_context(instruction=prompt[:500], mode="write")
+            if ctx:
+                prompt = ctx + "\n\n" + prompt
         except Exception:
             pass  # Knowledge context is best-effort
 

@@ -17,7 +17,7 @@ import uuid
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from core.config import DATA_DIR
 
@@ -471,7 +471,7 @@ class SimulationStore:
         events = self._read_events(sim_id)
         for ev in reversed(events):
             if ev.get("type") == "choices":
-                return ev.get("choices", [])
+                return cast(list[dict], ev.get("choices", []))
         return []
 
     def get_choices(self, event_id: str) -> list[dict]:
@@ -569,7 +569,7 @@ class SimulationStore:
             choices_events = [ev for ev in choices_events if ev.get("parent_id") == parent_id]
         if not choices_events:
             return []
-        return choices_events[-1].get("choices", [])
+        return cast(list[str], choices_events[-1].get("choices", []))
 
     # ── Branch Support ──
 

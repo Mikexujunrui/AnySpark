@@ -127,7 +127,7 @@ class EventStore:
                 # Flush previous turn
                 if current_user is not None:
                     messages.append(current_user)
-                    agent_record = {"role": "agent", "text": current_agent_text, "mode": current_agent_mode}
+                    agent_record: dict[str, object] = {"role": "agent", "text": current_agent_text, "mode": current_agent_mode}
                     if current_agent_parts is not None:
                         agent_record["parts"] = current_agent_parts
                         agent_record["user_text"] = current_user.get("text", "")

@@ -447,7 +447,7 @@ def update_outline_chapter(book_id: str, chapter_index: int, data: OutlineChapte
 
 @router.put("/books/{book_id}/detailed-outline/chapters/{chapter_index}")
 def update_detailed_outline_chapter(book_id: str, chapter_index: int, data: DetailedOutlineChapterUpdate):
-    update = {}
+    update: dict[str, object] = {}
     if data.title:
         update["title"] = data.title
     if data.plot_chain:
@@ -464,7 +464,7 @@ def update_outline_extra(book_id: str, extra_index: int, data: OutlineChapterUpd
 
 @router.put("/books/{book_id}/detailed-outline/extras/{extra_index}")
 def update_detailed_outline_extra(book_id: str, extra_index: int, data: DetailedOutlineChapterUpdate):
-    update = {}
+    update: dict[str, object] = {}
     if data.title:
         update["title"] = data.title
     if data.plot_chain:

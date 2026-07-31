@@ -2,6 +2,7 @@
 
 Extracted from executor.py to keep module sizes manageable.
 """
+from typing import cast
 
 from core.config import config
 from data.json_store import json_store
@@ -72,7 +73,7 @@ def _read_chapter(args: dict, book_id: str) -> str:
 
     try:
         ch = json_store.get_chapter(target_book_id, cid)
-        content = ch.get("content", "")
+        content = cast(str, ch.get("content", ""))
         # Safety cap: prevent loading a 10MB chapter into memory for token counting.
         # The agent-level truncation in _finalize_tool_result handles the actual limit.
         content = content[: config.storage.max_context_chars]

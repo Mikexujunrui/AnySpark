@@ -410,10 +410,10 @@ def _copy_json_data(book_id: str, tmp: Path) -> None:
 
     # Tasks
     try:
-        tasks = json_store.load_tasks(book_id)
+        tasks = json_store.load_task_lists(book_id)
         if tasks:
             (tmp / "tasks.json").write_text(
-                json.dumps(tasks, ensure_ascii=False, indent=2),
+                json.dumps({"task_lists": tasks}, ensure_ascii=False, indent=2),
                 encoding="utf-8",
             )
     except Exception as exc:
@@ -510,7 +510,8 @@ def _restore_json_data(book_id: str, tmp: Path) -> int:
     if reviews_file.exists():
         try:
             reviews = json.loads(reviews_file.read_text(encoding="utf-8"))
-            json_store.save_reviews(book_id, reviews)
+            for rev in reviews:
+                json_store.save_review(book_id, rev)
         except Exception as exc:
             logger.warning("Failed to restore reviews: %s", exc)
 
@@ -518,8 +519,9 @@ def _restore_json_data(book_id: str, tmp: Path) -> int:
     tasks_file = tmp / "tasks.json"
     if tasks_file.exists():
         try:
-            tasks = json.loads(tasks_file.read_text(encoding="utf-8"))
-            json_store.save_tasks(book_id, tasks)
+            tasks_payload = json.loads(tasks_file.read_text(encoding="utf-8"))
+            lists = tasks_payload.get("task_lists", tasks_payload if isinstance(tasks_payload, list) else [])
+            json_store._save_task_lists(book_id, lists)
         except Exception as exc:
             logger.warning("Failed to restore tasks: %s", exc)
 

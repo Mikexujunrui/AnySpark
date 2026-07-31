@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, Field, create_model
 
@@ -45,7 +45,7 @@ def _build_pydantic_model(
     Returns a ``pydantic.BaseModel`` subclass with all fields optional
     (required-ness is checked separately via the ``required`` key).
     """
-    fields: dict[str, tuple[type, Any]] = {}
+    fields: dict[str, tuple[object, Any]] = {}
 
     for key, spec in params_schema.items():
         if not isinstance(spec, dict):
@@ -67,7 +67,7 @@ def _build_pydantic_model(
             fields[key] = (python_type | None, Field(default=None, description=description))
 
     model_name = f"ToolParams_{len(_MODEL_CACHE)}"
-    return create_model(model_name, **fields)  # type: ignore[arg-type]
+    return cast(type[Any], create_model(model_name, **fields))  # type: ignore[arg-type]
 
 
 def _resolve_python_type(
@@ -94,7 +94,7 @@ def _resolve_python_type(
 
     if ptype == "array" and items_schema:
         item_type = _resolve_python_type(items_schema.get("type", "string"))
-        return list[item_type]  # type: ignore[return-value]
+        return list[item_type]  # type: ignore[return-value, valid-type]
 
     return py_type
 
@@ -146,13 +146,13 @@ def validate_with_pydantic(
             validated[k] = v
 
     # Check required fields that Pydantic might have missed
-    errors: list[str] = []
+    missing_errors: list[str] = []
     for key, spec in params_schema.items():
         if isinstance(spec, dict) and spec.get("required", True):
             if key not in args or args[key] is None:
-                errors.append(f"Missing required parameter: {key}")
+                missing_errors.append(f"Missing required parameter: {key}")
 
-    return validated, errors
+    return validated, missing_errors
 
 
 def _extract_pydantic_errors(exc: Exception) -> list[str]:

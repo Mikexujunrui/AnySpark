@@ -306,7 +306,7 @@ def cmd_list(project_id: str = DEFAULT_PROJECT):
         p("\n知识库为空。使用 /s <文本> 来添加设定", "yellow")
         return
 
-    count_by_type = {}
+    count_by_type: dict[str, int] = {}
     for e in entities:
         count_by_type[e.type] = count_by_type.get(e.type, 0) + 1
 

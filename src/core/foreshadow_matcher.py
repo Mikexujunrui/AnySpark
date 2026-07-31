@@ -17,6 +17,10 @@ import math
 import re
 from collections import Counter
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from core.knowledge import Foreshadow
 from typing import Any
 
 from data.json_store import json_store
@@ -112,7 +116,7 @@ def _split_into_windows(text: str, window_size: int = 500) -> list[tuple[str, in
 # ── Foreshadow matching ──
 
 
-def _get_foreshadows(book_id: str) -> list[dict]:
+def _get_foreshadows(book_id: str) -> list[Foreshadow]:
     """Get all foreshadows from the knowledge graph."""
     try:
         from core.graph_store import GraphStore
@@ -170,13 +174,13 @@ def match_foreshadows(book_id: str) -> list[ForeshadowMatch]:
     results: list[ForeshadowMatch] = []
 
     for fs in foreshadows:
-        fs_id = fs.get("id", "")
-        fs_desc = fs.get("name", "") or fs.get("description", "") or ""
+        fs_id = fs.id
+        fs_desc = fs.text
         if not fs_desc:
             continue
 
         # Determine which chapter the foreshadow was set up in
-        fs_chapter = fs.get("source_chapter", "") or fs.get("chapter_id", "")
+        fs_chapter = fs.plant_chapter
         start_idx = _get_chapter_index(chapters, fs_chapter) if fs_chapter else 0
         if start_idx < 0:
             start_idx = 0

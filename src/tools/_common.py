@@ -1,6 +1,7 @@
 import json
 import re
 from concurrent.futures import ThreadPoolExecutor
+from typing import cast
 
 from core.config import config
 from core.knowledge import Entity
@@ -325,7 +326,7 @@ class _EntityCache:
             return ""
         # Try GraphStore's to_llm_context for richer formatting
         if hasattr(self._kb, "to_llm_context"):
-            return self._kb.to_llm_context()
+            return cast(str, self._kb.to_llm_context())
         # Fallback: basic entity-only format
         lines = []
         for e in self._entities:
@@ -378,7 +379,7 @@ def _build_existing_cards(kb) -> str:
             "禁止作为 new_entities 重复添加；如需修改，请放到 updates 列表。同一批次内也禁止用"
             "多个略有差别的名字创建同一个角色——必须用同一个名字。)\n"
         )
-        return header + ctx
+        return cast(str, header + ctx)
 
     # Fallback: basic entity-only format
     entities = kb.list_entities()
@@ -402,7 +403,7 @@ def _build_existing_cards(kb) -> str:
 def _parse_progressive_result(response: str) -> dict:
     j = extract_json_from_response(response)
     try:
-        return json.loads(j.strip())
+        return cast(dict, json.loads(j.strip()))
     except json.JSONDecodeError:
         return {
             "new_entities": [],
@@ -421,7 +422,7 @@ def _apply_progressive_result_batch(result: dict, kb, book_id: str) -> tuple[int
 
     new_count = 0
     update_count = 0
-    operations = []
+    operations: list[dict] = []
 
     # ── Batch-internal dedupe pools ──
     # Within one LLM response, the model may emit the same entity twice (under

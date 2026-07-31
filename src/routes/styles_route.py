@@ -84,7 +84,9 @@ def set_narrative_strategy(book_id: str, data: NarrativeStrategyUpdate):
         )
         style_mgr = style_manager
         active_name = style_mgr.get_active_style(book_id)
-        style = style_mgr.get_style(active_name)
+        style = style_mgr.get(active_name)
+        if style is None:
+            raise HTTPException(404, f"未找到激活风格: {active_name}")
         style.narrative_strategy = strategy
         return {
             "ok": True,
@@ -106,7 +108,16 @@ def get_narrative_strategy(book_id: str):
     """Get the narrative strategy for a book's active style."""
     style_mgr = style_manager
     active_name = style_mgr.get_active_style(book_id)
-    style = style_mgr.get_style(active_name)
+    style = style_mgr.get(active_name)
+    if style is None:
+        return {
+            "pov": "",
+            "pacing_curve": "",
+            "reveal_density": 0.0,
+            "foreshadow_budget": 0,
+            "chapter_arc": "",
+            "tone_guidance": "",
+        }
     ns = style.narrative_strategy
     if ns:
         return {

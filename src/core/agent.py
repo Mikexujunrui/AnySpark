@@ -11,6 +11,7 @@ long text.
 """
 
 import json
+from typing import cast
 
 from .llm_client import chat
 
@@ -44,6 +45,6 @@ def classify_content(text: str) -> dict:
             j = j.split("\n", 1)[1]
         if j.endswith("```"):
             j = j.rsplit("\n", 1)[0]
-        return json.loads(j.strip())
+        return cast(dict, json.loads(j.strip()))
     except json.JSONDecodeError:
         return {"type": "setting_document", "confidence": 0.5, "reasoning": "classification failed"}

@@ -413,7 +413,7 @@ class NarratorAgent:
         char_responses = []
         for i, (pid, profile) in enumerate(profiles.items()):
             resp = responses[i]
-            if isinstance(resp, Exception):
+            if isinstance(resp, BaseException):
                 resp = {
                     "perception": "（角色响应失败）",
                     "thoughts": str(resp)[:100],

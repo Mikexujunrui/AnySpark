@@ -1,13 +1,14 @@
 import logging
 import uuid
 from dataclasses import dataclass, field
+from typing import Any
 
 from .agent_loop import AgentConfig, run_agent_loop
 from .config import config
 
 logger = logging.getLogger(__name__)
 
-AGENT_TYPES = {
+AGENT_TYPES: dict[str, dict[str, Any]] = {
     "general": {
         "description": "通用助手，处理复杂多步任务",
         "mode": "write",

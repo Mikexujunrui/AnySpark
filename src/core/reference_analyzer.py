@@ -28,7 +28,7 @@ import statistics
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from core.config import DATA_DIR
 from core.voice_fingerprint import _extract_all_dialogues
@@ -64,7 +64,7 @@ def load_analysis(analysis_type: str, ref_book_id: str) -> dict | None:
     if not path.exists():
         return None
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return cast(dict, json.loads(path.read_text(encoding="utf-8")))
     except (json.JSONDecodeError, OSError) as e:
         logger.warning("Failed to load analysis %s: %s", path, e)
         return None

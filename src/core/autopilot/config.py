@@ -55,7 +55,8 @@ class PlanIntent:
 
 
 # Intent classification keyword patterns
-INTENT_PATTERNS: dict[str, dict[str, object]] = {
+PatternDef = dict[str, object]
+INTENT_PATTERNS: dict[str, PatternDef] = {
     "write_new": {
         "keywords": [
             "写完",

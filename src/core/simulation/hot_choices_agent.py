@@ -107,7 +107,7 @@ class HotChoicesAgent:
 
         # Clean and deduplicate
         seen = set(exclude_choices or [])
-        cleaned = []
+        cleaned: list[str] = []
         for c in choices:
             c = c.strip()
             if c and c not in seen and len(cleaned) < 5:

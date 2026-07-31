@@ -9,6 +9,8 @@ and format the result for the agent.
 
 from __future__ import annotations
 
+from typing import cast
+
 from core.thread_pools import llm_pool as _ai_executor
 
 
@@ -18,7 +20,7 @@ def _resolve_ref_book_id(args: dict, book_id: str) -> str | None:
 
     ref_book_id = args.get("ref_book_id", "")
     if ref_book_id:
-        return ref_book_id
+        return cast(str, ref_book_id)
     ref_ids = json_store.get_reference_books(book_id)
     if not ref_ids:
         return None

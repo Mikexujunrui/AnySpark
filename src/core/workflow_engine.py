@@ -53,7 +53,7 @@ class WorkflowEngine:
             return [{"error": "workflow not found"}]
 
         wf.status = "running"
-        results = []
+        results: list[dict] = []
 
         for i, step in enumerate(wf.steps):
             wf.current_step = i

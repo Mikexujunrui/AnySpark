@@ -3,6 +3,7 @@
 
 import platform
 from datetime import datetime
+from typing import cast
 
 from data.json_store import json_store
 
@@ -499,7 +500,7 @@ def build_system_prompt(agent_type: str = "write", style_name: str = "", **kwarg
 
     prompt = "\n\n".join(sections)
     prompt = plugin_manager.call_hook_chain("modify_system_prompt", prompt, context=agent_type)
-    return prompt
+    return cast(str, prompt)
 
 
 def build_dynamic_context(
@@ -690,13 +691,13 @@ def _build_book_context(book_id: str, session_id: str = "") -> str:
         from .task_queue import task_queue
 
         active_tasks = task_queue.list_tasks(book_id=book_id) if book_id else []
-        running = [t for t in active_tasks if t.get("status") == "running"]
+        running = [t for t in active_tasks if t.status == "running"]
         if running:
             task_lines = ["\n# 当前活跃任务"]
             for t in running[:3]:
-                progress = task_queue.get_progress(t["id"])
+                progress = task_queue.get_progress(t.id)
                 task_lines.append(
-                    f"- [{t.get('audit_mode', 'soft')}] {t.get('label', '?')[:40]} "
+                    f"- [{t.audit_mode}] {t.label[:40]} "
                     f"({progress.get('completed', 0)}/{progress.get('total', 0)}步)"
                 )
             parts.append("\n".join(task_lines))

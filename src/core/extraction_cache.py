@@ -18,9 +18,9 @@ class ExtractionCache:
     def __init__(self, book_id: str):
         safe_id = "".join(char if char.isalnum() or char in "-_" else "_" for char in book_id)
         self.path = DATA_DIR / f"extraction_cache_{safe_id or 'default'}.json"
-        self.entries = self._load()
+        self.entries: dict[str, str] = self._load()
 
-    def _load(self) -> dict:
+    def _load(self) -> dict[str, str]:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}

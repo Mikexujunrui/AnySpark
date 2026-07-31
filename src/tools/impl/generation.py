@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from typing import cast
 
 from core.config import config
 from core.llm_client import chat as llm_chat
@@ -50,7 +51,7 @@ def _coerce_to_dict(v) -> dict:
 def _parse_progressive_result(response: str) -> dict:
     j = extract_json_from_response(response)
     try:
-        return json.loads(j.strip())
+        return cast(dict, json.loads(j.strip()))
     except json.JSONDecodeError:
         return {"new_entities": [], "updates": [], "relations": [], "foreshadows": []}
 
@@ -341,7 +342,7 @@ async def _generate_worldbuilding(loop, args: dict, kb, book_id: str, msg: str =
     source_parts = []
     used = 0
     if entities:
-        by_type = {}
+        by_type: dict[str, list] = {}
         for e in entities:
             by_type.setdefault(e.type, []).append(e)
         for t, elist in by_type.items():

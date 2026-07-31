@@ -8,6 +8,7 @@ import json
 import logging
 import re
 import time
+from typing import cast
 
 from ..task_queue import PersistentTask, TaskStep
 from .config import INTENT_PATTERNS, AutopilotConfig, PlanIntent
@@ -25,7 +26,7 @@ def _classify_intent(instruction: str, book_state: dict) -> PlanIntent:
     scores = {}
     for intent_type, pattern in INTENT_PATTERNS.items():
         score = 0
-        for kw in pattern["keywords"]:
+        for kw in cast(list[str], pattern.get("keywords", [])):
             # Support regex patterns (e.g., "第.*章.*改")
             if ".*" in kw:
                 if re.search(kw, instruction):
@@ -311,8 +312,8 @@ class AutopilotPlanner:
         def chapter_content(chapter: dict) -> str:
             """Read both versioned storage rows and legacy/import test rows."""
             if chapter.get("versions") and chapter.get("id"):
-                return json_store._chapter_view(chapter).get("content", "")
-            return str(chapter.get("content", "") or "")
+                return cast(str, json_store._chapter_view(chapter).get("content", ""))
+            return cast(str, chapter.get("content", "") or "")
 
         return {
             "existing_indices": existing_indices,

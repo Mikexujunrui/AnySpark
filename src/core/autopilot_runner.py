@@ -11,6 +11,7 @@ AutopilotExecutor handles: plan → start → confirm → pause → resume → c
 
 import logging
 import time
+from typing import cast
 
 from .autopilot import AutopilotConfig, AutopilotPlanner
 from .headless_loop import get_task_runner
@@ -154,10 +155,10 @@ class AutopilotExecutor:
         if not task:
             return False
         meta = task.metadata or {}
-        budget = meta.get("token_budget", 500_000)
+        budget = cast(int, meta.get("token_budget", 500_000))
         if budget <= 0:
             return True
-        used = meta.get("tokens_used", 0)
+        used = cast(int, meta.get("tokens_used", 0))
         return used < budget
 
     def update_tokens(self, task_id: str, additional_tokens: int):

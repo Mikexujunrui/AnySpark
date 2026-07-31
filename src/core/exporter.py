@@ -1,11 +1,12 @@
 import html
 import io
 from datetime import datetime
+from typing import cast
 
 
 def _format_chapter_title(ch: dict, index: int) -> str:
     """Format chapter title, adding [番外] prefix for extra chapters."""
-    title = ch.get("title", f"第{index}章")
+    title = cast(str, ch.get("title", f"第{index}章"))
     if ch.get("is_extra"):
         return f"[番外] {title}"
     return title

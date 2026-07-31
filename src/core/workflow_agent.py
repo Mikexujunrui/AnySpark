@@ -1,6 +1,7 @@
 """Workflow Agent — generates workflows from user conversation using LLM."""
 
 import json
+from typing import cast
 
 from .llm_client import chat
 
@@ -100,7 +101,7 @@ def generate_workflow(user_intent: str, project_context: str = "") -> dict:
             json_str = json_str[3:]
         if json_str.endswith("```"):
             json_str = json_str[:-3]
-        return json.loads(json_str.strip())
+        return cast(dict, json.loads(json_str.strip()))
     except json.JSONDecodeError:
         return {
             "name": "自定义工作流",
@@ -121,6 +122,6 @@ def suggest_workflows(prompt: str, available_steps: list[str] | None = None) -> 
 
     response = chat(prompt, system=system, temperature=0.5, task="workflow")
     try:
-        return json.loads(response)
+        return cast(list[dict], json.loads(response))
     except json.JSONDecodeError:
         return []

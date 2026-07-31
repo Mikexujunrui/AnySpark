@@ -1,6 +1,7 @@
 """Scheduler API Routes."""
 
 from datetime import datetime
+from typing import cast
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -53,7 +54,7 @@ def create_task(book_id: str, data: TaskCreate):
 
     steps = data.steps
     if not steps and data.template in TASK_TEMPLATES:
-        steps = TASK_TEMPLATES[data.template]["steps"]
+        steps = cast(list, TASK_TEMPLATES[data.template].get("steps", []))
 
     task = ScheduledTask(
         id=task_id,

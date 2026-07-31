@@ -41,7 +41,7 @@ def get_knowledge_summary(book_id: str):
     relations = kb.list_relations()
     foreshadows = kb.list_foreshadows()
 
-    by_type = {}
+    by_type: dict[str, list[dict]] = {}
     for e in entities:
         by_type.setdefault(e.type, []).append({"id": e.id, "name": e.name, "aliases": e.aliases, "data": e.data})
 
@@ -474,7 +474,7 @@ def import_spark_archive(book_id: str):
     if not archive_path.exists():
         raise HTTPException(404, f"归档文件不存在: {archive_path}")
     try:
-        stats = import_spark(book_id, archive_path)
+        stats = import_spark(book_id, str(archive_path))
         return {"ok": True, "stats": stats}
     except Exception as e:
         raise HTTPException(500, f"导入失败: {e}")
@@ -754,7 +754,7 @@ class TemporalRelationRequest(BaseModel):
     from_id: str
     to_id: str
     rel_type: str
-    since_chapter: int
+    since_chapter: str
 
 
 @router.post("/books/{book_id}/graph/temporal-relation")
@@ -906,7 +906,7 @@ def graph_search_endpoint(book_id: str, req: GraphSearchRequest):
         "results": [
             {
                 "sub_question": r.sub_question,
-                "cypher": r.cypher,
+                "sql": r.sql,
                 "explanation": r.explanation,
                 "rows": r.rows[:10],
                 "total_rows": len(r.rows),

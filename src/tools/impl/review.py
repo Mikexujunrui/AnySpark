@@ -258,7 +258,7 @@ def _manage_reviewers(args: dict) -> str:
             return "当前没有评审员。"
         lines = ["评审员列表:"]
         for r in reviewers:
-            lines.append(f"- {r.name} ({r.category}) — {r.description}")
+            lines.append(f"- {r.get('name', '?')} ({r.get('category', '?')}) — {r.get('description', '')}")
         return "\n".join(lines)
 
     elif action == "activate":

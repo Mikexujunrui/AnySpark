@@ -42,10 +42,10 @@ L4.0 git污染协调（贯穿，需主人配合外部进程）
 - [x] **L1.5** desktop_launcher.py（12 条）：`_MEIPASS`/类型注解（window: Any、fcntl 平台 ignore、bool cast）
 - [x] **L1.6** handlers.py + plot.py + extractor.py（28 条）：handler 变量名冲突（c/names/e 复用）；**修复 list_snapshots(character_entity_id=) 无效参数真实 bug（阶段计数曾统计全部角色）**；extractor 修复 `EntityType.value` 真实崩溃 bug（str 子类无 .value，spaCy NER 分支未测覆盖）；plot 返回类型 str|dict + llm_chat cast
 - [x] **L1.7** agent_loop/headless_loop/flows（22 条）：`_stream_llm_response`/`_stream_llm_with_retry` 返回类型 object→Any（消费端解包修复）；**FlowHandler 标注同步但 flow 全 async（真实类型 bug，改 Awaitable）**；**headless_loop append_message 不存在（真实 bug，改用 load+append+save_messages 持久化，与 chat.py 对齐）**；_intervention_queue 显式初始化；TaskQueue 类型标注；变理名 result→res 泄漏修复
-- [ ] **L1.8** 其余散落（routes/*、tools/impl/* 余量 ~140 条）
-  - ✅ 已修：documents/executor/narrative_logic/knowledge/chapter_tools/stats/chat（139→100）；**修复真实 bug：documents.py extract_from_text 参数顺序错位+KnowledgeProposal 当 dict 用；narrative_logic extract_json_from_response 未 json.loads（str.get() 必崩）；knowledge.py asyncio.as_completed 内 t.cancel() 对 coroutine 无效（改 create_task）**
-- [ ] **L1.9** baseline 归零：`.mypy-baseline` 写 0；`scripts/mypy_gate.sh` 实跑通过
-  - 验证：`bash scripts/mypy_gate.sh` 输出 errors: 0
+- [x] **L1.8** 其余散落（routes/*、tools/impl/*）✅ 全部清零
+  - 累计修复 100+ 条；**额外修复真实 bug**：archive 导出用不存在的 load_tasks/save_reviews/save_tasks（改 load_task_lists/save_review/_save_task_lists）；system_prompt 任务上下文 PersistentTask 当 dict 用（t.get() 崩溃隐患）；outline_pipeline 用不存在的 context_manager 模块+方法（改 ContextManager().build_writing_context）；foreshadow_matcher 期望 dict 实得 Foreshadow 对象；styles_route 用不存在的 StyleManager.get_style；review.py list_reviewers 返回 dict 却按对象访问；routes/knowledge SearchResult.cypher 字段名错（实为 sql）
+- [x] **L1.9** baseline 归零：`.mypy-baseline` 写 0；`scripts/mypy_gate.sh` 实跑通过
+  - 验证：`mypy src/` 0 errors；`bash scripts/mypy_gate.sh` 通过
 
 ## L2：覆盖率 38→40+（中风险）
 
