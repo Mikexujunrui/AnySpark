@@ -1,81 +1,9 @@
+// API 层入口 — 各域函数集中于此；HTTP 基础设施见 api/http.ts，SSE 见 api/sse.ts。
+import { assertOk, del, diagLog, get, post, put } from './api/http'
+
 const API = ''
-
-// ── Connection diagnostics ──
-// Structured logging for all API/SSE connections to help diagnose
-// frontend-backend connectivity instability.
-const DIAG_PREFIX = '[CONN-DIAG]'
-const diagLog = {
-  info: (msg: string, ...args: unknown[]) => {
-    console.log(`${DIAG_PREFIX} ${msg}`, ...args)
-  },
-  warn: (msg: string, ...args: unknown[]) => {
-    console.warn(`${DIAG_PREFIX} ${msg}`, ...args)
-  },
-  error: (msg: string, ...args: unknown[]) => {
-    console.error(`${DIAG_PREFIX} ${msg}`, ...args)
-  },
-}
-
-// Expose diagnostics for use in other modules
-export { diagLog }
-
-async function assertOk(res: Response): Promise<void> {
-  if (res.ok) return
-  let message: string = res.statusText || `请求失败 (${res.status})`
-  const data = await res.json().catch(() => null)
-  if (data && (data.error || data.detail || data.message)) {
-    message = data.error || data.detail || data.message
-  }
-  throw new Error(message)
-}
-
-async function requestWithDiags<T>(method: string, url: string, options?: RequestInit): Promise<T> {
-  const startTime = performance.now()
-  diagLog.info(`${method} ${url} — 开始请求`)
-  try {
-    const res = await fetch(API + url, options)
-    const elapsed = Math.round(performance.now() - startTime)
-    if (!res.ok) {
-      diagLog.warn(`${method} ${url} — 失败 %d | %dms`, res.status, elapsed)
-    } else {
-      diagLog.info(`${method} ${url} — 成功 | %dms`, elapsed)
-    }
-    await assertOk(res)
-    return res.json()
-  } catch (e) {
-    const elapsed = Math.round(performance.now() - startTime)
-    const errMsg = e instanceof Error ? e.message : String(e)
-    diagLog.error(`${method} ${url} — 异常 | %dms | %s`, elapsed, errMsg)
-    throw e
-  }
-}
-
-async function get<T = unknown>(url: string): Promise<T> {
-  return requestWithDiags<T>('GET', url)
-}
-
-async function post<T = unknown>(url: string, data?: unknown): Promise<T> {
-  return requestWithDiags<T>('POST', url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-}
-
-async function del<T = unknown>(url: string): Promise<T> {
-  return requestWithDiags<T>('DELETE', url, {
-    method: 'DELETE',
-    headers: { 'X-Confirm-Delete': 'true' },
-  })
-}
-
-async function put<T = unknown>(url: string, data?: unknown): Promise<T> {
-  return requestWithDiags<T>('PUT', url, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-  })
-}
+import { createAutopilotBridgeSSE, createSSE, createTaskSSE } from './api/sse'
+export { createAutopilotBridgeSSE, createSSE, createTaskSSE }
 
 export interface UpdateStatus {
   current_version: string
@@ -188,6 +116,7 @@ export interface SettingsData {
   slot_flash?: { provider_id: string; model: string }
   custom_map?: Record<string, string>
 }
+
 
 export const api = {
   // Books
@@ -402,60 +331,6 @@ export const api = {
     del(`/api/memory/preferences/${entryId}`),
   toggleMemory: (enabled: boolean): Promise<{ ok: boolean; enabled: boolean; message: string }> =>
     post('/api/memory/toggle', { enabled }),
-}
-
-export function createSSE(url: string, data: unknown, signal?: AbortSignal): Promise<Response> {
-  diagLog.info(`SSE POST ${url} — 建立连接`)
-  return fetch(API + url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data),
-    signal,
-  }).then(res => {
-    const ct = res.headers.get('content-type') || ''
-    diagLog.info(`SSE POST ${url} — 响应 %d | content-type=%s`, res.status, ct)
-    if (!res.ok) {
-      diagLog.error(`SSE POST ${url} — 连接失败 %d`, res.status)
-    }
-    return res
-  }).catch(e => {
-    if (e instanceof DOMException && e.name === 'AbortError') {
-      diagLog.info(`SSE POST ${url} — 已取消 (AbortError)`)
-    } else {
-      diagLog.error(`SSE POST ${url} — 异常: %s`, e instanceof Error ? e.message : String(e))
-    }
-    throw e
-  })
-}
-
-export function createTaskSSE(bookId: string, taskId: string): Promise<Response> {
-  const url = `/api/books/${bookId}/tasks/${taskId}/stream`
-  diagLog.info(`SSE GET ${url} — 建立连接`)
-  return fetch(API + url).then(res => {
-    diagLog.info(`SSE GET ${url} — 响应 %d`, res.status)
-    if (!res.ok) {
-      diagLog.error(`SSE GET ${url} — 连接失败 %d`, res.status)
-    }
-    return res
-  }).catch(e => {
-    diagLog.error(`SSE GET ${url} — 异常: %s`, e instanceof Error ? e.message : String(e))
-    throw e
-  })
-}
-
-export function createAutopilotBridgeSSE(bookId: string, taskId: string): Promise<Response> {
-  const url = `/api/books/${bookId}/autopilot/${taskId}/chat-bridge`
-  diagLog.info(`SSE GET ${url} — 建立连接`)
-  return fetch(API + url).then(res => {
-    diagLog.info(`SSE GET ${url} — 响应 %d`, res.status)
-    if (!res.ok) {
-      diagLog.error(`SSE GET ${url} — 连接失败 %d`, res.status)
-    }
-    return res
-  }).catch(e => {
-    diagLog.error(`SSE GET ${url} — 异常: %s`, e instanceof Error ? e.message : String(e))
-    throw e
-  })
 }
 
 // ── Document Import ──
