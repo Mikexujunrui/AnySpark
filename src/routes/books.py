@@ -117,10 +117,9 @@ async def import_book_archive(file: UploadFile):
     except Exception as exc:
         try:
             json_store.delete_book(book["id"])
-            GraphStore(book["id"])._run(
-                "MATCH (n {project_id: $pid}) DETACH DELETE n",
-                {"pid": book["id"]},
-            )
+            store = GraphStore(book["id"])
+            for tbl in ("relations", "entities", "foreshadows", "snapshots", "timeline_events", "constraints"):
+                store._run(f"DELETE FROM {tbl} WHERE project_id=?", (book["id"],))
         except Exception:
             pass
         raise HTTPException(400, f"导入失败：{exc}")
@@ -148,7 +147,8 @@ def delete_book(book_id: str):
     json_store.delete_book(book_id)
     try:
         store = GraphStore(book_id)
-        store._run("MATCH (e {project_id: $pid}) DETACH DELETE e", {"pid": book_id})
+        for tbl in ("relations", "entities", "foreshadows", "snapshots", "timeline_events", "constraints"):
+            store._run(f"DELETE FROM {tbl} WHERE project_id=?", (book_id,))
     except Exception:
         pass
     return {"ok": True}
