@@ -12,7 +12,7 @@ import logging
 import sqlite3
 from collections.abc import Callable
 from pathlib import Path
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, Any, TypeVar, cast
 
 from ..config import DATA_DIR
 from ..knowledge import CharacterSnapshot, Entity, Foreshadow, Relation, TimelineEvent
@@ -314,7 +314,7 @@ class _SQLiteBase:
     # ── Row → Domain object converters ──
 
     @staticmethod
-    def _row_to_entity(row: sqlite3.Row) -> Entity:
+    def _row_to_entity(row: dict[str, Any]) -> Entity:
         aliases_raw = row["aliases"]
         aliases = json.loads(aliases_raw) if isinstance(aliases_raw, str) else (aliases_raw or [])
         data_raw = row["data"]
@@ -333,7 +333,7 @@ class _SQLiteBase:
         )
 
     @staticmethod
-    def _row_to_relation(row: sqlite3.Row) -> Relation:
+    def _row_to_relation(row: dict[str, Any]) -> Relation:
         from ..knowledge import RelationType
 
         raw_type = row["type"].lower()
@@ -351,7 +351,7 @@ class _SQLiteBase:
         )
 
     @staticmethod
-    def _row_to_foreshadow(row: sqlite3.Row) -> Foreshadow:
+    def _row_to_foreshadow(row: dict[str, Any]) -> Foreshadow:
         return Foreshadow(
             id=row["id"],
             text=row["text"],
@@ -373,7 +373,7 @@ class _SQLiteBase:
         )
 
     @staticmethod
-    def _row_to_timeline_event(row: sqlite3.Row) -> TimelineEvent:
+    def _row_to_timeline_event(row: dict[str, Any]) -> TimelineEvent:
         return TimelineEvent(
             id=row["id"],
             time_point=row["time_point"],
@@ -393,7 +393,7 @@ class _SQLiteBase:
     # ════════════════════════════════════════════════════════════════
 
     @staticmethod
-    def _row_to_character_snapshot(row: sqlite3.Row) -> CharacterSnapshot:
+    def _row_to_character_snapshot(row: dict[str, Any]) -> CharacterSnapshot:
         data = json.loads(row["data"]) if isinstance(row["data"], str) else (row["data"] or {})
         try:
             phase = row["phase"]

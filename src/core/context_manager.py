@@ -206,7 +206,7 @@ class ContextManager:
 
         sections = []
         remaining_budget = entity_budget
-        shown_relation_pairs = set()
+        shown_relation_pairs: set[tuple[str, str]] = set()
 
         type_groups = [
             ("character", "人物", scope.characters),
@@ -623,7 +623,7 @@ class ContextManager:
         sections = []
         added_ids = set()
         remaining_budget = self.budget.lore_budget
-        shown_relation_pairs = set()
+        shown_relation_pairs: set[tuple[str, str]] = set()
 
         # ── P2-15: POV perspective filtering ──
         # Only include entities visible from the POV character's perspective:

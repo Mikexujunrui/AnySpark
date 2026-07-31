@@ -37,8 +37,8 @@ L4.0 git污染协调（贯穿，需主人配合外部进程）
 - [x] **L1.1** writing.py（19 条）：工具返回类型 `-> str` 实为 `str | dict`（guard 返回 str，正文返回 dict），改签名 `-> str | dict`（与 executor `_call_handler` 返回 `str | dict` 对齐）
   - 判据：`writing.py` 错误数 19→0；`pytest tests/test_generation_writing.py tests/test_writing*.py -q` 全绿
 - [x] **L1.2** workflow_tools.py（16 条）：`Workflow` 变量被标注为 dict，类型注解修正（flow/exec_context 改名 + results 注解）
-- [ ] **L1.3** context_manager.py（16 条）：dict 返回值/变量注解
-- [ ] **L1.4** sqlite_store/crud.py（13 条）：`_row_to_*` 接受 dict 而非 Row（与 `_run` 返回 `list[dict]` 对齐）
+- [x] **L1.3** context_manager.py（16 条）：dict 返回值/变量注解（foreshadow 对象化修复链，见 L1.4）
+- [x] **L1.4** sqlite_store（13+ 条）：`_row_to_*` 签名 `sqlite3.Row`→`dict[str, Any]`（与 `_run` 返回 `list[dict]` 对齐）；`list_scheduled_foreshadows` 改返回真 `Foreshadow` 对象（此前调用方对象属性访问实际拿到 dict，是静默 bug 隐患）；`Relation.type` 两处 str→RelationType
 - [ ] **L1.5** desktop_launcher.py（12 条）：`_MEIPASS`/类型注解
 - [ ] **L1.6** handlers.py + plot.py + extractor.py（28 条）
 - [ ] **L1.7** agent_loop/headless_loop/flows（22 条）

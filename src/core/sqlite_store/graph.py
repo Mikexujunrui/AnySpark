@@ -9,6 +9,8 @@ import logging
 import math
 from typing import Any
 
+from core.knowledge import Foreshadow
+
 from .crud import CrudMixin
 
 logger = logging.getLogger(__name__)
@@ -692,13 +694,13 @@ class GraphMixin(CrudMixin):
             (foreshadow_id,),
         )
 
-    def list_scheduled_foreshadows(self, chapter: str) -> list[dict]:
+    def list_scheduled_foreshadows(self, chapter: str) -> list[Foreshadow]:
         """Foreshadows scheduled to resolve at this chapter."""
         rows = self._run(
             "SELECT * FROM foreshadows WHERE scheduled_chapter=?",
             (chapter,),
         )
-        return [dict(r) for r in rows]
+        return [self._row_to_foreshadow(r) for r in rows]
 
     def update_snapshot(self, snapshot_id: str, payload: dict) -> None:
         """Update snapshot fields (whitelisted keys only)."""
@@ -717,14 +719,18 @@ class GraphMixin(CrudMixin):
         """Time-annotated relationship edge (data.since_chapter)."""
         import uuid as _uuid
 
-        from core.knowledge import Relation
+        from core.knowledge import Relation, RelationType
 
+        try:
+            typed = RelationType(rel_type)
+        except ValueError:
+            typed = rel_type  # type: ignore[assignment]  # non-enum edge type (e.g. DEPENDS_ON)
         self.add_relation(
             Relation(
                 id=str(_uuid.uuid4())[:8],
                 from_entity=from_id,
                 to_entity=to_id,
-                type=rel_type,
+                type=typed,
                 data={"since_chapter": since_chapter},
             )
         )
@@ -740,7 +746,7 @@ class GraphMixin(CrudMixin):
                 id=str(_uuid.uuid4())[:8],
                 from_entity=from_id,
                 to_entity=to_id,
-                type="DEPENDS_ON",
+                type="DEPENDS_ON",  # type: ignore[arg-type]  # non-enum edge type
                 data={},
             )
         )
@@ -764,7 +770,7 @@ class GraphMixin(CrudMixin):
         )
         return {"character_id": character_id, "relations": [dict(r) for r in rels], "nodes": []}
 
-    def get_character_knowledge(self, character_id: str, at_chapter: str = "") -> dict:
+    def get_character_knowledge(self, character_id: str, at_chapter: str | int = "") -> dict:
         """What this character is linked to (entities + snapshots)."""
         rels = self._run(
             "SELECT * FROM relations WHERE (from_entity=? OR to_entity=?) AND project_id=?",
