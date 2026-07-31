@@ -124,19 +124,19 @@ M8 ──→ M9 反向审计
 
 目标：`_process_tool_result`（199 行）从 if/elif 链变为纯分发表，7 个领域 case 抽到 `src/core/flows/`。**每抽一个 case 立即全量测试，不做一次性大爆炸。**
 
-- [ ] **M3.1** 建立 flows 目录与协议骨架
+- [x] **M3.1** 建立 flows 目录与协议骨架（src/core/flows/ + RESULT_FLOWS 分发表；LoopEvent 独立到 loop_event.py；_await_answer 移至 question.py）
   - 判据：`src/core/flows/__init__.py` 定义 `Flow` 抽象（`can_handle(result) -> bool` + `handle(result, ...) -> FlowResult`）；`_process_tool_result` 改为遍历 flows 分发
   - 验证：pytest 全绿（行为不变，纯重构）
-- [ ] **M3.2** 抽 question + plot_cards → `flows/user_interaction.py`
+- [x] **M3.2** 抽 question + plot_cards → flows/user_interaction.py → `flows/user_interaction.py`
   - 判据：两个 case 移入，`_process_tool_result` 对应分支删除；交互弹窗行为不变
   - 验证：pytest 全绿 + 手动验证 ask_user 弹窗（问一句→答→继续）
-- [ ] **M3.3** 抽 writing_result + patch_result + review_result → `flows/work_product.py`
+- [x] **M3.3** 抽 writing_result + patch_result + review_result → flows/work_product.py → `flows/work_product.py`
   - 判据：三个 case 移入；章节变更 diff 浮现逻辑不变
   - 验证：pytest 全绿 + 手动 patch_chapter 一次验证 diff 卡片
-- [ ] **M3.4** 抽 autopilot_plan + task_list → `flows/engine_signal.py`
+- [x] **M3.4** 抽 autopilot_plan + task_list → flows/engine_signal.py → `flows/engine_signal.py`
   - 判据：两个 case 移入；Autopilot 启动确认/任务列表行为不变
   - 验证：pytest 全绿 + 手动触发 autopilot_plan 确认弹窗
-- [ ] **M3.5** 收尾：`_process_tool_result` 纯分发化
+- [x] **M3.5** 收尾：`_process_tool_result` 纯分发化（<40行，无领域case；新增 tests/test_flows.py 9 用例）
   - 判据：函数 <40 行，无领域 case；每个 flow 有独立单测（`tests/test_flows_*.py`）
   - 验证：pytest 全绿 + ruff + mypy gate + 基线对比（M0.1 的测试数只增不减）
 

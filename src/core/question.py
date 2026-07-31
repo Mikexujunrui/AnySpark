@@ -80,3 +80,34 @@ class QuestionManager:
 
 
 manager = QuestionManager()
+
+
+async def _await_answer(question_id: str, timeout: float = 300) -> str:
+    """Wait for the user's permission-confirmation answer.
+
+    Returns one of:
+      "confirmed" — user clicked 确认执行
+      "cancelled" — user clicked 取消 (or gave a non-confirming answer)
+      "timeout"   — no answer within the wait window
+
+    Uses a single ``timeout`` wait (default 300s, same as ask_user) instead
+    of the old 10s-polling loop. The polling loop was broken: the first
+    10s timeout cancelled ``wait_for_answer`` which pops its future in
+    ``finally``, so the second iteration saw no pending future and returned
+    ``[["已取消"]]`` immediately — anyone who answered the preceding
+    ask_user but didn't click the permission dialog within ~10s was
+    mis-reported as having cancelled their own write.
+    """
+    try:
+        answers = await asyncio.wait_for(
+            manager.wait_for_answer(question_id), timeout=timeout
+        )
+        if answers and answers[0] and "确认" in answers[0][0]:
+            return "confirmed"
+        return "cancelled"
+    except TimeoutError:
+        return "timeout"
+    except asyncio.CancelledError:
+        raise  # Let cancellation propagate normally
+    except Exception:
+        return "cancelled"

@@ -16,11 +16,12 @@ import logging
 import traceback
 from collections import defaultdict, deque
 from collections.abc import AsyncGenerator, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from .agent_context import AgentContext
 from .compaction import handle_context_overflow, needs_compaction, prune_stale_tool_results
 from .config import config
+from .flows import RESULT_FLOWS
 from .hallucination import detect_hallucination
 from .llm_client import (
     LLMResponse,
@@ -29,9 +30,11 @@ from .llm_client import (
     llm_book_context,
     model_for,
 )
+from .loop_event import LoopEvent
 from .loop_state import LoopState
 from .parts import ChapterDiffPart, ReasoningPart, TextPart, ToolCallPart, ToolResultPart
 from .permissions import permission_manager
+from .question import _await_answer
 from .question import manager as question_manager
 from .retry import calculate_delay, is_context_overflow, is_retryable
 from .session_state import BusyError, CancelledError, RunHandle, run_state
@@ -121,14 +124,6 @@ def _extract_last_tool_summary(messages: list[dict]) -> str:
 
 
 @dataclass
-class LoopEvent:
-    type: str
-    data: dict = field(default_factory=dict)
-
-    def to_sse(self) -> dict:
-        return {"event": self.type, "data": json.dumps(self.data, ensure_ascii=False)}
-
-
 @dataclass
 class AgentConfig:
     agent_type: str = "write"
@@ -1273,37 +1268,6 @@ async def _prepare_tool_calls(
                 )
 
 
-async def _await_answer(question_id: str, timeout: float = 300) -> str:
-    """Wait for the user's permission-confirmation answer.
-
-    Returns one of:
-      "confirmed" — user clicked 确认执行
-      "cancelled" — user clicked 取消 (or gave a non-confirming answer)
-      "timeout"   — no answer within the wait window
-
-    Uses a single ``timeout`` wait (default 300s, same as ask_user) instead
-    of the old 10s-polling loop. The polling loop was broken: the first
-    10s timeout cancelled ``wait_for_answer`` which pops its future in
-    ``finally``, so the second iteration saw no pending future and returned
-    ``[["已取消"]]`` immediately — anyone who answered the preceding
-    ask_user but didn't click the permission dialog within ~10s was
-    mis-reported as having cancelled their own write.
-    """
-    try:
-        answers = await asyncio.wait_for(
-            question_manager.wait_for_answer(question_id), timeout=timeout
-        )
-        if answers and answers[0] and "确认" in answers[0][0]:
-            return "confirmed"
-        return "cancelled"
-    except TimeoutError:
-        return "timeout"
-    except asyncio.CancelledError:
-        raise  # Let cancellation propagate normally
-    except Exception:
-        return "cancelled"
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Unified tool-result processor (deduplicates streaming / parallel branches)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1316,173 +1280,35 @@ async def _process_tool_result(
     state: LoopState,
     messages: list[dict],
 ) -> AsyncGenerator[LoopEvent, None]:
-    """Handle every special result type (plot_cards / writing_result /
-    task_list / patch_result / review_result / question / default) for BOTH
-    streaming and parallel tools, then append the tool message."""
+    """Dispatch every special result type to its domain flow, then append the
+    tool message and emit chapter/terminal events.
+
+    Domain logic lives in ``core/flows`` (RESULT_FLOWS dispatch table); this
+    function only orchestrates: dispatch → yield flow events → unified tail.
+    """
     state.metrics.tool_calls += 1
     tool_name = tc.name if hasattr(tc, "name") else str(tc)
     state.metrics.tool_names[tool_name] = state.metrics.tool_names.get(tool_name, 0) + 1
-    result_str: str
+    result_str = ""
     terminal: str | None = None
     chapter_updated = False
 
-    if isinstance(result, dict) and result.get("type") == "plot_cards":
-        cards = result.get("cards", [])
-        q_req = question_manager.create_question(
-            [
-                {
-                    "question": "选择一个剧情方向",
-                    "header": "剧情走向",
-                    "options": [{"label": c.get("title", ""), "description": c.get("description", "")} for c in cards],
-                    "card_type": "plot_cards",
-                    "cards": cards,
-                    "context_summary": result.get("context_summary", ""),
-                    "custom": True,
-                }
-            ],
-            agent_config.book_id,
-        )
-        yield LoopEvent(
-            type="plot_cards",
-            data={
-                "id": q_req.id,
-                "context_summary": result.get("context_summary", ""),
-                "cards": cards,
-                "instruction": result.get("instruction", ""),
-            },
-        )
-        try:
-            answers = await asyncio.wait_for(question_manager.wait_for_answer(q_req.id), timeout=300)
-            selected_text = answers[0][0] if answers and answers[0] else "用户未选择"
-        except TimeoutError:
-            selected_text = "用户超时未选择"
-        except (ValueError, IndexError, KeyError):
-            selected_text = "用户拒绝了所有选项，请重新构思方向"
-        result_str = f"用户的剧情方向选择: {selected_text}\n\n请根据用户选择继续。"
-
-    elif isinstance(result, dict) and result.get("type") == "autopilot_plan":
-        task_id = result.get("task_id", "")
-        plan_summary = result.get("plan_summary", "")
-        chapters = result.get("chapters", [])
-        audit_mode = result.get("audit_mode", "soft")
-        ch_list = "、".join(f"第{c['index']}章{c.get('title', '')}" for c in chapters[:5])
-        confirm_msg = (
-            f"是否启动 Autopilot 自主写作？\n\n"
-            f"计划: {plan_summary}\n"
-            f"章节: {ch_list}{'...' if len(chapters) > 5 else ''}\n"
-            f"模式: {audit_mode}\n\n"
-            f"启动后将在后台逐章执行，您可随时暂停/取消。"
-        )
-        q_req = question_manager.create_question(
-            [
-                {
-                    "question": confirm_msg,
-                    "header": "启动 Autopilot",
-                    "options": [
-                        {"label": "确认启动", "description": "开始执行写作计划"},
-                        {"label": "取消", "description": "不启动 Autopilot"},
-                    ],
-                    "custom": False,
-                }
-            ],
-            agent_config.book_id,
-        )
-        yield LoopEvent(type="question", data={"id": q_req.id, "questions": q_req.questions})
-        confirmed = await _await_answer(q_req.id)
-        if confirmed == "confirmed":
-            from core.autopilot_runner import autopilot as ap
-
-            ok = await ap.confirm_start(task_id)
-            if ok:
-                result_str = (
-                    f"Autopilot 已启动！\n\n"
-                    f"任务ID: {task_id}\n"
-                    f"计划: {plan_summary}\n"
-                    f"模式: {audit_mode}\n\n"
-                    f"后台执行中，可在右侧面板监控进度。完成后会自动通知。"
-                )
-            else:
-                result_str = "Autopilot 启动失败，请重试。"
-        else:
-            if confirmed == "timeout":
-                result_str = "Autopilot 启动确认超时（5分钟未收到回复），未启动。如需启动请重新发起。"
-            else:
-                result_str = "用户取消了 Autopilot 启动。如需调整参数，请重新发起。"
-            from core.task_queue import task_queue as tq
-
-            tq.cancel_task(task_id)
-
-    elif isinstance(result, dict) and result.get("type") == "writing_result":
-        if result.get("saved"):
+    if isinstance(result, dict) and result.get("type") in RESULT_FLOWS:
+        flow = RESULT_FLOWS[result["type"]]
+        events, result_str, chapter_updated, terminal = await flow(result, agent_config.book_id)
+        for ev in events:
+            yield ev
+        # Small state side-effects that depend on loop state (not flow-able).
+        if result["type"] == "task_list":
+            tl_id = result.get("task_list_id", "")
+            if tl_id:
+                state.active_task_list_id = tl_id
+        elif result["type"] == "writing_result" and result.get("saved"):
             from .tool_meta import FULL_CHAPTER_GENERATION_TOOLS
 
             if tool_name in FULL_CHAPTER_GENERATION_TOOLS:
                 state.chapter_write_completed = True
                 state.chapter_write_tool = tool_name
-            yield LoopEvent(
-                type="writing_end",
-                data={
-                    "chapter_id": result.get("chapter_id", ""),
-                    "chapter_title": result.get("chapter_title", ""),
-                    "word_count": result.get("word_count", 0),
-                    "saved": True,
-                },
-            )
-        result_str = result.get("text", "")
-
-    elif isinstance(result, dict) and result.get("type") == "task_list":
-        yield LoopEvent(type="task_list", data={"items": result.get("items", [])})
-        # Track the active task list ID for terminal-branch completeness check
-        tl_id = result.get("task_list_id", "")
-        if tl_id:
-            state.active_task_list_id = tl_id
-        result_str = result.get("text", "")
-
-    elif isinstance(result, dict) and result.get("type") == "patch_result":
-        if not result.get("error"):
-            yield LoopEvent(
-                type="patch_result",
-                data={
-                    "chapter_id": result.get("chapter_id", ""),
-                    "chapter_title": result.get("chapter_title", ""),
-                    "operations": result.get("operations", []),
-                    "patched_count": result.get("patched_count", 0),
-                    "total_count": result.get("total_count", 0),
-                    "word_count": result.get("word_count", 0),
-                },
-            )
-        result_str = result.get("text", "") or result.get("error", "")
-
-    elif isinstance(result, dict) and result.get("type") == "review_result":
-        result_str = result.get("text", "")
-        chapter_updated = True
-        terminal = result_str
-
-    elif isinstance(result, dict) and result.get("type") == "question":
-        # ask_user tool — display a question popup on the frontend and block
-        # until the user answers. Without this, the ask_user result is just a
-        # JSON string the LLM sees but the user never gets a popup, causing the
-        # agent to end prematurely ("didn't ask the user, just stopped").
-        qs = result.get("questions", [])
-        if qs:
-            q_req = question_manager.create_question(qs, agent_config.book_id)
-            yield LoopEvent(type="question", data={"id": q_req.id, "questions": q_req.questions})
-            try:
-                answers = await asyncio.wait_for(question_manager.wait_for_answer(q_req.id), timeout=300)
-            except TimeoutError:
-                answers = [["用户超时未回复"]]
-            except Exception:
-                answers = [["用户拒绝了提问"]]
-            # Format answers as a readable string for the LLM
-            answer_parts = []
-            for i, q in enumerate(qs):
-                q_text = q.get("question", f"问题{i + 1}")
-                ans = answers[i] if i < len(answers) else ["未回复"]
-                answer_parts.append(f"Q: {q_text}\nA: {', '.join(ans)}")
-            result_str = "用户回答:\n" + "\n\n".join(answer_parts)
-        else:
-            result_str = "无问题"
-
     else:
         result_str = _finalize_tool_result(result)
 
