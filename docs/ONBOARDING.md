@@ -42,7 +42,7 @@ python scripts/check.py                    # 完整：+ pytest + tsc + eslint
 | `src/core/tool_defs/` + `tool_meta.py` | 工具定义 + 行为元数据（单一事实源） | **加新工具→改这里** |
 | `src/routes/` | FastAPI 路由（26 个文件） | 改 REST/SSE 端点 |
 
-前端：`frontend/src/api.ts`（端点）+ `api/http.ts`+`api/sse.ts`（基础设施）+ `components/`（面板）。
+前端：`frontend/src/api.ts`（门面）+ `api/`（books/chapters/knowledge/tasks/settings/memory/import 域模块）+ `api/http.ts`+`api/sse.ts`（基础设施）+ `components/`（面板）。
 
 ## 4. 必须知道的约定（新接手的 10 条铁律）
 
@@ -63,16 +63,16 @@ python scripts/check.py                    # 完整：+ pytest + tsc + eslint
 - **查图谱数据**：SQLite 直接 `sqlite3 data/novel.db`；章节在 `data/chapters_*.json`（带版本历史）
 - **索引坏了**：`python scripts/rebuild_fts.py`（幂等，先 `--dry-run`）
 - **发布**：`python scripts/release.py --dry-run patch`（然后按提示走）
-- **mypy 存量**：`C:/Python313/python.exe -m mypy src/ --ignore-missing-imports --no-strict-optional --no-site-packages`
+- **mypy 存量**：`C:/Python313/python.exe -m mypy src/ --ignore-missing-imports --no-strict-optional --no-site-packages`（当前 0 错误，baseline 0）
 
 ## 6. 已知问题与进行中的专项（接手时先看这里）
 
 | 问题 | 状态 | 说明 |
 |------|------|------|
 | **SQLite 迁移专项** | ✅ 已完成 | 22 处 Cypher 全部重写为 SQL/Python（impact/character/narrator/extractor/confidence/generation/handlers/knowledge 等）；relations FK 重构（允许 timeline/foreshadow 边，OCCURRED_AT/DEPENDS_ON 实证可存）；20 个缺方法全部实现（CRUD+查询+分析端点） |
-| mypy 存量 | 🟡 282 | `.mypy-baseline` 兜底；清零是专项 |
-| 覆盖率 | 🟡 39% | CI gate 38；40% 目标需补大文件测试 |
-| 前端 | 🟡 | api.ts 已拆 http/sse，api 对象全量拆分/巨型组件（ChaptersPanel 1329 行）待做 |
+| mypy 存量 | ✅ **清零** | 2026-08-01 遗留专项完成：269→0，`.mypy-baseline` 归零；期间修复 20+ 真实 bug（见 `.pi/plan_legacy.md`） |
+| 覆盖率 | ✅ **40.04%** | CI gate 38→40；新增 49 用例（writing/knowledge/extractor 纯函数 + main CLI 20 用例） |
+| 前端 | ✅ api.ts 全量拆分（375→7 域模块+types+门面）；ChaptersPanel 1329→994、SettingsModal 1045→903 | 拆分后 tsc/eslint/build 全绿；剩余巨型组件待做：无（ChatPanel JSX 已组件化） |
 | 并发 git 污染 | 🟡 | 曾有外部会话提交 chapters 数据（钩子被 `--no-verify` 绕过）；清理方法见 `.pi/plan.md` |
 
 ## 7. 文档导航（按需点入，不按顺序读）

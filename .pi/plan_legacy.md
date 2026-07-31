@@ -72,8 +72,8 @@ L4.0 git污染协调（贯穿，需主人配合外部进程）
 
 ## L4：收尾
 
-- [ ] **L4.1** 文档同步（ONBOARDING 第 6 节、CODE_HEALTH_ISSUES、BASELINE）
-- [ ] **L4.2** 总闸全跑 + 勾选核对
+- [x] **L4.1** 文档同步（ONBOARDING 第 6 节、CODE_HEALTH_ISSUES、BASELINE）→ 已更新 ONBOARDING 第 5/6 节 + CODE_HEALTH_ISSUES 最近进展
+- [x] **L4.2** 总闸全跑 + 勾选核对：ruff 全绿、mypy 0、pytest 793 passed（cov 40.04% gate 40）、tsc 0、eslint 0 error
 
 ## L4.0：并发 git 污染（贯穿，需主人协调）
 

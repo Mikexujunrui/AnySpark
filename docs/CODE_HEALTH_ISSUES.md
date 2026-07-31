@@ -10,14 +10,14 @@
 
 | 项目 | 结果 |
 |------|------|
-| mypy 错误数 | 786 → **282**（v3.2.1 各批次累计修复：mixin 链、search/parts/settings/styles cast、_MEIPASS getattr 化等） |
+| mypy 错误数 | 786 → **0**（2026-08-01 遗留专项清零：M0-M9 各批次 786→282→0；`.mypy-baseline` 归零，详见 `.pi/plan_legacy.md`） |
 | 权限确认 bug | ✅ 修复 `_await_answer` 10s 轮询误判取消（改为 300s 单次三态），新增 5 测试 |
 | 工具互斥/熔断 | ✅ 补行为测试（test_tool_mutex/test_agent_loop_e2e） |
 | FTS 重复索引 | ✅ 修复（18213→1848 行）；新增 `scripts/rebuild_fts.py` 重建脚本 |
 | agent_loop 划边界 | ✅ 7 个领域 case → `core/flows/`；`_process_tool_result` 纯分发化 |
 | SQLite `_run` | ✅ 返回 `list[dict]`（修复 Row.get 运行时崩溃） |
 | **SQLite 迁移专项** | 🔴 **进行中**：约 40 处 Cypher 调用静默空转（已修 impact_propagator/character_agent/narrator_agent；剩余见 ONBOARDING 第 6 节）；SQLiteStore 缺 ~40 方法（schedule_foreshadow 等）待验证 |
-| 覆盖率 | 37% → **39%**（747 tests，gate 38） |
+| 覆盖率 | 37% → **40.04%**（793 tests，gate 40） |
 | 供应链 | ✅ 依赖 pin + requirements.lock + pre-commit 锁守卫 + chapters/data 入库拦截 |
 | git 历史 | ✅ 1004→~40 提交（数据提交清除，保留 v3.0 代码史 + M0-M9 审计链） |
 
