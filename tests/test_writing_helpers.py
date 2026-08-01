@@ -467,3 +467,78 @@ def test_get_extraction_system(monkeypatch):
 
     monkeypatch.setattr(extractor, "load_prompt", lambda name: f"模板:{name}")
     assert extractor._get_extraction_system() == "模板:extraction_system"
+
+
+# ── 回归：chat_stream 返回 dict chunk 时 join 不崩（用户反馈 delegate_writing 失败）──
+
+
+async def test_write_by_nodes_handles_dict_chunks(monkeypatch):
+    """Provider may yield non-str chunks (dict); join must not raise
+    ``sequence item ... expected str instance, dict found``."""
+    import asyncio
+
+    from tools.impl.writing import _write_by_nodes
+
+
+    def fake_chat_stream(*a, **k):
+        # 第一个 chunk 就是 dict —— 精确复现用户报错 "sequence item 0"
+        yield {"text": "第一段是dict"}
+        yield "第二段文本"
+        yield {"text": "第三段是dict"}
+
+    monkeypatch.setattr("core.llm_client.chat_stream", fake_chat_stream)
+
+    loop = asyncio.get_running_loop()
+    full_text, err = await _write_by_nodes(
+        loop,
+        scoped_context="ctx",
+        ref_block="",
+        plot_chain=["事件一", "事件二"],
+        chapter_function="",
+        writing_rules="",
+        system="sys",
+        book_id="b",
+        queue=None,
+        target_words_per_node=50,
+    )
+    assert err is None
+    assert "第一段是dict" in full_text
+    assert "第二段文本" in full_text
+    assert "第三段是dict" in full_text
+
+
+async def test_delegate_writing_streaming_handles_dict_chunks(monkeypatch, tmp_data_dir):
+    """Main streaming path: dict chunks must not crash the final join."""
+    import asyncio
+
+    from data.json_store import json_store
+    from tools.impl.writing import _delegate_writing_streaming
+
+    book = json_store.create_book("流式dict书", "")
+
+    def fake_chat_stream(*a, **k):
+        yield "正文内容第一段"
+        yield {"text": "正文内容第二段"}
+
+    monkeypatch.setattr("core.llm_client.chat_stream", fake_chat_stream)
+
+    class FakeKB:
+        def list_entities(self):
+            return []
+
+        def get_graph_insights(self):
+            return {}
+
+    loop = asyncio.get_running_loop()
+    result = await _delegate_writing_streaming(
+        loop,
+        {"instruction": "写第二章", "chapter_title": "第二章"},
+        FakeKB(),
+        book["id"],
+        "写第二章",
+        queue=None,
+    )
+    assert isinstance(result, dict)
+    assert result.get("type") == "writing_result"
+    # 核心回归点：dict chunk 不再抛 "sequence item ... expected str instance"
+    # （saved 依赖 LLM 验证环节，与本 bug 无关，不在此断言）
