@@ -10,7 +10,7 @@ import Icon from '../ui/Icon'
 
 const MemoizedMarkdown = memo(function MarkdownContent({ text }: { text: string }) {
   return (
-    <div className="markdown-body">
+    <div className="markdown-body min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_code]:break-words">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </div>
   )
@@ -200,17 +200,17 @@ export default function MessageList({
       }}
     >
       {(Array.isArray(messages) ? messages : []).map((msg, i) => (
-        <div key={i} className={`flex gap-3 group ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+        <div key={i} className={`flex min-w-0 gap-3 group ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
           {msg.role === 'agent' && (
             <div className="w-7 h-7 rounded-lg bg-sky-900/40 border border-sky-800/60 flex items-center justify-center shrink-0 mt-0.5">
               <Icon name="lightbulb" size={13} className="text-sky-400" />
             </div>
           )}
-          <div className={`flex flex-col max-w-[min(640px,90%)] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+          <div className={`flex min-w-0 flex-col max-w-[min(640px,90%)] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
             {msg.role === 'user' && (
               <span className="text-[10px] text-zinc-500 mb-1 mr-1">你</span>
             )}
-            <div className={`rounded-xl px-4 py-3 text-sm leading-relaxed ${
+            <div className={`min-w-0 max-w-full rounded-xl px-4 py-3 text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${
               msg.autopilot
                 ? 'bg-purple-900/20 border border-purple-700/40 text-zinc-200'
                 : msg.role === 'user'
@@ -232,7 +232,7 @@ export default function MessageList({
                   <MemoizedMarkdown text={msg.text} />
                 </>
               ) : (
-                <span className="whitespace-pre-wrap">{msg.text}</span>
+                <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{msg.text}</span>
               )}
             </div>
             {msg.role === 'user' && i < messages.length - 1 && (

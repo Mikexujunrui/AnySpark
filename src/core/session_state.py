@@ -127,6 +127,7 @@ class SessionStateMachine:
             self._states[session_id] = SessionState.RUNNING
             handle = RunHandle(session_id=session_id)
             self._handles[session_id] = handle
+            self._last_active[session_id] = time.time()
             if session_id not in self._queues:
                 self._queues[session_id] = asyncio.Queue()
             return handle
@@ -146,6 +147,7 @@ class SessionStateMachine:
                 self._states[session_id] = SessionState.RUNNING
                 handle = RunHandle(session_id=session_id)
                 self._handles[session_id] = handle
+                self._last_active[session_id] = time.time()
                 if session_id not in self._queues:
                     self._queues[session_id] = asyncio.Queue()
                 return handle
@@ -156,6 +158,7 @@ class SessionStateMachine:
                     q = asyncio.Queue()
                     self._queues[session_id] = q
                 await q.put(QueuedInput(text=msg, mode=mode))
+                self._last_active[session_id] = time.time()
                 return None
 
     async def set_waiting_user(self, session_id: str):
@@ -175,6 +178,7 @@ class SessionStateMachine:
             if self._handles.get(session_id) is handle:
                 self._handles.pop(session_id, None)
             self._states[session_id] = SessionState.IDLE
+            self._last_active.pop(session_id, None)
 
     async def drain_queued(self, session_id: str) -> list[QueuedInput]:
         """Drain all queued inputs for a session. Called by the agent loop
@@ -188,6 +192,8 @@ class SessionStateMachine:
                 items.append(q.get_nowait())
             except asyncio.QueueEmpty:
                 break
+        if items:
+            self.touch(session_id)
         return items
 
     async def cancel(self, session_id: str) -> bool:

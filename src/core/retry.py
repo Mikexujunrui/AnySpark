@@ -29,7 +29,10 @@ def is_retryable(error: Exception) -> bool:
         if "overloaded" in body or "rate limit" in body or "too many requests" in body:
             return True
     err_str = str(error).lower()
-    if any(k in err_str for k in ("connection", "connect", "reset", "refused", "eof", "broken pipe")):
+    if any(
+        k in err_str
+        for k in ("connection", "connect", "timeout", "timed out", "reset", "refused", "eof", "broken pipe")
+    ):
         return True
     return False
 

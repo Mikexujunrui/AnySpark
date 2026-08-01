@@ -35,11 +35,15 @@ async def test_writing_result_saved_emits_event():
 
 
 @pytest.mark.asyncio
-async def test_writing_result_not_saved_no_event():
+async def test_writing_result_not_saved_emits_truthful_failure_event():
     events, text, updated, terminal = await flow_writing_result(
         {"type": "writing_result", "saved": False, "text": "失败"}, "b1"
     )
-    assert events == []
+    assert len(events) == 1 and events[0].type == "writing_end"
+    assert events[0].data["saved"] is False
+    assert events[0].data["error"] == "失败"
+    assert text == "失败"
+    assert not updated and terminal is None
 
 
 @pytest.mark.asyncio

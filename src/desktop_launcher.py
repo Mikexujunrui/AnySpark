@@ -115,7 +115,7 @@ def _show_process_conflict() -> None:
     padding:48px;line-height:1.7}}main{{max-width:620px;margin:auto}}h1{{font-size:22px;color:#ffd28c}}
     code{{color:#8fdcff}}</style><main><h1>旧版 AnySpark 仍在运行</h1>
     <p>请先从旧版菜单栏图标退出，或在“活动监视器/任务管理器”中结束 AnySpark，
-    然后重新打开 3.2.0 独立窗口版。</p>
+    然后重新打开 {APP_VERSION} 独立窗口版。</p>
     <p>当前本地端口：<code>{config.server.port}</code></p></main></html>"""
     webview.create_window(
         f"{APP_NAME} — 需要退出旧版",

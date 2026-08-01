@@ -15,6 +15,33 @@ from .config import INTENT_PATTERNS, AutopilotConfig, PlanIntent
 
 logger = logging.getLogger(__name__)
 
+_CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+
+
+def _parse_chinese_number(value: str) -> int:
+    """Parse common Chinese chapter numerals without an LLM round-trip."""
+    if not value:
+        return 0
+    if value.isdigit():
+        return int(value)
+    if all(char in _CN_DIGITS for char in value):
+        return int("".join(str(_CN_DIGITS[char]) for char in value))
+    total = section = current = 0
+    for char in value:
+        if char in _CN_DIGITS:
+            current = _CN_DIGITS[char]
+        elif char in {"十", "百", "千", "万"}:
+            unit = {"十": 10, "百": 100, "千": 1000, "万": 10000}[char]
+            if unit == 10000:
+                total += (section + current) * unit
+                section = current = 0
+            else:
+                section += (current or 1) * unit
+                current = 0
+        else:
+            return 0
+    return total + section + current
+
 
 def _classify_intent(instruction: str, book_state: dict) -> PlanIntent:
     """Classify user instruction into a structured PlanIntent.
@@ -41,6 +68,20 @@ def _classify_intent(instruction: str, book_state: dict) -> PlanIntent:
 
     # Parse chapter indices from instruction (e.g., "#3-#8", "第3-8章", "#3,#5,#7")
     chapter_indices = _parse_chapter_indices(instruction)
+
+    # A writing request may also ask to "check after writing". The earlier
+    # score-only classifier treated the word 检查 as a pure analysis task,
+    # creating text in task logs without ever saving a chapter. An explicit
+    # chapter target plus a writing verb wins unless the user clearly asks to
+    # edit an existing chapter.
+    explicit_write = bool(
+        chapter_indices
+        and re.search(r"(?:续写|撰写|创作|生成|开始写|完成|写).{0,12}(?:第|#)", instruction)
+    )
+    explicit_edit = bool(re.search(r"(?:重写|改写|修改|精修|优化|调整|替换)", instruction))
+    if explicit_write and not explicit_edit:
+        best_intent = "write_new"
+        best_score = max(best_score, 3)
 
     # Determine scope
     scope = "all"
@@ -128,10 +169,15 @@ def _parse_chapter_indices(instruction: str) -> list:
         indices = list(range(start, end + 1))
         return indices
 
-    # Match "第N-M章" pattern
-    cn_range_match = re.search(r"第(\d+)\s*[-~到至]\s*(\d+)章", instruction)
+    cn_num = r"[零〇一二两三四五六七八九十百千万\d]+"
+
+    # Match "第N-M章" pattern, including 第三到第八章.
+    cn_range_match = re.search(rf"第({cn_num})\s*[-~到至]\s*(?:第)?({cn_num})章", instruction)
     if cn_range_match:
-        start, end = int(cn_range_match.group(1)), int(cn_range_match.group(2))
+        start = _parse_chinese_number(cn_range_match.group(1))
+        end = _parse_chinese_number(cn_range_match.group(2))
+        if start <= 0 or end < start:
+            return []
         indices = list(range(start, end + 1))
         return indices
 
@@ -142,9 +188,10 @@ def _parse_chapter_indices(instruction: str) -> list:
         return sorted(set(indices))
 
     # Match "第N章" single chapter
-    cn_single = re.search(r"第(\d+)章", instruction)
+    cn_single = re.search(rf"第({cn_num})章", instruction)
     if cn_single:
-        indices = [int(cn_single.group(1))]
+        parsed = _parse_chinese_number(cn_single.group(1))
+        indices = [parsed] if parsed > 0 else []
         return indices
 
     return indices

@@ -45,7 +45,9 @@ def _build_pydantic_model(
     Returns a ``pydantic.BaseModel`` subclass with all fields optional
     (required-ness is checked separately via the ``required`` key).
     """
-    fields: dict[str, tuple[object, Any]] = {}
+    # Pydantic accepts both concrete types and PEP 604 unions in dynamic
+    # field definitions; its overload stubs cannot express that full shape.
+    fields: dict[str, Any] = {}
 
     for key, spec in params_schema.items():
         if not isinstance(spec, dict):
@@ -67,7 +69,7 @@ def _build_pydantic_model(
             fields[key] = (python_type | None, Field(default=None, description=description))
 
     model_name = f"ToolParams_{len(_MODEL_CACHE)}"
-    return cast(type[Any], create_model(model_name, **fields))  # type: ignore[arg-type]
+    return cast(type[BaseModel], create_model(model_name, **fields))
 
 
 def _resolve_python_type(
