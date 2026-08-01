@@ -526,8 +526,9 @@ async def _write_by_nodes(
             nonlocal write_error
             try:
                 for chunk in chat_stream(node_prompt, system=stable_system, temperature=0.7, task="writing"):
-                    node_chunks.append(chunk)
-                    chunk_queue.put_nowait(chunk)
+                    text = chunk if isinstance(chunk, str) else str(chunk)
+                    node_chunks.append(text)
+                    chunk_queue.put_nowait(text)
             except Exception as e:
                 logger.exception("node writing failed")
                 err_str = str(e).lower()
@@ -878,8 +879,9 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
 
         try:
             for chunk in cs(prompt, system=system, temperature=0.7, task="writing"):
-                chunks.append(chunk)
-                chunk_queue.put_nowait(chunk)
+                text = chunk if isinstance(chunk, str) else str(chunk)
+                chunks.append(text)
+                chunk_queue.put_nowait(text)
         except Exception as e:
             logger.exception("write_chapter_streaming failed")
             err_str = str(e).lower()
@@ -1194,8 +1196,9 @@ async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: s
             nonlocal write_error
             try:
                 for chunk in chat_stream(prompt, system=system, temperature=0.7, task="writing"):
-                    node_chunks.append(chunk)
-                    chunk_queue.put_nowait(chunk)
+                    text = chunk if isinstance(chunk, str) else str(chunk)
+                    node_chunks.append(text)
+                    chunk_queue.put_nowait(text)
             except Exception as e:
                 logger.exception("write_chapter_streaming failed")
                 err_str = str(e).lower()

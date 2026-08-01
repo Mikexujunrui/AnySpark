@@ -1302,9 +1302,47 @@ async def _process_tool_result(
 
     if isinstance(result, dict) and result.get("type") in RESULT_FLOWS:
         flow = RESULT_FLOWS[result["type"]]
-        events, result_str, chapter_updated, terminal = await flow(result, agent_config.book_id)
-        for ev in events:
-            yield ev
+        if result["type"] in ("question", "plot_cards"):
+            # Interactive flows block on the user's answer. Emit the SSE
+            # event FIRST so the frontend renders the question, then wait.
+            from .flows.user_interaction import (
+                flow_ask_user_emit,
+                flow_ask_user_wait,
+                flow_plot_cards_emit,
+            )
+
+            emit = flow_ask_user_emit if result["type"] == "question" else flow_plot_cards_emit
+            events = await emit(result, agent_config.book_id)
+            if events is None:
+                events, result_str, chapter_updated, terminal = [], "无问题", False, None
+            else:
+                for ev in events:
+                    yield ev
+                if result["type"] == "question":
+                    qid = events[0].data["id"]
+                    try:
+                        answers = await asyncio.wait_for(question_manager.wait_for_answer(qid), timeout=300)
+                    except TimeoutError:
+                        answers = [["用户超时未回复"]]
+                    except Exception:
+                        answers = [["用户拒绝了提问"]]
+                    result_str = await flow_ask_user_wait(result, agent_config.book_id, answers)
+                else:
+                    qid = events[0].data["id"]
+                    try:
+                        answers = await asyncio.wait_for(question_manager.wait_for_answer(qid), timeout=300)
+                        selected_text = answers[0][0] if answers and answers[0] else "用户未选择"
+                    except TimeoutError:
+                        selected_text = "用户超时未选择"
+                    except (ValueError, IndexError, KeyError):
+                        selected_text = "用户拒绝了所有选项，请重新构思方向"
+                    result_str = f"用户的剧情方向选择: {selected_text}\n\n请根据用户选择继续。"
+                chapter_updated = False
+                terminal = None
+        else:
+            events, result_str, chapter_updated, terminal = await flow(result, agent_config.book_id)
+            for ev in events:
+                yield ev
         # Small state side-effects that depend on loop state (not flow-able).
         if result["type"] == "task_list":
             tl_id = result.get("task_list_id", "")

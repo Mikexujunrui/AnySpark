@@ -382,7 +382,10 @@ def chat_stream(
                 content = chunk.choices[0].delta.content
                 if content:
                     content_yielded = True
-                    yield content
+                    # Some providers (reasoning modes) return non-str content;
+                    # normalize to str so downstream ``''.join(chunks)`` never
+                    # raises ``sequence item ... expected str instance, dict found``.
+                    yield content if isinstance(content, str) else str(content)
             return  # success
         except Exception as e:
             last_error = e

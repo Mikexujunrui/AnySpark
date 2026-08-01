@@ -116,3 +116,59 @@ async def test_plot_cards_flow(monkeypatch):
     )
     assert len(events) == 1 and events[0].type == "plot_cards"
     assert "方向A" in text
+
+
+@pytest.mark.asyncio
+async def test_ask_user_emit_yields_event_before_waiting(monkeypatch):
+    """Regression: the SSE question event must be produced BEFORE blocking
+    on the user's answer, or the frontend never renders the options."""
+    from core import question as qmod
+
+    created = {}
+
+    def fake_create(qs, book_id=""):
+        req = type("R", (), {"id": "q_early", "questions": qs})()
+        created["id"] = req.id
+        return req
+
+    monkeypatch.setattr(qmod.manager, "create_question", fake_create)
+
+    from core.flows.user_interaction import flow_ask_user_emit, flow_ask_user_wait
+
+    events = await flow_ask_user_emit({"type": "question", "questions": [{"question": "选一个？"}]}, "b1")
+    # Event must be available immediately — no waiting.
+    assert events is not None and len(events) == 1
+    assert events[0].type == "question"
+    assert events[0].data["id"] == created["id"]
+
+    text = await flow_ask_user_wait({"type": "question", "questions": [{"question": "选一个？"}]}, "b1", [["红色"]])
+    assert "红色" in text
+
+
+@pytest.mark.asyncio
+async def test_ask_user_emit_no_questions_returns_none():
+    from core.flows.user_interaction import flow_ask_user_emit
+
+    assert await flow_ask_user_emit({"type": "question", "questions": []}, "b1") is None
+
+
+@pytest.mark.asyncio
+async def test_ask_user_normalizes_string_options(monkeypatch):
+    """LLM may pass options as plain strings; frontend needs {label} objects."""
+    from core import question as qmod
+
+    captured = {}
+
+    def fake_create(qs, book_id=""):
+        captured["qs"] = qs
+        return type("R", (), {"id": "q_norm", "questions": qs})()
+
+    monkeypatch.setattr(qmod.manager, "create_question", fake_create)
+
+    from core.flows.user_interaction import flow_ask_user_emit
+
+    await flow_ask_user_emit(
+        {"type": "question", "questions": [{"question": "继续？", "options": ["是", "否"]}]}, "b1"
+    )
+    opts = captured["qs"][0]["options"]
+    assert opts == [{"label": "是", "description": ""}, {"label": "否", "description": ""}]
