@@ -343,7 +343,7 @@ async def _get_graph_insights(loop, args: dict, kb, book_id: str, msg: str = "")
     if underutilized:
         lines.append(f"\n### 未使用地点 ({len(underutilized)}个)")
         for loc in underutilized[:3]:
-            lines.append(f"  - {loc}")
+            lines.append(f"  - {loc.get('name', str(loc))}")
 
     scores = insights.get("confidence_scores", [])
     if scores:

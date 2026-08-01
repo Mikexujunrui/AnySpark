@@ -162,7 +162,8 @@ def test_graph_insight_forgotten_and_foreshadow():
         "forgotten_characters": [{"name": "张三"}, {"name": "李四"}],
         "unresolved_foreshadows": [{"text": "那把钥匙到底是谁的？"}],
         "bridge_characters": [{"entity_name": "王五"}],
-        "underutilized_locations": ["地窖"],
+        # analytics.py 真实契约：underutilized_locations 是 {id, name} dict 列表
+        "underutilized_locations": [{"id": "loc1", "name": "地窖"}],
     })
     report = _build_graph_insight_report(kb, SimpleNamespace(characters=[_ent("张三")]))
     assert "遗忘角色" in report
@@ -170,6 +171,24 @@ def test_graph_insight_forgotten_and_foreshadow():
     assert "待回收伏笔" in report
     assert "桥接角色" in report
     assert "未使用地点" in report
+    assert "地窖" in report
+
+
+def test_graph_insight_underutilized_locations_dict_contract():
+    """Regression: analytics.py yields {id, name} dicts; the report must not
+    ``join`` them (TypeError: sequence item 0: expected str instance, dict
+    found) — user-reported crash in delegate_writing via graph insights."""
+    kb = _FakeKB({
+        "forgotten_characters": [],
+        "unresolved_foreshadows": [],
+        "bridge_characters": [],
+        "underutilized_locations": [{"id": "l1", "name": "公司门口"}, {"id": "l2", "name": "会议室"}],
+    })
+    report = _build_graph_insight_report(kb, SimpleNamespace(characters=[]))
+    assert "未使用地点" in report
+    assert "公司门口" in report
+    assert "会议室" in report
+    assert "l1" not in report  # id 不泄露
 
 
 def test_graph_insight_scope_character_excluded():

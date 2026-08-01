@@ -205,7 +205,8 @@ def _build_graph_insight_report(kb, scope) -> str:
     # Underutilized locations
     unused_locs = insights.get("underutilized_locations", [])
     if unused_locs:
-        lines.append(f"  📍 未使用地点: {', '.join(unused_locs[:3])}")
+        names = ", ".join(loc.get("name", "?") for loc in unused_locs[:3])
+        lines.append(f"  📍 未使用地点: {names}")
 
     if not lines:
         return ""
