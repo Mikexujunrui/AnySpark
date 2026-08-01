@@ -230,6 +230,7 @@ async def _loop_inner(
     handle: RunHandle,
 ) -> AsyncGenerator[LoopEvent, None]:
 
+    session_id = agent_config.session_id or agent_config.book_id or "default"
     messages = _prepare_initial_messages(user_message, agent_config, history_messages)
     # is_subagent: True when this agent was spawned by another agent (not by the user).
     # Sub-agents must NOT see the task tool to prevent recursive spawn chains
@@ -291,6 +292,17 @@ async def _loop_inner(
             handle.check_cancelled()
             state.advance_round()
 
+            # Messages sent while this run is busy are steering input for the
+            # active run. Consume them before the next LLM call instead of
+            # leaving the UI permanently stuck on "消息已排队".
+            queued_inputs = await run_state.drain_queued(session_id)
+            if queued_inputs:
+                _inject_queued_inputs(messages, queued_inputs)
+                yield LoopEvent(
+                    type="progress",
+                    data={"stage": f"已接收 {len(queued_inputs)} 条追加指令，正在调整当前任务..."},
+                )
+
             # ── Stage 0: proactive stale tool result pruning ──
             # Truncates old tool outputs to previews BEFORE compaction
             # is needed. Without this, read_chapter results accumulate
@@ -322,6 +334,7 @@ async def _loop_inner(
             response = None
             streamed_text = ""
             fatal_error = None
+            retries_before = state.metrics.llm_retries
             async for msg_type, data in _stream_llm_with_retry(
                 messages,
                 tool_list,
@@ -341,7 +354,9 @@ async def _loop_inner(
                     response, streamed_text = data
 
             if fatal_error is not None:
-                err_msg = f"LLM 错误（已重试{MAX_LLM_ERROR_RETRIES}次）: {str(fatal_error)[:150]}"
+                actual_retries = max(0, state.metrics.llm_retries - retries_before)
+                retry_note = f"已重试{actual_retries}次" if actual_retries else "未重试"
+                err_msg = f"LLM 错误（{retry_note}）: {str(fatal_error)[:150]}"
                 yield LoopEvent(type="error", data={"message": err_msg})
                 state.metrics.finish_reason = "llm_error"
                 # Deterministic terminal event (industry standard: every exit
@@ -415,6 +430,21 @@ async def _loop_inner(
                     state.add_part(TextPart(text=streamed_text))
 
                 final_text = (response.content or "").strip()
+
+                # Close the race where steering input arrives while the model
+                # is producing its terminal answer. Keep the same run alive.
+                await asyncio.sleep(0)
+                queued_inputs = await run_state.drain_queued(session_id)
+                if queued_inputs:
+                    assistant_text = response.content or streamed_text
+                    if assistant_text:
+                        messages.append({"role": "assistant", "content": assistant_text})
+                    _inject_queued_inputs(messages, queued_inputs)
+                    yield LoopEvent(
+                        type="progress",
+                        data={"stage": f"正在处理 {len(queued_inputs)} 条追加指令..."},
+                    )
+                    continue
 
                 # Check 1: fake_tool/fake_write hallucination — warning only,
                 # never interrupts the loop. Trust the LLM; if it genuinely
@@ -1355,6 +1385,19 @@ async def _process_tool_result(
                 state.chapter_write_completed = True
                 state.chapter_write_tool = tool_name
     else:
+        from .tool_meta import FULL_CHAPTER_GENERATION_TOOLS
+
+        if tool_name in FULL_CHAPTER_GENERATION_TOOLS:
+            yield LoopEvent(
+                type="writing_end",
+                data={
+                    "chapter_id": "",
+                    "chapter_title": "",
+                    "word_count": 0,
+                    "saved": False,
+                    "error": str(result)[:300] or "写作工具未返回可保存的正文。",
+                },
+            )
         result_str = _finalize_tool_result(result)
 
     if result_str != "":
@@ -1393,6 +1436,18 @@ def _append_user_hint(messages: list[dict], content: str) -> None:
     ``[系统提示]`` prefix. Some providers ignore non-leading ``role: system``
     messages, so using user turns keeps the instruction visible across backends."""
     messages.append({"role": "user", "content": content})
+
+
+def _inject_queued_inputs(messages: list[dict], queued_inputs) -> None:
+    """Inject queued user turns in order as explicit later corrections."""
+    for item in queued_inputs:
+        mode_note = f" 模式={item.mode}" if getattr(item, "mode", "") else ""
+        messages.append(
+            {
+                "role": "user",
+                "content": f"[用户在任务执行期间追加/修正的指令{mode_note}]\n{item.text}",
+            }
+        )
 
 
 def _collect_result_parts(tc: ToolCall, result, state: LoopState, messages: list[dict]) -> None:

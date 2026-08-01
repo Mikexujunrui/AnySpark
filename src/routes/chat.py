@@ -176,7 +176,7 @@ async def chat_with_agent(req: MessageRequest):
     if active_task_id:
         action, _ = classify_intervention(msg)
         if action != "chat_overlay":
-            return EventSourceResponse(_handle_intervention(msg, req, active_task_id, action))
+            return await _handle_intervention(msg, req, active_task_id, action)
 
     if msg == "/" or msg == "/help":
         return _slash_help(req)

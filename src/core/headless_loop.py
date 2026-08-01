@@ -206,6 +206,8 @@ async def run_agent_loop_headless(
     total_rounds = 0
     metrics_data = {}
 
+    loop_error = ""
+
     try:
         async for event in run_agent_loop(instruction, agent_config, history_messages):
             # Broadcast each event for online SSE relay
@@ -233,15 +235,8 @@ async def run_agent_loop_headless(
             elif event.type == "text" and not final_text:
                 final_text = event.data.get("content", "")
             elif event.type == "error":
-                final_text = event.data.get("message", "处理出错")
-                return HeadlessResult(
-                    success=False,
-                    text=final_text,
-                    session_id=session_id,
-                    rounds=total_rounds,
-                    error=final_text,
-                    metrics=metrics_data,
-                )
+                loop_error = event.data.get("message", "处理出错")
+                final_text = loop_error
 
     except asyncio.CancelledError:
         logger.info("Headless loop cancelled for session %s", session_id)
@@ -262,6 +257,26 @@ async def run_agent_loop_headless(
             error=str(e)[:300],
         )
 
+    # A "done" event with a non-success finish_reason (LLM error, empty
+    # response, token/round budget exhausted, incomplete task) must not be
+    # reported as success: Auto would otherwise run quality gates on prose
+    # that was never saved and mark the step as finished.
+    finish_reason = str(metrics_data.get("finish_reason", ""))
+    failure_reasons = {
+        "llm_error",
+        "llm_empty",
+        "abnormal_exit",
+        "token_budget_reached",
+        "round_limit_reached",
+        "task_incomplete_done",
+    }
+    success = not loop_error and bool(final_text.strip()) and finish_reason not in failure_reasons
+    if not success and not loop_error:
+        loop_error = (
+            f"Agent 未完成任务（finish_reason={finish_reason or 'missing'}）。"
+            "本步不会被标记为成功。"
+        )
+
     # Persist the turn so it appears in session history
     if final_text:
         _persist_headless_turn(
@@ -277,19 +292,21 @@ async def run_agent_loop_headless(
                 "book_id": book_id,
                 "session_id": session_id,
                 "source": source,
-                "stage": "completed",
+                "stage": "completed" if success else "failed",
                 "text_preview": final_text[:200],
                 "rounds": total_rounds,
+                "error": loop_error,
             },
             source="headless_loop",
         )
     )
 
     return HeadlessResult(
-        success=True,
+        success=success,
         text=final_text,
         session_id=session_id,
         rounds=total_rounds,
+        error=loop_error,
         metrics=metrics_data,
     )
 
@@ -327,7 +344,7 @@ def _persist_headless_turn(
         ts = datetime.now().strftime("%H:%M")
         from core.book_locks import book_lock
 
-        with book_lock(session_id):
+        with book_lock(book_id):
             history = json_store.load_messages(session_id)
             history.append(
                 {"role": "user", "text": user_text, "ts": ts, "mode": mode}
@@ -520,6 +537,9 @@ class TaskRunner:
                 result = None
                 try:
                     result = await self._execute_step(task_id, step)
+                    if result is None or result.get("success") is False or result.get("error"):
+                        error_detail = (result or {}).get("error") or "步骤未返回成功结果"
+                        raise RuntimeError(str(error_detail)[:300])
                     # Check if skip was requested during step execution
                     if self._skip_flags.pop(task_id, None):
                         self._queue.mark_step_completed(task_id, step.id, {"skipped": True, "reason": "用户跳过"})

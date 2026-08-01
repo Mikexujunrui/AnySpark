@@ -121,6 +121,9 @@ export default function MessageInput({
             setSlashIdx(0)
           }}
           onKeyDown={(e) => {
+            // IME Enter confirms the current Chinese/Japanese candidate; it
+            // must not send the message. keyCode 229 covers older WebViews.
+            if (e.nativeEvent.isComposing || e.keyCode === 229) return
             if (showSlash && slashItems.length > 0) {
               const menuEl: any = document.querySelector('[data-slash-menu]')
               if (menuEl && menuEl._slashNav) {
