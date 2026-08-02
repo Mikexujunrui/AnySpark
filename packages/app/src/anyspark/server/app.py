@@ -19,7 +19,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from anyspark.align import ManualEntry, ManualInjector, ManualStore, SignalCollector, SignalStore
+from anyspark.align import (
+    AGENCY_LEVELS,
+    AgencyStore,
+    BiasStore,
+    ManualEntry,
+    ManualInjector,
+    ManualStore,
+    SignalCollector,
+    SignalStore,
+    build_agency_block,
+    parse_agency_declaration,
+    temperature_for,
+)
 from anyspark.check import compile_rule, run_review
 from anyspark.core import Agent, Model, ToolRegistry
 from anyspark.explore import (
@@ -63,6 +75,7 @@ class ChatRequest(BaseModel):
     conversation_id: str | None = None
     system_prompt: str | None = None
     temperature: float = 0.7
+    agency_level: int | None = None  # 能动级别 0-4（覆盖当前档位；缺省用已存档位）
 
 
 class ToolEvent(BaseModel):
@@ -75,6 +88,7 @@ class ChatResponse(BaseModel):
     text: str
     turns: list[dict[str, Any]]
     events: list[ToolEvent]
+    agency_declared: int | None = None  # AI 声明的档位（用户点选确认）
 
 
 class ChapterOut(BaseModel):
@@ -138,6 +152,15 @@ class GraphExtractIn(BaseModel):
     text: str
 
 
+class AgencyIn(BaseModel):
+    level: int
+
+
+class BiasIn(BaseModel):
+    content: str
+    source: str = "ai"
+
+
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
@@ -167,6 +190,9 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     graph_verifier = GraphVerifier(graph)
     # token 预算 + 两阶段压缩（S8：长书上下文刚需）
     budget = TokenBudget(budget=12000, summarize=make_summarizer(model))
+    # 能动性协议（机制 2）+ AI 倾向档案（S9）
+    agency = AgencyStore(real_db)
+    bias = BiasStore(real_db)
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
@@ -181,19 +207,25 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         temperature: float,
         book_id: str = "main",
         on_delta: Any | None = None,
+        agency_level: int | None = None,
     ) -> Agent:
         registry = ToolRegistry()
         register_writing_tools(registry, chapters)
+        # 能动级别：显式传入 > 已存档位；温度映射（档位低=精确执行温度低）
+        if agency_level is None:
+            agency_level = agency.get_level(book_id)
+        eff_temp = temperature_for(agency_level) if temperature == 0.7 else temperature
         m: Model
         if on_delta is not None and isinstance(model, DeepSeekModel):
             # SSE 流式：真实 DeepSeek 流式传输 + delta 回调
-            m = DeepSeekModel(temperature=temperature, stream=True, on_delta=on_delta)
+            m = DeepSeekModel(temperature=eff_temp, stream=True, on_delta=on_delta)
         elif on_delta is not None:
             m = model  # 测试 fake：无逐字流，仅事件帧
-        elif temperature == 0.7:
-            m = model
+        elif isinstance(model, DeepSeekModel) and eff_temp != 0.7:
+            # 真实模型 + 能动性温度映射（档位低=精确执行温度低）
+            m = DeepSeekModel(temperature=eff_temp)
         else:
-            m = DeepSeekModel(temperature=temperature)
+            m = model  # 共享 model（测试注入或默认真实）；温度由构造决定
         # 对齐注入：说明书（项目级>全局级）追加进系统提示
         align_block = manual_injector.build_system_block(book_id)
         full_prompt = system_prompt
@@ -203,6 +235,14 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         graph_block = graph_injector.build_block(book_id)
         if graph_block:
             full_prompt = full_prompt + "\n\n" + graph_block
+        # 能动性注入：本轮档位（机制 2）
+        agency_block = build_agency_block(agency_level)
+        if agency_block:
+            full_prompt = full_prompt + "\n\n" + agency_block
+        # AI 倾向档案注入（双向黑盒解法）
+        bias_block = bias.render()
+        if bias_block:
+            full_prompt = full_prompt + "\n\n" + bias_block
         return Agent(
             model=m,
             registry=registry,
@@ -239,6 +279,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         agent = _make_agent(
             req.system_prompt or DEFAULT_SYSTEM,
             req.temperature,
+            agency_level=req.agency_level,
         )
         agent.events.on(
             "tool_call", lambda e: events.append(ToolEvent(type=e.type, payload=e.payload))
@@ -281,11 +322,14 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                     order = next((c.order_index for c in chs if c.title == title), len(chs))
                     background_tasks.add_task(_extract_chapter, "main", title, content, order)
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
+        # AI 档位声明解析（机制 2：AI 可声明，用户点选确认）
+        declared = parse_agency_declaration(turn.text)
         return ChatResponse(
             conversation_id=conv_id,
             text=turn.text,
             turns=turns_payload,
             events=events,
+            agency_declared=declared,
         )
 
     @app.post("/api/chat/stream")
@@ -321,6 +365,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                 req.system_prompt or DEFAULT_SYSTEM,
                 req.temperature,
                 on_delta=lambda c: events_queue.put(("text_delta", {"content": c})),
+                agency_level=req.agency_level,
             )
             for t in ("turn_start", "text", "tool_call", "tool_result", "done", "error"):
                 agent.events.on(t, on_event)
@@ -389,13 +434,16 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
     @app.post("/api/signals")
     def record_signal(req: SignalIn) -> dict[str, Any]:
-        """采集用户操作信号（接受/修改/删除/自定义等）。"""
+        """采集用户操作信号（接受/修改/删除/自定义等）；同时驱动能动性反馈调节。"""
         if req.kind == "accepted":
             sig = signal_collector.accepted(req.content, req.context)
+            agency.adjust(+1)  # 接受=升级（档位上限 4）
         elif req.kind == "deleted":
             sig = signal_collector.deleted(req.content, req.context)
+            agency.adjust(-1)  # 删除=降级（档位下限 0）
         elif req.kind == "rejected":
             sig = signal_collector.rejected(req.content, req.context)
+            agency.adjust(-1)  # 拒绝=降级
         elif req.kind == "custom":
             sig = signal_collector.custom(req.content, req.context)
         else:  # modified
@@ -507,6 +555,32 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         if card is None:
             raise HTTPException(status_code=404, detail="材料不存在")
         return card.to_dict()
+
+    @app.get("/api/agency", response_model=dict[str, object])
+    def get_agency() -> dict[str, object]:
+        """能动档位（机制 2）：当前级别 + 五级协议描述。"""
+        return {"level": agency.get_level(), "levels": AGENCY_LEVELS}
+
+    @app.post("/api/agency", response_model=dict[str, object])
+    def set_agency(req: AgencyIn) -> dict[str, object]:
+        """用户点选档位（一键修正，摩擦前置）。"""
+        level = agency.set_level(req.level)
+        return {"level": level, "levels": AGENCY_LEVELS}
+
+    @app.get("/api/bias", response_model=list[dict[str, Any]])
+    def list_bias() -> list[dict[str, Any]]:
+        """AI 倾向档案（双向黑盒解法）。"""
+        return bias.list()
+
+    @app.post("/api/bias", response_model=dict[str, Any])
+    def add_bias(req: BiasIn) -> dict[str, Any]:
+        """新增倾向自述（AI 声明或用户修正）。"""
+        return bias.add(req.content, req.source)
+
+    @app.delete("/api/bias/{bias_id}")
+    def delete_bias(bias_id: str) -> dict[str, bool]:
+        bias.delete(bias_id)
+        return {"ok": True}
 
     @app.get("/api/chapters", response_model=list[ChapterOut])
     def list_chapters() -> list[ChapterOut]:

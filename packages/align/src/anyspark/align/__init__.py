@@ -8,6 +8,14 @@ anyspark.align — 对齐系统包。
 - 注入优先级：项目级 > 全局级；项目级永远可覆盖全局
 """
 
+from .agency import (
+    AGENCY_LEVELS,
+    AgencyStore,
+    build_agency_block,
+    parse_agency_declaration,
+    temperature_for,
+)
+from .bias import BiasStore
 from .extract import PreferenceExtractor
 from .inject import ManualInjector, MemoryInjector
 from .manual import ManualEntry, ManualStore, render_manual
@@ -15,6 +23,9 @@ from .signals import Signal, SignalCollector, SignalStore
 from .summarize import MemoryStore, SceneMemory, SessionSummarizer
 
 __all__ = [
+    "AGENCY_LEVELS",
+    "AgencyStore",
+    "BiasStore",
     "ManualEntry",
     "ManualInjector",
     "ManualStore",
@@ -26,5 +37,8 @@ __all__ = [
     "Signal",
     "SignalCollector",
     "SignalStore",
+    "build_agency_block",
+    "parse_agency_declaration",
     "render_manual",
+    "temperature_for",
 ]

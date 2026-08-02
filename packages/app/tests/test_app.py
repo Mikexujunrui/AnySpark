@@ -156,6 +156,46 @@ def test_chat_stream_error_frame() -> None:
     assert "模型爆炸" in r.text
 
 
+def test_agency_api_and_injection() -> None:
+    """S9：能动档位 CRUD + chat 注入档位块（fake 模型无 AI 声明）。"""
+    client = _make_client()
+    # 默认档位 2
+    r = client.get("/api/agency")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["level"] == 2
+    assert len(body["levels"]) == 5
+    # 设置档位 0（只听写）并回读
+    r2 = client.post("/api/agency", json={"level": 0})
+    assert r2.json()["level"] == 0
+    # 越界钳制
+    assert client.post("/api/agency", json={"level": 99}).json()["level"] == 4
+
+
+def test_signal_adjusts_agency() -> None:
+    """S9：反馈自动调节——接受升级、拒绝降级。"""
+    client = _make_client()
+    client.post("/api/agency", json={"level": 2})
+    client.post("/api/signals", json={"kind": "accepted", "content": "这段很好"})
+    assert client.get("/api/agency").json()["level"] == 3
+    client.post("/api/signals", json={"kind": "rejected", "content": "这段不对"})
+    client.post("/api/signals", json={"kind": "deleted", "content": "删掉"})
+    assert client.get("/api/agency").json()["level"] == 1
+
+
+def test_bias_api_and_render() -> None:
+    """S9：AI 倾向档案 CRUD。"""
+    client = _make_client()
+    r = client.post("/api/bias", json={"content": "我这个模型写对话偏克制", "source": "ai"})
+    assert r.status_code == 200
+    bid = r.json()["id"]
+    entries = client.get("/api/bias").json()
+    assert len(entries) == 1
+    assert entries[0]["source"] == "ai"
+    client.delete(f"/api/bias/{bid}")
+    assert client.get("/api/bias").json() == []
+
+
 def test_chat_uses_same_conversation_for_continuation() -> None:
     client = _make_client()
     first = client.post("/api/chat", json={"message": "写第一章"}).json()
