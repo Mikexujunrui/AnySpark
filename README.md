@@ -9,12 +9,22 @@ v4 是一次**二次项目**——绿地独立建设，不复用旧代码（旧�
 ## 快速开始（开发环境）
 
 ```bash
-# 后端（需要 Python 3.11+ 与 uv）
-uv sync
-uv run python -m anyspark.server
+# 1. 配置真实模型（复制 .env.example 为 .env，填入 DeepSeek key）
+cp .env.example .env
 
-# 前端
-cd frontend && npm ci && npm run dev
+# 2. 一键启动（后端 8000 + 前端 5173，写作即对话）
+bash scripts/dev.sh
+# 或分开：
+uv sync && uv run anyspark-server   # 后端
+cd frontend && npm ci && npm run dev # 前端
+```
+
+打开 http://localhost:5173 进入创作台。
+
+## 总闸（全门禁）
+
+```bash
+uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 ```
 
 ## 文档导航（实现前必读）

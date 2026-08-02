@@ -15,6 +15,7 @@ dependencies = [
     "anyspark-explore",  # 工作区成员：探索引擎
     "anyspark-check",    # 工作区成员：检测网
     "anyspark-template", # 工作区成员：模式库+资料
+    "anyspark-desktop",  # 工作区成员：桌面壳
 ]
 
 [tool.uv.workspace]
@@ -29,6 +30,7 @@ anyspark-align = { workspace = true }
 anyspark-explore = { workspace = true }
 anyspark-check = { workspace = true }
 anyspark-template = { workspace = true }
+anyspark-desktop = { workspace = true }
 
 
 # 门禁工具版本（pin）
