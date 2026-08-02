@@ -244,7 +244,17 @@ def _format_chapter_result(
 
 
 def _requested_regular_chapter_index(args: dict, instruction: str = "") -> int | None:
-    """Resolve a requested regular chapter number from explicit args/text."""
+    """Resolve a requested regular chapter number from explicit args/text.
+
+    Priority:
+    1. Explicit ``chapter_index`` arg (the most reliable signal).
+    2. A "target-style" marker: ``写/续写/新增/新建/开始第N章`` — this is what
+       the agent means when asking to write chapter N.
+    3. The *last* ``第N章`` occurrence. Instructions frequently mention earlier
+       chapters for continuity ("承接第6章结尾，写第7章"); taking the first
+       match misreads such instructions as targeting chapter 6, tripping the
+       new-chapter protection guard and sending the agent into a retry loop.
+    """
     if bool(args.get("is_extra", False)):
         return None
     explicit = args.get("chapter_index")
@@ -265,8 +275,11 @@ def _requested_regular_chapter_index(args: dict, instruction: str = "") -> int |
     )
     # Only accept a real "第N章" marker. A loose first-number match mistakes
     # target word counts such as "写一章 2500 字" for chapter #2500.
-    match = re.search(r"第\s*(\d+)\s*章", text)
-    return int(match.group(1)) if match else None
+    target = re.search(r"(?:写|续写|开始写|新增|新建|接着写)\s*第\s*(\d+)\s*章", text)
+    if target:
+        return int(target.group(1))
+    matches = re.findall(r"第\s*(\d+)\s*章", text)
+    return int(matches[-1]) if matches else None
 
 
 def _guard_new_chapter_target(book_id: str, args: dict, instruction: str = "") -> dict | None:

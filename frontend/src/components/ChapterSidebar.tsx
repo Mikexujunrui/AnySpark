@@ -193,7 +193,7 @@ export default function ChapterSidebar({
                   )}
                 </div>
                 <div className="flex items-center gap-2 text-zinc-600 text-[10px] mt-0.5">
-                  <span className={`${isExtra ? 'text-violet-700' : 'text-zinc-700'} font-mono`}>#{isExtra ? `E${idx + 1}` : idx}</span>
+                  <span className={`${isExtra ? 'text-violet-700' : 'text-zinc-700'} font-mono`}>#{isExtra ? `E${idx + 1}` : idx + 1}</span>
                   <span>{(ch.content || '').replace(/\s/g, '').length || 0} 字</span>
                   <span className={`px-1 rounded font-mono ${
                     ch.version_label?.includes('.')
@@ -224,7 +224,6 @@ export default function ChapterSidebar({
                     </div>
                     <div className="ml-2 mt-0.5 space-y-0.5 border-l border-zinc-800/50 pl-2">
                       {volChapters.map(ch => {
-                        globalIdx++
                         return renderChapterButton(ch, globalIdx)
                       })}
                     </div>

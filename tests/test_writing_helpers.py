@@ -50,6 +50,23 @@ def test_chapter_index_no_match():
     assert _requested_regular_chapter_index({}, "随便写点") is None
 
 
+def test_chapter_index_target_style_wins_over_earlier_mention():
+    # "承接第6章结尾，写第7章" must target chapter 7, not the mentioned 6.
+    assert _requested_regular_chapter_index({}, "承接第6章结尾的剧情，写第7章的内容") == 7
+    assert _requested_regular_chapter_index({}, "看完第5章后，续写第6章") == 6
+
+
+def test_chapter_index_falls_back_to_last_mention():
+    # Without an explicit target marker, the last "第N章" is the intended target.
+    assert _requested_regular_chapter_index({}, "先核对第6章，再写第7章") == 7
+
+
+def test_chapter_index_target_style_only_matches_verb():
+    # "第6章已存在" style continuity references without a writing verb must not
+    # be taken as the requested target when a target marker exists later.
+    assert _requested_regular_chapter_index({}, "第6章已存在，写第7章") == 7
+
+
 # ── _build_scope_report ──
 
 
