@@ -1,0 +1,104 @@
+"""
+anyspark.align.extract — 提炼器（对话+操作 → 偏好条目）。
+
+设计（DESIGN 第 6 节）：提炼器把"对话 + 操作信号"提炼成偏好条目，
+进用户模型（承担对齐）。条目=自然语言短句 + 来源 + 置信度 + 活跃度 + 锁定。
+用真实 DeepSeek 提炼（模型无关：提示词与输出全为自然语言）。
+"""
+
+from __future__ import annotations
+
+import json
+import re
+from typing import Any
+
+from anyspark.core.types import Message
+
+from .manual import Activity, ManualEntry
+from .signals import Signal
+
+# 提炼提示模板（自然语言，模型无关）
+EXTRACT_PROMPT = """你是小说写作协作系统的偏好提炼器。从下面的"对话片段 + 用户操作信号"中，
+提炼出用户稳定、可复用的写作偏好条目。
+
+要求：
+1. 只提炼**稳定偏好**（重复出现/强烈表达），不要提炼一次性事实。
+2. 每条用一句明确无歧义的自然语言短句表达，能直接指导未来写作。
+3. 标注置信度（0-1，越高越确定）与活跃度（high/medium/low）。
+4. 若某条与用户已有偏好冲突，不要输出它（写"SKIP"）。
+
+输出格式（严格 JSON 数组，不要其它文字）：
+[{"content": "偏好短句", "confidence": 0.8, "activity": "high"}]
+
+对话与操作信号：
+"""
+
+
+class PreferenceExtractor:
+    """偏好提炼器：真实 LLM 提炼（模型无关，适配器注入）。"""
+
+    def __init__(self, model: object) -> None:
+        # model 实现 core.Model 协议（respond(messages, tools) -> ModelOutput）
+        self._model = model
+
+    def extract(
+        self, dialogue: list[Message], signals: list[Signal], max_items: int = 3
+    ) -> list[ManualEntry]:
+        """从对话+操作提炼偏好条目（过滤 SKIP 与非法项）。"""
+        signal_text = (
+            "\n".join(f"- [{s.kind}] {s.content}" for s in signals[:20]) or "（无操作信号）"
+        )
+        dialogue_text = (
+            "\n".join(f"{m.role}: {m.content[:200]}" for m in dialogue[-10:]) or "（无对话）"
+        )
+
+        prompt = EXTRACT_PROMPT + f"\n对话片段：\n{dialogue_text}\n\n操作信号：\n{signal_text}\n"
+        prompt += f"\n请提炼最多 {max_items} 条偏好，输出 JSON 数组。"
+
+        # 用真实模型（无工具）调用
+        output = self._model.respond(  # type: ignore[attr-defined]
+            [Message(role="system", content=prompt)],
+            [],
+        )
+        return self._parse(output.text)
+
+    def _parse(self, raw: str) -> list[ManualEntry]:
+        entries: list[ManualEntry] = []
+        for item in _parse_json_array(raw):
+            content = str(item.get("content", "")).strip()
+            if not content or content == "SKIP" or content.upper() == "SKIP":
+                continue
+            try:
+                conf = float(item.get("confidence", 0.5))
+            except (TypeError, ValueError):
+                conf = 0.5
+            conf = max(0.0, min(1.0, conf))
+            activity: Activity = (
+                item.get("activity", "medium")
+                if item.get("activity", "medium") in ("high", "medium", "low")
+                else "medium"
+            )
+            entries.append(
+                ManualEntry(content=content, source="auto", confidence=conf, activity=activity)
+            )
+        return entries
+
+
+def _parse_json_array(text: str) -> list[dict[str, Any]]:
+    """宽容解析模型输出的 JSON 数组（去除 ``` 围栏与前后文字）。"""
+    cleaned = text.strip()
+    # 去 ```json ... ``` 围栏
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1)
+    # 取第一个 [ 到最后一个 ]
+    start, end = cleaned.find("["), cleaned.rfind("]")
+    if start != -1 and end != -1 and end > start:
+        cleaned = cleaned[start : end + 1]
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, list):
+            return [d for d in data if isinstance(d, dict)]
+    except json.JSONDecodeError:
+        pass
+    return []
