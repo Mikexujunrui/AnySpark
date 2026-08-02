@@ -187,11 +187,21 @@
 | 属性 | 内容 |
 |------|------|
 | 层级 | AI 层支撑 |
-| 职责 | 统一多模型接入、请求限流、重试回退、Token 统计 |
+| 职责 | 统一多模型接入、请求限流、重试回退、Token 统计、**模型参数档位映射** |
 | 依赖 | 外部 LLM API（DeepSeek / OpenAI 兼容） |
 | 难度 | 中等 |
 | 状态 | ✅ 已实现 |
-| 实现 | `src/core/llm_client.py` |
+| 实现 | `src/core/llm_client.py`, `src/core/reasoning.py` |
+
+**思考强度档位映射（v3.4 按模型族定制）:**
+| 模型族 | 可用档位 | 原生参数 |
+|------|------|------|
+| DeepSeek | off/low/medium/high（3 档） | `reasoning_effort=low\|medium\|high` |
+| OpenAI o 系列 | off/minimal/low/medium/high（4 档） | `reasoning_effort=minimal\|low\|medium\|high` |
+| Anthropic | 预算式（off/low/medium/high） | `thinking.budget_tokens=2048/8192/16384` |
+| Gemini | 预算式（off/low/medium/high） | `thinkingConfig.thinkingBudget=1024/4096/8192` |
+
+统一强度标尺：`off / minimal / low / medium / high` 五档。用户选标尺档位后由 `core/reasoning.py` 按模型族就近换算到该族原生参数；模型族通过 `provider.type + 模型名关键词` 识别，并支持 `settings.json` 扩展自定义模型族档位。所有注入经 OpenAI SDK `extra_body`，被网关拒绝时由 `_provider_rejected_optional_params` 降级到 portable 参数集。
 
 ---
 

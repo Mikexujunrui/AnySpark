@@ -195,6 +195,7 @@ modules:
       - 请求限流与排队
       - 重试与回退策略
       - Token用量统计
+      - 模型参数档位映射（思考强度：统一五档标尺 off/minimal/low/medium/high → 按模型族换算原生参数）
     supported_models:
       - DeepSeek (v4-pro / v4-flash)
       - 任何 OpenAI 兼容 API
@@ -202,6 +203,14 @@ modules:
       - name: chat
         input: "{ model, messages, tools, stream }"
         output: "Stream<LLMChunk>"
+      - name: reasoning_effort_to_params
+        description: 将思考强度档位按模型族换算为 provider 原生请求参数
+        input: "{ provider_type, model, effort }"
+        output: "dict（注入 extra_body）"
+      - name: resolve_family_tiers
+        description: 返回指定模型族可用的思考强度档位列表
+        input: "{ provider_type, model }"
+        output: "list[str]"
       - name: getUsage
         input: "{ projectId, dateRange }"
         output: "TokenUsage"

@@ -21,6 +21,16 @@
 
 ## 追加记录
 
+### v18 — 2026-08-02: 思考强度模型族档位（按模型定制）
+- 变更类型: 重构
+- 涉及模块: reasoning, settings, llm_client, routes/settings, SettingsModal.tsx, tests/test_reasoning_effort
+- 描述: 固定 4 档思考强度重构为统一五档标尺（off/minimal/low/medium/high）+ 模型族档位表。DeepSeek 3 档、OpenAI o 系列 4 档、Anthropic/Gemini 预算式，支持 settings.json 扩展自定义模型族档位。前端档位按钮按当前模型族动态渲染。
+
+### v17 — 2026-08-02: 模型思考强度调节（Reasoning Effort）
+- 变更类型: 新增
+- 涉及模块: reasoning(新), llm_client, settings, routes/settings, SettingsModal.tsx, tests/test_reasoning_effort(新)
+- 描述: 新增模型参数档位抽象层。首个维度"思考强度"（off/low/medium/high），`core/reasoning.py` 映射到 OpenAI 兼容（reasoning_effort）/ Anthropic（thinking.budget_tokens）/ Gemini（thinkingConfig.thinkingBudget），统一经 OpenAI SDK extra_body 注入，同时作用于正文生成与 Agent 工具循环。网关拒绝时复用现有 portable 降级机制。
+
 ### v16 — 2026-07-24: v3.0.0 SQLite 重构 + 移除 Docker 依赖
 - 变更类型: 重构 + 清理
 - 涉及模块: sqlite_store(新), graph_store(弃用), config, errors, start.bat, start.ps1, start.sh, .github/workflows/ci.yml, .env.example, README, 使用说明书, 所有文档

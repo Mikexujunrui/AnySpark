@@ -214,6 +214,49 @@ Cancel 请求 → RunState.cancel → 设置 cancelled flag → 循环内 check 
 
 ## 变更记录
 
+### v3.4 - 2026-08-02: 思考强度模型族档位（按模型定制）
+
+- 变更类型: 重构
+- 涉及模块: reasoning, settings, llm_client, routes/settings, SettingsModal.tsx, tests/test_reasoning_effort
+- 描述: v3.3 的固定 4 档（off/low/medium/high）硬套所有模型，但不同模型族思考参数差异大。重构为**统一强度标尺 + 模型族档位表**：标尺固定为 5 档 `off/minimal/low/medium/high`，每个模型族声明自己支持的档位集合与原生参数映射，用户选标尺档位后按当前模型就近换算。内置模型族档位表（DeepSeek 3 档、OpenAI o 系列 4 档、Anthropic/Gemini 预算式），支持在 `settings.json` 扩展自定义模型族档位。映射函数新增返回该模型族可用档位列表，供前端渲染动态档位按钮。
+
+**核心设计:**
+- `EFFORT_TIERS` — 统一标尺 5 档
+- `MODEL_FAMILY_TIERS` — 模型族档位表：`deepseek: [low,medium,high]`、`openai_o: [minimal,low,medium,high]`、`anthropic: [budget]`、`gemini: [budget]`
+- `resolve_family_tiers(provider_type, model)` — 识别模型族并返回可用档位
+- `reasoning_effort_to_params(provider_type, model, effort)` — 按族换算，未知档位就近取最近档
+- 自定义: `AppSettings.custom_family_tiers`（settings.json 可扩展）
+
+### v3.3.2 - 2026-08-02: 修复 delegate_writing 章节号误解析导致 Agent 卡循环
+
+- 变更类型: 修复
+- 涉及模块: tools/impl/writing.py, tests/test_writing_helpers.py
+- 描述: Agent 写新章时指令常含连续性上下文（"承接第6章结尾，写第7章"），`_requested_regular_chapter_index` 用 `re.search` 取第一个"第N章"，误解析为 6 → `_guard_new_chapter_target` 判定"第6章已存在"拒绝 → Agent 反复重试形成死循环（实测日志 Round 8/9 连续 delegate_writing/finalize 被拒后 abnormal_exit）。修复：优先匹配目标型表述（"写/续写/开始写/新增/新建/接着写第N章"），无目标型时取最后一个"第N章"（连续性提及通常在前、目标在后），避免保护机制误判。
+
+### v3.3.1 - 2026-08-02: 修复章节序号零号错位
+
+- 变更类型: 修复
+- 涉及模块: ChapterSidebar.tsx
+- 描述: 章节侧边栏普通章节序号从 0 开始显示（`#0` 表示第一章），与系统其余部分的 1-based 约定（`#1` 表示第一章）冲突。Agent 参考前端序号时会把 `#0` 当作"第零章"，或数错章节数（N 章却显示 `#0..#N-1`），导致 `delegate_writing` 误报"第N章已存在"。修复：普通章节序号改为 `#N`（1-based，与 `_parse_chapter_index` 的解析一致），并移除卷内分组时的重复 `globalIdx++` 造成的卷内跳号（原卷内章节显示 `#1,#3,#5`）。
+
+### v3.3 - 2026-08-02: 模型思考强度调节（Reasoning Effort）
+
+- 变更类型: 新增
+- 涉及模块: reasoning(新), llm_client, settings, routes/settings, SettingsModal.tsx, tests/test_reasoning_effort(新)
+- 描述: 新增模型参数档位抽象层——首个落地维度为"思考强度"（reasoning effort）。用户只选择 4 档（off/low/medium/high），`core/reasoning.py` 映射为各 provider 原生参数（OpenAI 兼容 `reasoning_effort` / Anthropic `thinking.budget_tokens` / Gemini `thinkingConfig.thinkingBudget`），统一经 OpenAI SDK `extra_body` 注入。同时作用于正文生成（prose）与 Agent 工具循环两条调用通道。被网关拒绝时复用现有 `_provider_rejected_optional_params` + `_portable_completion_kwargs` 降级。
+
+**新增模块:**
+- `core/reasoning.py` — `reasoning_effort_to_params(provider_type, model, effort) -> dict` 档位→原始参数映射（模型名关键词识别推理模型，非推理模型不注入）
+- `tests/test_reasoning_effort.py` — 映射/降级/归一化测试
+
+**集成修改:**
+- `settings.py` — `GenerationSettings` 新增 `reasoning_effort` 字段，`normalized()` 校验四档
+- `llm_client.py` — `_prose_completion_kwargs` 与 `chat_with_tools*` 统一合并注入
+- `routes/settings.py` — `GenerationSettingsUpdate` 透传新字段
+- `SettingsModal.tsx` — generation tab 增加"思考强度"四档选择器
+
+---
+
 ### v2.6 - 2026-07-16: AI味扫描引擎 + 批量导入优化
 
 - 变更类型: 新增 + 修复 + 优化
