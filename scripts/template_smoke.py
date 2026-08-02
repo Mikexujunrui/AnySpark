@@ -1,10 +1,10 @@
-# -*- coding: utf-8 -*-
 """
 AnySpark v4 — 阶段 5 真实链路冒烟：资料消化（摘要卡）+ 模式库。
 
 运行：uv run python scripts/template_smoke.py
 需要：.env 配置 DEEPSEEK_API_KEY（真实 DeepSeek）
 """
+
 from __future__ import annotations
 
 import tempfile
