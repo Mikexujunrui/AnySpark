@@ -40,6 +40,7 @@ def main() -> int:
         "packages/explore",
         "packages/check",
         "packages/template",
+        "packages/graph",
         "scripts",
     ]
     failed = False
