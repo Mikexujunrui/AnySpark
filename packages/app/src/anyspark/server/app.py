@@ -25,6 +25,7 @@ from anyspark.explore import (
     run_exploration,
 )
 from anyspark.models.deepseek import DeepSeekModel
+from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.tools_writing import register_writing_tools
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import MaterialDigestor, MaterialStore, default_library
@@ -131,6 +132,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     - db_path: 默认 data/anyspark.db；测试可注入临时路径
     """
     load_dotenv(PROJECT_ROOT / ".env")
+    setup_logging()
 
     real_db = db_path or DB_PATH
     store = SqliteConversationStore(real_db)
@@ -165,10 +167,11 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     @app.get("/api/health")
     def health() -> dict[str, str]:
         name = getattr(model, "model_name", "unknown")
-        return {"status": "ok", "model": str(name)}
+        return {"status": "ok", "model": str(name), "log": log_path()}
 
     @app.post("/api/chat", response_model=ChatResponse)
     def chat(req: ChatRequest) -> ChatResponse:
+        logger.info("chat 请求: conv=%s len=%d", req.conversation_id or "(新)", len(req.message))
         events: list[ToolEvent] = []
         agent = _make_agent(
             req.system_prompt or DEFAULT_SYSTEM,
@@ -180,6 +183,12 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         agent.events.on(
             "tool_result", lambda e: events.append(ToolEvent(type=e.type, payload=e.payload))
         )
+        # 工具调用/结果写日志（排查用）
+        agent.events.on("tool_call", lambda e: logger.info("工具调用: %s", e.payload.get("name")))
+        agent.events.on(
+            "tool_result",
+            lambda e: logger.info("工具结果: %s ok=%s", e.payload.get("name"), e.payload.get("ok")),
+        )
 
         # 无会话时显式创建，保证 conversation_id 可回传（多轮续写）
         conv_id = req.conversation_id
@@ -187,10 +196,18 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             conv = agent.store.create()
             conv_id = conv.id
 
-        turn = agent.run(req.message, conv_id)
+        try:
+            turn = agent.run(req.message, conv_id)
+        except Exception as exc:  # 记录并返回 500
+            logger.exception("chat 执行异常: %s", exc)
+            raise HTTPException(status_code=500, detail=f"执行失败: {exc}") from exc
         if not turn.tool_calls and "达到最大工具迭代" in turn.text:
+            logger.warning("chat 达到最大工具迭代: conv=%s", conv_id)
             raise HTTPException(status_code=500, detail=turn.text)
 
+        logger.info(
+            "chat 完成: conv=%s 输出%d字 工具%d次", conv_id, len(turn.text), len(turn.tool_calls)
+        )
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
         return ChatResponse(
             conversation_id=conv_id,

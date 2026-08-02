@@ -1,84 +1,104 @@
 @echo off
 rem ============================================
-rem  AnySpark v4 - Windows Ò»¼üÆô¶¯
-rem  Ë«»÷±¾ÎÄ¼þ¼´¿É£ºÆðºó¶Ë + ÆðÇ°¶Ë + ¿ªä¯ÀÀÆ÷
+rem  AnySpark v4 - Windows ä¸€é”®å¯åŠ¨ï¼ˆåŒå‡»å³ç”¨ï¼‰
+rem  åŽç«¯ç›´æŽ¥ç”¨ .venv é‡Œçš„ç¨‹åºï¼Œä¸ä¾èµ– PATH çš„ uv
+rem  ç¼–ç ï¼šUTF-8 æ—  BOM + CRLFï¼ˆåŒ¹é…ç³»ç»Ÿä»£ç é¡µ 65001ï¼‰
 rem ============================================
+setlocal
 cd /d "%~dp0"
 
 echo.
 echo  ============================================
-echo    AnySpark v4  ´´×÷Ì¨Æô¶¯ÖÐ...
+echo    AnySpark v4  åˆ›ä½œå°å¯åŠ¨ä¸­...
 echo  ============================================
 echo.
 
-rem ---- 1. ¼ì²é .env£¨ÕæÊµÄ£ÐÍ key£©----
+rem ---- 0. é‡Šæ”¾æ®‹ç•™ç«¯å£ï¼ˆä¸Šæ¬¡æœªæ­£å¸¸å…³é—­æ—¶å¿…ç”¨ï¼‰----
+echo  [0/4] æ¸…ç†æ®‹ç•™è¿›ç¨‹...
+call :freeport 8000
+call :freeport 5173
+echo.
+
+rem ---- 1. æ£€æŸ¥ .envï¼ˆç¼ºåˆ™å¤åˆ¶æ¨¡æ¿ï¼‰----
 if not exist ".env" (
-    echo  [¾¯¸æ] Î´ÕÒµ½ .env ÅäÖÃÎÄ¼þ
-    echo  Çë¸´ÖÆ .env.example Îª .env ²¢ÌîÈë DeepSeek API Key
+    echo  [æç¤º] æœªæ‰¾åˆ° .env é…ç½®æ–‡ä»¶
+    echo  è¯·å¤åˆ¶ .env.example ä¸º .env å¹¶å¡«å…¥ DeepSeek API Key
     copy ".env.example" ".env" >nul
-    echo  ÒÑ×Ô¶¯´´½¨ .env Ä£°å£¬ÇëÓÃ¼ÇÊÂ±¾ÌîÈëÕæÊµ key ºóÖØÐÂÆô¶¯
+    echo  å·²è‡ªåŠ¨ç”Ÿæˆ .env æ¨¡æ¿ï¼Œè¯·æ‰‹åŠ¨å¡«å…¥çœŸå®ž key åŽé‡æ–°è¿è¡Œ
     echo.
 )
 
-rem ---- 2. °²×° Python ÒÀÀµ£¨Ê×´Î²Å°²×°£©----
-echo  [1/4] ¼ì²é Python ÒÀÀµ...
+rem ---- 2. åŽç«¯çŽ¯å¢ƒï¼ˆé¦–æ¬¡æ‰å®‰è£…ï¼‰----
+echo  [1/4] æ£€æŸ¥ Python çŽ¯å¢ƒ...
 if not exist ".venv" (
-    echo        Ê×´Î°²×° Python ÒÀÀµ£¬¿ÉÄÜÐèÒª¼¸·ÖÖÓ£¨ÐèÁªÍø£©...
+    echo       é¦–æ¬¡å®‰è£… Python ä¾èµ–ï¼ˆéœ€è¦è”ç½‘ + å·²è£… uvï¼‰...
+    echo       è‹¥æç¤º uv ä¸å­˜åœ¨ï¼Œè¯·å…ˆå®‰è£… uv: https://docs.astral.sh/uv/
     uv sync
     if errorlevel 1 (
         echo.
-        echo  [´íÎó] uv sync Ê§°Ü¡£¿ÉÄÜÔ­Òò£º
-        echo    1. Î´°²×° uv ^(https://docs.astral.sh/uv/^)
-        echo    2. ÍøÂç²»Í¨ / Ê×´ÎÏÂÔØ³¬Ê±
-        echo  ÐÞ¸´ºóÖØÐÂË«»÷±¾ÎÄ¼þ¼´¿É¡£
+        echo  [é”™è¯¯] ä¾èµ–å®‰è£…å¤±è´¥ï¼Œè¯·ç¡®è®¤å·²å®‰è£… uv ä¸”ç½‘ç»œé€šç•…
         pause
         exit /b 1
     )
 ) else (
-    echo        ÒÀÀµÒÑ¾ÍÐ÷£¨Ìø¹ý°²×°£©
+    echo       çŽ¯å¢ƒå·²å°±ç»ª
 )
 echo.
 
-rem ---- 3. °²×°Ç°¶ËÒÀÀµ£¨Ê×´Î£©----
-echo  [2/4] ¼ì²éÇ°¶ËÒÀÀµ...
+rem ---- 3. å‰ç«¯ä¾èµ–ï¼ˆé¦–æ¬¡æ‰å®‰è£…ï¼‰----
+echo  [2/4] æ£€æŸ¥å‰ç«¯ä¾èµ–...
 if not exist "frontend\node_modules" (
-    echo        Ê×´Î°²×°Ç°¶ËÒÀÀµ£¬¿ÉÄÜÐèÒª¼¸·ÖÖÓ...
+    echo       é¦–æ¬¡å®‰è£…å‰ç«¯ä¾èµ–ï¼ˆéœ€è¦ç½‘ç»œï¼‰...
     pushd frontend
     call npm ci
     popd
 )
-echo        Ç°¶ËÒÀÀµ¾ÍÐ÷
+echo       å‰ç«¯ä¾èµ–å°±ç»ª
 echo.
 
-rem ---- 4. Æô¶¯ºó¶Ë ----
-echo  [3/4] Æô¶¯ºó¶Ë 127.0.0.1:8000 ...
-pushd "%~dp0"
+rem ---- 4. å¯åŠ¨åŽç«¯ï¼ˆ.venv é‡Œçš„ç¨‹åºï¼‰----
+echo  [3/4] å¯åŠ¨åŽç«¯ 127.0.0.1:8000 ...
+echo        æ—¥å¿—æ–‡ä»¶: data\logs\anyspark.log
 
-start "AnySpark-Backend" cmd /k "uv run anyspark-server --port 8000"
+echo        æ—¥å¿—æ–‡ä»¶: data\logsnyspark.log
+if exist ".venv\Scripts\anyspark-server.exe" (
+    start "AnySpark-Backend" cmd /k "cd /d %~dp0 && .venv\Scripts\anyspark-server.exe --port 8000"
+) else (
+    echo  [é”™è¯¯] æœªæ‰¾åˆ° .venv\Scripts\anyspark-server.exeï¼Œè¯·åˆ é™¤ .venv åŽé‡æ–°è¿è¡Œ
+    pause
+    exit /b 1
+)
 
-popd
-
-rem ---- 5. Æô¶¯Ç°¶Ë ----
-echo  [4/4] Æô¶¯Ç°¶Ë localhost:5173 ...
+rem ---- 5. å¯åŠ¨å‰ç«¯ ----
+echo  [4/4] å¯åŠ¨å‰ç«¯ localhost:5173 ...
 pushd "%~dp0frontend"
-
 start "AnySpark-Frontend" cmd /k "npm run dev"
-
 popd
 
 echo.
-echo  ÕýÔÚµÈ´ý·þÎñ¾ÍÐ÷£¬ÉÔºó×Ô¶¯´ò¿ªä¯ÀÀÆ÷...
-echo  £¨Á½¸öºÚÉ«´°¿ÚÇëÎð¹Ø±Õ£¬¹Ø±Õ¼´ÍË³ö AnySpark£©
-"%SystemRoot%\System32\timeout.exe" /t 10 /nobreak >nul
+echo  æ­£åœ¨ç­‰å¾…ä¸¤ä¸ªæœåŠ¡å¯åŠ¨ï¼Œç¨åŽä¼šè‡ªåŠ¨æ‰“å¼€æµè§ˆå™¨...
+"%SystemRoot%\System32\timeout.exe" /t 10 /nobreak >nul
 
-rem ---- 6. ´ò¿ªä¯ÀÀÆ÷ ----
+rem ---- 6. æ‰“å¼€æµè§ˆå™¨ ----
 start "" "http://localhost:5173"
 
 echo.
-echo  ´´×÷Ì¨ÒÑÆô¶¯£¡
-echo  ä¯ÀÀÆ÷ÈôÎ´×Ô¶¯´ò¿ª£¬ÇëÊÖ¶¯·ÃÎÊ£º
+echo  åˆ›ä½œå°å·²å¯åŠ¨
+echo  è‹¥æµè§ˆå™¨æœªè‡ªåŠ¨æ‰“å¼€ï¼Œè¯·æ‰‹åŠ¨è®¿é—®:
 echo    http://localhost:5173
 echo.
-echo  ÍË³ö·½·¨£º¹Ø±ÕÁ½¸öÃüÁîÐÐ´°¿Ú
+echo  é€€å‡ºæ—¶è¯·å…³é—­æ‰€æœ‰é»‘è‰²çª—å£
 echo.
 pause
+exit /b 0
+
+rem ============================================
+rem  è¾…åŠ©ï¼šæŒ‰ç«¯å£å·æ€æŽ‰å ç”¨è¿›ç¨‹
+rem  ç”¨æ³•: call :freeport 8000
+rem ============================================
+:freeport
+for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%1 " ^| findstr "LISTENING"') do (
+    echo      ç«¯å£ %1 è¢« PID %%p å ç”¨ï¼Œå·²è‡ªåŠ¨æ¸…ç†
+    taskkill /F /PID %%p >nul 2>&1
+)
+goto :eof
