@@ -8,13 +8,14 @@ anyspark.server.app — FastAPI 后端（真实 API 层）。
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from anyspark.align import ManualEntry, ManualInjector, ManualStore, SignalCollector, SignalStore
 from anyspark.core import Agent, Model, ToolRegistry
 from anyspark.models.deepseek import DeepSeekModel
 from anyspark.server.tools_writing import register_writing_tools
@@ -65,6 +66,24 @@ class ChapterOut(BaseModel):
     updated_at: str
 
 
+class ManualEntryIn(BaseModel):
+    content: str
+    confidence: float = 0.5
+    scope: str = "project"
+
+
+class ManualEntryPatch(BaseModel):
+    content: str | None = None
+    locked: bool | None = None
+
+
+class SignalIn(BaseModel):
+    kind: str  # accepted|modified|deleted|rejected|custom
+    content: str
+    new_content: str | None = None
+    context: str = ""
+
+
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
@@ -79,6 +98,10 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     real_db = db_path or DB_PATH
     store = SqliteConversationStore(real_db)
     chapters = ChapterStore(real_db)
+    manual = ManualStore(real_db)
+    signals = SignalStore(real_db)
+    manual_injector = ManualInjector(manual)
+    signal_collector = SignalCollector(signals)
     model = model or DeepSeekModel()
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
@@ -89,11 +112,16 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         allow_headers=["*"],
     )
 
-    def _make_agent(system_prompt: str, temperature: float) -> Agent:
+    def _make_agent(system_prompt: str, temperature: float, book_id: str = "main") -> Agent:
         registry = ToolRegistry()
         register_writing_tools(registry, chapters)
         m = model if temperature == 0.7 else DeepSeekModel(temperature=temperature)
-        return Agent(model=m, registry=registry, store=store, system_prompt=system_prompt)
+        # 对齐注入：说明书（项目级>全局级）追加进系统提示
+        align_block = manual_injector.build_system_block(book_id)
+        full_prompt = system_prompt
+        if align_block:
+            full_prompt = full_prompt + "\n\n" + align_block
+        return Agent(model=m, registry=registry, store=store, system_prompt=full_prompt)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -131,6 +159,56 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             turns=turns_payload,
             events=events,
         )
+
+    @app.get("/api/manual", response_model=list[dict[str, Any]])
+    def list_manual(scope: str = "project") -> list[dict[str, Any]]:
+        """说明书条目（scope=project|global）。"""
+        entries = manual.list(scope, "main")  # type: ignore[arg-type]
+        return [e.to_dict() for e in entries]
+
+    @app.post("/api/manual", response_model=dict[str, Any])
+    def add_manual(req: ManualEntryIn) -> dict[str, Any]:
+        """新增说明书条目（用户手写）。"""
+        scope = cast(Literal["project", "global"], req.scope)
+        entry = ManualEntry(
+            content=req.content,
+            source="user",
+            confidence=req.confidence,
+            scope=scope,
+            book_id="main",
+        )
+        manual.add(entry)
+        return entry.to_dict()
+
+    @app.patch("/api/manual/{entry_id}", response_model=dict[str, Any])
+    def update_manual(entry_id: str, req: ManualEntryPatch) -> dict[str, Any]:
+        """修改条目内容（锁定条目拒绝，用户主权）。"""
+        entry = manual.update(entry_id, content=req.content)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="条目不存在")
+        if req.locked is not None:
+            entry = manual.set_locked(entry_id, req.locked) or entry
+        return entry.to_dict()
+
+    @app.delete("/api/manual/{entry_id}")
+    def delete_manual(entry_id: str) -> dict[str, bool]:
+        manual.delete(entry_id)
+        return {"ok": True}
+
+    @app.post("/api/signals")
+    def record_signal(req: SignalIn) -> dict[str, Any]:
+        """采集用户操作信号（接受/修改/删除/自定义等）。"""
+        if req.kind == "accepted":
+            sig = signal_collector.accepted(req.content, req.context)
+        elif req.kind == "deleted":
+            sig = signal_collector.deleted(req.content, req.context)
+        elif req.kind == "rejected":
+            sig = signal_collector.rejected(req.content, req.context)
+        elif req.kind == "custom":
+            sig = signal_collector.custom(req.content, req.context)
+        else:  # modified
+            sig = signal_collector.modified(req.content, req.new_content or "", req.context)
+        return sig.to_dict()
 
     @app.get("/api/chapters", response_model=list[ChapterOut])
     def list_chapters() -> list[ChapterOut]:

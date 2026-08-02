@@ -61,3 +61,35 @@ def test_chat_uses_same_conversation_for_continuation() -> None:
     second = client.post("/api/chat", json={"message": "续写", "conversation_id": conv_id})
     assert second.status_code == 200
     assert second.json()["conversation_id"] == conv_id
+
+
+def test_manual_crud_via_api() -> None:
+    client = _make_client()
+    # 新增
+    r = client.post("/api/manual", json={"content": "不要破折号", "confidence": 0.9})
+    assert r.status_code == 200
+    entry_id = r.json()["id"]
+    assert r.json()["source"] == "user"
+    # 列出
+    entries = client.get("/api/manual?scope=project").json()
+    assert any(e["id"] == entry_id for e in entries)
+    # 锁定
+    r2 = client.patch(f"/api/manual/{entry_id}", json={"locked": True})
+    assert r2.status_code == 200
+    assert r2.json()["locked"] is True
+    # 删除
+    r3 = client.delete(f"/api/manual/{entry_id}")
+    assert r3.status_code == 200
+    entries = client.get("/api/manual?scope=project").json()
+    assert not any(e["id"] == entry_id for e in entries)
+
+
+def test_record_signal_via_api() -> None:
+    client = _make_client()
+    r = client.post(
+        "/api/signals",
+        json={"kind": "modified", "content": "原文", "new_content": "新文", "context": "稿纸"},
+    )
+    assert r.status_code == 200
+    assert r.json()["kind"] == "modified"
+    assert r.json()["context"] == "稿纸"

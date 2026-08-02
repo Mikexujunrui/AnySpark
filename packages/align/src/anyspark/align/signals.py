@@ -99,7 +99,7 @@ class SignalStore:
     def recent(self, limit: int = 50, book_id: str = "main") -> list[Signal]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM signals WHERE book_id=? ORDER BY created_at DESC LIMIT ?",
+                "SELECT * FROM signals WHERE book_id=? ORDER BY rowid DESC LIMIT ?",
                 (book_id, limit),
             ).fetchall()
         return [_signal_from_row(r) for r in rows]
