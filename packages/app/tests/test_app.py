@@ -93,3 +93,22 @@ def test_record_signal_via_api() -> None:
     assert r.status_code == 200
     assert r.json()["kind"] == "modified"
     assert r.json()["context"] == "稿纸"
+
+
+def test_check_rule_via_api() -> None:
+    client = _make_client()
+    r = client.post(
+        "/api/check/rule",
+        json={"rule": "不要破折号", "text": "他——她走了。"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert body["hits"]  # 命中破折号
+
+
+def test_check_unknown_rule_via_api() -> None:
+    client = _make_client()
+    r = client.post("/api/check/rule", json={"rule": "今天天气不错", "text": "abc"})
+    assert r.status_code == 200
+    assert r.json()["ok"] is False

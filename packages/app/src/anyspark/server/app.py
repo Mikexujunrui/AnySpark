@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from anyspark.align import ManualEntry, ManualInjector, ManualStore, SignalCollector, SignalStore
+from anyspark.check import compile_rule, run_review
 from anyspark.core import Agent, Model, ToolRegistry
 from anyspark.explore import (
     DirectionCard,
@@ -101,6 +102,16 @@ class ExploreCardsIn(BaseModel):
 
 class ExploreArchiveIn(BaseModel):
     card: dict[str, object]
+
+
+class CheckRequest(BaseModel):
+    text: str
+    target: str = "当前章节"
+
+
+class RuleRequest(BaseModel):
+    rule: str
+    text: str
 
 
 # ---------------------------------------------------------------------------
@@ -272,6 +283,35 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     @app.get("/api/explore/archive", response_model=list[dict[str, object]])
     def explore_archive_list() -> list[dict[str, object]]:
         return archive.directions()
+
+    @app.post("/api/check", response_model=dict[str, object])
+    def check_text_route(req: CheckRequest) -> dict[str, object]:
+        """多检测者审读正文（骨架检测项，并行）。"""
+        report = run_review(model, req.target, req.text)
+        return {
+            "target": report.target,
+            "hard_count": report.hard_count,
+            "findings": [
+                {
+                    "category": f.category,
+                    "severity": f.severity,
+                    "message": f.message,
+                    "evidence": f.evidence,
+                    "suggestion": f.suggestion,
+                    "source": f.source,
+                }
+                for f in report.findings
+            ],
+        }
+
+    @app.post("/api/check/rule", response_model=dict[str, object])
+    def check_rule_route(req: RuleRequest) -> dict[str, object]:
+        """轻量规则编译器：用户自然语言规则 → 检测命中。"""
+        compiled = compile_rule(req.rule)
+        if compiled is None:
+            return {"ok": False, "description": "未能识别的规则", "hits": []}
+        hits = compiled.checker(req.text)
+        return {"ok": True, "description": compiled.description, "hits": hits}
 
     @app.get("/api/chapters", response_model=list[ChapterOut])
     def list_chapters() -> list[ChapterOut]:

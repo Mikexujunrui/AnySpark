@@ -7,6 +7,7 @@ members = [
     "anyspark",
     "anyspark-align",
     "anyspark-app",
+    "anyspark-check",
     "anyspark-core",
     "anyspark-explore",
 ]
@@ -49,6 +50,7 @@ source = { virtual = "." }
 dependencies = [
     { name = "anyspark-align" },
     { name = "anyspark-app" },
+    { name = "anyspark-check" },
     { name = "anyspark-core" },
     { name = "anyspark-explore" },
 ]
@@ -64,6 +66,7 @@ dev = [
 requires-dist = [
     { name = "anyspark-align", editable = "packages/align" },
     { name = "anyspark-app", editable = "packages/app" },
+    { name = "anyspark-check", editable = "packages/check" },
     { name = "anyspark-core", editable = "packages/core" },
     { name = "anyspark-explore", editable = "packages/explore" },
 ]
@@ -111,6 +114,21 @@ requires-dist = [
     { name = "pydantic", specifier = "==2.13.4" },
     { name = "python-dotenv", specifier = "==1.1.1" },
     { name = "uvicorn", specifier = "==0.52.1" },
+]
+
+[[package]]
+name = "anyspark-check"
+version = "0.0.1"
+source = { editable = "packages/check" }
+dependencies = [
+    { name = "anyspark-core" },
+    { name = "openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyspark-core", editable = "packages/core" },
+    { name = "openai", specifier = "==2.52.0" },
 ]
 
 [[package]]
