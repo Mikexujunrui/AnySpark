@@ -17,6 +17,12 @@ from pydantic import BaseModel, Field
 
 from anyspark.align import ManualEntry, ManualInjector, ManualStore, SignalCollector, SignalStore
 from anyspark.core import Agent, Model, ToolRegistry
+from anyspark.explore import (
+    DirectionCard,
+    IntentUnderstander,
+    ProjectArchive,
+    run_exploration,
+)
 from anyspark.models.deepseek import DeepSeekModel
 from anyspark.server.tools_writing import register_writing_tools
 from anyspark.store import ChapterStore, SqliteConversationStore
@@ -84,6 +90,19 @@ class SignalIn(BaseModel):
     context: str = ""
 
 
+class ExploreIntentIn(BaseModel):
+    seed: str
+
+
+class ExploreCardsIn(BaseModel):
+    seed: str
+    intent_confirmed: dict[str, object]
+
+
+class ExploreArchiveIn(BaseModel):
+    card: dict[str, object]
+
+
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
@@ -100,6 +119,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     chapters = ChapterStore(real_db)
     manual = ManualStore(real_db)
     signals = SignalStore(real_db)
+    archive = ProjectArchive(real_db)
     manual_injector = ManualInjector(manual)
     signal_collector = SignalCollector(signals)
     model = model or DeepSeekModel()
@@ -209,6 +229,49 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         else:  # modified
             sig = signal_collector.modified(req.content, req.new_content or "", req.context)
         return sig.to_dict()
+
+    @app.post("/api/explore/intent", response_model=dict[str, object])
+    def explore_intent(req: ExploreIntentIn) -> dict[str, object]:
+        """种子 → 概念卡 + 关键歧义点（意图理解）。"""
+        understander = IntentUnderstander(model)
+        return understander.understand(req.seed)
+
+    @app.post("/api/explore/cards", response_model=list[dict[str, object]])
+    def explore_cards(req: ExploreCardsIn) -> list[dict[str, object]]:
+        """确认后的意图 → 方向卡 ×4（并行探索，三来源混合）。"""
+        constraints = archive.constraints("main")
+        cards = run_exploration(
+            model,
+            req.seed,
+            req.intent_confirmed,
+            constraints,
+            n_explorers=4,
+        )
+        return [c.to_dict() for c in cards]
+
+    @app.post("/api/explore/archive", response_model=dict[str, object])
+    def explore_archive(req: ExploreArchiveIn) -> dict[str, object]:
+        """固化选中方向进项目档案。"""
+        c = req.card
+        src: Literal["template", "grow", "user"]
+        if c.get("source") == "grow":
+            src = "grow"
+        elif c.get("source") == "user":
+            src = "user"
+        else:
+            src = "template"
+        card = DirectionCard(
+            title=str(c.get("title", "未命名方向")),
+            summary=str(c.get("summary", "")),
+            dimension=str(c.get("dimension", "情节驱动")),
+            source=src,
+            term=str(c.get("term", "")),
+        )
+        return archive.archive_direction(card)
+
+    @app.get("/api/explore/archive", response_model=list[dict[str, object]])
+    def explore_archive_list() -> list[dict[str, object]]:
+        return archive.directions()
 
     @app.get("/api/chapters", response_model=list[ChapterOut])
     def list_chapters() -> list[ChapterOut]:

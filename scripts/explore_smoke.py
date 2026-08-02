@@ -1,10 +1,10 @@
-# -*- coding: utf-8 -*-
 """
 AnySpark v4 — 阶段 3 真实链路冒烟：种子→意图确认→并行探索×4→方向卡→固化。
 
 运行：uv run python scripts/explore_smoke.py
 需要：.env 配置 DEEPSEEK_API_KEY（真实 DeepSeek）
 """
+
 from __future__ import annotations
 
 import tempfile
@@ -13,8 +13,6 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 from anyspark.explore import (
-    DirectionCard,
-    ExplorationStrategy,
     IntentUnderstander,
     ProjectArchive,
     run_exploration,
@@ -42,11 +40,6 @@ def main() -> None:
         archive.add_constraint("陈渡的过去在雾城", "main")
         constraints = archive.constraints()
 
-        strategy = ExplorationStrategy(
-            seed=seed,
-            intent_confirmed=concept,
-            constraints=constraints,
-        )
         cards = run_exploration(model, seed, concept, constraints, n_explorers=4)
 
         for i, c in enumerate(cards):
