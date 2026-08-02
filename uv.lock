@@ -8,6 +8,7 @@ members = [
     "anyspark-align",
     "anyspark-app",
     "anyspark-core",
+    "anyspark-explore",
 ]
 
 [[package]]
@@ -49,6 +50,7 @@ dependencies = [
     { name = "anyspark-align" },
     { name = "anyspark-app" },
     { name = "anyspark-core" },
+    { name = "anyspark-explore" },
 ]
 
 [package.dev-dependencies]
@@ -63,6 +65,7 @@ requires-dist = [
     { name = "anyspark-align", editable = "packages/align" },
     { name = "anyspark-app", editable = "packages/app" },
     { name = "anyspark-core", editable = "packages/core" },
+    { name = "anyspark-explore", editable = "packages/explore" },
 ]
 
 [package.metadata.requires-dev]
@@ -114,6 +117,21 @@ requires-dist = [
 name = "anyspark-core"
 version = "0.0.1"
 source = { editable = "packages/core" }
+
+[[package]]
+name = "anyspark-explore"
+version = "0.0.1"
+source = { editable = "packages/explore" }
+dependencies = [
+    { name = "anyspark-core" },
+    { name = "openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyspark-core", editable = "packages/core" },
+    { name = "openai", specifier = "==2.52.0" },
+]
 
 [[package]]
 name = "certifi"

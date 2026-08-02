@@ -9,9 +9,10 @@ version = "0.0.1"
 description = "AnySpark v4 创作引擎（workspace 根项目）"
 requires-python = ">=3.11"
 dependencies = [
-    "anyspark-core",  # 工作区成员（editable），版本由成员包自身约束
-    "anyspark-app",   # 工作区成员：真实模型接入 + 后端 API
-    "anyspark-align", # 工作区成员：对齐系统
+    "anyspark-core",   # 工作区成员（editable），版本由成员包自身约束
+    "anyspark-app",    # 工作区成员：真实模型接入 + 后端 API
+    "anyspark-align",  # 工作区成员：对齐系统
+    "anyspark-explore",# 工作区成员：探索引擎
 ]
 
 [tool.uv.workspace]
@@ -23,6 +24,7 @@ members = [
 anyspark-core = { workspace = true }
 anyspark-app = { workspace = true }
 anyspark-align = { workspace = true }
+anyspark-explore = { workspace = true }
 
 
 # 门禁工具版本（pin）
@@ -43,6 +45,7 @@ src = [
     "packages/core",
     "packages/app",
     "packages/align",
+    "packages/explore",
     "scripts",
 ]
 
@@ -69,14 +72,16 @@ files = [
     "packages/core",
     "packages/app",
     "packages/align",
+    "packages/explore",
 ]
 mypy_path = [
     "packages/core/src",
     "packages/app/src",
     "packages/align/src",
+    "packages/explore/src",
 ]
 explicit_package_bases = true
 
 [tool.pytest.ini_options]
-testpaths = ["packages/core/tests", "packages/app/tests", "packages/align/tests"]
+testpaths = ["packages/core/tests", "packages/app/tests", "packages/align/tests", "packages/explore/tests"]
 addopts = "-q"
