@@ -8,13 +8,15 @@ from httpx import Timeout
 from openai import OpenAI
 from pydantic import BaseModel
 
-from core.llm_client import MODELS, reload_clients
+from core.llm_client import MODELS, available_effort_tiers_for_task, reload_clients
 from core.llm_client import get_mode as _llm_get_mode
 from core.model_discovery import ModelDiscoveryError, discover_models, provider_base_url
+from core.reasoning import EFFORT_TIERS
 from core.settings import (
     TASK_TYPES,
     VALID_MODES,
     VALID_PROVIDER_TYPES,
+    AppSettings,
     BookOverrides,
     GenerationSettings,
     ModelSlot,
@@ -26,6 +28,33 @@ from core.settings import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["settings"])
+
+# Display labels for the unified effort scale (frontend renders these).
+EFFORT_TIER_LABELS = {
+    "off": {"label": "关闭", "hint": "不注入思考参数，最快"},
+    "minimal": {"label": "极简", "hint": "少量思考，最快可用档"},
+    "low": {"label": "轻量", "hint": "快，浅层推理"},
+    "medium": {"label": "标准", "hint": "默认档位"},
+    "high": {"label": "深度", "hint": "慢，深度推理"},
+}
+
+
+def reasoning_tier_meta(settings: AppSettings) -> dict:
+    """Return effort-tier metadata for the settings panel.
+
+    ``scale`` lists all five scale rungs with display labels; ``families`` maps
+    task labels to the tiers available for that model family so the UI can
+    highlight which rungs the current model actually supports.
+    """
+    scale = [{"key": tier, **EFFORT_TIER_LABELS.get(tier, {"label": tier, "hint": ""})} for tier in EFFORT_TIERS]
+    family_meta = {}
+    for task in ("writing", "planning", "extraction", "editing", "general", "research"):
+        family_meta[task] = available_effort_tiers_for_task(task)
+    return {
+        "scale": scale,
+        "families": family_meta,
+        "custom_count": len(settings.custom_family_tiers or {}),
+    }
 
 
 # ── Request models ──────────────────────────────────────────────────────────
@@ -77,7 +106,7 @@ class GenerationSettingsUpdate(BaseModel):
     frequency_penalty: float = 0.15
     presence_penalty: float = 0.0
     max_output_tokens: int = 65536
-
+    reasoning_effort: str = "medium"
 
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
@@ -91,6 +120,7 @@ def get_current_settings():
     d["valid_modes"] = list(VALID_MODES)
     d["valid_provider_types"] = list(VALID_PROVIDER_TYPES)
     d["task_types"] = list(TASK_TYPES)
+    d["effort_tiers"] = reasoning_tier_meta(s)
     return d
 
 
@@ -443,6 +473,7 @@ def get_effective_settings(book_id: str):
     d["valid_modes"] = list(VALID_MODES)
     d["valid_provider_types"] = list(VALID_PROVIDER_TYPES)
     d["task_types"] = list(TASK_TYPES)
+    d["effort_tiers"] = reasoning_tier_meta(effective)
 
     # Include info about whether overrides are active
     original_override = s.get_book_override(book_id)

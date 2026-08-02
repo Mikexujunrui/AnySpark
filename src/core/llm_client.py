@@ -17,6 +17,7 @@ from openai import OpenAI, Stream
 from openai.types.chat import ChatCompletionChunk, ChatCompletionMessageParam
 
 from .config import config
+from .reasoning import family_tiers, reasoning_effort_to_params
 from .retry import calculate_delay, is_connection_error, is_context_overflow, is_retryable, with_retry
 from .settings import AppSettings
 
@@ -298,6 +299,60 @@ def _portable_completion_kwargs(kwargs: dict) -> dict:
     return portable
 
 
+def _provider_type(provider_id: str) -> str:
+    """Return the provider type for a provider id (fallback 'openai')."""
+    try:
+        from .settings import get_settings
+
+        provider = get_settings().get_provider(provider_id)
+        return provider.type if provider else "openai"
+    except (AttributeError, KeyError, RuntimeError):
+        return "openai"
+
+
+def _custom_family_tiers() -> dict:
+    """Return user-defined reasoning-effort family tier configs."""
+    try:
+        return _settings().custom_family_tiers or {}
+    except (AttributeError, TypeError, ValueError):
+        return {}
+
+
+def _apply_reasoning_params(kwargs: dict, provider_id: str, model: str) -> dict:
+    """Merge reasoning-effort tier params into the request kwargs.
+
+    Applies to both prose and Agent tool-calling requests. Returns a new dict
+    with the ``extra_body`` merged (or the params spread directly) so reasoning
+    settings and sampling controls coexist; gateways that reject the payload
+    are downgraded by the existing portable-kwargs fallback.
+    """
+    try:
+        effort = _settings().generation.normalized().reasoning_effort
+    except (AttributeError, TypeError, ValueError):
+        effort = "medium"
+    params = reasoning_effort_to_params(
+        _provider_type(provider_id), model, effort, custom=_custom_family_tiers()
+    )
+    if not params:
+        return kwargs
+    merged = dict(kwargs)
+    extra_body = params.pop("extra_body", None)
+    if extra_body:
+        merged["extra_body"] = {**merged.get("extra_body", {}), **extra_body}
+    merged.update(params)
+    return merged
+
+
+def available_effort_tiers_for_task(task: str) -> list[str]:
+    """Return the reasoning tiers available for the model slot of a task.
+
+    Used by the settings API to render dynamic effort buttons matching the
+    model family currently assigned to the active slot.
+    """
+    provider_id, model = _resolve(task)
+    return family_tiers(_provider_type(provider_id), model, custom=_custom_family_tiers())
+
+
 def chat(prompt: str, system: str = "", temperature: float = 0.3, task: str = "general") -> str:
     """Sync chat with retry on transient connection errors."""
     last_error = None
@@ -310,6 +365,7 @@ def chat(prompt: str, system: str = "", temperature: float = 0.3, task: str = "g
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
             kwargs = _prose_completion_kwargs(task, temperature)
+            kwargs = _apply_reasoning_params(kwargs, provider_id, model)
             try:
                 response = client.chat.completions.create(
                     model=model,
@@ -359,6 +415,7 @@ def chat_stream(
                 messages.append({"role": "system", "content": system})
             messages.append({"role": "user", "content": prompt})
             kwargs = _prose_completion_kwargs(task, temperature)
+            kwargs = _apply_reasoning_params(kwargs, provider_id, model)
             try:
                 stream: Stream[ChatCompletionChunk] = client.chat.completions.create(
                     model=model,
@@ -442,6 +499,7 @@ def chat_with_tools(
         "messages": messages,
         "temperature": temperature,
     }
+    kwargs = _apply_reasoning_params(kwargs, provider_id, model)
     if tools:
         kwargs["tools"] = [{"type": "function", "function": t} for t in tools]
         kwargs["tool_choice"] = "auto"
@@ -488,6 +546,7 @@ def chat_with_tools_stream(
         "temperature": temperature,
         "stream": True,
     }
+    kwargs = _apply_reasoning_params(kwargs, provider_id, model)
     if tools:
         kwargs["tools"] = [{"type": "function", "function": t} for t in tools]
         kwargs["tool_choice"] = "auto"

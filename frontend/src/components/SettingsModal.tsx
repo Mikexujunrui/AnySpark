@@ -55,12 +55,14 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
 
   // Custom map
   const [customMap, setCustomMap] = useState({})
+  const [effortMeta, setEffortMeta] = useState<{ scale: any[]; families: Record<string, string[]> } | null>(null)
   const [generationForm, setGenerationForm] = useState({
     temperature: 0.7,
     top_p: 0.95,
     frequency_penalty: 0.15,
     presence_penalty: 0,
     max_output_tokens: 65536,
+    reasoning_effort: 'medium',
   })
 
   // Book override state
@@ -81,12 +83,14 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
       const data = await res.json()
       setSettings(data)
       setCustomMap(data.custom_map || {})
+      setEffortMeta(data.effort_tiers || null)
       setGenerationForm(data.generation || {
         temperature: 0.7,
         top_p: 0.95,
         frequency_penalty: 0.15,
         presence_penalty: 0,
         max_output_tokens: 65536,
+        reasoning_effort: 'medium',
       })
       setLoading(false)
     } catch (e) {
@@ -680,6 +684,46 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                 <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
                   Agent 的工具选择仍使用稳定参数，因此提高创造性不会让工具调用更容易“打架”。
                   不同模型对参数的敏感程度不同，建议小幅调整后用同一段提示词对比。
+                </p>
+              </div>
+
+              {/* Reasoning effort tier */}
+              <div className="rounded-xl border border-zinc-800 p-4">
+                <div className="mb-2 flex items-center justify-between">
+                  <label className="text-xs font-medium text-zinc-300">思考强度</label>
+                  <span className="text-[10px] text-zinc-500">
+                    模型生成前思考的深度，影响正文与 Agent 决策
+                  </span>
+                </div>
+                {(() => {
+                  const scale = effortMeta?.scale || []
+                  const writingTiers = new Set(effortMeta?.families?.writing || ['off', 'low', 'medium', 'high'])
+                  return (
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {scale.map((opt: any) => {
+                        const supported = writingTiers.has(opt.key)
+                        return (
+                          <button
+                            key={opt.key}
+                            title={`${opt.hint || ''}${supported ? '' : '（当前写作模型不支持该档位）'}`}
+                            onClick={() => setGenerationForm(f => ({ ...f, reasoning_effort: opt.key }))}
+                            className={`rounded-lg border px-2 py-1.5 text-[11px] transition-colors ${
+                              generationForm.reasoning_effort === opt.key
+                                ? 'border-sky-500 bg-sky-950/40 text-sky-300'
+                                : supported
+                                  ? 'border-zinc-700 bg-zinc-800 text-zinc-500 hover:text-zinc-300'
+                                  : 'border-zinc-800 bg-zinc-900/40 text-zinc-700 cursor-not-allowed opacity-60'
+                            }`}
+                          >
+                            {opt.label}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )
+                })()}
+                <p className="mt-1 text-[10px] text-zinc-600">
+                  不同模型支持的档位不同（DeepSeek 3 档、o 系列 4 档、Claude/Gemini 预算式）。不支持当前写作模型的档位已置灰，选择后仍会就近映射到最近档位。
                 </p>
               </div>
 

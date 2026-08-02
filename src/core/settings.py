@@ -63,8 +63,14 @@ class GenerationSettings:
     frequency_penalty: float = 0.15
     presence_penalty: float = 0.0
     max_output_tokens: int = 65536
+    # Model "thinking strength" tier: off | low | medium | high.
+    # Applied to both prose generation and the Agent tool loop via
+    # core.reasoning.reasoning_effort_to_params.
+    reasoning_effort: str = "medium"
 
     def normalized(self) -> "GenerationSettings":
+        from .reasoning import normalize_reasoning_effort
+
         return GenerationSettings(
             temperature=max(0.0, min(float(self.temperature), 2.0)),
             top_p=max(0.01, min(float(self.top_p), 1.0)),
@@ -74,6 +80,7 @@ class GenerationSettings:
             # gateways before billing. 65k is still generous for long prose
             # while remaining portable across current providers.
             max_output_tokens=max(512, min(int(self.max_output_tokens), 65536)),
+            reasoning_effort=normalize_reasoning_effort(self.reasoning_effort),
         )
 
 
@@ -119,6 +126,7 @@ class AppSettings:
     generation: GenerationSettings = field(default_factory=GenerationSettings)
     update_check_enabled: bool = True  # whether to check GitHub for new releases
     memory_enabled: bool = True  # global toggle for the memory system (project + preferences)
+    custom_family_tiers: dict = field(default_factory=dict)  # {familyName: tierConfig} for reasoning effort
 
     # ── helpers ──
 
@@ -157,6 +165,7 @@ class AppSettings:
             generation=self.generation,
             update_check_enabled=self.update_check_enabled,
             memory_enabled=self.memory_enabled,
+            custom_family_tiers=dict(self.custom_family_tiers),
         )
         return effective
 
@@ -200,6 +209,7 @@ class AppSettings:
             generation=generation,
             update_check_enabled=d.get("update_check_enabled", True),
             memory_enabled=d.get("memory_enabled", True),
+            custom_family_tiers=d.get("custom_family_tiers", {}) or {},
         )
 
 
