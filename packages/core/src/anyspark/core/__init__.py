@@ -15,7 +15,6 @@ from .protocol import (
     ToolSpec,
     backfill_content_tool_result,
     execute,
-    parse_tool_calls,
 )
 from .storage import Conversation, ConversationStore, InMemoryConversationStore
 from .tools import (
@@ -23,7 +22,7 @@ from .tools import (
     echo_implementer,
     register_builtins,
 )
-from .types import Message, ToolCall, Turn
+from .types import Message, ModelOutput, ToolCall, Turn
 
 __all__ = [
     "GENERIC_EVENT_TYPES",
@@ -36,6 +35,7 @@ __all__ = [
     "InMemoryConversationStore",
     "Message",
     "Model",
+    "ModelOutput",
     "ParamSpec",
     "ToolCall",
     "ToolRegistry",
@@ -46,6 +46,5 @@ __all__ = [
     "backfill_content_tool_result",
     "echo_implementer",
     "execute",
-    "parse_tool_calls",
     "register_builtins",
 ]

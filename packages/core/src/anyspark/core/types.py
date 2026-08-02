@@ -54,3 +54,15 @@ class Turn:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_results: list[ToolResult] = field(default_factory=list)
+
+
+@dataclass
+class ModelOutput:
+    """模型一次响应的结构化结果：文本 + 请求的工具调用（模型无关）。
+
+    core 定义此结构，任何真实模型适配器（如 anyspark-app 的 DeepSeekModel）
+    把自家 API 的响应翻译成此结构返回给 Agent 循环。
+    """
+
+    text: str = ""
+    tool_calls: list[ToolCall] = field(default_factory=list)

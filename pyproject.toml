@@ -10,6 +10,7 @@ description = "AnySpark v4 创作引擎（workspace 根项目）"
 requires-python = ">=3.11"
 dependencies = [
     "anyspark-core",  # 工作区成员（editable），版本由成员包自身约束
+    "anyspark-app",   # 工作区成员：真实模型接入 + 后端 API
 ]
 
 [tool.uv.workspace]
@@ -19,6 +20,7 @@ members = [
 
 [tool.uv.sources]
 anyspark-core = { workspace = true }
+anyspark-app = { workspace = true }
 
 
 # 门禁工具版本（pin）
@@ -37,6 +39,7 @@ line-length = 100
 target-version = "py311"
 src = [
     "packages/core",
+    "packages/app",
     "scripts",
 ]
 
@@ -61,8 +64,14 @@ strict = true
 plugins = []
 files = [
     "packages/core",
+    "packages/app",
 ]
+mypy_path = [
+    "packages/core/src",
+    "packages/app/src",
+]
+explicit_package_bases = true
 
 [tool.pytest.ini_options]
-testpaths = ["packages/core/tests"]
+testpaths = ["packages/core/tests", "packages/app/tests"]
 addopts = "-q"

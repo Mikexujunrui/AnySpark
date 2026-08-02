@@ -2,19 +2,31 @@
 
 from __future__ import annotations
 
-from anyspark.core import Agent, Message, Model, ToolRegistry, register_builtins
+from anyspark.core import (
+    Agent,
+    Message,
+    Model,
+    ModelOutput,
+    ToolRegistry,
+    ToolSpec,
+    register_builtins,
+)
 
 
 class ScriptedModel:
-    """脚本化模型：按脚本依次输出文本，先调工具再给最终答案。"""
+    """脚本化模型：按脚本依次返回 ModelOutput（先工具后终答）。"""
 
-    def __init__(self, script: list[str]) -> None:
-        self._script = list(script)
+    def __init__(self, outputs: list[ModelOutput]) -> None:
+        self._script = list(outputs)
         self.answered_prompts: list[list[Message]] = []
 
-    def respond(self, messages: list[Message], tool_descriptions: str) -> str:
+    def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
         self.answered_prompts.append(list(messages))
         return self._script.pop(0)
+
+
+def _no_tool(text: str) -> ModelOutput:
+    return ModelOutput(text=text)
 
 
 def _make_agent(model: Model) -> Agent:
@@ -24,19 +36,26 @@ def _make_agent(model: Model) -> Agent:
 
 
 def test_loop_runs_without_tools() -> None:
-    agent = _make_agent(ScriptedModel(["直接给出的答案"]))
+    agent = _make_agent(ScriptedModel([_no_tool("直接给出的答案")]))
     turn = agent.run("问题")
     assert turn.text == "直接给出的答案"
     assert turn.tool_calls == []
-    # 会话落盘：user + assistant（system 指令在模型 prompt 内联，不重复落盘）
+    # 会话落盘：user + assistant（system 指令是否内联由适配器决定，此处未提供 system_prompt）
     msgs = agent.store.messages(agent.store.list_conversations()[0].id)
-    roles = [m.role for m in msgs]
-    assert roles == ["user", "assistant"]
+    assert [m.role for m in msgs] == ["user", "assistant"]
 
 
 def test_one_tool_then_final_output() -> None:
-    # 第一次输出调工具，第二次输出最终答案
-    agent = _make_agent(ScriptedModel(["`add(a=1, b=2)`", "结果是 3"]))
+    from anyspark.core import ToolCall
+
+    agent = _make_agent(
+        ScriptedModel(
+            [
+                ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})]),
+                _no_tool("结果是 3"),
+            ]
+        )
+    )
     agent.store.create("c1")
     turn = agent.run("帮我算一下", "c1")
 
@@ -54,15 +73,28 @@ def test_loop_emits_done_event() -> None:
     events: list[str] = []
     from anyspark.core import Event
 
-    agent = _make_agent(ScriptedModel(["答案"]))
+    agent = _make_agent(ScriptedModel([_no_tool("答案")]))
     agent.events.on("done", lambda e: events.append(e.type if isinstance(e, Event) else str(e)))
     agent.run("问题")
     assert "done" in events
 
 
 def test_max_iterations_guard() -> None:
+    from anyspark.core import ToolCall
+
     # 模型永远调工具，应触发生成上限终止
-    agent = _make_agent(ScriptedModel(["`add(a=1, b=2)`"] * 100))
+    always_tool = ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})])
+    agent = _make_agent(ScriptedModel([always_tool] * 100))
     agent.max_tool_iterations = 3
     turn = agent.run("无限循环测试")
     assert "达到最大工具迭代次数" in turn.text
+
+
+def test_system_prompt_prepended_when_set() -> None:
+    scripted = ScriptedModel([_no_tool("ok")])
+    agent = _make_agent(scripted)
+    agent.system_prompt = "你是演示助手。"
+    agent.run("问题")
+    prompts = scripted.answered_prompts
+    assert prompts[0][0].role == "system"
+    assert "演示助手" in prompts[0][0].content
