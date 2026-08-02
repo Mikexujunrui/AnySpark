@@ -1,0 +1,38 @@
+# ---- AnySpark v4 用户数据，绝不入库 ----
+data/
+chapters/
+data_backup_*/
+*.db
+*.db-journal
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+*.spec.bak
+
+# ---- 前端 ----
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# ---- 工具缓存 ----
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.cov_data/
+
+# ---- IDE / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- 日志与临时 ----
+*.log
+*.tmp
