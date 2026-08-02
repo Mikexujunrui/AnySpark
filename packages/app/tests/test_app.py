@@ -2,6 +2,7 @@
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -194,6 +195,73 @@ def test_bias_api_and_render() -> None:
     assert entries[0]["source"] == "ai"
     client.delete(f"/api/bias/{bid}")
     assert client.get("/api/bias").json() == []
+
+
+class FakeTextModel:
+    """固定文本回复（S10 交互端点测试）。"""
+
+    def __init__(self, text: str = "固定回复文本") -> None:
+        self._text = text
+        self.model_name = "fake-text"
+
+    def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+        return ModelOutput(text=self._text)
+
+
+def _make_client_with(model: Any) -> TestClient:
+    db = Path(tempfile.mkdtemp()) / "test.db"
+    app = build_app(model=model, db_path=db)
+    return TestClient(app)
+
+
+def test_direction_api() -> None:
+    """S10：方向声明（阶段 5，摩擦前置）。"""
+    client = _make_client_with(FakeTextModel("我准备写：主角推开钟表铺的门"))
+    r = client.post(
+        "/api/chat/direction",
+        json={"prompt": "写主角发现怀表", "context": "陈渡是老周的徒弟"},
+    )
+    assert r.status_code == 200
+    assert "方向声明" in r.json()["direction"]
+    assert "钟表铺" in r.json()["direction"]
+
+
+def test_candidates_api() -> None:
+    """S10：候选卡堆（并行 N 个差异化候选）。"""
+    client = _make_client_with(FakeTextModel("雨夜，路灯在积水里碎成一片"))
+    r = client.post("/api/chat/candidates", json={"prompt": "写雨夜追车", "n": 2})
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["candidates"]) == 2
+    for c in body["candidates"]:
+        assert c["style"] and c["text"]
+
+
+def test_rewrite_api() -> None:
+    """S10：改写渐变条（保原味↔大幅改）。"""
+    client = _make_client_with(FakeTextModel("改写后的正文"))
+    for mode in ("subtle", "balanced", "bold"):
+        r = client.post(
+            "/api/chat/rewrite",
+            json={"text": "原文在这里", "mode": mode},
+        )
+        assert r.status_code == 200
+        assert r.json()["mode"] == mode
+        assert r.json()["rewritten"]
+
+
+def test_wrapup_api() -> None:
+    """S10：一章收尾（阶段 6：一致性摘要 + 下一章衔接提示）。"""
+    client = _make_client()  # FakeWritingModel 先写一章
+    client.post("/api/chat", json={"message": "写第一章"})
+    chapters = client.get("/api/chapters").json()
+    assert chapters
+    cid = chapters[0]["id"]
+    r = client.post(f"/api/chapters/{cid}/wrapup")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["chapter_id"] == cid
+    assert body["summary"] or body["next_hint"]  # 至少一项有内容
 
 
 def test_chat_uses_same_conversation_for_continuation() -> None:

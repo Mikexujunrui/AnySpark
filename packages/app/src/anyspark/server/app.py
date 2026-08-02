@@ -33,7 +33,7 @@ from anyspark.align import (
     temperature_for,
 )
 from anyspark.check import compile_rule, run_review
-from anyspark.core import Agent, Model, ToolRegistry
+from anyspark.core import Agent, Message, Model, ToolRegistry
 from anyspark.explore import (
     DirectionCard,
     IntentUnderstander,
@@ -159,6 +159,26 @@ class AgencyIn(BaseModel):
 class BiasIn(BaseModel):
     content: str
     source: str = "ai"
+
+
+class DirectionIn(BaseModel):
+    prompt: str
+    context: str = ""  # 可选：章节摘要/设定约束
+
+
+class CandidatesIn(BaseModel):
+    prompt: str
+    context: str = ""
+    n: int = 3
+
+
+class RewriteIn(BaseModel):
+    text: str
+    mode: str = "balanced"  # subtle|balanced|bold
+
+
+class WrapupIn(BaseModel):
+    chapter_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -581,6 +601,120 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     def delete_bias(bias_id: str) -> dict[str, bool]:
         bias.delete(bias_id)
         return {"ok": True}
+
+    # ------------------------------------------------------------------
+    # S10 低摩擦交互层 + T2 阶段 5/6（候选卡堆/方向声明/改写渐变/一章收尾）
+    # ------------------------------------------------------------------
+    @app.post("/api/chat/direction", response_model=dict[str, str])
+    def chat_direction(req: DirectionIn) -> dict[str, str]:
+        """阶段 5 方向声明：AI 只声明"我准备写：…"不写正文（摩擦前置，用户 0.5s 确认）。"""
+        ctx = f"\n已知设定：{req.context[:2000]}" if req.context else ""
+        prompt = (
+            "你是小说写作智能体。用户将让你写一段内容。"
+            "在动笔前，先输出【方向声明】——一句话说明你准备写什么、怎么切入"
+            "（像'我准备写：主角推开钟表铺的门，雨声里老周欲言又止'）。"
+            "只输出声明，不要写正文。\n\n"
+            f"用户要求：{req.prompt}{ctx}"
+        )
+        out = model.respond([Message(role="system", content=prompt)], [])
+        direction = out.text.strip()
+        if not direction.startswith("【方向声明】"):
+            direction = f"【方向声明】{direction}"
+        return {"direction": direction}
+
+    @app.post("/api/chat/candidates", response_model=dict[str, object])
+    def chat_candidates(req: CandidatesIn) -> dict[str, object]:
+        """候选卡堆：并行生成 N 个差异化候选（上下文隔离→真多样性，机制 1/4）。"""
+        from concurrent.futures import ThreadPoolExecutor
+
+        ctx = f"\n已知设定：{req.context[:2000]}" if req.context else ""
+        n = max(2, min(4, req.n))
+        styles = ["平实叙事", "强画面感", "悬念张力", "细腻心理"]
+
+        def _one(i: int) -> str:
+            prompt = (
+                f"你是小说写作智能体。按风格「{styles[i % len(styles)]}」写下面要求的一段正文"
+                f"（约 150-250 字，直接输出正文，不要解释）。\n\n用户要求：{req.prompt}{ctx}"
+            )
+            out = model.respond(
+                [Message(role="system", content=prompt)], []
+            )
+            return out.text.strip()
+
+        with ThreadPoolExecutor(max_workers=n) as pool:
+            results = list(pool.map(_one, range(n)))
+        candidates = [
+            {"id": f"c{i + 1}", "style": styles[i % len(styles)], "text": results[i]}
+            for i in range(n)
+        ]
+        return {"candidates": candidates}
+
+    @app.post("/api/chat/rewrite", response_model=dict[str, str])
+    def chat_rewrite(req: RewriteIn) -> dict[str, str]:
+        """改写渐变条（机制 4）：保原味↔大幅改，温度+指令差异化。"""
+        mode = req.mode if req.mode in ("subtle", "balanced", "bold") else "balanced"
+        temp_map = {"subtle": 0.3, "balanced": 0.7, "bold": 1.1}
+        instruct_map = {
+            "subtle": "尽量保留原文结构与表达，只做轻微润色",
+            "balanced": "在保留原意的基础上改写，语言更生动",
+            "bold": "大胆重构：换切入角度、换句式节奏、大幅改变表达",
+        }
+        prompt = (
+            "你是小说写作智能体。改写下面这段正文。"
+            f"要求：{instruct_map[mode]}。直接输出改写后的正文，不要解释。\n\n原文：\n{req.text[:3000]}"
+        )
+        # 渐变条温度映射：保原味=低温，大幅改=高温（仅真实模型生效）
+        rewrite_model: Any = model
+        if isinstance(model, DeepSeekModel):
+            rewrite_model = DeepSeekModel(temperature=temp_map[mode])
+        out = rewrite_model.respond(
+            [Message(role="system", content=prompt)],
+            [],
+        )
+        return {"rewritten": out.text.strip(), "mode": mode}
+
+    @app.post("/api/chapters/{chapter_id}/wrapup", response_model=dict[str, object])
+    def chapter_wrapup(chapter_id: str) -> dict[str, object]:
+        """阶段 6 一章收尾：一致性摘要卡 + 下一章衔接提示（不自动评审，轻量）。"""
+        ch = chapters.get(chapter_id)
+        if ch is None:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        prompt = (
+            "你是小说写作智能体。读下面这章正文，输出两句：\n"
+            "1. 一致性摘要（一句话概括本章发生了什么、推进了什么）\n"
+            "2. 下一章衔接提示（建议下一章推进什么，如'推进角色弧/揭开伏笔'，给一个具体方向）\n"
+            "格式（严格 JSON）：{\"summary\": \"…\", \"next_hint\": \"…\"}\n\n"
+            f"章节《{ch.title}》正文：\n{ch.content[:4000]}"
+        )
+        out = model.respond(
+            [Message(role="system", content=prompt)], []
+        )
+        import json as _json
+        import re
+
+        cleaned = out.text.strip()
+        fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
+        if fence:
+            cleaned = fence.group(1)
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        summary, hint = "", ""
+        if start != -1 and end != -1 and end > start:
+            try:
+                data = _json.loads(cleaned[start : end + 1])
+                if isinstance(data, dict):
+                    summary = str(data.get("summary", ""))
+                    hint = str(data.get("next_hint", ""))
+            except _json.JSONDecodeError:
+                pass
+        # 图谱统计（本章涉及的实体）
+        involved = graph_verifier.facts_for("main", ch.content[:2000])
+        return {
+            "chapter_id": chapter_id,
+            "title": ch.title,
+            "summary": summary or out.text.strip()[:100],
+            "next_hint": hint,
+            "graph_entities": [f.entity.name for f in involved][:10],
+        }
 
     @app.get("/api/chapters", response_model=list[ChapterOut])
     def list_chapters() -> list[ChapterOut]:
