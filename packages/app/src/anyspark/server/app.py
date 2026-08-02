@@ -16,7 +16,7 @@ from typing import Any, Literal, cast
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from anyspark.align import (
@@ -636,9 +636,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                 f"你是小说写作智能体。按风格「{styles[i % len(styles)]}」写下面要求的一段正文"
                 f"（约 150-250 字，直接输出正文，不要解释）。\n\n用户要求：{req.prompt}{ctx}"
             )
-            out = model.respond(
-                [Message(role="system", content=prompt)], []
-            )
+            out = model.respond([Message(role="system", content=prompt)], [])
             return out.text.strip()
 
         with ThreadPoolExecutor(max_workers=n) as pool:
@@ -683,12 +681,10 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             "你是小说写作智能体。读下面这章正文，输出两句：\n"
             "1. 一致性摘要（一句话概括本章发生了什么、推进了什么）\n"
             "2. 下一章衔接提示（建议下一章推进什么，如'推进角色弧/揭开伏笔'，给一个具体方向）\n"
-            "格式（严格 JSON）：{\"summary\": \"…\", \"next_hint\": \"…\"}\n\n"
+            '格式（严格 JSON）：{"summary": "…", "next_hint": "…"}\n\n'
             f"章节《{ch.title}》正文：\n{ch.content[:4000]}"
         )
-        out = model.respond(
-            [Message(role="system", content=prompt)], []
-        )
+        out = model.respond([Message(role="system", content=prompt)], [])
         import json as _json
         import re
 
@@ -743,6 +739,26 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             content=ch.content,
             order_index=ch.order_index,
             updated_at=ch.updated_at,
+        )
+
+    @app.get("/api/chapters/{chapter_id}/export")
+    def export_chapter(chapter_id: str, format: str = "txt") -> Response:
+        """多格式导出（S11 工具扩展：txt/md）。"""
+        ch = chapters.get(chapter_id)
+        if ch is None:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        fmt = format if format in ("txt", "md") else "txt"
+        body = f"# {ch.title}\n\n{ch.content}\n" if fmt == "md" else f"{ch.title}\n{ch.content}\n"
+        media = "text/markdown; charset=utf-8" if fmt == "md" else "text/plain; charset=utf-8"
+        # 中文文件名用 RFC 5987 filename*（latin-1 无法直接编码中文）
+        from urllib.parse import quote
+
+        safe_name = quote(f"{ch.title}.{fmt}")
+        disposition = f"attachment; filename=chapter.{fmt}; filename*=UTF-8''{safe_name}"
+        return Response(
+            content=body,
+            media_type=media,
+            headers={"Content-Disposition": disposition},
         )
 
     # ------------------------------------------------------------------

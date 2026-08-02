@@ -20,6 +20,7 @@ from openai import OpenAI
 
 from anyspark.core.protocol import ToolSpec
 from anyspark.core.types import Message, ModelOutput, ToolCall
+from anyspark.server.retry import retry_with_backoff
 
 # 与 pi 同款默认：DashScope 兼容端点 + deepseek-v4-flash
 DEFAULT_BASE_URL = os.getenv(
@@ -68,9 +69,11 @@ class DeepSeekModel:
         max_tokens: int = 4096,
         stream: bool = False,
         on_delta: Callable[[str], None] | None = None,
+        timeout: float = 120.0,
     ) -> None:
         """
         stream: 流式传输（SSE 用）；on_delta: 文本增量回调（stream=True 时逐段触发）。
+        timeout: 单次请求超时（秒）；网络抖动自动指数退避重试（S11 流程基建）。
         非流式路径与旧行为完全一致（协议向后兼容）。
         """
         self._base_url = base_url or DEFAULT_BASE_URL
@@ -82,9 +85,11 @@ class DeepSeekModel:
         self._max_tokens = max_tokens
         self._stream = stream
         self._on_delta = on_delta
+        self._timeout = timeout
         self._client = OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
+            timeout=self._timeout,
         )
 
     @property
@@ -105,23 +110,26 @@ class DeepSeekModel:
             kwargs["tool_choice"] = "auto"
 
         if self._stream:
-            return self._respond_stream(kwargs)
+            return retry_with_backoff(lambda: self._respond_stream(kwargs))
 
-        response = self._client.chat.completions.create(**kwargs)
-        message = response.choices[0].message
+        def _call() -> ModelOutput:
+            response = self._client.chat.completions.create(**kwargs)
+            message = response.choices[0].message
 
-        text = message.content or ""
-        tool_calls: list[ToolCall] = []
-        if message.tool_calls:
-            for tc in message.tool_calls:
-                fn = tc.function
-                try:
-                    args: dict[str, Any] = json.loads(fn.arguments) if fn.arguments else {}
-                except json.JSONDecodeError:
-                    args = {"_raw": fn.arguments}
-                tool_calls.append(ToolCall(name=fn.name, arguments=args))
+            text = message.content or ""
+            tool_calls: list[ToolCall] = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    fn = tc.function
+                    try:
+                        args: dict[str, Any] = json.loads(fn.arguments) if fn.arguments else {}
+                    except json.JSONDecodeError:
+                        args = {"_raw": fn.arguments}
+                    tool_calls.append(ToolCall(name=fn.name, arguments=args))
 
-        return ModelOutput(text=text, tool_calls=tool_calls)
+            return ModelOutput(text=text, tool_calls=tool_calls)
+
+        return retry_with_backoff(_call)
 
     def _respond_stream(self, kwargs: dict[str, Any]) -> ModelOutput:
         """流式路径：文本 delta 逐段回调 on_delta；tool_calls 分片累积。"""
