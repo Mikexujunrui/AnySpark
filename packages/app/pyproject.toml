@@ -17,6 +17,9 @@ dependencies = [
     "python-dotenv==1.1.1",
 ]
 
+[project.scripts]
+anyspark-server = "anyspark.server.cli:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

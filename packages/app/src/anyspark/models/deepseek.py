@@ -27,7 +27,7 @@ DEFAULT_BASE_URL = os.getenv(
 DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 
 
-def _to_openai_tool(spec: ToolSpec) -> dict[str, Any]:
+def to_openai_tool(spec: ToolSpec) -> dict[str, Any]:
     """把 core 的 ToolSpec 转成 OpenAI 原生 tools 定义（真实函数调用 schema）。"""
     properties: dict[str, Any] = {}
     required: list[str] = []
@@ -50,7 +50,7 @@ def _to_openai_tool(spec: ToolSpec) -> dict[str, Any]:
     return {"type": "function", "function": fn}
 
 
-def _to_openai_message(m: Message) -> dict[str, Any]:
+def to_openai_message(m: Message) -> dict[str, Any]:
     """把 core 的 Message 转成 OpenAI chat 消息。"""
     return {"role": m.role, "content": m.content}
 
@@ -84,7 +84,7 @@ class DeepSeekModel:
 
     def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
         """真实调用 DeepSeek，返回模型无关的 ModelOutput。"""
-        openai_messages = [_to_openai_message(m) for m in messages]
+        openai_messages = [to_openai_message(m) for m in messages]
         kwargs: dict[str, Any] = {
             "model": self._model,
             "messages": openai_messages,
@@ -92,7 +92,7 @@ class DeepSeekModel:
             "max_tokens": self._max_tokens,
         }
         if tools:
-            kwargs["tools"] = [_to_openai_tool(t) for t in tools]
+            kwargs["tools"] = [to_openai_tool(t) for t in tools]
             kwargs["tool_choice"] = "auto"
 
         response = self._client.chat.completions.create(**kwargs)
