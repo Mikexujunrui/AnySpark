@@ -10,7 +10,8 @@ from anyspark.server.app import build_app
 
 
 class FakeWritingModel:
-    """fake model：第一次回 tool_call 调 write_chapter，第二次回最终文本。"""
+    """fake model：第一次回 tool_call 调 write_chapter，第二次回最终文本，
+    第三次（后台图谱抽取）回抽取 JSON。"""
 
     def __init__(self) -> None:
         self.calls = 0
@@ -27,7 +28,34 @@ class FakeWritingModel:
                     )
                 ]
             )
-        return ModelOutput(text="第一章已写好。")
+        if self.calls == 2:
+            return ModelOutput(text="第一章已写好。")
+        # 后台图谱抽取（S7）：返回实体 JSON
+        return ModelOutput(
+            text='{"entities": [{"name": "陈渡", "type": "角色", "aliases": [], '
+            '"description": "雨夜抵达雾城的侦探"}, {"name": "雾城", "type": "地点", '
+            '"aliases": [], "description": "故事发生的城市"}], '
+            '"relations": [{"from": "陈渡", "to": "雾城", "type": "抵达", '
+            '"description": "陈渡抵达雾城"}], "events": []}'
+        )
+
+
+class FakeExtractModel:
+    """fake model：始终返回图谱抽取 JSON（手动抽取路由测试用）。"""
+
+    def __init__(self) -> None:
+        self.model_name = "fake-extract"
+
+    def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+        return ModelOutput(
+            text='{"entities": [{"name": "沈歆", "type": "角色", "aliases": ["沈姑娘"], '
+            '"description": "陈渡的妹妹"}, {"name": "雾城钟表铺", "type": "地点", '
+            '"aliases": [], "description": "城西的钟表铺"}], '
+            '"relations": [{"from": "沈歆", "to": "陈渡", "type": "兄妹", '
+            '"description": "亲兄妹"}], '
+            '"events": [{"time_point": "第二章", "label": "兄妹相认", '
+            '"description": "沈歆在钟表铺等陈渡", "involved": ["沈歆", "陈渡"]}]}'
+        )
 
 
 def _make_client() -> TestClient:
@@ -52,6 +80,42 @@ def test_chat_writes_chapter() -> None:
     assert chapters, "应有被写入的章节"
     assert chapters[0]["title"] == "第一章"
     assert "雨夜，陈渡" in chapters[0]["content"]
+
+
+def test_chat_auto_extracts_graph() -> None:
+    """S7：write_chapter 落盘后自动抽取图谱（后台任务同步执行）。"""
+    client = _make_client()
+    resp = client.post("/api/chat", json={"message": "写第一章"})
+    assert resp.status_code == 200
+    entities = client.get("/api/graph/entities").json()
+    names = {e["name"] for e in entities}
+    assert "陈渡" in names and "雾城" in names
+    # 注入块非空（当前时空点已知事实）
+    ctx = client.get("/api/graph/context").json()
+    assert "已固化事实" in ctx["block"]
+
+
+def test_graph_api_manual_extract() -> None:
+    """S7：手动抽取路由（补抽/重抽），实体/关系/事件入库可见。"""
+    db = Path(tempfile.mkdtemp()) / "test.db"
+    app = build_app(model=FakeExtractModel(), db_path=db)
+    client = TestClient(app)
+    r = client.post(
+        "/api/graph/extract",
+        json={"chapter_ref": "第二章", "text": "沈歆在雾城钟表铺等他，兄妹相认。"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["entities"] >= 2 and body["relations"] >= 1 and body["events"] >= 1
+    entities = client.get("/api/graph/entities").json()
+    names = {e["name"] for e in entities}
+    assert "沈歆" in names and "雾城钟表铺" in names
+    relations = client.get("/api/graph/relations").json()
+    assert any(rr["rel_type"] == "兄妹" for rr in relations)
+    events = client.get("/api/graph/events").json()
+    assert any(ev["label"] == "兄妹相认" for ev in events)
+    # 事件引用的缺失实体（陈渡）被自动补建
+    assert "陈渡" in {e["name"] for e in client.get("/api/graph/entities").json()}
 
 
 def test_chat_uses_same_conversation_for_continuation() -> None:

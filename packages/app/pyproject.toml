@@ -10,6 +10,7 @@ description = "AnySpark v4 应用层：DeepSeek 真实接入 + FastAPI 后端"
 requires-python = ">=3.11"
 dependencies = [
     "anyspark-core==0.0.1",  # workspace 成员
+    "anyspark-graph==0.0.1",  # workspace 成员：知识图谱（AI 事实源）
     "fastapi==0.141.1",
     "uvicorn==0.52.1",
     "pydantic==2.13.4",
@@ -29,3 +30,4 @@ packages = ["src/anyspark"]
 
 [tool.uv.sources]
 anyspark-core = { workspace = true }
+anyspark-graph = { workspace = true }

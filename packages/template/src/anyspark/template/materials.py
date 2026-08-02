@@ -34,6 +34,7 @@ class MaterialCard:
     terms: list[str]  # 术语
     purpose: Purpose = "fact"
     source_text: str = ""  # 原文（保留可查全文）
+    graph_entities: list[str] = field(default_factory=list)  # 关联图谱实体 id（机制 10）
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     created_at: str = field(default_factory=lambda: _now())
 
@@ -48,6 +49,7 @@ class MaterialCard:
             "terms": self.terms,
             "purpose": self.purpose,
             "source_text": self.source_text,
+            "graph_entities": self.graph_entities,
             "created_at": self.created_at,
         }
 
@@ -90,10 +92,19 @@ class MaterialStore:
                 terms TEXT NOT NULL DEFAULT '[]',
                 purpose TEXT NOT NULL DEFAULT 'fact',
                 source_text TEXT NOT NULL DEFAULT '',
+                graph_entities TEXT NOT NULL DEFAULT '[]',
                 created_at TEXT NOT NULL
             );
             """
         )
+        # 旧库兼容：已存在的 materials 表补列（幂等）
+        try:
+            self._conn.execute(
+                "ALTER TABLE materials ADD COLUMN graph_entities TEXT NOT NULL DEFAULT '[]'"
+            )
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass  # 列已存在
         self._conn.commit()
 
     def save(self, card: MaterialCard) -> MaterialCard:
@@ -102,7 +113,8 @@ class MaterialStore:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO materials (id, title, topic, key_points, key_settings, "
-                "characters, terms, purpose, source_text, created_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "characters, terms, purpose, source_text, graph_entities, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     card.id,
                     card.title,
@@ -113,6 +125,7 @@ class MaterialStore:
                     json.dumps(card.terms, ensure_ascii=False),
                     card.purpose,
                     card.source_text,
+                    json.dumps(card.graph_entities, ensure_ascii=False),
                     card.created_at,
                 ),
             )
@@ -135,6 +148,7 @@ class MaterialStore:
                 terms=json.loads(r["terms"]),
                 purpose=r["purpose"],
                 source_text=r["source_text"],
+                graph_entities=json.loads(r["graph_entities"] or "[]"),
                 created_at=r["created_at"],
             )
             for r in rows
@@ -159,6 +173,7 @@ class MaterialStore:
             terms=json.loads(row["terms"]),
             purpose=row["purpose"],
             source_text=row["source_text"],
+            graph_entities=json.loads(row["graph_entities"] or "[]"),
             created_at=row["created_at"],
         )
 

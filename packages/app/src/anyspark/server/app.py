@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Literal, cast
 
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -24,6 +24,7 @@ from anyspark.explore import (
     ProjectArchive,
     run_exploration,
 )
+from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
 from anyspark.models.deepseek import DeepSeekModel
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.tools_writing import register_writing_tools
@@ -122,6 +123,11 @@ class MaterialIn(BaseModel):
     purpose: str = "fact"  # style|fact|both
 
 
+class GraphExtractIn(BaseModel):
+    chapter_ref: str
+    text: str
+
+
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
@@ -144,6 +150,11 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     manual_injector = ManualInjector(manual)
     signal_collector = SignalCollector(signals)
     model = model or DeepSeekModel()
+    # 知识图谱（S7：AI 事实源）
+    graph = GraphStore(real_db)
+    graph_extractor = GraphExtractor(model)
+    graph_injector = GraphInjector(graph)
+    graph_verifier = GraphVerifier(graph)
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
@@ -162,7 +173,27 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         full_prompt = system_prompt
         if align_block:
             full_prompt = full_prompt + "\n\n" + align_block
+        # 图谱注入：当前时空点已知事实（AI 事实源，模型局限弥补）
+        graph_block = graph_injector.build_block(book_id)
+        if graph_block:
+            full_prompt = full_prompt + "\n\n" + graph_block
         return Agent(model=m, registry=registry, store=store, system_prompt=full_prompt)
+
+    def _extract_chapter(book_id: str, title: str, content: str, order: int) -> None:
+        """章节落盘后自动抽取图谱（后台任务）。失败只记日志，绝不阻断写作。"""
+        try:
+            existing = [e.to_dict() for e in graph.list_entities(book_id)]
+            ext = graph_extractor.extract(title, content, existing)
+            graph.ingest_chapter(book_id, title, order, ext)
+            logger.info(
+                "图谱抽取完成: 《%s》 实体%d 关系%d 事件%d",
+                title,
+                len(ext.entities),
+                len(ext.relations),
+                len(ext.events),
+            )
+        except Exception as exc:  # 抽取失败不影响写作主链路
+            logger.warning("图谱抽取失败(不影响写作): %s", exc)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -170,7 +201,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         return {"status": "ok", "model": str(name), "log": log_path()}
 
     @app.post("/api/chat", response_model=ChatResponse)
-    def chat(req: ChatRequest) -> ChatResponse:
+    def chat(req: ChatRequest, background_tasks: BackgroundTasks) -> ChatResponse:
         logger.info("chat 请求: conv=%s len=%d", req.conversation_id or "(新)", len(req.message))
         events: list[ToolEvent] = []
         agent = _make_agent(
@@ -208,6 +239,15 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         logger.info(
             "chat 完成: conv=%s 输出%d字 工具%d次", conv_id, len(turn.text), len(turn.tool_calls)
         )
+        # 图谱抽取：写入章节后自动抽取入库（后台任务，不阻塞响应；失败不影响写作）
+        for wc in turn.tool_calls:
+            if wc.name == "write_chapter":
+                title = str(wc.arguments.get("title", "")).strip()
+                content = str(wc.arguments.get("content", ""))
+                if title and content:
+                    chs = chapters.list_by_book("main")
+                    order = next((c.order_index for c in chs if c.title == title), len(chs))
+                    background_tasks.add_task(_extract_chapter, "main", title, content, order)
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
         return ChatResponse(
             conversation_id=conv_id,
@@ -311,11 +351,14 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
     @app.post("/api/check", response_model=dict[str, object])
     def check_text_route(req: CheckRequest) -> dict[str, object]:
-        """多检测者审读正文（骨架检测项，并行）。"""
+        """多检测者审读正文（骨架检测项，并行）+ 图谱事实证据（确定性比对基础）。"""
         report = run_review(model, req.target, req.text)
+        # S7：图谱事实证据——文本涉及的已知实体/关系（检测网/用户比对设定冲突）
+        evidence = graph_verifier.render_evidence("main", req.text)
         return {
             "target": report.target,
             "hard_count": report.hard_count,
+            "graph_evidence": evidence,
             "findings": [
                 {
                     "category": f.category,
@@ -345,12 +388,16 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
     @app.post("/api/materials", response_model=dict[str, object])
     def add_material(req: MaterialIn) -> dict[str, object]:
-        """上传材料 → 真实 LLM 消化成摘要卡 → 入库（原文保留）。"""
+        """上传材料 → 真实 LLM 消化成摘要卡 → 图谱关联 → 入库（原文保留）。"""
         purpose: Any = req.purpose if req.purpose in ("style", "fact", "both") else "fact"
         digestor = MaterialDigestor(model)
         card = digestor.digest(req.text, purpose=purpose)
         if req.title:
             card.title = req.title
+        # 图谱关联（机制 10 补齐）：摘要卡角色/设定/术语 → 图谱实体
+        names = [*card.characters, *card.key_settings, *card.terms]
+        linked = graph.resolve_names("main", names)
+        card.graph_entities = [e.id for e in linked]
         materials.save(card)
         return card.to_dict()
 
@@ -393,6 +440,42 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             order_index=ch.order_index,
             updated_at=ch.updated_at,
         )
+
+    # ------------------------------------------------------------------
+    # 知识图谱（S7：AI 事实源，后台自动维护）
+    # ------------------------------------------------------------------
+    @app.get("/api/graph/entities", response_model=list[dict[str, Any]])
+    def list_graph_entities(q: str = "", entity_type: str = "") -> list[dict[str, Any]]:
+        """图谱实体（可 q 模糊 / entity_type 过滤）。"""
+        items = graph.list_entities("main", q=q or None, entity_type=entity_type or None)
+        return [e.to_dict() for e in items]
+
+    @app.get("/api/graph/relations", response_model=list[dict[str, Any]])
+    def list_graph_relations() -> list[dict[str, Any]]:
+        return [r.to_dict() for r in graph.list_relations("main")]
+
+    @app.get("/api/graph/events", response_model=list[dict[str, Any]])
+    def list_graph_events() -> list[dict[str, Any]]:
+        return [e.to_dict() for e in graph.list_events("main")]
+
+    @app.get("/api/graph/context", response_model=dict[str, str])
+    def graph_context() -> dict[str, str]:
+        """当前时空点已知事实注入块（预览）。"""
+        return {"block": graph_injector.build_block("main")}
+
+    @app.post("/api/graph/extract", response_model=dict[str, int])
+    def graph_extract_route(req: GraphExtractIn) -> dict[str, int]:
+        """手动抽取一章入库（真实 LLM；write_chapter 后已自动，此为补抽/重抽）。"""
+        existing = [e.to_dict() for e in graph.list_entities("main")]
+        ext = graph_extractor.extract(req.chapter_ref, req.text, existing)
+        chs = chapters.list_by_book("main")
+        order = next((c.order_index for c in chs if c.title == req.chapter_ref), len(chs))
+        graph.ingest_chapter("main", req.chapter_ref, order, ext)
+        return {
+            "entities": len(ext.entities),
+            "relations": len(ext.relations),
+            "events": len(ext.events),
+        }
 
     return app
 

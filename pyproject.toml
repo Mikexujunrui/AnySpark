@@ -15,6 +15,7 @@ dependencies = [
     "anyspark-explore",  # 工作区成员：探索引擎
     "anyspark-check",    # 工作区成员：检测网
     "anyspark-template", # 工作区成员：模式库+资料
+    "anyspark-graph",    # 工作区成员：知识图谱（AI 事实源）
     "anyspark-desktop",  # 工作区成员：桌面壳
 ]
 
@@ -30,6 +31,7 @@ anyspark-align = { workspace = true }
 anyspark-explore = { workspace = true }
 anyspark-check = { workspace = true }
 anyspark-template = { workspace = true }
+anyspark-graph = { workspace = true }
 anyspark-desktop = { workspace = true }
 
 
@@ -54,6 +56,7 @@ src = [
     "packages/explore",
     "packages/check",
     "packages/template",
+    "packages/graph",
     "scripts",
 ]
 
@@ -83,6 +86,7 @@ files = [
     "packages/explore",
     "packages/check",
     "packages/template",
+    "packages/graph",
 ]
 mypy_path = [
     "packages/core/src",
@@ -91,6 +95,7 @@ mypy_path = [
     "packages/explore/src",
     "packages/check/src",
     "packages/template/src",
+    "packages/graph/src",
 ]
 explicit_package_bases = true
 
@@ -102,5 +107,6 @@ testpaths = [
     "packages/explore/tests",
     "packages/check/tests",
     "packages/template/tests",
+    "packages/graph/tests",
 ]
 addopts = "-q"
