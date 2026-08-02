@@ -11,7 +11,7 @@
 | 阶段 | 内容 | 验收 | 状态 |
 |------|------|------|------|
 | 0 地基 | workspace + core 骨架 | core 最小循环跑通 | ✅ 完成 |
-| 1 核心写作 | DeepSeek 真实接入 + 工具集 + 探索-判别(单模型) + FastAPI 后端 | 对话→写作→修改基础流通 | 🔄 进行中 |
+| 1 核心写作 | DeepSeek 真实接入 + 工具集 + 探索-判别(单模型) + FastAPI 后端 | 对话→写作→修改基础流通 | ✅ 完成 |
 | 2 对齐系统 | align 包：说明书/提炼/信号/注入 | 操作→信号→说明书→注入生效 | ⬜ 未开始 |
 | 3 探索引擎 | explore 包：多智能体探索/概念卡/方向卡 | 种子→概念卡→方向卡→固化 | ⬜ 未开始 |
 | 4 检测+规则 | 三层检测网/多检测者/规则编译器 | 检测报告可用；用户自然语言自定义规则 | ⬜ 未开始 |
@@ -43,21 +43,49 @@
 
 ---
 
-## S1 核心写作（进行中）
+## S1 核心写作（已完成 ✅）
 
-**范围**（DESIGN 阶段1）：真实 DeepSeek 接入 + 极简工具集扩展 + FastAPI 后端 + 探索-判别（单模型）
+**交付 commit**：`S1 真实模型接入` + `S1 后端闭环` + `S1 前端稿纸`
 
-**任务清单**：
-- [ ] `S1-1` core 加真实 `DeepSeekModel`（OpenAI 兼容，DashScope + deepseek-v4-flash），实现 `Model` 协议
-- [ ] `S1-2` 工具集扩展：写作场景真实工具（如 `write_text`/`save_chapter`/`search_knowledge`）
-- [ ] `S1-3` FastAPI server：POST /chat（对话→写作闭环）、SSE 事件流、会话持久化（SQLite）
-- [ ] `S1-4` 探索-判别：单模型先跑通"方向 → 候选 → 判别"
-- [ ] `S1-5` 验收：对话→写作→修改基础流通（curl 真实跑到正文）
+**范围落实**（DESIGN 阶段1）：真实 DeepSeek + FastAPI 后端 + SQLite 持久化 + 前端稿纸
 
-**当前踩坑 / 未决**：(空)
+**真实实现**（无任何模拟/降级）：
+- `anyspark-app` 包：DeepSeekModel（OpenAI SDK 原生 function calling，DashScope 端点 + deepseek-v4-flash，pi 同款）
+- FastAPI 后端：`/api/chat`（对话→写作闭环）、`/api/chapters`、`/api/health`；CORS + Vite 代理
+- 真实写作工具：list_chapters / read_chapter / write_chapter（续写/修改带版本历史）
+- SQLite 真实落盘：会话/消息 + 章节/版本历史（check_same_thread=False 供多线程）
+- 前端创作台：三层空间骨架（稿纸+写作上下文占位+抽屉占位），TipTap 稿纸，Zustand 领域 store，api 唯一出入口
+
+**门禁**：ruff + mypy + pytest(30) + tsc + eslint + vite build 全绿
+
+**真实端到端验证**（多次）:
+- DeepSeek 自主调工具写出并落盘章节（《雾都来客》雨夜侦探；《月狐》月下白狐）
+- 续写闭环：329 字 → 1011 字，旧版进版本历史
+- 前端 Vite 代理 → 后端 → DeepSeek → SQLite 全链路跑通
+
+**踩坑记录**：
+- `PROJECT_ROOT = parents[5]`（不是 [4]）——否则 .env/data 路径错位
+- SQLite 跨线程：FastAPI sync endpoint 跑在 threadpool → 需 check_same_thread=False + 锁
+- mypy namespace：src 多包需 `explicit_package_bases` + `mypy_path` 双 src；`py.typed` 每个子包
+- Vite 6 默认绑 localhost(IPv6 ::1)，curl 127.0.0.1 会 HTTP 000，用 localhost 访问
 
 ---
 
-## S2+ 后续阶段占位（推进时展开）
+## S2 对齐系统（未开始）
 
-(阶段完成时在此记录，接续推进)
+**范围**（DESIGN 阶段2 + 第 6 节）：align 包：说明书（分层）/ 提炼器 / 摘要器 / 信号采集 / 注入器
+
+**验收**：操作→信号→说明书→注入生效；说明书界面可读可改
+
+**任务清单**：
+- [ ] `S2-1` align 包：说明书数据模型（条目：内容/来源/置信度/活跃度/锁定）+ SQLite 存储
+- [ ] `S2-2` 信号采集器：用户操作（点选/修改/删除/接受）→ 偏好信号
+- [ ] `S2-3` 提炼器：对话+操作 → 偏好条目（真实 DeepSeek 提炼）
+- [ ] `S2-4` 注入器：说明书 → 写作/探索上下文注入（项目级>全局级）
+- [ ] `S2-5` 摘要器：会话 → 场景记忆 → 项目档案（延续性）
+- [ ] `S2-6` 前端：说明书界面（可读可改）+ 信号采集挂钩
+- [ ] `S2-7` 验收：修改率/提问率代理指标生效路径
+
+---
+
+## S3 探索引擎（未开始）
