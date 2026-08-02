@@ -1,19 +1,21 @@
 @echo off
 rem ============================================
-rem  °´¶Ë¿Ú°²È«ÇåÀí½ø³Ì£¨²»»áÎóÉ±ÆäËü³ÌĞò£©
-rem  ÓÃ·¨: kill_port.bat 8000   »ò   kill_port.bat 5173
+rem  æŒ‰ç«¯å£æ¸…ç†å ç”¨è¿›ç¨‹ï¼ˆé˜²æ­¢æ®‹ç•™è¿›ç¨‹å¯¼è‡´å¯åŠ¨å¤±è´¥ï¼‰
+rem  ç”¨æ³•: kill_port.bat 8000  æˆ–  kill_port.bat 5173
+rem  ç¼–ç ï¼šUTF-8 æ—  BOM + CRLFï¼ˆåŒ¹é…ç³»ç»Ÿä»£ç é¡µ 65001ï¼‰
 rem ============================================
+setlocal
 set "PORT=%~1"
 if "%PORT%"=="" (
-    echo ÓÃ·¨: kill_port.bat ^<¶Ë¿ÚºÅ^>
-    echo Àı: kill_port.bat 8000
+    echo ç”¨æ³•: kill_port.bat ^<ç«¯å£å·^>
+    echo ä¾‹:   kill_port.bat 8000
     pause
     exit /b 1
 )
 
-echo ÕıÔÚ²éÕÒ¶Ë¿Ú %PORT% µÄÕ¼ÓÃ½ø³Ì...
+echo æ­£åœ¨æŸ¥æ‰¾ç«¯å£ %PORT% çš„å ç”¨è¿›ç¨‹...
 for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%PORT% " ^| findstr "LISTENING"') do (
-    echo  ÕÒµ½ PID %%p Õ¼ÓÃ¶Ë¿Ú %PORT%£¬ÕıÔÚ½áÊø...
-    taskkill /F /PID %%p
+    echo  æ‰¾åˆ° PID %%p å ç”¨ç«¯å£ %PORT%ï¼Œæ­£åœ¨ç»“æŸ...
+    taskkill /F /PID %%p >nul 2>&1
 )
-echo Íê³É¡£
+echo å®Œæˆ
