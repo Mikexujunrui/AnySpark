@@ -239,3 +239,9 @@
 
 **遗留**（非本阶段）：完整确定性校验规则（时间线顺序/伏笔匹配）；关键点图谱（T2 阶段 3，作品级规划，设计标注可选）——留 S10+
 
+### S7 补充：智能体接入层 + 记录基础设施（commit `3f021d5`）
+- **pi-anyspark** pi package（`E:\Desktop\pi\pi-main\packages\pi-anyspark\`，已注册 settings.json）：4 工具——`anyspark_server`（生命周期）/ `anyspark_api`（任意端点+链路记录）/ `anyspark_gate`（总闸）/ `anyspark_state`（状态快照）
+- **记录基础设施** `data/dev/`：`runs/<时间戳>_<标签>/`（request/response/summary）、`gate/`、`state/`、`server.pid`
+- **接入说明**：`docs/DEV-AGENT.md`（工具清单/推荐测试链路/踩坑：图谱抽取后台异步需等 15-30s）
+- **验证**：真实链路全通——chat 写《第一章 雨夜》400 字正文（4 工具调用）→ 后台抽取 10 实体/7 关系/2 事件 → 注入块 584 字 → 检测带 graph_evidence；记录文件正确落盘
+
