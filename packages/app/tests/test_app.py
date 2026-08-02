@@ -112,3 +112,12 @@ def test_check_unknown_rule_via_api() -> None:
     r = client.post("/api/check/rule", json={"rule": "今天天气不错", "text": "abc"})
     assert r.status_code == 200
     assert r.json()["ok"] is False
+
+
+def test_templates_list() -> None:
+    client = _make_client()
+    r = client.get("/api/templates")
+    assert r.status_code == 200
+    templates = r.json()
+    assert len(templates) >= 5
+    assert templates[0]["granularity"]  # 四要素元数据

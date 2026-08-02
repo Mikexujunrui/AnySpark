@@ -27,6 +27,7 @@ from anyspark.explore import (
 from anyspark.models.deepseek import DeepSeekModel
 from anyspark.server.tools_writing import register_writing_tools
 from anyspark.store import ChapterStore, SqliteConversationStore
+from anyspark.template import MaterialDigestor, MaterialStore, default_library
 
 # 数据根：项目 data/（gitignored，绝不入库）
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
@@ -114,6 +115,12 @@ class RuleRequest(BaseModel):
     text: str
 
 
+class MaterialIn(BaseModel):
+    text: str
+    title: str = ""
+    purpose: str = "fact"  # style|fact|both
+
+
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
@@ -131,6 +138,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     manual = ManualStore(real_db)
     signals = SignalStore(real_db)
     archive = ProjectArchive(real_db)
+    materials = MaterialStore(real_db)
     manual_injector = ManualInjector(manual)
     signal_collector = SignalCollector(signals)
     model = model or DeepSeekModel()
@@ -312,6 +320,33 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             return {"ok": False, "description": "未能识别的规则", "hits": []}
         hits = compiled.checker(req.text)
         return {"ok": True, "description": compiled.description, "hits": hits}
+
+    @app.get("/api/templates", response_model=list[dict[str, object]])
+    def list_templates() -> list[dict[str, object]]:
+        """L2 默认模式库（探索方向生成器）。"""
+        return [t.to_dict() for t in default_library()]
+
+    @app.post("/api/materials", response_model=dict[str, object])
+    def add_material(req: MaterialIn) -> dict[str, object]:
+        """上传材料 → 真实 LLM 消化成摘要卡 → 入库（原文保留）。"""
+        purpose: Any = req.purpose if req.purpose in ("style", "fact", "both") else "fact"
+        digestor = MaterialDigestor(model)
+        card = digestor.digest(req.text, purpose=purpose)
+        if req.title:
+            card.title = req.title
+        materials.save(card)
+        return card.to_dict()
+
+    @app.get("/api/materials", response_model=list[dict[str, object]])
+    def list_materials() -> list[dict[str, object]]:
+        return [m.to_dict() for m in materials.list()]
+
+    @app.get("/api/materials/{material_id}", response_model=dict[str, object])
+    def get_material(material_id: str) -> dict[str, object]:
+        card = materials.get(material_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="材料不存在")
+        return card.to_dict()
 
     @app.get("/api/chapters", response_model=list[ChapterOut])
     def list_chapters() -> list[ChapterOut]:

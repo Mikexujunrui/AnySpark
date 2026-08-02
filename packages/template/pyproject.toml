@@ -1,0 +1,24 @@
+# ---------------------------------------------------------------------------
+# anyspark-template — 模式库包（三层模板 + 资料消化）
+# 依赖：core（单向）。设计规格：DESIGN.md 机制 6/10
+# marker: S5
+# ---------------------------------------------------------------------------
+[project]
+name = "anyspark-template"
+version = "0.0.1"
+description = "AnySpark v4 模式库：三层模式（模型内存/默认库/外部库）+ 资料摘要卡+图谱关联"
+requires-python = ">=3.11"
+dependencies = [
+    "anyspark-core==0.0.1",  # workspace 成员
+    "openai==2.52.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anyspark"]
+
+[tool.uv.sources]
+anyspark-core = { workspace = true }

@@ -10,6 +10,7 @@ members = [
     "anyspark-check",
     "anyspark-core",
     "anyspark-explore",
+    "anyspark-template",
 ]
 
 [[package]]
@@ -53,6 +54,7 @@ dependencies = [
     { name = "anyspark-check" },
     { name = "anyspark-core" },
     { name = "anyspark-explore" },
+    { name = "anyspark-template" },
 ]
 
 [package.dev-dependencies]
@@ -69,6 +71,7 @@ requires-dist = [
     { name = "anyspark-check", editable = "packages/check" },
     { name = "anyspark-core", editable = "packages/core" },
     { name = "anyspark-explore", editable = "packages/explore" },
+    { name = "anyspark-template", editable = "packages/template" },
 ]
 
 [package.metadata.requires-dev]
@@ -140,6 +143,21 @@ source = { editable = "packages/core" }
 name = "anyspark-explore"
 version = "0.0.1"
 source = { editable = "packages/explore" }
+dependencies = [
+    { name = "anyspark-core" },
+    { name = "openai" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "anyspark-core", editable = "packages/core" },
+    { name = "openai", specifier = "==2.52.0" },
+]
+
+[[package]]
+name = "anyspark-template"
+version = "0.0.1"
+source = { editable = "packages/template" }
 dependencies = [
     { name = "anyspark-core" },
     { name = "openai" },
