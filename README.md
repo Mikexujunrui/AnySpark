@@ -37,6 +37,11 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 | [docs/UPGRADE-DISCUSSION.md](docs/UPGRADE-DISCUSSION.md) | 讨论纪要与推理过程（查证设计意图用） |
 | [docs/HANDOFF-L-SERIES.md](docs/HANDOFF-L-SERIES.md) | 与旧仓库 L 系列收尾的边界交接 |
 
+## 当前状态
+
+- **v4.0.0 第一版已完成**（S0~S6 七阶段全部通过，每阶段真实 DeepSeek 链路验证，总闸全绿）
+- **补缺中**：按 AUDIT-V1 优先级推进——知识图谱 → token 压缩 → 能动性协议 → SSE 流式 → 其余（路线见 PROGRESS.md「补缺阶段规划」）
+
 ## 设计一句话
 
 > 一个**机制硬编码、内容自然语言、模型无关**的多包系统：用户在**创作台**（概念卡→方向卡→稿纸）上以**操作式表达**与 AI 协作，AI 靠**多智能体探索**找方向、**说明书对齐**懂用户、**检测网**当第二双眼睛——从种子到作品，摩擦前置且递减。
