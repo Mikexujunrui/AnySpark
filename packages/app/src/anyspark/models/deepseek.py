@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from typing import Any
 
 from openai import OpenAI
@@ -65,7 +66,13 @@ class DeepSeekModel:
         model: str | None = None,
         temperature: float = 0.7,
         max_tokens: int = 4096,
+        stream: bool = False,
+        on_delta: Callable[[str], None] | None = None,
     ) -> None:
+        """
+        stream: 流式传输（SSE 用）；on_delta: 文本增量回调（stream=True 时逐段触发）。
+        非流式路径与旧行为完全一致（协议向后兼容）。
+        """
         self._base_url = base_url or DEFAULT_BASE_URL
         self._api_key = api_key or os.getenv("DEEPSEEK_API_KEY", "")
         if not self._api_key:
@@ -73,6 +80,8 @@ class DeepSeekModel:
         self._model = model or DEFAULT_MODEL
         self._temperature = temperature
         self._max_tokens = max_tokens
+        self._stream = stream
+        self._on_delta = on_delta
         self._client = OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
@@ -95,6 +104,9 @@ class DeepSeekModel:
             kwargs["tools"] = [to_openai_tool(t) for t in tools]
             kwargs["tool_choice"] = "auto"
 
+        if self._stream:
+            return self._respond_stream(kwargs)
+
         response = self._client.chat.completions.create(**kwargs)
         message = response.choices[0].message
 
@@ -109,4 +121,35 @@ class DeepSeekModel:
                     args = {"_raw": fn.arguments}
                 tool_calls.append(ToolCall(name=fn.name, arguments=args))
 
+        return ModelOutput(text=text, tool_calls=tool_calls)
+
+    def _respond_stream(self, kwargs: dict[str, Any]) -> ModelOutput:
+        """流式路径：文本 delta 逐段回调 on_delta；tool_calls 分片累积。"""
+        kwargs["stream"] = True
+        stream = self._client.chat.completions.create(**kwargs)
+        text_parts: list[str] = []
+        tool_acc: dict[int, dict[str, str]] = {}  # index -> {name, arguments}
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            if delta.content:
+                text_parts.append(delta.content)
+                if self._on_delta:
+                    self._on_delta(delta.content)
+            for tc in delta.tool_calls or []:
+                acc = tool_acc.setdefault(tc.index, {"name": "", "arguments": ""})
+                if tc.function and tc.function.name:
+                    acc["name"] += tc.function.name
+                if tc.function and tc.function.arguments:
+                    acc["arguments"] += tc.function.arguments
+        text = "".join(text_parts)
+        tool_calls: list[ToolCall] = []
+        for idx in sorted(tool_acc):
+            acc = tool_acc[idx]
+            try:
+                args: dict[str, Any] = json.loads(acc["arguments"]) if acc["arguments"] else {}
+            except json.JSONDecodeError:
+                args = {"_raw": acc["arguments"]}
+            tool_calls.append(ToolCall(name=acc["name"], arguments=args))
         return ModelOutput(text=text, tool_calls=tool_calls)

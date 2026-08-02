@@ -1,0 +1,83 @@
+"""anyspark.server.context — token 预算两阶段压缩测试。"""
+
+from __future__ import annotations
+
+from anyspark.core.types import Message
+from anyspark.server.context import TokenBudget, make_summarizer
+
+
+def _msgs(n: int, per: str = "消息内容 ") -> list[Message]:
+    return [Message(role="user" if i % 2 == 0 else "assistant", content=per * 10) for i in range(n)]
+
+
+def test_count_approximates_tokens() -> None:
+    b = TokenBudget(budget=1000)
+    assert b.count("") == 0
+    assert b.count("hello world") > 0
+    assert b.count("你好") > 0
+
+
+def test_no_compress_under_budget() -> None:
+    b = TokenBudget(budget=100000)
+    msgs = [Message(role="system", content="S"), *_msgs(10, "短")]
+    out = b.compress(msgs)
+    assert out == msgs  # 未超预算原样返回
+
+
+def test_prune_without_summarizer() -> None:
+    """超预算且无摘要器：纯 prune，保留 system + 最近消息。"""
+    b = TokenBudget(budget=100)  # 极小预算触发压缩
+    msgs = [Message(role="system", content="系统指令" * 20), *_msgs(30, "长消息")]
+    out = b.compress(msgs)
+    assert out[0].role == "system"  # system 保留
+    assert len(out) < len(msgs)  # 有压缩
+    assert b.count_messages(out) <= b.count_messages(msgs)  # 不增反减
+    assert out[-1].content == msgs[-1].content  # 最近消息保留
+
+
+def test_summarize_with_llm() -> None:
+    """有摘要器：旧历史压成一条历史摘要（系统消息），最近消息保留。"""
+    captured: list[list[Message]] = []
+
+    def fake_summarize(history: list[Message]) -> str:
+        captured.append(history)
+        return "摘要：早期对话已压缩。"
+
+    b = TokenBudget(budget=100, summarize=fake_summarize)
+    msgs = [Message(role="system", content="系统指令" * 20), *_msgs(30, "长消息")]
+    out = b.compress(msgs)
+    # 摘要器被调用（拿到了可压缩段）
+    assert captured and len(captured[0]) < len(msgs)
+    # 输出含历史摘要系统消息
+    assert any("历史对话摘要" in m.content for m in out)
+    # 最近消息保留
+    assert out[-1].content == msgs[-1].content
+    assert b.count_messages(out) < b.count_messages(msgs)
+
+
+def test_summarize_failure_falls_back_to_prune() -> None:
+    """摘要器抛异常：降级纯 prune，不中断。"""
+
+    def broken(history: list[Message]) -> str:
+        raise RuntimeError("LLM 挂了")
+
+    b = TokenBudget(budget=100, summarize=broken)
+    msgs = [Message(role="system", content="系统指令" * 20), *_msgs(30, "长消息")]
+    out = b.compress(msgs)
+    assert out[0].role == "system"
+    assert len(out) < len(msgs)
+
+
+def test_make_summarizer_uses_model() -> None:
+    """make_summarizer 包装真实模型调用（fake 模型）。"""
+
+    class FakeModel:
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="压缩摘要：写了第一章雨夜。")
+
+    s = make_summarizer(FakeModel())
+    assert s is not None
+    out = s([Message(role="user", content="x")])
+    assert "雨夜" in out

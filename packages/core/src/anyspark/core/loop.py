@@ -14,6 +14,7 @@ anyspark.core.loop — Agent 循环（机制 1 的过程控制，硬编码）。
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -33,6 +34,12 @@ class Model(Protocol):
     def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput: ...
 
 
+# 上下文压缩协议：输入完整 prompt 消息列表，输出压缩后的列表（token 预算）。
+# 核心只声明协议（零依赖铁律）；具体实现（tiktoken 计数 + prune/summarize）由
+# app 层注入（见 anyspark.server.context.TokenBudget）。模型无关。
+ContextCompressor = Callable[[list[Message]], list[Message]]
+
+
 @dataclass
 class Agent:
     """极简 Agent：持有模型、工具注册表、存储、事件发射器。"""
@@ -43,6 +50,7 @@ class Agent:
     events: EventEmitter = field(default_factory=EventEmitter)
     system_prompt: str = ""
     max_tool_iterations: int = 8  # 防无限循环硬上限
+    context_compressor: ContextCompressor | None = None  # 可选：token 预算压缩（app 注入）
 
     def run(self, user_prompt: str, conversation_id: str | None = None) -> Turn:
         """跑一轮：读提示 → 调工具（可多轮）→ 回填 → 输出。返回最终 Turn。"""
@@ -72,6 +80,9 @@ class Agent:
             prompt_messages = (
                 [Message(role="system", content=system_block)] if system_block else []
             ) + history
+            # token 预算：可选压缩（prune/summarize 两阶段，实现由 app 注入）
+            if self.context_compressor is not None:
+                prompt_messages = self.context_compressor(prompt_messages)
 
             tools: list[ToolSpec] = self.registry.specs()
             output = self.model.respond(prompt_messages, tools)

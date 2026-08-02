@@ -7,12 +7,16 @@ anyspark.server.app — FastAPI 后端（真实 API 层）。
 
 from __future__ import annotations
 
+import json
+import queue
+import threading
 from pathlib import Path
 from typing import Any, Literal, cast
 
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from anyspark.align import ManualEntry, ManualInjector, ManualStore, SignalCollector, SignalStore
@@ -26,6 +30,7 @@ from anyspark.explore import (
 )
 from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
 from anyspark.models.deepseek import DeepSeekModel
+from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.tools_writing import register_writing_tools
 from anyspark.store import ChapterStore, SqliteConversationStore
@@ -43,6 +48,11 @@ DEFAULT_SYSTEM = (
     "写正文可用 write_chapter 保存。"
     "正文要具体、有画面感，杜绝空泛总结。"
 )
+
+
+def _sse_frame(event: str, data: dict[str, Any]) -> str:
+    """SSE 帧：event: <type>\ndata: <json>\n\n（core 事件协议 → 传输层）。"""
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +165,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     graph_extractor = GraphExtractor(model)
     graph_injector = GraphInjector(graph)
     graph_verifier = GraphVerifier(graph)
+    # token 预算 + 两阶段压缩（S8：长书上下文刚需）
+    budget = TokenBudget(budget=12000, summarize=make_summarizer(model))
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
@@ -164,10 +176,24 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         allow_headers=["*"],
     )
 
-    def _make_agent(system_prompt: str, temperature: float, book_id: str = "main") -> Agent:
+    def _make_agent(
+        system_prompt: str,
+        temperature: float,
+        book_id: str = "main",
+        on_delta: Any | None = None,
+    ) -> Agent:
         registry = ToolRegistry()
         register_writing_tools(registry, chapters)
-        m = model if temperature == 0.7 else DeepSeekModel(temperature=temperature)
+        m: Model
+        if on_delta is not None and isinstance(model, DeepSeekModel):
+            # SSE 流式：真实 DeepSeek 流式传输 + delta 回调
+            m = DeepSeekModel(temperature=temperature, stream=True, on_delta=on_delta)
+        elif on_delta is not None:
+            m = model  # 测试 fake：无逐字流，仅事件帧
+        elif temperature == 0.7:
+            m = model
+        else:
+            m = DeepSeekModel(temperature=temperature)
         # 对齐注入：说明书（项目级>全局级）追加进系统提示
         align_block = manual_injector.build_system_block(book_id)
         full_prompt = system_prompt
@@ -177,7 +203,13 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         graph_block = graph_injector.build_block(book_id)
         if graph_block:
             full_prompt = full_prompt + "\n\n" + graph_block
-        return Agent(model=m, registry=registry, store=store, system_prompt=full_prompt)
+        return Agent(
+            model=m,
+            registry=registry,
+            store=store,
+            system_prompt=full_prompt,
+            context_compressor=budget.compress,  # token 预算两阶段压缩（S8）
+        )
 
     def _extract_chapter(book_id: str, title: str, content: str, order: int) -> None:
         """章节落盘后自动抽取图谱（后台任务）。失败只记日志，绝不阻断写作。"""
@@ -254,6 +286,70 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             text=turn.text,
             turns=turns_payload,
             events=events,
+        )
+
+    @app.post("/api/chat/stream")
+    def chat_stream(req: ChatRequest) -> StreamingResponse:
+        """SSE 流式：turn_start / text_delta / tool_call / tool_result / done / error。
+
+        S8（模型局限弥补 + A 类硬编码 SSE 传输）：长文生成逐字流式，用户不等全量。
+        事件帧格式：event: <type>\ndata: <json>\n\n（core 事件协议 → 传输层）。
+        """
+        events_queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
+
+        def on_event(e: Any) -> None:
+            events_queue.put((e.type, e.payload))
+
+        def run_agent(agent: Agent, msg: str, conv_id: str) -> None:
+            try:
+                turn = agent.run(msg, conv_id)
+                # 图谱抽取：与 /api/chat 行为一致（write_chapter 落盘后自动抽取）
+                for wc in turn.tool_calls:
+                    if wc.name == "write_chapter":
+                        title = str(wc.arguments.get("title", "")).strip()
+                        content = str(wc.arguments.get("content", ""))
+                        if title and content:
+                            chs = chapters.list_by_book("main")
+                            order = next((c.order_index for c in chs if c.title == title), len(chs))
+                            _extract_chapter("main", title, content, order)
+            except Exception as exc:  # 异常转 error 帧（不中断连接）
+                logger.exception("chat/stream 执行异常: %s", exc)
+                events_queue.put(("error", {"message": f"执行失败: {exc}"}))
+
+        def gen() -> Any:
+            agent = _make_agent(
+                req.system_prompt or DEFAULT_SYSTEM,
+                req.temperature,
+                on_delta=lambda c: events_queue.put(("text_delta", {"content": c})),
+            )
+            for t in ("turn_start", "text", "tool_call", "tool_result", "done", "error"):
+                agent.events.on(t, on_event)
+            conv_id = req.conversation_id
+            if not conv_id:
+                conv = agent.store.create()
+                conv_id = conv.id
+            # Agent 循环在线程跑，事件经 queue 转 SSE 帧（同步生成器流式输出）
+            threading.Thread(
+                target=run_agent, args=(agent, req.message, conv_id), daemon=True
+            ).start()
+            while True:
+                try:
+                    etype, payload = events_queue.get(timeout=120)
+                except queue.Empty:
+                    yield _sse_frame("error", {"message": "流式超时（120s 无事件）"})
+                    break
+                if etype == "done":
+                    yield _sse_frame("done", {"conversation_id": conv_id})
+                    break
+                if etype == "error":
+                    yield _sse_frame("error", payload)
+                    break
+                yield _sse_frame(etype, payload)
+
+        return StreamingResponse(
+            gen(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
 
     @app.get("/api/manual", response_model=list[dict[str, Any]])

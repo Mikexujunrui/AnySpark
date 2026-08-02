@@ -118,6 +118,44 @@ def test_graph_api_manual_extract() -> None:
     assert "陈渡" in {e["name"] for e in client.get("/api/graph/entities").json()}
 
 
+def test_chat_stream_sse_frames() -> None:
+    """S8：/api/chat/stream 返回 SSE 帧（事件协议 → 传输层）。
+
+    fake model 无逐字流，但事件帧完整：turn_start → tool_call → text → done。
+    """
+    client = _make_client()
+    r = client.post("/api/chat/stream", json={"message": "写第一章"})
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    body = r.text
+    assert "event: turn_start" in body
+    assert "event: tool_call" in body
+    assert "event: text" in body
+    assert "event: done" in body
+    assert "conversation_id" in body
+    # 图谱抽取也照常触发（后台任务）
+    entities = client.get("/api/graph/entities").json()
+    assert any(e["name"] == "陈渡" for e in entities)
+
+
+def test_chat_stream_error_frame() -> None:
+    """S8：异常转 error 帧，不中断连接。"""
+
+    class BoomModel:
+        model_name = "boom"
+
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            raise RuntimeError("模型爆炸")
+
+    db = Path(tempfile.mkdtemp()) / "test.db"
+    app = build_app(model=BoomModel(), db_path=db)
+    client = TestClient(app)
+    r = client.post("/api/chat/stream", json={"message": "hi"})
+    assert r.status_code == 200
+    assert "event: error" in r.text
+    assert "模型爆炸" in r.text
+
+
 def test_chat_uses_same_conversation_for_continuation() -> None:
     client = _make_client()
     first = client.post("/api/chat", json={"message": "写第一章"}).json()

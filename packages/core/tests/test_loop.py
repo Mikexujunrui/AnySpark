@@ -45,6 +45,30 @@ def test_loop_runs_without_tools() -> None:
     assert [m.role for m in msgs] == ["user", "assistant"]
 
 
+def test_context_compressor_is_applied() -> None:
+    """S8：token 预算压缩回调（app 注入）在每轮模型调用前生效。"""
+    calls: list[list[Message]] = []
+
+    def compressor(messages: list[Message]) -> list[Message]:
+        calls.append(list(messages))
+        # 模拟压缩：只保留 system + 最后一条
+        return messages[:1] + messages[-1:]
+
+    model = ScriptedModel([_no_tool("压缩后回答")])
+    agent = Agent(
+        model=model,
+        registry=ToolRegistry(),
+        system_prompt="系统指令",
+        context_compressor=compressor,
+    )
+    turn = agent.run("长对话问题")
+    assert turn.text == "压缩后回答"
+    assert len(calls) == 1
+    assert calls[0][0].role == "system"  # 压缩器拿到完整 prompt（含 system）
+    # 模型实际收到的消息是压缩后的（system + 最后一条）
+    assert len(model.answered_prompts[0]) == 2
+
+
 def test_one_tool_then_final_output() -> None:
     from anyspark.core import ToolCall
 
