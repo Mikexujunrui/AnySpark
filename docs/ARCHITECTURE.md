@@ -214,6 +214,12 @@ Cancel 请求 → RunState.cancel → 设置 cancelled flag → 循环内 check 
 
 ## 变更记录
 
+### v3.4.1 - 2026-08-02: 修复 extract_all_chapters 未注册
+
+- 变更类型: 修复
+- 涉及模块: tools/executor.py, tests/test_extract_all_registration(新)
+- 描述: 用户反馈 `extract_all_chapters 未注册`，740 章全量提取不可用，只能退回单章提取。根因：handler（`tools/impl/knowledge.py:_extract_all_chapters`）、工具定义（`tool_defs/knowledge.py`）、元数据（`tool_meta.py`）均存在，但 executor 从未 import 且未注册到 `_build_dispatch` 与 `_register_streaming` 两张表。修复：补 import + 双表注册。新增回归测试 `tests/test_extract_all_registration.py` 锁定三层注册（registry / dispatch / streaming），防止再退化。
+
 ### v3.4 - 2026-08-02: 思考强度模型族档位（按模型定制）
 
 - 变更类型: 重构

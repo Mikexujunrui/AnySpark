@@ -80,6 +80,7 @@ from tools.impl.imports import (
 )
 from tools.impl.inspirations import _manage_inspirations
 from tools.impl.knowledge import (
+    _extract_all_chapters,
     _extract_chapter,
     _finalize_chapter,
     _prepare_writing,
@@ -366,6 +367,7 @@ def _build_dispatch() -> None:
     _register_in_dispatch(D, _reorder_chapters, "reorder_chapters")
     _register_in_dispatch(D, _chapter_history, "chapter_history")
     _register_in_dispatch(D, _extract_chapter, "extract_chapter")
+    _register_in_dispatch(D, _extract_all_chapters, "extract_all_chapters")
     _register_in_dispatch(D, _prepare_writing, "prepare_writing")
     _register_in_dispatch(D, _finalize_chapter, "finalize_chapter")
     _register_in_dispatch(D, _read_document, "read_document")
@@ -552,6 +554,7 @@ def _register_streaming():
             "run_review": _run_review,
             "write_chapter": _write_chapter_streaming,
             "delegate_writing": _delegate_writing_streaming,
+            "extract_all_chapters": _extract_all_chapters,
             "rewrite_by_chain": _rewrite_by_chain_streaming,
             "generate_workflow": _generate_workflow_streaming,
             "manage_workflows": _manage_workflows_streaming,

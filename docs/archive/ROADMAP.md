@@ -21,6 +21,11 @@
 
 ## 追加记录
 
+### v19 — 2026-08-02: 修复 extract_all_chapters 未注册
+- 变更类型: 修复
+- 涉及模块: tools/executor.py, tests/test_extract_all_registration(新)
+- 描述: 批量提取工具 `extract_all_chapters` 因 executor 未 import/未注册而不可用（handler、tool_defs、TOOL_META 均存在）。补注册到 dispatch + streaming 双表，新增三层注册回归测试。
+
 ### v18 — 2026-08-02: 思考强度模型族档位（按模型定制）
 - 变更类型: 重构
 - 涉及模块: reasoning, settings, llm_client, routes/settings, SettingsModal.tsx, tests/test_reasoning_effort
