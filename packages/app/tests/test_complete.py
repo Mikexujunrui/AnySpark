@@ -13,7 +13,7 @@ from anyspark.server.tools_web import (
     render_results,
     search_web,
 )
-from anyspark.template import ExternalLibrary, PlotGenerator, PlotStore
+from anyspark.template import ExternalLibrary, PlotGenerator, PlotResolver, PlotStore
 
 SO_HTML = (
     '<li class="res-list"><h3 class="res-title"><a href="https://example.com/a" '
@@ -113,6 +113,18 @@ class FakePlotModel:
         )
 
 
+class FakeResolveModel:
+    """回收响应：本章揭开了"怀表刻着沈青山"。"""
+
+    model_name = "fake-resolve"
+
+    def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+        return ModelOutput(
+            text='{"resolved": [{"content": "怀表刻着沈青山", '
+            '"evidence": "本章发现怀表内部刻着沈青山的名字"}]}'
+        )
+
+
 def test_plot_generate_and_store() -> None:
     store = PlotStore(Path(tempfile.mkdtemp()) / "p.db")
     gen = PlotGenerator(FakePlotModel())
@@ -121,13 +133,49 @@ def test_plot_generate_and_store() -> None:
     assert points[0].category == "主线冲突"
     listed = store.list()
     assert len(listed) == 2
-    # 状态流转
-    p = store.update_status(listed[0].id, "resolved")
+    # 状态流转 + 关注度（S17：attention 字段 + update 取代 update_status）
+    p = store.update(listed[0].id, status="resolved")
     assert p is not None and p.status == "resolved"
+    p2 = store.update(listed[1].id, attention="ignore")
+    assert p2 is not None and p2.attention == "ignore"
     rendered = store.render()
     assert "关键点图谱" in rendered and "✓" in rendered
+    # ignore 条目不注入
+    assert listed[1].content not in rendered
     store.delete(listed[1].id)
     assert len(store.list()) == 1
+
+
+def test_plot_auto_resolve() -> None:
+    """S17 伏笔自动回收：章节文本匹配揭开 open 关键点 → resolved；未涉及的不动。"""
+    store = PlotStore(Path(tempfile.mkdtemp()) / "r.db")
+    gen = PlotGenerator(FakePlotModel())
+    gen.generate("main", store, "")
+    resolver = PlotResolver(FakeResolveModel())
+    resolved = resolver.resolve(
+        "main", "第4章", "怀表内部刻着沈青山的名字，陈渡终于明白了。", store
+    )
+    assert resolved == ["怀表刻着沈青山"]
+    points = {p.content: p for p in store.list()}
+    assert points["怀表刻着沈青山"].status == "resolved"
+    assert points["怀表刻着沈青山"].chapter_ref == "第4章"
+    # 未涉及的伏笔仍 open
+    assert points["陈渡追查父亲死因"].status == "open"
+
+
+def test_plot_resolve_ignores_attention_ignore() -> None:
+    """attention=ignore 的条目不参与回收（用户标注不需要=不惦记）。"""
+    store = PlotStore(Path(tempfile.mkdtemp()) / "i.db")
+    gen = PlotGenerator(FakePlotModel())
+    gen.generate("main", store, "")
+    for p in store.list():
+        if p.content == "怀表刻着沈青山":
+            store.update(p.id, attention="ignore")
+    resolver = PlotResolver(FakeResolveModel())
+    resolved = resolver.resolve("main", "第4章", "怀表内部刻着沈青山的名字", store)
+    assert resolved == []
+    points = {p.content: p for p in store.list()}
+    assert points["怀表刻着沈青山"].status == "open"  # ignore 不回收
 
 
 # ---------------------------------------------------------------------------

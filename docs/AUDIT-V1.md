@@ -67,6 +67,7 @@
 | 重试可拼接组件（core.RetryingModel 组合包装，任何模型可套；DeepSeek 不再内嵌） | §1 A 类硬编码 | `core/retry.py`（S15） |
 | 氛围滑块注入归属 align（mood.py，B 类载体与 agency/bias 同包） | 机制4 | `align/mood.py`（S15） |
 | 前端抽屉按需加载（React.lazy + Suspense，独立 chunk） | 机制5 抽屉 | `frontend/src/app/App.tsx`（S15） |
+| 伏笔闭环（注入写作/自动回收/关注度 care-ignore） | T2 阶段3 + 机制 | `template/plot.py` + `app.py`（S17） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134

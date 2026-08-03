@@ -53,6 +53,7 @@ from anyspark.template import (
     MaterialDigestor,
     MaterialStore,
     PlotGenerator,
+    PlotResolver,
     PlotStore,
 )
 
@@ -91,7 +92,7 @@ class ChatRequest(BaseModel):
     # 增强按需装配（S15："你要什么再装什么"——默认关的增强，点亮才挂）
     enable_search: bool = False  # 网络搜索工具按需注册（默认关：写作主链路不背考据能力）
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
-    skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood 子集
+    skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood/plot 子集
 
 
 class ToolEvent(BaseModel):
@@ -211,8 +212,9 @@ class PlotIn(BaseModel):
     settings: str = ""  # 作品设定/种子（可选，缺省用已写章节）
 
 
-class PlotStatusIn(BaseModel):
-    status: str  # open|resolved
+class PlotPatchIn(BaseModel):
+    status: str | None = None  # open|resolved
+    attention: str | None = None  # care|ignore（用户标注在意/不需要）
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +243,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     # 默认真实模型套上组合式重试包装（S15：重试是 core 可拼接组件，不内嵌在模型里）
     model = model or RetryingModel(DeepSeekModel())
     plot_generator = PlotGenerator(model)  # 依赖 model，须在其初始化之后
+    plot_resolver = PlotResolver(model)  # 伏笔自动回收（S17：章节落盘后台识别揭开）
     # 知识图谱（S7：AI 事实源）
     graph = GraphStore(real_db)
     graph_extractor = GraphExtractor(model)
@@ -314,6 +317,10 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         bias_block = bias.render()
         if "bias" not in skip and bias_block:
             full_prompt = full_prompt + "\n\n" + bias_block
+        # 关键点图谱注入（T2 阶段 3：当前推进状态——哪些伏笔还开着/刚回收）
+        plot_block = plots.render("main")
+        if "plot" not in skip and plot_block:
+            full_prompt = full_prompt + "\n\n" + plot_block
         # 氛围滑块注入（机制 4：本段氛围要求）
         mood_block = build_mood_block(mood)
         if "mood" not in skip and mood_block:
@@ -327,7 +334,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         )
 
     def _extract_chapter(book_id: str, title: str, content: str, order: int) -> None:
-        """章节落盘后自动抽取图谱（后台任务）。失败只记日志，绝不阻断写作。"""
+        """章节落盘后自动：图谱抽取 + 伏笔自动回收（后台任务）。失败只记日志，绝不阻断写作。"""
         try:
             existing = [e.to_dict() for e in graph.list_entities(book_id)]
             ext = graph_extractor.extract(title, content, existing)
@@ -341,6 +348,13 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             )
         except Exception as exc:  # 抽取失败不影响写作主链路
             logger.warning("图谱抽取失败(不影响写作): %s", exc)
+        # 伏笔自动回收：本章揭开了哪些进行中的关键点（S17，独立 try 互不影响）
+        try:
+            resolved = plot_resolver.resolve(book_id, title, content, plots)
+            if resolved:
+                logger.info("伏笔自动回收: 《%s》 %s", title, "、".join(resolved))
+        except Exception as exc:
+            logger.warning("伏笔回收失败(不影响写作): %s", exc)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -405,6 +419,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                     if title and content:
                         chs = chapters.list_by_book("main")
                         order = next((c.order_index for c in chs if c.title == title), len(chs))
+                        logger.info("后台图谱抽取挂载: 《%s》", title)
                         background_tasks.add_task(_extract_chapter, "main", title, content, order)
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
         # AI 档位声明解析（机制 2：AI 可声明，用户点选确认）
@@ -646,9 +661,6 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     class PlotIn(BaseModel):
         settings: str = ""  # 作品设定/种子（可选，缺省用已写章节）
 
-    class PlotStatusIn(BaseModel):
-        status: str  # open|resolved
-
     @app.post("/api/plot", response_model=list[dict[str, object]])
     def generate_plot(req: PlotIn) -> list[dict[str, object]]:
         """关键点图谱（T2 阶段 3 可选深入）：LLM 生成草案入库。"""
@@ -660,8 +672,13 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         return [p.to_dict() for p in plots.list()]
 
     @app.patch("/api/plot/{plot_id}", response_model=dict[str, object])
-    def update_plot_status(plot_id: str, req: PlotStatusIn) -> dict[str, object]:
-        p = plots.update_status(plot_id, req.status)
+    def update_plot_status(plot_id: str, req: PlotPatchIn) -> dict[str, object]:
+        """更新关键点：状态（回收/重开）+ 关注度（在意/不需要）——操作即对齐信号。"""
+        p = plots.update(
+            plot_id,
+            status=req.status,
+            attention=req.attention,
+        )
         if p is None:
             raise HTTPException(status_code=404, detail="关键点不存在")
         return p.to_dict()

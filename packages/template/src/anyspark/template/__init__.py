@@ -10,7 +10,13 @@ anyspark.template — 模式库包。
 
 from .materials import MaterialCard, MaterialDigestor, MaterialStore
 from .patterns import DEFAULT_TEMPLATES, ExternalLibrary, Template, default_library
-from .plot import PLOT_CATEGORIES, PlotGenerator, PlotPoint, PlotStore
+from .plot import (
+    PLOT_CATEGORIES,
+    PlotGenerator,
+    PlotPoint,
+    PlotResolver,
+    PlotStore,
+)
 
 __all__ = [
     "DEFAULT_TEMPLATES",
@@ -21,6 +27,7 @@ __all__ = [
     "MaterialStore",
     "PlotGenerator",
     "PlotPoint",
+    "PlotResolver",
     "PlotStore",
     "Template",
     "default_library",

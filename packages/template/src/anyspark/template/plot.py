@@ -9,6 +9,7 @@ DESIGN：图谱=跨章长期记忆（主线冲突/角色弧/情感核/世界规�
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import threading
 import uuid
@@ -37,6 +38,7 @@ class PlotPoint:
     content: str
     chapter_ref: str = ""  # 关联章节（可空=全局）
     status: str = "open"  # open|resolved
+    attention: str = "care"  # care|ignore（用户标注在意/不需要；ignore 不注入不回收）
     created_at: str = field(default_factory=_now)
 
     def to_dict(self) -> dict[str, Any]:
@@ -47,6 +49,7 @@ class PlotPoint:
             "content": self.content,
             "chapter_ref": self.chapter_ref,
             "status": self.status,
+            "attention": self.attention,
             "created_at": self.created_at,
         }
 
@@ -69,28 +72,43 @@ class PlotStore:
                 content TEXT NOT NULL,
                 chapter_ref TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'open',
+                attention TEXT NOT NULL DEFAULT 'care',
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_plot_book ON plot_points(book_id, category);
             """
         )
-        self._conn.commit()
+        # 旧库兼容：attention 列（S17 新增）
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(plot_points)")}
+        if "attention" not in cols:
+            self._conn.execute(
+                "ALTER TABLE plot_points ADD COLUMN attention TEXT NOT NULL DEFAULT 'care'"
+            )
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
 
-    def add(self, book_id: str, category: str, content: str, chapter_ref: str = "") -> PlotPoint:
+    def add(
+        self,
+        book_id: str,
+        category: str,
+        content: str,
+        chapter_ref: str = "",
+        attention: str = "care",
+    ) -> PlotPoint:
         pid = uuid.uuid4().hex
         cat = category if category in PLOT_CATEGORIES else "主线冲突"
+        att = attention if attention in ("care", "ignore") else "care"
         now = _now()
         with self._lock:
             self._conn.execute(
                 "INSERT INTO plot_points (id, book_id, category, content, chapter_ref, "
-                "status, created_at) VALUES (?,?,?,?,?,?,?)",
-                (pid, book_id, cat, content, chapter_ref, "open", now),
+                "status, attention, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (pid, book_id, cat, content, chapter_ref, "open", att, now),
             )
             self._conn.commit()
-        return PlotPoint(pid, book_id, cat, content, chapter_ref, "open", now)
+        return PlotPoint(pid, book_id, cat, content, chapter_ref, "open", att, now)
 
     def list(self, book_id: str = "main") -> list[PlotPoint]:
         rows = self._conn.execute(
@@ -104,35 +122,82 @@ class PlotStore:
                 content=r["content"],
                 chapter_ref=r["chapter_ref"],
                 status=r["status"],
+                attention=r["attention"],
                 created_at=r["created_at"],
             )
             for r in rows
         ]
 
-    def update_status(self, plot_id: str, status: str) -> PlotPoint | None:
+    def update(
+        self,
+        plot_id: str,
+        *,
+        status: str | None = None,
+        attention: str | None = None,
+        chapter_ref: str | None = None,
+    ) -> PlotPoint | None:
+        """更新状态/关注度/关联章节（None=不变）。"""
+        sets: list[str] = []
+        params: list[Any] = []
+        if status is not None:
+            sets.append("status=?")
+            params.append(status if status in ("open", "resolved") else "open")
+        if attention is not None:
+            sets.append("attention=?")
+            params.append(attention if attention in ("care", "ignore") else "care")
+        if chapter_ref is not None:
+            sets.append("chapter_ref=?")
+            params.append(chapter_ref)
+        if not sets:
+            return self.get(plot_id)
+        params.append(plot_id)
         with self._lock:
-            self._conn.execute("UPDATE plot_points SET status=? WHERE id=?", (status, plot_id))
+            self._conn.execute(f"UPDATE plot_points SET {','.join(sets)} WHERE id=?", params)
             self._conn.commit()
-        for p in self.list():
-            if p.id == plot_id:
-                return p
-        return None
+        return self.get(plot_id)
+
+    def get(self, plot_id: str) -> PlotPoint | None:
+        row = self._conn.execute("SELECT * FROM plot_points WHERE id=?", (plot_id,)).fetchone()
+        if not row:
+            return None
+        return PlotPoint(
+            id=row["id"],
+            book_id=row["book_id"],
+            category=row["category"],
+            content=row["content"],
+            chapter_ref=row["chapter_ref"],
+            status=row["status"],
+            attention=row["attention"],
+            created_at=row["created_at"],
+        )
 
     def delete(self, plot_id: str) -> None:
         with self._lock:
             self._conn.execute("DELETE FROM plot_points WHERE id=?", (plot_id,))
             self._conn.commit()
 
-    def render(self, book_id: str = "main") -> str:
-        """渲染成注入块（当前推进状态，供一章收尾/续写时注入）。"""
-        points = self.list(book_id)
+    def render(self, book_id: str = "main", max_resolved: int = 3) -> str:
+        """渲染成注入块（当前推进状态，供写作时注入）。
+
+        - attention=ignore 的条目不注入（用户标注"不需要"=不惦记）
+        - open 全注入；resolved 只列最近 max_resolved 条（省 token，提示推进即可）
+        """
+        points = [p for p in self.list(book_id) if p.attention != "ignore"]
         if not points:
             return ""
+        open_pts = [p for p in points if p.status == "open"]
+        resolved_pts = [p for p in points if p.status == "resolved"][-max_resolved:]
         lines = ["# 关键点图谱（当前推进状态）"]
-        for p in points:
-            mark = "✓" if p.status == "resolved" else "○"
-            ref = f"（{p.chapter_ref}）" if p.chapter_ref else ""
-            lines.append(f"- {mark} [{p.category}] {p.content}{ref}")
+        if open_pts:
+            lines.append("进行中（写作时注意呼应/推进）：")
+            for p in open_pts:
+                ref = f"（{p.chapter_ref}）" if p.chapter_ref else ""
+                lines.append(f"- ○ [{p.category}] {p.content}{ref}")
+        if resolved_pts:
+            lines.append("已回收：")
+            for p in resolved_pts:
+                ref = f"（{p.chapter_ref}）" if p.chapter_ref else ""
+                lines.append(f"- ✓ [{p.category}] {p.content}{ref}")
         return "\n".join(lines)
 
 
@@ -189,3 +254,88 @@ class PlotGenerator:
             except json.JSONDecodeError:
                 pass
         return points
+
+
+RESOLVE_PROMPT = (
+    "你是小说结构分析师。读下面这一章正文，判断其中**揭开了哪些进行中的关键点（伏笔/悬念）**。\n"
+    "只回收真正被本章明确揭示/回应/解决的；未被涉及的不要列。\n"
+    "输出（严格 JSON，不要其它文字）：\n"
+    '{"resolved": [{"content": "被揭开的关键点原文（与列表高度一致）", '
+    '"evidence": "章节中的证据（一句话）"}]}\n\n'
+    "进行中的关键点列表：\n"
+)
+
+
+class PlotResolver:
+    """伏笔自动回收（半硬编码）：章节落盘后，LLM 判断本章揭开哪些 open 关键点 → resolved。
+
+    机制硬编码（匹配/更新），内容模型生成（证据/判断）。失败静默（不影响写作主链路）。
+    """
+
+    def __init__(self, model: object) -> None:
+        self._model = model
+
+    def resolve(self, book_id: str, title: str, content: str, store: PlotStore) -> list[str]:
+        """返回被回收的关键点 content 列表（失败返回空，绝不抛异常）。"""
+        open_pts = [
+            p for p in store.list(book_id) if p.status == "open" and p.attention != "ignore"
+        ]
+        if not open_pts:
+            return []
+        listing = "\n".join(f"- [{p.category}] {p.content}" for p in open_pts)
+        prompt = RESOLVE_PROMPT + listing + f"\n\n章节《{title}》正文：\n{content[:6000]}"
+        try:
+            out = self._model.respond(  # type: ignore[attr-defined]
+                [Message(role="system", content=prompt)],
+                [],
+            )
+            return self._match(out.text, open_pts, title, store)
+        except Exception:
+            return []
+
+    def _match(
+        self,
+        raw: str,
+        open_pts: list[PlotPoint],
+        title: str,
+        store: PlotStore,
+    ) -> list[str]:
+        """宽容解析 + 内容匹配（LLM 输出的 content 需与库中条目高度一致才回收，防误伤）。"""
+        import re as _re
+
+        cleaned = raw.strip()
+        fence = _re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, _re.DOTALL)
+        if fence:
+            cleaned = fence.group(1)
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start == -1 or end <= start:
+            return []
+        try:
+            data = json.loads(cleaned[start : end + 1])
+        except json.JSONDecodeError:
+            return []
+        resolved_content: list[str] = []
+        items = data.get("resolved") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            return []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            c = str(item.get("content", "")).strip()
+            if not c:
+                continue
+            for p in open_pts:
+                if _text_match(p.content, c):
+                    store.update(p.id, status="resolved", chapter_ref=title)
+                    resolved_content.append(p.content)
+                    break
+        return resolved_content
+
+
+def _text_match(a: str, b: str) -> bool:
+    """双向包含匹配（容忍 LLM 复述的细微差异）。"""
+    na = re.sub(r"[\s，。、；：！？「」『』\"']+", "", a)
+    nb = re.sub(r"[\s，。、；：！？「」『』\"']+", "", b)
+    if not na or not nb:
+        return False
+    return na in nb or nb in na

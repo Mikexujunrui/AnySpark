@@ -321,6 +321,26 @@
 
 ---
 
+## S17 伏笔闭环补缺（已完成 ✅）
+
+**交付 commit**：`S17 伏笔闭环`
+
+**背景**：S16 审计发现伏笔（PlotPoint）"存而不用"——DESIGN 承诺的注入/自动回收/对齐标注三项基本未落地。本次补齐（前端仍搁置，用 anyspark_api 实测）。
+
+**实现**：
+- **注入（最大断裂修复）**：`_make_agent` 注入链新增 plot 块（`plots.render("main")`，skip_inject 支持 "plot"）——写作时 AI 知道哪些伏笔还开着/刚回收；render 升级：open 全注入、resolved 只列最近 3 条、attention=ignore 不注入
+- **自动回收**：`PlotResolver`（半硬编码）——章节落盘后台任务里 LLM 判断本章揭开哪些 open 伏笔 → 内容双向包含匹配防误伤 → status=resolved + chapter_ref 落章；失败静默不阻断写作；ignore 条目不参与回收
+- **对齐标注**：PlotPoint 加 `attention`（care/ignore）；PATCH /api/plot/{id} 支持 status+attention；旧库 ALTER 兼容
+
+**门禁**：ruff + mypy + pytest **148**（+2：自动回收匹配/ignore 不回收）全绿
+
+**真实链路验证**（anyspark_api）：
+- 图谱生成 7 项（含伏笔"怀表背面刻有一串数字"）→ PATCH 标记 ignore → chat 写《第三章 怀表》（AI 回复主动提到"呼应关键点图谱中怀表密码的伏笔"=注入生效）→ 后台自动回收日志 `伏笔自动回收: 《第三章 怀表》 怀表背面刻有一串数字` → 状态 ✓ resolved、章节=第三章 怀表
+
+**踩坑**：FastAPI background_tasks 与请求**共享线程池**——LLM 慢调用（15-40s）导致后台任务**延迟排队执行**（S7 既存行为，非 S17 引入）；验证时需等 60s+。已记录，后续若需可改独立 worker。
+
+---
+
 ## S14 T7 验证指标（已完成 ✅）
 
 **交付 commit**：`S14 T7 指标`
