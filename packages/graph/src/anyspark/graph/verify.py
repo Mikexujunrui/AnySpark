@@ -59,6 +59,21 @@ class GraphVerifier:
         out = "\n".join(lines)
         return out[:max_len]
 
+    def check_temporal(self, book_id: str, text: str, up_to_order: int) -> list[str]:
+        """时序校验（确定性规则）：文本中提及的实体若在图谱中首次出现于
+        更晚的章节（first_order > up_to_order），提示"时空倒置"——该实体在
+        当前时空点还不应出现。返回自然语言警告列表。"""
+        warnings: list[str] = []
+        entities = self._graph.list_entities(book_id, limit=500)
+        for e in entities:
+            if e.first_order > up_to_order and e.name in text:
+                warnings.append(
+                    f"时序警告：{e.name}（{e.entity_type}）首次出现于"
+                    f"{e.first_chapter}，而当前是截止第 {up_to_order} 章的时空点——"
+                    "它此刻还不该登场（如确需提及，请确认是否为倒叙/回忆）。"
+                )
+        return warnings
+
 
 def _find_mention(e: Entity, text: str) -> str:
     """返回命中的名字/别名；无命中返回空串。"""

@@ -257,5 +257,21 @@
 | S11 基建+安全 | `866dd66` | retry 指数退避；DeepSeekModel timeout+重试；沙箱文件工具（越界/超长/docz 解析）；fake_write 落盘自校验；导出 RFC5987 中文名 | DeepSeek 自主沙箱落盘；导出含中文文件名 |
 | S12 收尾 | 本文档 | gate.py 补 graph 包；CI 通配已覆盖；AUDIT-V1 复核；桌面壳 32 路由 | 总闸全绿（pytest 123） |
 
-**剩余缺口**（设计明确降权/后补，非缺失）：关键点图谱（T2 阶段 3 可选深入）；确定性校验完整规则（伏笔匹配/时间线顺序，S7 已铺证据层）；L3 外部模式库；评审团/Autopilot 增强包；网络搜索工具（写作 Agent 侧）
+**剩余缺口**（设计明确降权/后补，非缺失）：~~关键点图谱~~ ✅ ~~确定性校验完整规则~~ ✅ ~~网络搜索~~ ✅ ~~L3 模式库~~ ✅ ——S13 已全部补齐，见下方；仅增强包（评审团/Autopilot）与场景拼图板画布仍按设计降权
+
+---
+
+## S13 补全遗留（已完成 ✅）
+
+**交付 commit**：`补全后提交`
+
+- **网络搜索工具** `search_web`（参考 pi-web-toolkit 搜索包思想）：360 主引擎 + Bing 兜底 + UA 伪装 + 正则解析（data-mdurl/ck跳转解真实URL），零依赖 urllib；注册进写作 Agent，DeepSeek 可自主调用
+- **时序校验**（确定性规则）：`GraphVerifier.check_temporal`——文本提及的实体若在图谱中首现于更晚章节 → "时空倒置"警告；接入 `/api/check?chapter_order=`
+- **氛围滑块**（机制 4 补齐）：后端 `mood` 注入（紧张/温暖/舒缓/压抑 0-100）+ 前端 MoodSliders，随 chat 请求注入系统提示
+- **L3 外部模式库**（机制 6）：`ExternalLibrary`（SQLite）+ POST /api/templates/import，与 L2 合并供探索
+- **关键点图谱**（T2 阶段 3）：`PlotStore` + `PlotGenerator`（LLM 生成草案）+ /api/plot CRUD + 状态流转（open/resolved）
+- **门禁**：pytest **131**（新增 8：搜索解析/时序校验/L3 导入/plot/氛围）；总闸全绿
+- **真实验证**：DeepSeek 自主 search_web 考据；L3 导入 6 模板；关键点图谱 7 项（含自动补全"档案被篡改"悬疑设定）
+
+**踩坑**：Pydantic 模型定义在 build_app 函数内会 ForwardRef 解析失败（须模块级）；PlotGenerator 须在 model 初始化后装配
 

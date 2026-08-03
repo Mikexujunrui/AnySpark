@@ -46,7 +46,13 @@ from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.tools_writing import register_writing_tools
 from anyspark.store import ChapterStore, SqliteConversationStore
-from anyspark.template import MaterialDigestor, MaterialStore, default_library
+from anyspark.template import (
+    ExternalLibrary,
+    MaterialDigestor,
+    MaterialStore,
+    PlotGenerator,
+    PlotStore,
+)
 
 # 数据根：项目 data/（gitignored，绝不入库）
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
@@ -67,6 +73,29 @@ def _sse_frame(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
+# 氛围维度（机制 4：氛围滑块组；自然语言承载，模型无关）
+MOOD_DIMS = {
+    "tension": "紧张感",
+    "warmth": "温暖感",
+    "calm": "舒缓感",
+    "dread": "压抑感",
+}
+
+
+def _mood_block(mood: dict[str, float]) -> str:
+    """氛围字典 → 自然语言注入块（空字典返回空串）。"""
+    if not mood:
+        return ""
+    parts: list[str] = []
+    for k, v in mood.items():
+        name = MOOD_DIMS.get(k, k)
+        val = max(0, min(100, int(v)))
+        parts.append(f"{name} {val}/100")
+    if not parts:
+        return ""
+    return "# 本段氛围要求\n" + "、".join(parts) + "（写作时让文字承载此氛围）"
+
+
 # ---------------------------------------------------------------------------
 # Pydantic 请求/响应模型
 # ---------------------------------------------------------------------------
@@ -76,6 +105,7 @@ class ChatRequest(BaseModel):
     system_prompt: str | None = None
     temperature: float = 0.7
     agency_level: int | None = None  # 能动级别 0-4（覆盖当前档位；缺省用已存档位）
+    mood: dict[str, float] | None = None  # 氛围滑块：维度→强度 0-100（如 tension: 80）
 
 
 class ToolEvent(BaseModel):
@@ -134,6 +164,7 @@ class ExploreArchiveIn(BaseModel):
 class CheckRequest(BaseModel):
     text: str
     target: str = "当前章节"
+    chapter_order: int | None = None  # 时序校验：当前章节序号（校验时空倒置）
 
 
 class RuleRequest(BaseModel):
@@ -181,6 +212,23 @@ class WrapupIn(BaseModel):
     chapter_id: str
 
 
+class TemplateIn(BaseModel):
+    name: str
+    description: str
+    granularity: str = "章"
+    position: str = "发展"
+    function: str = "主线"
+    params: list[str] = []
+
+
+class PlotIn(BaseModel):
+    settings: str = ""  # 作品设定/种子（可选，缺省用已写章节）
+
+
+class PlotStatusIn(BaseModel):
+    status: str  # open|resolved
+
+
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
@@ -200,9 +248,12 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     signals = SignalStore(real_db)
     archive = ProjectArchive(real_db)
     materials = MaterialStore(real_db)
+    templates_external = ExternalLibrary(real_db)
+    plots = PlotStore(real_db)
     manual_injector = ManualInjector(manual)
     signal_collector = SignalCollector(signals)
     model = model or DeepSeekModel()
+    plot_generator = PlotGenerator(model)  # 依赖 model，须在其初始化之后
     # 知识图谱（S7：AI 事实源）
     graph = GraphStore(real_db)
     graph_extractor = GraphExtractor(model)
@@ -228,9 +279,15 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         book_id: str = "main",
         on_delta: Any | None = None,
         agency_level: int | None = None,
+        mood: dict[str, float] | None = None,
     ) -> Agent:
         registry = ToolRegistry()
         register_writing_tools(registry, chapters)
+        # 网络搜索工具（写实考据，参考 pi 搜索包；360 主 + Bing 兜底）
+        from anyspark.server.tools_web import make_search_implementer
+
+        search_spec, search_impl = make_search_implementer()
+        registry.register(search_spec, search_impl)
         # 能动级别：显式传入 > 已存档位；温度映射（档位低=精确执行温度低）
         if agency_level is None:
             agency_level = agency.get_level(book_id)
@@ -263,6 +320,10 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         bias_block = bias.render()
         if bias_block:
             full_prompt = full_prompt + "\n\n" + bias_block
+        # 氛围滑块注入（机制 4：本段氛围要求）
+        mood_block = _mood_block(mood or {})
+        if mood_block:
+            full_prompt = full_prompt + "\n\n" + mood_block
         return Agent(
             model=m,
             registry=registry,
@@ -300,6 +361,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             req.system_prompt or DEFAULT_SYSTEM,
             req.temperature,
             agency_level=req.agency_level,
+            mood=req.mood,
         )
         agent.events.on(
             "tool_call", lambda e: events.append(ToolEvent(type=e.type, payload=e.payload))
@@ -386,6 +448,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                 req.temperature,
                 on_delta=lambda c: events_queue.put(("text_delta", {"content": c})),
                 agency_level=req.agency_level,
+                mood=req.mood,
             )
             for t in ("turn_start", "text", "tool_call", "tool_result", "done", "error"):
                 agent.events.on(t, on_event)
@@ -515,14 +578,21 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
     @app.post("/api/check", response_model=dict[str, object])
     def check_text_route(req: CheckRequest) -> dict[str, object]:
-        """多检测者审读正文（骨架检测项，并行）+ 图谱事实证据（确定性比对基础）。"""
+        """多检测者审读正文（骨架检测项，并行）+ 图谱事实证据 + 时序校验（确定性规则）。"""
         report = run_review(model, req.target, req.text)
         # S7：图谱事实证据——文本涉及的已知实体/关系（检测网/用户比对设定冲突）
         evidence = graph_verifier.render_evidence("main", req.text)
+        # S13：时序校验——截止当前章节时空点，提及未来才首现的实体=时空倒置
+        temporal = (
+            graph_verifier.check_temporal("main", req.text, req.chapter_order)
+            if req.chapter_order is not None
+            else []
+        )
         return {
             "target": report.target,
             "hard_count": report.hard_count,
             "graph_evidence": evidence,
+            "temporal_warnings": temporal,
             "findings": [
                 {
                     "category": f.category,
@@ -547,8 +617,49 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
     @app.get("/api/templates", response_model=list[dict[str, object]])
     def list_templates() -> list[dict[str, object]]:
-        """L2 默认模式库（探索方向生成器）。"""
-        return [t.to_dict() for t in default_library()]
+        """模式库 L2+L3 合并（探索方向生成器）。"""
+        return [t.to_dict() for t in templates_external.all()]
+
+    @app.post("/api/templates/import", response_model=dict[str, object])
+    def import_template(req: TemplateIn) -> dict[str, object]:
+        """L3 外部模式库：导入自定义模板（自然语言+四要素，合并进探索库）。"""
+        t = templates_external.import_template(
+            req.name, req.description, req.granularity, req.position, req.function, req.params
+        )
+        return t.to_dict()
+
+    @app.delete("/api/templates/{name}")
+    def delete_template(name: str) -> dict[str, bool]:
+        templates_external.delete(name)
+        return {"ok": True}
+
+    class PlotIn(BaseModel):
+        settings: str = ""  # 作品设定/种子（可选，缺省用已写章节）
+
+    class PlotStatusIn(BaseModel):
+        status: str  # open|resolved
+
+    @app.post("/api/plot", response_model=list[dict[str, object]])
+    def generate_plot(req: PlotIn) -> list[dict[str, object]]:
+        """关键点图谱（T2 阶段 3 可选深入）：LLM 生成草案入库。"""
+        points = plot_generator.generate("main", plots, req.settings)
+        return [p.to_dict() for p in points]
+
+    @app.get("/api/plot", response_model=list[dict[str, object]])
+    def list_plot() -> list[dict[str, object]]:
+        return [p.to_dict() for p in plots.list()]
+
+    @app.patch("/api/plot/{plot_id}", response_model=dict[str, object])
+    def update_plot_status(plot_id: str, req: PlotStatusIn) -> dict[str, object]:
+        p = plots.update_status(plot_id, req.status)
+        if p is None:
+            raise HTTPException(status_code=404, detail="关键点不存在")
+        return p.to_dict()
+
+    @app.delete("/api/plot/{plot_id}")
+    def delete_plot(plot_id: str) -> dict[str, bool]:
+        plots.delete(plot_id)
+        return {"ok": True}
 
     @app.post("/api/materials", response_model=dict[str, object])
     def add_material(req: MaterialIn) -> dict[str, object]:

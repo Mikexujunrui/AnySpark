@@ -7,7 +7,11 @@ anyspark.template.patterns — 模式库：模板模型 + L2 开发者默认库�
 
 from __future__ import annotations
 
+import sqlite3
+import threading
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 # 模板四要素
@@ -103,3 +107,99 @@ DEFAULT_TEMPLATES: list[Template] = [
 def default_library() -> list[Template]:
     """L2 默认库（副本，调用方可增删）。"""
     return [Template(**t.to_dict()) for t in DEFAULT_TEMPLATES]  # type: ignore[arg-type]
+
+
+class ExternalLibrary:
+    """L3 外部模式库（机制 6：用户导入/平台共享，SQLite）。
+
+    与 L2 合并供给探索（模板是探索方向生成器，自然语言唯一介质）；
+    外部模板可删，L2 不可。
+    """
+
+    def __init__(self, db_path: str | Path) -> None:
+        self._db = str(db_path)
+        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(self._db, check_same_thread=False)
+        self._lock = threading.Lock()
+        self._conn.row_factory = sqlite3.Row
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS templates_external (
+                name TEXT PRIMARY KEY,
+                description TEXT NOT NULL,
+                granularity TEXT NOT NULL DEFAULT '章',
+                position TEXT NOT NULL DEFAULT '发展',
+                function TEXT NOT NULL DEFAULT '主线',
+                params TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+        self._conn.commit()
+
+    def close(self) -> None:
+        self._conn.close()
+
+    def import_template(
+        self,
+        name: str,
+        description: str,
+        granularity: str = "章",
+        position: str = "发展",
+        function: str = "主线",
+        params: list[str] | None = None,
+    ) -> Template:
+        import json as _json
+
+        now = datetime.now(UTC).isoformat()
+        with self._lock:
+            self._conn.execute(
+                "INSERT OR REPLACE INTO templates_external "
+                "(name, description, granularity, position, function, params, created_at) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    name,
+                    description,
+                    granularity,
+                    position,
+                    function,
+                    _json.dumps(params or []),
+                    now,
+                ),
+            )
+            self._conn.commit()
+        return Template(
+            name=name,
+            description=description,
+            granularity=granularity,  # type: ignore[arg-type]
+            position=position,  # type: ignore[arg-type]
+            function=function,  # type: ignore[arg-type]
+            params=params or [],
+            layer="external",
+        )
+
+    def list_external(self) -> list[Template]:
+        import json as _json
+
+        rows = self._conn.execute("SELECT * FROM templates_external ORDER BY rowid DESC").fetchall()
+        return [
+            Template(
+                name=r["name"],
+                description=r["description"],
+                granularity=r["granularity"],
+                position=r["position"],
+                function=r["function"],
+                params=_json.loads(r["params"] or "[]"),
+                layer="external",
+            )
+            for r in rows
+        ]
+
+    def all(self) -> list[Template]:
+        """L2 + L3 合并（探索用的完整模式库）。"""
+        return default_library() + self.list_external()
+
+    def delete(self, name: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM templates_external WHERE name=?", (name,))
+            self._conn.commit()
