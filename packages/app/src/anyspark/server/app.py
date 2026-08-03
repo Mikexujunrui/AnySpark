@@ -44,6 +44,7 @@ from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerif
 from anyspark.models.deepseek import DeepSeekModel
 from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
+from anyspark.server.stats import compute_stats
 from anyspark.server.tools_writing import register_writing_tools
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import (
@@ -352,6 +353,11 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     def health() -> dict[str, str]:
         name = getattr(model, "model_name", "unknown")
         return {"status": "ok", "model": str(name), "log": log_path()}
+
+    @app.get("/api/stats")
+    def stats() -> dict[str, Any]:
+        """T7 验证指标（代理指标，纯 SQL 统计现有表，零新表）：修改率/提问率/完成率。"""
+        return compute_stats(real_db)
 
     @app.post("/api/chat", response_model=ChatResponse)
     def chat(req: ChatRequest, background_tasks: BackgroundTasks) -> ChatResponse:

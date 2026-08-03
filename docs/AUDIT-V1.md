@@ -62,6 +62,7 @@
 | 安全底线：未知工具兜底/落盘自校验/沙箱越界/超长上限/docx 解析 | A 类硬编码 | `tools_writing.py`（S11） |
 | 多格式导出（txt/md，RFC5987 中文文件名） | 模型局限弥补工具执行 | `/api/chapters/{id}/export`（S11） |
 | 智能体接入层 + 记录基础设施（pi-anyspark 4 工具 + data/dev/） | 工程补充 | `E:\Desktop\pi\pi-main\packages\pi-anyspark`（S7 补充） |
+| T7 验证指标（修改率/提问率/完成率，纯 SQL 统计现有表零新表 + /api/stats） | §9 T7 | `app/server/stats.py`（S14） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134
@@ -102,6 +103,7 @@
 - ~~网络搜索工具~~ → **S13 已实现**（search_web：360+Bing 降级，参考 pi 搜索包）
 - ~~L3 外部模式库~~ → **S13 已实现**（ExternalLibrary + /api/templates/import）
 - ~~氛围滑块组~~ → **S13 已实现**（mood 注入 + 前端 MoodSliders）
+- ~~T7 验证指标（修改率/提问率/完成率）~~ → **S14 已实现**（stats.py 纯 SQL 统计现有表 + /api/stats；零新表零埋点——信号本身就是埋点）
 - 场景拼图板（画布级拖拽）——仍按设计降权，按需后补
 - 评审团/Autopilot 增强包——设计明确降为可选、默认关闭
 
