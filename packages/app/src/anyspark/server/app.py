@@ -29,11 +29,12 @@ from anyspark.align import (
     SignalCollector,
     SignalStore,
     build_agency_block,
+    build_mood_block,
     parse_agency_declaration,
     temperature_for,
 )
 from anyspark.check import compile_rule, run_review
-from anyspark.core import Agent, Message, Model, ToolRegistry
+from anyspark.core import Agent, Message, Model, RetryingModel, ToolRegistry
 from anyspark.explore import (
     DirectionCard,
     IntentUnderstander,
@@ -74,27 +75,7 @@ def _sse_frame(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-# 氛围维度（机制 4：氛围滑块组；自然语言承载，模型无关）
-MOOD_DIMS = {
-    "tension": "紧张感",
-    "warmth": "温暖感",
-    "calm": "舒缓感",
-    "dread": "压抑感",
-}
-
-
-def _mood_block(mood: dict[str, float]) -> str:
-    """氛围字典 → 自然语言注入块（空字典返回空串）。"""
-    if not mood:
-        return ""
-    parts: list[str] = []
-    for k, v in mood.items():
-        name = MOOD_DIMS.get(k, k)
-        val = max(0, min(100, int(v)))
-        parts.append(f"{name} {val}/100")
-    if not parts:
-        return ""
-    return "# 本段氛围要求\n" + "、".join(parts) + "（写作时让文字承载此氛围）"
+# 氛围注入（机制 4）已由 align.mood 提供（S15 从组合根挪入 align，与 agency/bias 同归属）
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +88,10 @@ class ChatRequest(BaseModel):
     temperature: float = 0.7
     agency_level: int | None = None  # 能动级别 0-4（覆盖当前档位；缺省用已存档位）
     mood: dict[str, float] | None = None  # 氛围滑块：维度→强度 0-100（如 tension: 80）
+    # 增强按需装配（S15："你要什么再装什么"——默认关的增强，点亮才挂）
+    enable_search: bool = False  # 网络搜索工具按需注册（默认关：写作主链路不背考据能力）
+    extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
+    skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood 子集
 
 
 class ToolEvent(BaseModel):
@@ -253,7 +238,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     plots = PlotStore(real_db)
     manual_injector = ManualInjector(manual)
     signal_collector = SignalCollector(signals)
-    model = model or DeepSeekModel()
+    # 默认真实模型套上组合式重试包装（S15：重试是 core 可拼接组件，不内嵌在模型里）
+    model = model or RetryingModel(DeepSeekModel())
     plot_generator = PlotGenerator(model)  # 依赖 model，须在其初始化之后
     # 知识图谱（S7：AI 事实源）
     graph = GraphStore(real_db)
@@ -281,49 +267,56 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         on_delta: Any | None = None,
         agency_level: int | None = None,
         mood: dict[str, float] | None = None,
+        enable_search: bool = False,
+        skip_inject: set[str] | None = None,
     ) -> Agent:
         registry = ToolRegistry()
         register_writing_tools(registry, chapters)
-        # 网络搜索工具（写实考据，参考 pi 搜索包；360 主 + Bing 兜底）
-        from anyspark.server.tools_web import make_search_implementer
+        # 网络搜索工具：按需注册（S15 起默认关——写作主链路不背考据能力，需要时点亮）
+        if enable_search:
+            from anyspark.server.tools_web import make_search_implementer
 
-        search_spec, search_impl = make_search_implementer()
-        registry.register(search_spec, search_impl)
+            search_spec, search_impl = make_search_implementer()
+            registry.register(search_spec, search_impl)
         # 能动级别：显式传入 > 已存档位；温度映射（档位低=精确执行温度低）
         if agency_level is None:
             agency_level = agency.get_level(book_id)
         eff_temp = temperature_for(agency_level) if temperature == 0.7 else temperature
+        # 解包重试包装（RetryingModel.inner）判断底层是否真实 DeepSeek（流式能力）
+        base_model = getattr(model, "inner", model)
         m: Model
-        if on_delta is not None and isinstance(model, DeepSeekModel):
-            # SSE 流式：真实 DeepSeek 流式传输 + delta 回调
-            m = DeepSeekModel(temperature=eff_temp, stream=True, on_delta=on_delta)
+        if on_delta is not None and isinstance(base_model, DeepSeekModel):
+            # SSE 流式：真实 DeepSeek 流式传输 + delta 回调（重试由组合包装提供）
+            m = RetryingModel(DeepSeekModel(temperature=eff_temp, stream=True, on_delta=on_delta))
         elif on_delta is not None:
             m = model  # 测试 fake：无逐字流，仅事件帧
-        elif isinstance(model, DeepSeekModel) and eff_temp != 0.7:
+        elif isinstance(base_model, DeepSeekModel) and eff_temp != 0.7:
             # 真实模型 + 能动性温度映射（档位低=精确执行温度低）
-            m = DeepSeekModel(temperature=eff_temp)
+            m = RetryingModel(DeepSeekModel(temperature=eff_temp))
         else:
             m = model  # 共享 model（测试注入或默认真实）；温度由构造决定
+        # 注入块装配：核心注入默认全开，skip_inject 可细粒度关闭（S15 增强按需）
+        skip = skip_inject or set()
+        full_prompt = system_prompt
         # 对齐注入：说明书（项目级>全局级）追加进系统提示
         align_block = manual_injector.build_system_block(book_id)
-        full_prompt = system_prompt
-        if align_block:
+        if "manual" not in skip and align_block:
             full_prompt = full_prompt + "\n\n" + align_block
         # 图谱注入：当前时空点已知事实（AI 事实源，模型局限弥补）
         graph_block = graph_injector.build_block(book_id)
-        if graph_block:
+        if "graph" not in skip and graph_block:
             full_prompt = full_prompt + "\n\n" + graph_block
         # 能动性注入：本轮档位（机制 2）
         agency_block = build_agency_block(agency_level)
-        if agency_block:
+        if "agency" not in skip and agency_block:
             full_prompt = full_prompt + "\n\n" + agency_block
         # AI 倾向档案注入（双向黑盒解法）
         bias_block = bias.render()
-        if bias_block:
+        if "bias" not in skip and bias_block:
             full_prompt = full_prompt + "\n\n" + bias_block
         # 氛围滑块注入（机制 4：本段氛围要求）
-        mood_block = _mood_block(mood or {})
-        if mood_block:
+        mood_block = build_mood_block(mood)
+        if "mood" not in skip and mood_block:
             full_prompt = full_prompt + "\n\n" + mood_block
         return Agent(
             model=m,
@@ -368,6 +361,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             req.temperature,
             agency_level=req.agency_level,
             mood=req.mood,
+            enable_search=req.enable_search,
+            skip_inject=set(req.skip_inject),
         )
         agent.events.on(
             "tool_call", lambda e: events.append(ToolEvent(type=e.type, payload=e.payload))
@@ -401,14 +396,16 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             "chat 完成: conv=%s 输出%d字 工具%d次", conv_id, len(turn.text), len(turn.tool_calls)
         )
         # 图谱抽取：写入章节后自动抽取入库（后台任务，不阻塞响应；失败不影响写作）
-        for wc in turn.tool_calls:
-            if wc.name == "write_chapter":
-                title = str(wc.arguments.get("title", "")).strip()
-                content = str(wc.arguments.get("content", ""))
-                if title and content:
-                    chs = chapters.list_by_book("main")
-                    order = next((c.order_index for c in chs if c.title == title), len(chs))
-                    background_tasks.add_task(_extract_chapter, "main", title, content, order)
+        # extract_graph 开关（S15）：默认开保持现状，可关省 token（手动 /api/graph/extract 兜底）
+        if req.extract_graph:
+            for wc in turn.tool_calls:
+                if wc.name == "write_chapter":
+                    title = str(wc.arguments.get("title", "")).strip()
+                    content = str(wc.arguments.get("content", ""))
+                    if title and content:
+                        chs = chapters.list_by_book("main")
+                        order = next((c.order_index for c in chs if c.title == title), len(chs))
+                        background_tasks.add_task(_extract_chapter, "main", title, content, order)
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
         # AI 档位声明解析（机制 2：AI 可声明，用户点选确认）
         declared = parse_agency_declaration(turn.text)
@@ -436,14 +433,19 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             try:
                 turn = agent.run(msg, conv_id)
                 # 图谱抽取：与 /api/chat 行为一致（write_chapter 落盘后自动抽取）
-                for wc in turn.tool_calls:
-                    if wc.name == "write_chapter":
-                        title = str(wc.arguments.get("title", "")).strip()
-                        content = str(wc.arguments.get("content", ""))
-                        if title and content:
-                            chs = chapters.list_by_book("main")
-                            order = next((c.order_index for c in chs if c.title == title), len(chs))
-                            _extract_chapter("main", title, content, order)
+                # extract_graph 开关（S15）：默认开保持现状，可关省 token
+                if req.extract_graph:
+                    for wc in turn.tool_calls:
+                        if wc.name == "write_chapter":
+                            title = str(wc.arguments.get("title", "")).strip()
+                            content = str(wc.arguments.get("content", ""))
+                            if title and content:
+                                chs = chapters.list_by_book("main")
+                                order = next(
+                                    (c.order_index for c in chs if c.title == title),
+                                    len(chs),
+                                )
+                                _extract_chapter("main", title, content, order)
             except Exception as exc:  # 异常转 error 帧（不中断连接）
                 logger.exception("chat/stream 执行异常: %s", exc)
                 events_queue.put(("error", {"message": f"执行失败: {exc}"}))
@@ -455,6 +457,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                 on_delta=lambda c: events_queue.put(("text_delta", {"content": c})),
                 agency_level=req.agency_level,
                 mood=req.mood,
+                enable_search=req.enable_search,
+                skip_inject=set(req.skip_inject),
             )
             for t in ("turn_start", "text", "tool_call", "tool_result", "done", "error"):
                 agent.events.on(t, on_event)

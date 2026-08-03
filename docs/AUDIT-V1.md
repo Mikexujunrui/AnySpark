@@ -63,6 +63,10 @@
 | 多格式导出（txt/md，RFC5987 中文文件名） | 模型局限弥补工具执行 | `/api/chapters/{id}/export`（S11） |
 | 智能体接入层 + 记录基础设施（pi-anyspark 4 工具 + data/dev/） | 工程补充 | `E:\Desktop\pi\pi-main\packages\pi-anyspark`（S7 补充） |
 | T7 验证指标（修改率/提问率/完成率，纯 SQL 统计现有表零新表 + /api/stats） | §9 T7 | `app/server/stats.py`（S14） |
+| 增强按需装配（enable_search 默认关 / extract_graph 可关 / skip_inject 细粒度） | §4 核心原则 + 机制7 | `app/server/app.py` ChatRequest（S15） |
+| 重试可拼接组件（core.RetryingModel 组合包装，任何模型可套；DeepSeek 不再内嵌） | §1 A 类硬编码 | `core/retry.py`（S15） |
+| 氛围滑块注入归属 align（mood.py，B 类载体与 agency/bias 同包） | 机制4 | `align/mood.py`（S15） |
+| 前端抽屉按需加载（React.lazy + Suspense，独立 chunk） | 机制5 抽屉 | `frontend/src/app/App.tsx`（S15） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134

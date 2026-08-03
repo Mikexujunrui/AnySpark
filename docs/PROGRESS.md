@@ -279,6 +279,26 @@
 
 ---
 
+## S15 拼接哲学落地（已完成 ✅）
+
+**交付 commit**：`S15 增强按需装配 + 重试可拼接`
+
+**背景**：设计哲学要求"极简可拓展的拼接方式"（你要什么再装什么、机制硬编码内容自然语言、core 极简）。架构骨架（8 包单向依赖）本就符合，但组合根里**两处增强无条件挂进主链路、两处基础设施没做成可拼接组件**。本次全部修正：
+
+**实现（C1-C6）**：
+- **C1 搜索按需注册**：`enable_search: bool = False`（默认关）——写作 Agent 不再无条件背 search_web，需要考据时点亮（机制 7 轻量优先）
+- **C2 图谱抽取开关**：`extract_graph: bool = True`（默认开保持现状）——可关省 token，手动 /api/graph/extract 兜底
+- **C3 氛围滑块归位**：`_mood_block`/MOOD_DIMS 从组合根挪进 `align/mood.py`（B 类交互载体与 agency/bias 同包）
+- **C4 重试可拼接**：`core/retry.py` 新增 `RetryingModel` 组合包装（任何 Model 协议模型可套，`.inner` 解包透明）；DeepSeekModel 不再内嵌 retry（只做单次调用+timeout）；server/retry.py 降为 re-export 兼容旧调用；build_app 装配 `RetryingModel(DeepSeekModel())`
+- **C5 注入细粒度开关**：`skip_inject: list[str]`（跳过 manual/graph/agency/bias/mood 任意子集）——"只关某项注入"成为可能
+- **C6 前端按需加载**：说明书/审读/资料三抽屉 React.lazy + Suspense（不打开不下载；独立 chunk 已生效，主 bundle 剥离 3 面板）
+
+**门禁**：ruff + mypy + pytest **146**（+9：core retry 4 + 开关 5）全绿；前端 tsc/eslint/build 全绿
+
+**同步修订**：`docs/DESIGN.md`——A 类硬编码重试组件化说明 / 模型局限表（搜索按需、重试组合包装）/ 机制 7 约束 2（写作 Agent 默认不带搜索）/ §4 核心原则新增"增强按需装配"段 / 机制 4 氛围归属 align.mood；`docs/AUDIT-V1.md` 同步
+
+---
+
 ## S14 T7 验证指标（已完成 ✅）
 
 **交付 commit**：`S14 T7 指标`

@@ -131,13 +131,14 @@ def test_plot_generate_and_store() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 氛围注入（后端 _mood_block）
+# 氛围注入（S15 起归属 align.mood——B 类交互载体与 agency/bias 同包）
 # ---------------------------------------------------------------------------
 def test_mood_block() -> None:
-    from anyspark.server.app import _mood_block
+    from anyspark.align import build_mood_block
 
-    assert _mood_block({}) == ""
-    block = _mood_block({"tension": 80, "calm": 30})
+    assert build_mood_block({}) == ""
+    assert build_mood_block(None) == ""
+    block = build_mood_block({"tension": 80, "calm": 30})
     assert "紧张感 80/100" in block and "舒缓感 30/100" in block
     # 越界钳制
-    assert "100/100" in _mood_block({"dread": 500})
+    assert "100/100" in build_mood_block({"dread": 500})

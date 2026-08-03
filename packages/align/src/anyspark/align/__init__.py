@@ -19,11 +19,13 @@ from .bias import BiasStore
 from .extract import PreferenceExtractor
 from .inject import ManualInjector, MemoryInjector
 from .manual import ManualEntry, ManualStore, render_manual
+from .mood import MOOD_DIMS, build_mood_block
 from .signals import Signal, SignalCollector, SignalStore
 from .summarize import MemoryStore, SceneMemory, SessionSummarizer
 
 __all__ = [
     "AGENCY_LEVELS",
+    "MOOD_DIMS",
     "AgencyStore",
     "BiasStore",
     "ManualEntry",
@@ -38,6 +40,7 @@ __all__ = [
     "SignalCollector",
     "SignalStore",
     "build_agency_block",
+    "build_mood_block",
     "parse_agency_declaration",
     "render_manual",
     "temperature_for",

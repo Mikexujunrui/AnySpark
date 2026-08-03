@@ -20,7 +20,6 @@ from openai import OpenAI
 
 from anyspark.core.protocol import ToolSpec
 from anyspark.core.types import Message, ModelOutput, ToolCall
-from anyspark.server.retry import retry_with_backoff
 
 # 与 pi 同款默认：DashScope 兼容端点 + deepseek-v4-flash
 DEFAULT_BASE_URL = os.getenv(
@@ -73,7 +72,9 @@ class DeepSeekModel:
     ) -> None:
         """
         stream: 流式传输（SSE 用）；on_delta: 文本增量回调（stream=True 时逐段触发）。
-        timeout: 单次请求超时（秒）；网络抖动自动指数退避重试（S11 流程基建）。
+        timeout: 单次请求超时（秒）。
+        重试由组合式包装提供（core.RetryingModel，S15 起不内嵌在模型内）——
+        任何模型可套同一重试组件，换模型不丢流程基建。
         非流式路径与旧行为完全一致（协议向后兼容）。
         """
         self._base_url = base_url or DEFAULT_BASE_URL
@@ -110,7 +111,7 @@ class DeepSeekModel:
             kwargs["tool_choice"] = "auto"
 
         if self._stream:
-            return retry_with_backoff(lambda: self._respond_stream(kwargs))
+            return self._respond_stream(kwargs)
 
         def _call() -> ModelOutput:
             response = self._client.chat.completions.create(**kwargs)
@@ -129,7 +130,7 @@ class DeepSeekModel:
 
             return ModelOutput(text=text, tool_calls=tool_calls)
 
-        return retry_with_backoff(_call)
+        return _call()
 
     def _respond_stream(self, kwargs: dict[str, Any]) -> ModelOutput:
         """流式路径：文本 delta 逐段回调 on_delta；tool_calls 分片累积。"""

@@ -1,47 +1,11 @@
 """
-anyspark.server.retry — 流程基建：指数退避重试 + 超时熔断。
+anyspark.server.retry — 重试组件（re-export，向后兼容）。
 
-设计（DESIGN 模型局限弥补"不会自己调度 → 指数退避重试、超时熔断"）。
-网络/上游抖动时自动重试，避免一次失败打断写作；重试间隔指数退避 + 抖动。
+S15 起重试实现移到 core（anyspark.core.retry）——流程基建（A 类硬编码）提升为
+可组合组件（RetryingModel 包装，任何模型可套，模型无关）。
+本模块保留 `retry_with_backoff` 的 re-export，旧调用方（test_retry 等）不受影响。
 """
 
-from __future__ import annotations
+from anyspark.core.retry import RETRYABLE, RetryingModel, retry_with_backoff
 
-import random
-import time
-from collections.abc import Callable
-from typing import TypeVar
-
-T = TypeVar("T")
-
-# 可重试的异常类型（网络/上游类；业务错误不重试）
-RETRYABLE = (TimeoutError, ConnectionError, OSError)
-
-
-def retry_with_backoff(
-    fn: Callable[[], T],
-    retries: int = 3,
-    base: float = 1.0,
-    max_wait: float = 10.0,
-    on_retry: Callable[[int, Exception], None] | None = None,
-) -> T:
-    """指数退避重试：第 n 次等待 base * 2^n + 抖动，超过 retries 次则抛出最后异常。
-
-    用法：result = retry_with_backoff(lambda: model.respond(...))
-    """
-    attempt = 0
-    last_exc: Exception | None = None
-    while True:
-        try:
-            return fn()
-        except RETRYABLE as exc:
-            attempt += 1
-            last_exc = exc
-            if attempt >= retries:
-                break
-            wait = min(max_wait, base * (2 ** (attempt - 1))) + random.uniform(0, 0.5)
-            if on_retry:
-                on_retry(attempt, exc)
-            time.sleep(wait)
-    assert last_exc is not None
-    raise last_exc
+__all__ = ["RETRYABLE", "RetryingModel", "retry_with_backoff"]
