@@ -10,7 +10,6 @@ description = "AnySpark v4 对齐系统：说明书分层 / 提炼器 / 摘要�
 requires-python = ">=3.11"
 dependencies = [
     "anyspark-core==0.0.1",  # workspace 成员
-    "openai==2.52.0",
 ]
 
 [build-system]

@@ -10,7 +10,6 @@ description = "AnySpark v4 检测网：系统骨架/AI动态检测项/轻量规�
 requires-python = ">=3.11"
 dependencies = [
     "anyspark-core==0.0.1",  # workspace 成员
-    "openai==2.52.0",
 ]
 
 [build-system]

@@ -93,14 +93,10 @@ version = "0.0.1"
 source = { editable = "packages/align" }
 dependencies = [
     { name = "anyspark-core" },
-    { name = "openai" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "anyspark-core", editable = "packages/core" },
-    { name = "openai", specifier = "==2.52.0" },
-]
+requires-dist = [{ name = "anyspark-core", editable = "packages/core" }]
 
 [[package]]
 name = "anyspark-app"
@@ -135,14 +131,10 @@ version = "0.0.1"
 source = { editable = "packages/check" }
 dependencies = [
     { name = "anyspark-core" },
-    { name = "openai" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "anyspark-core", editable = "packages/core" },
-    { name = "openai", specifier = "==2.52.0" },
-]
+requires-dist = [{ name = "anyspark-core", editable = "packages/core" }]
 
 [[package]]
 name = "anyspark-core"
@@ -170,14 +162,10 @@ version = "0.0.1"
 source = { editable = "packages/explore" }
 dependencies = [
     { name = "anyspark-core" },
-    { name = "openai" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "anyspark-core", editable = "packages/core" },
-    { name = "openai", specifier = "==2.52.0" },
-]
+requires-dist = [{ name = "anyspark-core", editable = "packages/core" }]
 
 [[package]]
 name = "anyspark-graph"
@@ -196,14 +184,10 @@ version = "0.0.1"
 source = { editable = "packages/template" }
 dependencies = [
     { name = "anyspark-core" },
-    { name = "openai" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "anyspark-core", editable = "packages/core" },
-    { name = "openai", specifier = "==2.52.0" },
-]
+requires-dist = [{ name = "anyspark-core", editable = "packages/core" }]
 
 [[package]]
 name = "bottle"

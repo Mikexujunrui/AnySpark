@@ -10,7 +10,6 @@ description = "AnySpark v4 探索引擎：意图理解 / 探索策略集 / 多�
 requires-python = ">=3.11"
 dependencies = [
     "anyspark-core==0.0.1",  # workspace 成员
-    "openai==2.52.0",
 ]
 
 [build-system]

@@ -10,7 +10,6 @@ description = "AnySpark v4 模式库：三层模式（模型内存/默认库/外
 requires-python = ">=3.11"
 dependencies = [
     "anyspark-core==0.0.1",  # workspace 成员
-    "openai==2.52.0",
 ]
 
 [build-system]
