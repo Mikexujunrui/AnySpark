@@ -1,0 +1,15 @@
+[project]
+name = "anyspark-benchmarks"
+version = "0.1.0"
+description = "AnySpark v4 benchmark（半独立子项目：单元层/系统层/对比层/人工层）"
+requires-python = ">=3.11"
+dependencies = [
+    "httpx==0.28.*",
+    "pyyaml==6.0.*",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["benchmarks"]
+
+[tool.ruff]
+line-length = 100

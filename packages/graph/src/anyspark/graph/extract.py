@@ -89,17 +89,26 @@ class GraphExtractor:
         text: str,
         existing: list[dict[str, Any]] | None = None,
     ) -> Extraction:
-        """抽取一章：新实体 + 关系 + 事件（已有实体不重复）。"""
+        """抽取一章：新实体 + 关系 + 事件（已有实体不重复）。
+
+        宽容解析的补强（benchmark 发现）：模型输出偶发截断/非法 JSON，
+        解析结果全空时重试一次（不同采样）；仍空则返回空（不阻塞调用方）。
+        """
         existing_text = ""
         if existing:
             names = "\n".join(f"- {e['name']}（{e['entity_type']}）" for e in existing[:50])
             existing_text = f"\n{names}\n"
         prompt = EXTRACT_PROMPT + existing_text + f"\n章节《{chapter_ref}》正文：\n{text[:6000]}"
-        output = self._model.respond(  # type: ignore[attr-defined]
-            [Message(role="system", content=prompt)],
-            [],
-        )
-        return self._parse(output.text)
+        parsed = Extraction()
+        for _attempt in range(2):
+            output = self._model.respond(  # type: ignore[attr-defined]
+                [Message(role="system", content=prompt)],
+                [],
+            )
+            parsed = self._parse(output.text)
+            if parsed.entities:
+                break
+        return parsed
 
     def _parse(self, raw: str) -> Extraction:
         """宽容解析模型输出（围栏/前后文字/非法类型容错）。"""

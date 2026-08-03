@@ -41,3 +41,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# ---- benchmarks 运行产物（代码入库，产物不入库）----
+benchmarks/report/
+benchmarks/assets/
+benchmarks/unit/gold/
