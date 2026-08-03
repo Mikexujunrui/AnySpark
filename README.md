@@ -1,4 +1,4 @@
-# 火花 AnySpark — 智能小说创作引擎 v3.2.5
+# 火花 AnySpark — 智能小说创作引擎 v3.2.6
 
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![React 19](https://img.shields.io/badge/react-19-61dafb.svg)](https://react.dev/)
@@ -8,10 +8,9 @@
 
 > **每个人心中都有一簇火花，AnySpark 帮你点燃它。** 火花是一个基于 LLM 自主循环架构的全流程 AI 叙事创作平台——不止是写作助手，更是你的故事引擎。
 
-> **3.2.5 稳定性修复版**：合并上游 3.2.1 稳定性修复（仅 A 类），消息队列真正消费、
-> headless 假完成拦截、中文章号解析、写作预览可交互等。详见 [更新日志](CHANGELOG.md)
-> 与 [3.2.0 使用与发布指南](docs/archive/3.2.0_今晚最终版使用与发布.md)。
-> 打包版现已使用独立桌面窗口，不再打开默认浏览器；关闭窗口会一并停止本地后台服务。
+> **3.2.6 模型参数精细化版**：思考强度按模型族定制档位（DeepSeek 3 档 / o 系列 4 档 /
+> Anthropic/Gemini 预算式），批量提取工具 `extract_all_chapters` 修复可用；
+> 合并章节序号与章号解析等稳定性修复。详见 [更新日志](CHANGELOG.md)。
 
 > ⚠️ **设计哲学：AI 为笔，你为执笔人。** 火花的开发初衷是让 AI 在不脱离人类作家掌控的前提下辅助创作——第一目标是提升写作效率的同时，确保故事**不偏离**你设定的方向。Autopilot、全书变换、批量改写等涉及大规模自动操作的特性目前均为**实验功能**，请在充分审核每步输出的前提下谨慎使用。人类作家的判断力始终是创作的最后一道闸门。
 
@@ -193,6 +192,8 @@
 | **技能系统** | YAML 定义可执行复合工作流，支持指令/护栏/强制输出，预装 11 个系统 Skill |
 | **创作宪法** | 每本书独立的项目级硬约束（可选启用/关闭），覆盖普通对话、正文写作、修改、评审和 Auto |
 | **正文生成参数** | 可视化设置 Temperature、Top P、重复惩罚与输出上限，不扰动工具调用稳定性 |
+| **思考强度档位** | 按模型族定制：DeepSeek 3 档 / OpenAI o 系列 4 档 / Anthropic·Gemini 思考预算式，统一五档标尺就近映射，settings.json 可扩展 |
+| **批量知识提取** | `extract_all_chapters` 一键提取全书角色/地点/关系/伏笔，内容指纹缓存跳过未变化章节，单章超时防护可中途取消 |
 | **文风系统** | 系统默认 + 用户自定义双源分离，每本书独立活跃风格，支持 CRUD 管理 |
 | **插件系统** | Python 钩子插件（on_write / on_extract / modify_system_prompt），支持自定义提取器和写作风格 |
 | **交互故事系统** | 图谱驱动的分支叙事引擎，支持读者选择驱动剧情走向 |
@@ -583,7 +584,7 @@ data/
 | 版本控制 | pygit2 (libgit2) |
 | 容器化 | 无需容器，直接运行 |
 
-> 完整技术栈说明见 [TECH_STACK.md](TECH_STACK.md)
+> 完整技术栈说明见 [TECH_STACK.md](docs/TECH_STACK.md)
 
 ---
 
@@ -591,14 +592,14 @@ data/
 
 | 文档 | 内容 |
 |------|------|
-| [ARCHITECTURE.md](ARCHITECTURE.md) | 系统架构设计、分层说明、数据主流向 |
-| [MODULES.md](MODULES.md) | 23 个核心模块定义、接口与实现状态 |
-| [TECH_STACK.md](TECH_STACK.md) | 完整技术栈与版本 |
-| [FRONTEND.md](FRONTEND.md) | 前端开发指南：组件架构、状态管理、SSE 交互模式 |
-| [TESTING.md](TESTING.md) | 测试策略：分层说明、运行命令、编写规范 |
-| [EXTENDING.md](EXTENDING.md) | 扩展开发：插件、技能、文风、评审员自定义 |
-| [ROADMAP.md](ROADMAP.md) | 开发路线图与版本历史 (v1.0 → v3.0) |
-| [IMPROVEMENTS.md](IMPROVEMENTS.md) | 改进跟踪 (36/36 项已完成) |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 系统架构设计、分层说明、数据主流向 |
+| [MODULES.md](docs/MODULES.md) | 23 个核心模块定义、接口与实现状态 |
+| [TECH_STACK.md](docs/TECH_STACK.md) | 完整技术栈与版本 |
+| [FRONTEND.md](docs/FRONTEND.md) | 前端开发指南：组件架构、状态管理、SSE 交互模式 |
+| [TESTING.md](docs/TESTING.md) | 测试策略：分层说明、运行命令、编写规范 |
+| [EXTENDING.md](docs/EXTENDING.md) | 扩展开发：插件、技能、文风、评审员自定义 |
+| [ROADMAP.md](docs/archive/ROADMAP.md) | 开发路线图与版本历史 (v1.0 → v3.0) |
+| [IMPROVEMENTS.md](docs/IMPROVEMENTS.md) | 改进跟踪 (36/36 项已完成) |
 | [CHANGELOG.md](../CHANGELOG.md) | 版本变更日志 |
 | [CONTRIBUTING.md](../CONTRIBUTING.md) | 贡献指南 |
 
