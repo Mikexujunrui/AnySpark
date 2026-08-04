@@ -176,6 +176,7 @@ class Chapter:
     created_at: str
     updated_at: str
     versions: list[dict[str, Any]]  # 旧版本快照 [{content, saved_at, note}]
+    narrative_line: str = "main"  # S29 多线叙事：本章属于哪条线（时序校验按线比较）
 
 
 class ChapterStore:
@@ -196,6 +197,7 @@ class ChapterStore:
                 title TEXT NOT NULL,
                 content TEXT NOT NULL,
                 order_index INTEGER NOT NULL DEFAULT 0,
+                narrative_line TEXT NOT NULL DEFAULT 'main',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
@@ -209,9 +211,22 @@ class ChapterStore:
             CREATE INDEX IF NOT EXISTS idx_chapters_book ON chapters(book_id, order_index);
             """
         )
+        # S29 旧库兼容：narrative_line 列
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(chapters)")}
+        if "narrative_line" not in cols:
+            self._conn.execute(
+                "ALTER TABLE chapters ADD COLUMN narrative_line TEXT NOT NULL DEFAULT 'main'"
+            )
         self._conn.commit()
 
-    def upsert(self, book_id: str, title: str, content: str, order_index: int = 0) -> Chapter:
+    def upsert(
+        self,
+        book_id: str,
+        title: str,
+        content: str,
+        order_index: int = 0,
+        narrative_line: str = "main",
+    ) -> Chapter:
         """新建或覆盖一章；覆盖前把旧版存进版本历史。"""
         now = _now()
         existing = self._conn.execute(
@@ -227,17 +242,17 @@ class ChapterStore:
                     (cid, old["content"], now),
                 )
                 self._conn.execute(
-                    "UPDATE chapters SET content = ?, title = ?, order_index = ?, updated_at = ? "
-                    "WHERE id = ?",
-                    (content, title, order_index, now, cid),
+                    "UPDATE chapters SET content = ?, title = ?, order_index = ?, "
+                    "narrative_line = ?, updated_at = ? WHERE id = ?",
+                    (content, title, order_index, narrative_line, now, cid),
                 )
         else:
             cid = uuid.uuid4().hex
             with self._conn:
                 self._conn.execute(
                     "INSERT INTO chapters (id, book_id, title, content, order_index, "
-                    "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (cid, book_id, title, content, order_index, now, now),
+                    "narrative_line, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (cid, book_id, title, content, order_index, narrative_line, now, now),
                 )
         return self.get(cid)  # type: ignore[return-value]
 

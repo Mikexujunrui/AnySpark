@@ -64,6 +64,9 @@ class Entity:
     last_chapter: str = ""
     first_order: int = 0
     last_order: int = 0
+    # S29（多线叙事）：实体出现过的叙事线（如 ["main", "line_b"]）——时序校验按线比较，
+    # 跨线首现不误报"时空倒置"（A 线第 3 章提到 B 线第 5 章才首现的角色是并行叙事，非倒叙）。
+    lines: list[str] = field(default_factory=lambda: ["main"])
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -78,6 +81,7 @@ class Entity:
             "last_chapter": self.last_chapter,
             "first_order": self.first_order,
             "last_order": self.last_order,
+            "lines": self.lines,
         }
 
 
@@ -162,6 +166,7 @@ class GraphStore:
                 last_chapter TEXT NOT NULL DEFAULT '',
                 first_order INTEGER NOT NULL DEFAULT 0,
                 last_order INTEGER NOT NULL DEFAULT 0,
+                lines TEXT NOT NULL DEFAULT '["main"]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 UNIQUE(book_id, name)
@@ -209,11 +214,15 @@ class GraphStore:
                 ON graph_events(book_id, chapter_order);
             """
         )
-        # 旧库兼容（S20）：state 列
+        # 旧库兼容（S20 state / S29 lines）
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(graph_entities)")}
         if "state" not in cols:
             self._conn.execute(
                 "ALTER TABLE graph_entities ADD COLUMN state TEXT NOT NULL DEFAULT ''"
+            )
+        if "lines" not in cols:
+            self._conn.execute(
+                "ALTER TABLE graph_entities ADD COLUMN lines TEXT NOT NULL DEFAULT '[\"main\"]'"
             )
         self._conn.commit()
 
@@ -233,11 +242,13 @@ class GraphStore:
         chapter_ref: str = "",
         chapter_order: int = 0,
         state_delta: str = "",
+        line: str = "main",
     ) -> Entity:
         """同名实体合并：别名并集、描述覆盖、出现章节范围累计。
 
         state_delta（S20）：本章状态变化——增量拼接到旧状态（"旧；本章：变化"），
         并记录演化快照到 entity_states（角色/地点随时间自然变化）。
+        line（S29 多线叙事）：实体出现的叙事线并入 lines（跨线并行不覆盖）。
         """
         aliases = aliases or []
         eid = uuid.uuid4().hex
@@ -259,10 +270,13 @@ class GraphStore:
                 # 状态增量拼接（S20）：旧状态 + 本章变化
                 old_state = str(row["state"] or "")
                 new_state = _merge_state(old_state, state_delta)
+                # S29：叙事线并入（跨线并行不覆盖）
+                old_lines = json.loads(row["lines"] or '["main"]')
+                merged_lines = list(dict.fromkeys([*old_lines, line]))
                 self._conn.execute(
                     "UPDATE graph_entities SET entity_type=?, aliases=?, description=?, "
                     "state=?, first_chapter=?, last_chapter=?, first_order=?, "
-                    "last_order=?, updated_at=? WHERE id=?",
+                    "last_order=?, lines=?, updated_at=? WHERE id=?",
                     (
                         etype,
                         json.dumps(merged, ensure_ascii=False),
@@ -272,6 +286,7 @@ class GraphStore:
                         last_ch,
                         first_ord,
                         last_ord,
+                        json.dumps(merged_lines, ensure_ascii=False),
                         now,
                         eid,
                     ),
@@ -282,7 +297,8 @@ class GraphStore:
                 self._conn.execute(
                     "INSERT INTO graph_entities (id, book_id, entity_type, name, aliases, "
                     "description, state, first_chapter, last_chapter, first_order, "
-                    "last_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "last_order, lines, created_at, updated_at) VALUES "
+                    "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         eid,
                         book_id,
@@ -295,6 +311,7 @@ class GraphStore:
                         chapter_ref,
                         chapter_order,
                         chapter_order,
+                        json.dumps([line], ensure_ascii=False),
                         now,
                         now,
                     ),
@@ -588,6 +605,7 @@ class GraphStore:
         chapter_ref: str,
         chapter_order: int,
         extraction: object,
+        line: str = "main",
     ) -> None:
         """把抽取结果幂等落库（实体合并/关系三元组去重/事件替换）。
 
@@ -606,6 +624,7 @@ class GraphStore:
                 chapter_ref,
                 chapter_order,
                 getattr(e, "state", ""),
+                line,
             )
         # 补建引用缺失实体（引用完整性）
         referenced: list[str] = []
@@ -615,7 +634,9 @@ class GraphStore:
             referenced.extend(ev.involved)
         for name in referenced:
             if not self.get_entity(book_id, name):
-                self.upsert_entity(book_id, name, "设定", [], "", chapter_ref, chapter_order)
+                self.upsert_entity(
+                    book_id, name, "设定", [], "", chapter_ref, chapter_order, "", line
+                )
         # S20：已有实体状态更新（仅更新已存在实体的 state，不建新实体）
         states = getattr(extraction, "states", [])
         for st in states:
@@ -630,6 +651,7 @@ class GraphStore:
                 chapter_ref,
                 chapter_order,
                 st.state,
+                line,
             )
         for r in relations:
             self.upsert_relation(
@@ -674,6 +696,7 @@ class GraphStore:
             last_chapter=row["last_chapter"],
             first_order=row["first_order"],
             last_order=row["last_order"],
+            lines=json.loads(row["lines"] or '["main"]'),
         )
 
     @staticmethod

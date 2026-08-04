@@ -321,3 +321,37 @@ def test_verifier_facts_for() -> None:
     assert v.facts_for("main", "今天天气不错") == []
     ev = v.render_evidence("main", "陈渡和沈歆见面了。")
     assert "陈渡" in ev and "兄妹" in ev
+
+
+def test_temporal_check_respects_narrative_line() -> None:
+    """S29 多线叙事：时序校验按线比较——跨线首现不误报时空倒置。
+
+    场景：实体 X 在 B 线第 5 章首现（first_order=5, lines=["line_b"]）；
+    A 线第 3 章文本提到 X → line="main" 时不应警告（并行叙事，非倒叙）；
+    但 B 线第 3 章文本提到 X（同线超前）→ 仍警告（真倒叙）。
+    """
+    from anyspark.graph.verify import GraphVerifier
+
+    store = _store()
+    # X 在 B 线第 5 章首现
+    store.ingest_chapter(
+        "book",
+        "第5章",
+        5,
+        Extraction(entities=[EntityDraft("X", "角色", [], "神秘人")], relations=[], events=[]),
+        line="line_b",
+    )
+    # A 线第 3 章也有 Y（line=main 的章节落库）
+    store.ingest_chapter(
+        "book",
+        "第3章",
+        3,
+        Extraction(entities=[EntityDraft("Y", "角色", [], "普通人")], relations=[], events=[]),
+        line="main",
+    )
+    verifier = GraphVerifier(store)
+    # 跨线：main 线截止第 3 章，提到 X（X 首现于 line_b 第 5 章）→ 不警告
+    assert verifier.check_temporal("book", "X 出现在这里", up_to_order=3, line="main") == []
+    # 同线超前：line_b 截止第 3 章，提到 X（X 在该线首现于第 5 章）→ 警告
+    w = verifier.check_temporal("book", "X 出现在这里", up_to_order=3, line="line_b")
+    assert len(w) == 1 and "时序警告" in w[0]

@@ -78,6 +78,7 @@
 | before/afterToolCall 钩子（拦截/改写）/ terminate 智能停止（整批终止）/ SSE 假 done 修复 / 流式重试防重复 delta | 机制5 + A 类过程控制 | `core/loop+retry+types` + `deepseek.py`（S27） |
 | pi 行为对照测试（7 场景语义轨迹一致）/ 性能基线存档 / 长书压力测试（暴露修保留段阈值缩放 bug + steer 终答轮丢失） | 工程验证 | `benchmarks/parity/`（S28） |
 | 信号→说明书提炼闭环修复（signals 后台入队提炼，PreferenceExtractor 首次接线）/ 分支剧本哲学指标验证（修改率↓/说明书累积/偏好遵从） | 机制 3 对齐系统 + §9 T7 | `app.py` + `store/sqlite.py` + `benchmarks/system/`（S21 系统层） |
+| 多线叙事时间建模（Entity.lines + chapters.narrative_line + 时序校验按线比较） | 机制9 检测网补充 | `graph/schema+verify` + `tools_writing` + `app.py`（S29） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134
@@ -113,7 +114,7 @@
 - ~~P3 低摩擦组件~~ → S9/S10：能动性圆点 / 候选卡堆 / 渐变条 / 方向声明 / 一章收尾 / 拖入稿纸
 
 ### 剩余（设计明确降权/后补，勿当缺失补）：
-- ~~确定性校验完整规则~~ → **S13 时序校验已实现**（check_temporal：时空倒置检测；伏笔匹配按需）
+- ~~确定性校验完整规则~~ → **S13 时序校验已实现**（check_temporal：时空倒置检测）；**S29 多线叙事按线比较**（narrative_line，跨线首现不误报）；伏笔匹配按需
 - ~~关键点图谱~~ → **S13 已实现**（PlotStore/PlotGenerator + /api/plot）
 - ~~网络搜索工具~~ → **S13 已实现**（search_web：360+Bing 降级，参考 pi 搜索包）
 - ~~L3 外部模式库~~ → **S13 已实现**（ExternalLibrary + /api/templates/import）

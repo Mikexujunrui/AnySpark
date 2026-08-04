@@ -163,6 +163,7 @@ class CheckRequest(BaseModel):
     text: str
     target: str = "当前章节"
     chapter_order: int | None = None  # 时序校验：当前章节序号（校验时空倒置）
+    line: str = "main"  # S29 多线叙事：当前写作的叙事线（时序校验按线比较）
 
 
 class RuleRequest(BaseModel):
@@ -268,15 +269,15 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     # 图谱抽取/伏笔回收/信号提炼不占请求线程池，请求立即返回、后台串行处理。
     # 任务负载类型（S28 扩展）：("chapter", title, content, order) 图谱抽取/伏笔回收；
     # ("refine",) 信号→说明书提炼。
-    _bg_queue: queue.Queue[tuple[str, str, str, int] | tuple[str]] = queue.Queue()
+    _bg_queue: queue.Queue[tuple[str, str, str, int, str] | tuple[str]] = queue.Queue()
 
     def _bg_worker() -> None:
         while True:
             try:
                 task = _bg_queue.get()
-                if task and task[0] == "chapter" and len(task) == 4:
-                    _, title, content, order = task
-                    _extract_chapter("main", title, content, order)
+                if task and task[0] == "chapter" and len(task) == 5:
+                    _, title, content, order, line = task
+                    _extract_chapter("main", title, content, order, line)
                 elif task and task[0] == "refine":
                     _refine_from_signals()
             except Exception as exc:
@@ -409,12 +410,14 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             persist_compression=True,  # S26：压缩结果回写 store（pi compaction entry 语义）
         )
 
-    def _extract_chapter(book_id: str, title: str, content: str, order: int) -> None:
+    def _extract_chapter(
+        book_id: str, title: str, content: str, order: int, line: str = "main"
+    ) -> None:
         """章节落盘后自动：图谱抽取 + 伏笔自动回收（后台任务）。失败只记日志，绝不阻断写作。"""
         try:
             existing = [e.to_dict() for e in graph.list_entities(book_id)]
             ext = graph_extractor.extract(title, content, existing)
-            graph.ingest_chapter(book_id, title, order, ext)
+            graph.ingest_chapter(book_id, title, order, ext, line)
             logger.info(
                 "图谱抽取完成: 《%s》 实体%d 关系%d 事件%d",
                 title,
@@ -547,7 +550,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                         chs = chapters.list_by_book("main")
                         order = next((c.order_index for c in chs if c.title == title), len(chs))
                         logger.info("后台图谱抽取挂载: 《%s》", title)
-                        _bg_queue.put(("chapter", title, content, order))
+                        line = str(wc.arguments.get("line", "main")).strip() or "main"
+                        _bg_queue.put(("chapter", title, content, order, line))
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
         # AI 档位声明解析（机制 2：AI 可声明，用户点选确认）
         declared = parse_agency_declaration(turn.text)
@@ -594,7 +598,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                                     len(chs),
                                 )
                                 # 后台队列处理（不阻塞 SSE 的 done 帧）
-                                _bg_queue.put(("chapter", title, content, order))
+                                line = str(wc.arguments.get("line", "main")).strip() or "main"
+                        _bg_queue.put(("chapter", title, content, order, line))
             except Exception as exc:  # 异常转 error 帧（不中断连接）
                 logger.exception("chat/stream 执行异常: %s", exc)
                 events_queue.put(("error", {"message": f"执行失败: {exc}"}))
@@ -762,8 +767,9 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         # S7：图谱事实证据——文本涉及的已知实体/关系（检测网/用户比对设定冲突）
         evidence = graph_verifier.render_evidence("main", req.text)
         # S13：时序校验——截止当前章节时空点，提及未来才首现的实体=时空倒置
+        # S29：按叙事线比较（跨线首现不误报，多线并行时间差正常）
         temporal = (
-            graph_verifier.check_temporal("main", req.text, req.chapter_order)
+            graph_verifier.check_temporal("main", req.text, req.chapter_order, req.line)
             if req.chapter_order is not None
             else []
         )

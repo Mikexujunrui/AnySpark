@@ -579,3 +579,24 @@
 - **学习曲线真实形态**：轮 2 破折号 5（提炼注入有延迟，非立刻收敛）——符合"对齐是渐进的"预期，诚实记录
 
 **门禁**：ruff + mypy 全绿；pytest **183**（+1：信号触发提炼 API 测试）；总闸全绿
+
+
+---
+
+## S29 多线叙事时间建模（Backlog → 已完成 ✅）
+
+**背景**：S13 的时序校验（check_temporal）用实体的全局 first_order 判断"时空倒置"——**多线叙事误报**：A 线第 3 章提到 B 线第 5 章才首现的角色会被误报（并行叙事的时间差被当成倒叙）。
+
+**实现（最小闭环，机制硬编码/内容自然语言）**：
+- **Entity.lines**：实体出现过的叙事线集合（JSON 列，旧库 ALTER 兼容；跨线并入不覆盖）
+- **chapters.narrative_line**：章节所属线（默认 main）；write_chapter 工具加可选 `line` 参数（模型/前端可声明"本章属 line_b"）
+- **check_temporal(book_id, text, up_to_order, line)**：仅当 `line in e.lines` 且 first_order 超前才警告——**同线超前=真倒叙（报警），跨线首现=并行叙事（不报）**
+- /api/check 加 `line` 参数；图谱抽取链路透传 line
+
+**门禁**：pytest **184**（+1：多线时序校验单测）；总闸全绿
+
+**真实链路验证**（`write_chapter line=line_b` 写《B线第一章 白泽》→ 白泽 lines=["line_b"] 入库）：
+- main 线截止第 1 章提白泽 → **0 警告**（跨线不误报）✅
+- line_b 截止第 0 章提白泽 → **2 警告**（同线超前=真倒叙）✅
+
+**踩坑**：① bash heredoc 无引号会把 `\"` 转义吃掉——SQL DEFAULT '["main"]' 内嵌双引号与外层字符串冲突导致 SyntaxError（heredoc 分隔符必须加引号或用 edit）；② dataclass 有默认值字段不能放无默认值字段前（narrative_line 放 Chapter 末尾）；③ 验证脚本读错响应字段（temporal_warnings 非 temporal）——API 层返回结构未对齐造成误判

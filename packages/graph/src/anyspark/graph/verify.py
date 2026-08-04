@@ -59,16 +59,21 @@ class GraphVerifier:
         out = "\n".join(lines)
         return out[:max_len]
 
-    def check_temporal(self, book_id: str, text: str, up_to_order: int) -> list[str]:
-        """时序校验（确定性规则）：文本中提及的实体若在图谱中首次出现于
-        更晚的章节（first_order > up_to_order），提示"时空倒置"——该实体在
-        当前时空点还不应出现。返回自然语言警告列表。"""
+    def check_temporal(
+        self, book_id: str, text: str, up_to_order: int, line: str = "main"
+    ) -> list[str]:
+        """时序校验（确定性规则）：文本中提及的实体若在当前**叙事线**中首次出现于
+        更晚的章节（first_order > up_to_order 且该线在实体 lines 中），提示"时空倒置"。
+
+        S29 多线叙事：跨线首现不警告——A 线第 3 章提到 B 线第 5 章才首现的角色
+        是并行叙事（时间差正常），不是倒叙。仅同线内 first_order 超前才报警。
+        """
         warnings: list[str] = []
         entities = self._graph.list_entities(book_id, limit=500)
         for e in entities:
-            if e.first_order > up_to_order and e.name in text:
+            if e.first_order > up_to_order and e.name in text and line in e.lines:
                 warnings.append(
-                    f"时序警告：{e.name}（{e.entity_type}）首次出现于"
+                    f"时序警告：{e.name}（{e.entity_type}）在{line}线首次出现于"
                     f"{e.first_chapter}，而当前是截止第 {up_to_order} 章的时空点——"
                     "它此刻还不该登场（如确需提及，请确认是否为倒叙/回忆）。"
                 )

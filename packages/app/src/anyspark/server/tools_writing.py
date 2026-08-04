@@ -96,6 +96,9 @@ class WritingTools:
         content = str(arguments.get("content", ""))
         if not title or not content:
             return ToolResult(call=call, ok=False, content="缺少 title 或 content 参数。")
+        # S29 多线叙事：可选 line 参数（默认 main）——声明本章属于哪条叙事线，
+        # 图谱时序校验按线比较，跨线首现不误报"时空倒置"。
+        line = str(arguments.get("line", "main")).strip() or "main"
         if len(content) > MAX_FILE_CHARS:
             return ToolResult(
                 call=call, ok=False, content=f"正文超长（>{MAX_FILE_CHARS} 字），请分段写入。"
@@ -103,7 +106,7 @@ class WritingTools:
         all_chapters = self._chapters.list_by_book(self._book_id)
         existing = next((c for c in all_chapters if c.title == title), None)
         order = existing.order_index if existing else len(all_chapters)
-        ch = self._chapters.upsert(self._book_id, title, content, order)
+        ch = self._chapters.upsert(self._book_id, title, content, order, line)
         # 写后缓存失效（S21）：同一请求内修改过的章节，下次 read 必须读到新内容
         self._read_cache.pop(title, None)
         # 幻觉检测 fake_write 兜底：落盘后自校验（id 必须能回读）
@@ -177,6 +180,12 @@ _WRITING_SPECS: list[ToolSpec] = [
         params=[
             ParamSpec(name="title", type="string", required=True, description="章节标题"),
             ParamSpec(name="content", type="string", required=True, description="章节正文全文"),
+            ParamSpec(
+                name="line",
+                type="string",
+                required=False,
+                description="本章所属叙事线（可选，默认 main；多线如 line_b）",
+            ),
         ],
         # S25（对齐 pi executionMode）：写类工具标 sequential——与 read 类工具同批时
         # 整批串行，防止读旧写新的逻辑错序（锁只保数据不保顺序）。
