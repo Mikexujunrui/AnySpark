@@ -73,6 +73,10 @@ class TokenBudget:
         if cut_end <= head_len:
             return self._truncate_tail(messages, head_len)
 
+        # 已读清单（S21 修失忆-重读循环）：prune 前扫描被裁剪段里的 read 成功记录，
+        # 生成"已读章节"提示——模型知道读过什么，压缩后不会盲目重读
+        read_note = _collect_read_note(messages[head_len:cut_end])
+
         # 阶段 2：LLM 摘要可压缩段（无摘要器则纯 prune）
         history_part = messages[head_len:cut_end]
         if self._summarize is not None:
@@ -91,12 +95,17 @@ class TokenBudget:
                     else [summary_msg, *messages[cut_end:]]
                 )
                 if self.count_messages(kept) <= total:  # 摘要有效才替换
+                    if read_note:
+                        kept.insert(head_len + 1, read_note)
                     return kept
             except Exception:
                 pass  # 摘要失败降级为纯 prune
 
         # 阶段 1（或降级）：纯 prune——保留 system + 最近消息（丢弃可压缩段）
-        return [messages[0], *messages[cut_end:]] if head_len else messages[cut_end:]
+        kept = [messages[0], *messages[cut_end:]] if head_len else messages[cut_end:]
+        if read_note:
+            kept.insert(head_len, read_note)
+        return kept
 
     def _truncate_tail(self, messages: list[Message], head_len: int) -> list[Message]:
         """消息太少时的兜底：从尾部逐条保留直到预算内（最近优先）。"""
@@ -123,3 +132,33 @@ def make_summarizer(model: object, max_len: int = 800) -> Summarizer:
         return str(out.text)[:max_len]
 
     return _summarize
+
+
+def _collect_read_note(messages: list[Message]) -> Message | None:
+    """从被裁剪的消息里收集已读章节，生成"已读清单"提示（S21 修失忆-重读循环）。
+
+    扫描 role=tool 且内容是 read_chapter 成功回填（含"全文如下"）的消息，
+    提取章节标题；有已读则生成一条 system 提示：压缩后模型知道读过什么，
+    不会盲目重复 read_chapter。
+    """
+    import re as _re
+
+    titles: list[str] = []
+    for m in messages:
+        if m.role != "tool" or "全文如下" not in m.content:
+            continue
+        mch = _re.search(r"《(.+?)》全文如下", m.content)
+        if mch:
+            t = mch.group(1).strip()
+            if t and t not in titles:
+                titles.append(t)
+    if not titles:
+        return None
+    listing = "、".join(f"《{t}》" for t in titles)
+    return Message(
+        role="system",
+        content=(
+            f"【已读章节清单】对话历史中已读取过：{listing}。"
+            "如需引用其中内容，直接基于已读记忆/摘要，不要重复调用 read_chapter。"
+        ),
+    )

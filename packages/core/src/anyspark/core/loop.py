@@ -83,7 +83,9 @@ class Agent:
     store: ConversationStore = field(default_factory=InMemoryConversationStore)
     events: EventEmitter = field(default_factory=EventEmitter)
     system_prompt: str = ""
-    max_tool_iterations: int = 8  # 防无限循环硬上限
+    max_tool_iterations: int = (
+        16  # 防无限循环硬上限（S21：读2章+写留足空间；pi 用智能终止替代硬上限）
+    )
     context_compressor: ContextCompressor | None = None  # 可选：token 预算压缩（app 注入）
 
     def run(

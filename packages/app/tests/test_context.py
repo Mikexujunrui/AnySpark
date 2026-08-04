@@ -81,3 +81,45 @@ def test_make_summarizer_uses_model() -> None:
     assert s is not None
     out = s([Message(role="user", content="x")])
     assert "雨夜" in out
+
+
+def test_compress_keeps_read_note() -> None:
+    """S21 修失忆-重读循环：prune 后保留已读章节清单，模型不盲目重读。"""
+    from anyspark.core.types import Message
+
+    b = TokenBudget(budget=300)  # 小预算强制触发压缩
+    messages: list[Message] = [
+        Message(role="system", content="你是写作助手。"),
+        Message(role="user", content="开始"),
+        Message(role="tool", content="《第一章》全文如下：\n" + "雨夜" * 80),
+        Message(role="assistant", content="我读了第一章" + "续" * 50),
+        Message(role="tool", content="《第二章》全文如下：\n" + "码头" * 80),
+        Message(role="assistant", content="我读了第二章" + "续" * 50),
+        Message(role="user", content="继续写" + "续" * 60),
+        Message(role="assistant", content="好的" + "续" * 60),
+        Message(role="user", content="再继续" + "续" * 60),
+        Message(role="assistant", content="明白" + "续" * 60),
+        Message(role="user", content="继续第三章" + "续" * 60),
+    ]
+    kept = b.compress(messages)
+    combined = "\n".join(m.content for m in kept)
+    # 已读清单保留（模型知道读过第一章/第二章）
+    assert "已读章节清单" in combined
+    assert "第一章" in combined and "第二章" in combined
+    # 可压缩段（含超长工具结果）被裁掉：消息数显著减少 + 无"全文如下"
+    assert len(kept) < len(messages)
+    assert "全文如下" not in combined
+
+
+def test_read_note_empty_when_no_reads() -> None:
+    """无已读记录时不生成清单（不污染提示）。"""
+    from anyspark.core.types import Message
+
+    b = TokenBudget(budget=100)
+    messages = [
+        Message(role="system", content="s"),
+        Message(role="user", content="u" * 80),
+        Message(role="assistant", content="a" * 80),
+    ]
+    kept = b.compress(messages)
+    assert "已读章节清单" not in "\n".join(m.content for m in kept)

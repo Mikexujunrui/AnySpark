@@ -426,6 +426,19 @@
 
 **踩坑**：① RetryingModel 也要实现 respond_stream（组合包装完整性）；② Pydantic 单字段模型被 FastAPI 当 query（Body 需 Annotated 写法）；③ CancelIn 须模块级（ForwardRef 坑 S13 重演）
 
+### S21 补充：过度 read 真实根因与修复（主人指出分析错误后定位）
+
+**主人洞察**：DS 模型（pi 同款）本身不会过度 read——把锅甩给"模型特性"是错的。逐层排查定位到**机制性根因**：
+- **根因 1（失忆-重读循环）**：TokenBudget 超预算后 prune 一刀切丢弃中间历史（含 read 全文），模型"失忆"→ 盲目重读 → 又占 token → 又 prune → 循环
+- **根因 2**：迭代上限 8 在"读多章+写"场景不够（实测 8 次迭代全 read 没写就终止）；系统提示未引导"只读相关章节"
+
+**修复**：
+- `_collect_read_note`：prune 前扫描被裁段 read 成功记录 → 生成【已读章节清单】system 提示（摘要路径也插入）——模型知道读过什么，不盲目重读
+- DEFAULT_SYSTEM 引导："只需 read 最近的 1-2 章，不要读取全部历史章节（更早内容由【已固化事实】注入提供）"
+- max_tool_iterations 8 → 16
+
+**验证**：修复前写《第十章》8 次迭代全 read 无 write 终止；修复后 AI 只读相关 2 章（第八章/第六章）→ write_chapter 落盘 1407 字，且主动埋伏笔。pytest 158（+2 已读清单测试）
+
 ---
 
 ## S14 T7 验证指标（已完成 ✅）
