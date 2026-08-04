@@ -513,11 +513,11 @@ async def _generate_location_map(loop, args: dict, kb, book_id: str, msg: str = 
                 if loc_b.name in loc_a.name and len(loc_b.name) >= 2:
                     # Only add if no existing LOCATED_IN/BELONGS_TO edge
                     existing = kb._run(
-                        "SELECT COUNT(*) c FROM relations WHERE from_entity=? AND to_entity=? "
+                        "SELECT COUNT(*) AS c FROM relations WHERE from_entity=? AND to_entity=? "
                         "AND type IN ('LOCATED_IN','BELONGS_TO') AND project_id=?",
                         (loc_a.id, loc_b.id, kb.project_id),
                     )
-                    if existing and existing[0]["cnt"] == 0:
+                    if existing and int(existing[0].get("c", 0) or 0) == 0:
                         from core.knowledge import Relation, RelationType
 
                         kb.add_relation(

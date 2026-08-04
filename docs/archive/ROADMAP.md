@@ -21,6 +21,11 @@
 
 ## 追加记录
 
+### v20 — 2026-08-02: 修复展示层读取链路（时间线/地点/伏笔调度）
+- 变更类型: 修复
+- 涉及模块: tools/impl/generation.py, core/graph_search.py, tests/test_display_layer_read(新)
+- 描述: 用户报"入库时间线/伏笔展示层不可见"。实测数据在库、读取 API 正常，但发现两个真实 bug：generate_location_map 列名 KeyError('cnt') 崩溃；search_graph 固定 3 元组绑定导致 bindingerror。均修复并补回归测试。
+
 ### v19 — 2026-08-02: 修复 extract_all_chapters 未注册
 - 变更类型: 修复
 - 涉及模块: tools/executor.py, tests/test_extract_all_registration(新)

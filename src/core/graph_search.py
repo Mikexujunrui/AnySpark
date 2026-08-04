@@ -103,29 +103,49 @@ class GraphSearchResponse:
 def _execute_query(store, sql: str, params: dict) -> tuple[list[dict], str]:
     """Execute a SQL query with error handling.
 
-    Works with SQLiteStore (tuple/named params). The legacy graph-store path was removed in the v3.x SQLite consolidation.
+    LLM-generated SQL uses ``?`` positional placeholders whose count varies
+    per query, but only ``project_id``/``name``/``limit`` are known at runtime.
+    We therefore bind the *same ordered values* for every ``?`` so any number
+    of placeholders resolves, and never pass a raw dict to ``execute`` (sqlite3
+    would treat a dict as a single positional argument and raise a binding
+    error).
     """
-    try:
-        # SQLiteStore._run expects tuple; convert params dict to tuple
-        # Extract known params like project_id, limit, name
-        pid = params.get("pid", store.project_id)
-        limit = params.get("limit", 50)
-        name = params.get("name", "")
+    import re
+    import sqlite3
 
-        # Try to execute with positional params
-        import sqlite3
+    pid = params.get("pid", store.project_id)
+    limit = params.get("limit", 50)
+    name = params.get("name", "")
 
+    # Reject any non-SELECT statement (write-protection for a read tool).
+    if not re.match(r"^\s*SELECT\b", sql, re.IGNORECASE):
+        return [], "仅支持 SELECT 查询"
+
+    # Bind one value per '?' in declaration order. SQLite fills left-to-right,
+    # so value N always maps to placeholder N. This keeps LLM SQL working even
+    # when it emits more/fewer placeholders than we anticipated.
+    count = sql.count("?")
+    if count == 0:
+        # No placeholders at all: run the SQL directly.
         try:
-            cursor = store._conn.execute(sql, (pid, limit, name))
-            rows = cursor.fetchall()
-        except sqlite3.Error:
-            # Fall back to named params
-            cursor = store._conn.execute(sql, params)
-            rows = cursor.fetchall()
+            rows = store._conn.execute(sql).fetchall()
+            return [dict(r) for r in rows], ""
+        except Exception as e:
+            return [], f"Query execution error: {str(e)[:120]}"
 
-        # Convert to plain dicts
-        result = [dict(r) for r in rows]
-        return result, ""
+    values: list = [pid, name, limit]
+    if count > len(values):
+        # LLM emitted more placeholders than we have runtime values — pad with
+        # the name so e.g. multi-name searches still resolve instead of erroring.
+        values.extend([name] * (count - len(values)))
+    args = tuple(values[:count])
+
+    try:
+        cursor = store._conn.execute(sql, args)
+        rows = cursor.fetchall()
+        return [dict(r) for r in rows], ""
+    except sqlite3.Error as e:
+        return [], f"Query execution error: {str(e)[:120]}"
     except Exception as e:
         return [], f"Query execution error: {str(e)[:120]}"
 

@@ -214,6 +214,12 @@ Cancel 请求 → RunState.cancel → 设置 cancelled flag → 循环内 check 
 
 ## 变更记录
 
+### v3.4.2 - 2026-08-02: 修复展示层读取链路（时间线/地点/伏笔调度）
+
+- 变更类型: 修复
+- 涉及模块: tools/impl/generation.py, core/graph_search.py, tests/test_display_layer_read(新)
+- 描述: 用户反馈"extract_chapter 写入与 generate_timeline 读取不一致，入库的时间线/伏笔在展示层不可见"。实测图库数据完备（时间线 41 事件、伏笔 97 条、地点 30 节点），`get_timeline_for_view`/`list_foreshadows` 读取正常——用户旧版本行为多为缓存/版本问题。但发现两个真实 bug：①`generate_location_map` 名称包含关系回填读取 `SELECT COUNT(*) c` 却访问 `["cnt"]`，地点的名字存在包含关系时抛 KeyError 崩溃；②`search_graph` 的 `_execute_query` 固定绑定 3 元组 `(pid, name, limit)` 到 LLM 生成 SQL（占位符数随查询变化），引发 `Incorrect number of bindings`（bindingerror）。修复：①列名改为 `c`/`.get` 安全取值；②`_execute_query` 按 SQL 占位符数量自适应绑定、0 占位符直接执行、非 SELECT 拒绝。新增回归测试锁定两处修复与"数据可读"前提。
+
 ### v3.4.1 - 2026-08-02: 修复 extract_all_chapters 未注册
 
 - 变更类型: 修复
