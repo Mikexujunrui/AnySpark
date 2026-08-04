@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -254,6 +254,21 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     plots = PlotStore(real_db)
     # 活跃会话的取消令牌（S21：/api/chat/cancel 可中断正在跑的 Agent）
     _active_tokens: dict[str, CancellationToken] = {}
+    # 后台任务队列 + 独立 worker（S21 修 BackgroundTasks 共享线程池排队缺陷）：
+    # 图谱抽取/伏笔回收不占请求线程池，请求立即返回、后台串行处理
+    _bg_queue: queue.Queue[tuple[str, str, int]] = queue.Queue()
+
+    def _bg_worker() -> None:
+        while True:
+            try:
+                title, content, order = _bg_queue.get()
+                _extract_chapter("main", title, content, order)
+            except Exception as exc:
+                logger.warning("后台任务异常: %s", exc)
+            finally:
+                _bg_queue.task_done()
+
+    threading.Thread(target=_bg_worker, daemon=True).start()
     manual_injector = ManualInjector(manual)
     signal_collector = SignalCollector(signals)
     # 默认真实模型套上组合式重试包装（S15：重试是 core 可拼接组件，不内嵌在模型里）
@@ -396,7 +411,13 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         return compute_stats(real_db)
 
     @app.post("/api/chat", response_model=ChatResponse)
-    def chat(req: ChatRequest, background_tasks: BackgroundTasks) -> ChatResponse:
+    def chat(req: ChatRequest) -> ChatResponse:
+        # steering 防护（S21）：会话正在处理中时拒绝并发新消息，提示等待/取消
+        if req.conversation_id and req.conversation_id in _active_tokens:
+            raise HTTPException(
+                status_code=409,
+                detail="该会话正在处理中（可 POST /api/chat/cancel 中断后再发）",
+            )
         logger.info("chat 请求: conv=%s len=%d", req.conversation_id or "(新)", len(req.message))
         events: list[ToolEvent] = []
         agent = _make_agent(
@@ -454,7 +475,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                         chs = chapters.list_by_book("main")
                         order = next((c.order_index for c in chs if c.title == title), len(chs))
                         logger.info("后台图谱抽取挂载: 《%s》", title)
-                        background_tasks.add_task(_extract_chapter, "main", title, content, order)
+                        _bg_queue.put((title, content, order))
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
         # AI 档位声明解析（机制 2：AI 可声明，用户点选确认）
         declared = parse_agency_declaration(turn.text)
@@ -499,7 +520,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                                     (c.order_index for c in chs if c.title == title),
                                     len(chs),
                                 )
-                                _extract_chapter("main", title, content, order)
+                                # 后台队列处理（不阻塞 SSE 的 done 帧）
+                                _bg_queue.put((title, content, order))
             except Exception as exc:  # 异常转 error 帧（不中断连接）
                 logger.exception("chat/stream 执行异常: %s", exc)
                 events_queue.put(("error", {"message": f"执行失败: {exc}"}))

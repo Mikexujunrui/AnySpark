@@ -84,12 +84,21 @@ def test_chat_writes_chapter() -> None:
 
 
 def test_chat_auto_extracts_graph() -> None:
-    """S7：write_chapter 落盘后自动抽取图谱（后台任务同步执行）。"""
+    """S7：write_chapter 落盘后自动抽取图谱（独立 worker 异步执行，S21）。"""
+    import time
+
     client = _make_client()
     resp = client.post("/api/chat", json={"message": "写第一章"})
     assert resp.status_code == 200
-    entities = client.get("/api/graph/entities").json()
-    names = {e["name"] for e in entities}
+    # 后台 worker 异步抽取：轮询等待实体入库（fake 模型快，正常 <3s）
+    names: set[str] = set()
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        entities = client.get("/api/graph/entities").json()
+        names = {e["name"] for e in entities}
+        if "陈渡" in names and "雾城" in names:
+            break
+        time.sleep(0.5)
     assert "陈渡" in names and "雾城" in names
     # 注入块非空（当前时空点已知事实）
     ctx = client.get("/api/graph/context").json()

@@ -123,3 +123,30 @@ def test_read_note_empty_when_no_reads() -> None:
     ]
     kept = b.compress(messages)
     assert "已读章节清单" not in "\n".join(m.content for m in kept)
+
+
+def test_compress_cache_hits_same_context() -> None:
+    """S21 修续聊卡住：同上下文二次压缩命中指纹缓存（不重复 LLM 摘要）。"""
+    calls: list[int] = []
+
+    def fake_summarize(msgs: list[Message]) -> str:
+        calls.append(len(msgs))
+        return "摘要内容" + "续" * 100
+
+    from anyspark.core.types import Message
+
+    b = TokenBudget(budget=200, summarize=fake_summarize)
+    messages = [
+        Message(role="system", content="s"),
+        Message(role="user", content="u" * 80),
+        Message(role="assistant", content="a" * 80),
+        Message(role="tool", content="《第一章》全文如下：\n" + "x" * 100),
+        Message(role="user", content="继续" + "续" * 80),
+        Message(role="assistant", content="好" + "续" * 80),
+        Message(role="user", content="再继续" + "续" * 80),
+        Message(role="assistant", content="明白" + "续" * 80),
+    ]
+    r1 = b.compress(messages)
+    r2 = b.compress(messages)  # 同上下文
+    assert len(calls) == 1  # 摘要只跑一次
+    assert r1 == r2

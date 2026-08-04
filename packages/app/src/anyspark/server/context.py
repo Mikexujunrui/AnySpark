@@ -27,6 +27,8 @@ from anyspark.core.types import Message
 KEEP_RECENT = 6
 # 预算安全系数：DeepSeek tokenizer 与 cl100k 的偏差余量
 SAFETY_FACTOR = 1.2
+# 压缩触发阈值（S21 对齐 pi：接近上限前主动压缩，避免临界突变）
+COMPRESS_AT = 0.9
 
 Summarizer = Callable[[list[Message]], str] | None
 
@@ -43,6 +45,11 @@ class TokenBudget:
         self._budget = int(budget / SAFETY_FACTOR)
         self._enc = tiktoken.get_encoding(encoding)
         self._summarize = summarize
+        # 摘要结果指纹缓存（S21 修续聊卡住）：同上下文不重复调 LLM 摘要
+        # （Agent 每轮迭代都 compress，消息未变时命中缓存，省 30-60s/轮）
+        self._cache: dict[int, list[Message]] = {}
+        self._cache_order: list[int] = []
+        self._cache_max = 32
 
     # ------------------------------------------------------------------
     # 计数
@@ -57,10 +64,31 @@ class TokenBudget:
     # 压缩（ContextCompressor 协议入口）
     # ------------------------------------------------------------------
     def compress(self, messages: list[Message]) -> list[Message]:
-        """输入完整 prompt 消息，超预算则两阶段压缩，返回压缩后消息。"""
+        """输入完整 prompt 消息，超过触发阈值（90% 预算，S21 提前触发）则压缩。
+
+        结果按消息指纹缓存：Agent 每轮迭代调用时，上下文未变则直接命中，
+        不重复执行昂贵的 LLM 摘要（续聊长上下文的卡顿主因）。
+        """
         total = self.count_messages(messages)
-        if total <= self._budget:
+        if total <= int(self._budget * COMPRESS_AT):
             return messages
+
+        # 指纹缓存：同上下文直接返回上次压缩结果（省 LLM 摘要调用）
+        fingerprint = hash(tuple(m.content for m in messages))
+        cached = self._cache.get(fingerprint)
+        if cached is not None:
+            return cached
+
+        kept = self._compress_uncached(messages, total)
+        self._cache[fingerprint] = kept
+        self._cache_order.append(fingerprint)
+        if len(self._cache_order) > self._cache_max:
+            old = self._cache_order.pop(0)
+            self._cache.pop(old, None)
+        return kept
+
+    def _compress_uncached(self, messages: list[Message], total: int) -> list[Message]:
+        """压缩主逻辑（被 compress 缓存包裹）。"""
 
         # 找出可压缩段：messages[0] 可能是 system（保留），从其后开始；
         # 保底保留最近 KEEP_RECENT 条（进行中对话）。
