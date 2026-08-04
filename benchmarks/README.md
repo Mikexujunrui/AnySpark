@@ -28,7 +28,17 @@ uv run python -m benchmarks.unit.run_unit --base http://127.0.0.1:9000
 
 # 只跑单个任务
 uv run python -m benchmarks.unit.run_unit --spawn --task T1
+
+# 对比层：AnySpark vs 裸 LLM（同模型、长程任务、客观指标）
+uv run python -m benchmarks.compare.run_compare --spawn
 ```
+
+## 对比层设计（诚实原则）
+
+- 同一任务 × 同一模型（deepseek-v4-flash）× 同一输入：裸 LLM = 无任何系统的直接调用
+- 三任务：A 设定忠实度（哈利波特设定续写）/ B 长书一致性（原创种子 5 章）/ C 偏好跨轮记忆（禁破折号，第 2 章不重复偏好）
+- 判据：token 计数客观；设定违规/名字漂移用 LLM 裁判（同模型双方同一裁判，公平可重复）
+- **已知事实（2026-08-04 首轮）**：短/中程任务（≤5 章）裸 LLM 与 AnySpark 质量相当、裸 LLM 便宜 1.7-2.4x；AnySpark 的差异价值在长书记忆/多轮对齐/可观测性（如能动性【AI补充】标注）——对比层 v1 诚实呈现，不夸大
 
 ## 评测资产（本地手工，不入库）
 
