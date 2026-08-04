@@ -459,3 +459,48 @@ def test_wrapup_lists_open_hooks() -> None:
     wrap = client.post(f"/api/chapters/{chs[-1]['id']}/wrapup", json={})
     assert wrap.status_code == 200
     assert any(h["content"] == "怀表密码必须解开" for h in wrap.json()["open_hooks"])
+
+
+def test_plot_aging_open_duration() -> None:
+    """S31 老龄化：登记章 planted_order → 注入/wrapup 显示开放时长（中性事实，不设阈值）。"""
+    import tempfile
+    from pathlib import Path
+
+    from anyspark.template import PlotStore
+
+    tmp = Path(tempfile.mkdtemp()) / "aging.db"
+    store = PlotStore(tmp)
+    # 第 2 章登记的 must 钩子
+    store.add("main", "伏笔", "怀表密码", "第2章", priority="must", planted_order=2)
+    # 注入渲染：当前第 6 章 → 标"已开放 4 章"
+    rendered = store.render(current_order=6)
+    assert "已开放 4 章" in rendered
+    # 未知当前章（0）→ 不标年龄
+    assert "已开放" not in store.render(current_order=0)
+    # wrapup 用的 open_must 带 current_order 计算 open_since
+    hooks = store.open_must("main", current_order=6)
+    assert hooks and hooks[0].planted_order == 2
+
+
+def test_plot_planted_order_via_api() -> None:
+    """S31：登记 API 接受 planted_order，返回并持久化。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(db_path=":memory:"))
+    r = client.post(
+        "/api/plot/item",
+        json={
+            "content": "门后有人",
+            "category": "伏笔",
+            "chapter_ref": "第1章",
+            "priority": "must",
+            "planted_order": 1,
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["planted_order"] == 1
+    # 列表返回 planted_order
+    pts = client.get("/api/plot").json()
+    assert pts[0]["planted_order"] == 1

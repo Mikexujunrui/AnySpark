@@ -238,6 +238,7 @@ class PlotItemIn(BaseModel):
     category: str = "伏笔"
     chapter_ref: str = ""
     priority: str = "soft"  # must=剧情钩子（作者承诺必须回收）/ soft=细节线索
+    planted_order: int = 0  # S31 老龄化：登记时的章节序号（开放时长 = 当前章 - planted_order）
 
 
 class CancelIn(BaseModel):
@@ -405,7 +406,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         if "bias" not in skip and bias_block:
             full_prompt = full_prompt + "\n\n" + bias_block
         # 关键点图谱注入（T2 阶段 3：当前推进状态——哪些伏笔还开着/刚回收）
-        plot_block = plots.render("main")
+        # S31：注入时传当前章节数（老龄化：must 钩子标"已开放 N 章"，中性事实）
+        plot_block = plots.render("main", current_order=len(chapters.list_by_book(book_id)))
         if "plot" not in skip and plot_block:
             full_prompt = full_prompt + "\n\n" + plot_block
         # 氛围滑块注入（机制 4：本段氛围要求）
@@ -859,13 +861,15 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     @app.post("/api/plot/item", response_model=dict[str, object])
     def add_plot_item(req: PlotItemIn) -> dict[str, object]:
         """S31：主动登记伏笔/关键点（作者或 AI 声明）——
-        priority=must 表示这是作者对读者的主线承诺（剧情钩子，必须回收）。"""
+        priority=must 表示这是作者对读者的主线承诺（剧情钩子，必须回收）；
+        planted_order 记录登记时的章节序号（老龄化计算用）。"""
         p = plots.add(
             "main",
             req.category,
             req.content,
             req.chapter_ref,
             priority=req.priority,
+            planted_order=req.planted_order,
         )
         return p.to_dict()
 
@@ -1036,13 +1040,17 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         # 图谱统计（本章涉及的实体）
         involved = graph_verifier.facts_for("main", ch.content[:2000])
         # S31：主线钩子检查——作者承诺的剧情钩子仍未回收的（轻量提示，建议非门禁）
-        open_hooks = plots.open_must("main") or []
+        # 老龄化：带开放时长（中性事实，不设阈值不评判）
+        open_hooks = plots.open_must("main", current_order=ch.order_index) or []
         hook_check = (
             [
                 {
                     "content": h.content[:60],
                     "chapter_ref": h.chapter_ref,
                     "category": h.category,
+                    "open_since": (
+                        ch.order_index - h.planted_order if h.planted_order > 0 else None
+                    ),
                 }
                 for h in open_hooks
             ][:8]

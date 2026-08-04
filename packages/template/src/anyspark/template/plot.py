@@ -28,6 +28,17 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _age_text(p: PlotPoint, current_order: int) -> str:
+    """S31 老龄化：中性事实提示——"（已开放 N 章）"。
+    不设阈值、不评判（开放久可能是故意留到结局）；只在知道登记章时标年龄。"""
+    if current_order <= 0 or p.planted_order <= 0:
+        return ""
+    age = current_order - p.planted_order
+    if age <= 0:
+        return ""
+    return f"（已开放 {age} 章）"
+
+
 @dataclass
 class PlotPoint:
     """一个关键点（可增删改、标注在意/不需要——操作即对齐信号）。
@@ -49,6 +60,7 @@ class PlotPoint:
     attention: str = "care"  # care|ignore（用户标注在意/不需要；ignore 不注入不回收）
     priority: str = "soft"  # S31: must（剧情钩子，必须回收）| soft（细节线索）
     resolved_chapter: str = ""  # S31: 回收章节
+    planted_order: int = 0  # S31 老龄化：登记时的章节序号（开放时长 = 当前章 - planted_order）
     created_at: str = field(default_factory=_now)
 
     def to_dict(self) -> dict[str, Any]:
@@ -62,6 +74,7 @@ class PlotPoint:
             "attention": self.attention,
             "priority": self.priority,
             "resolved_chapter": self.resolved_chapter,
+            "planted_order": self.planted_order,
             "created_at": self.created_at,
         }
 
@@ -87,6 +100,7 @@ class PlotStore:
                 attention TEXT NOT NULL DEFAULT 'care',
                 priority TEXT NOT NULL DEFAULT 'soft',
                 resolved_chapter TEXT NOT NULL DEFAULT '',
+                planted_order INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_plot_book ON plot_points(book_id, category);
@@ -106,6 +120,10 @@ class PlotStore:
             self._conn.execute(
                 "ALTER TABLE plot_points ADD COLUMN resolved_chapter TEXT NOT NULL DEFAULT ''"
             )
+        if "planted_order" not in cols:
+            self._conn.execute(
+                "ALTER TABLE plot_points ADD COLUMN planted_order INTEGER NOT NULL DEFAULT 0"
+            )
         self._conn.commit()
 
     def close(self) -> None:
@@ -119,6 +137,7 @@ class PlotStore:
         chapter_ref: str = "",
         attention: str = "care",
         priority: str = "soft",
+        planted_order: int = 0,
     ) -> PlotPoint:
         pid = uuid.uuid4().hex
         cat = category if category in PLOT_CATEGORIES else "主线冲突"
@@ -128,12 +147,14 @@ class PlotStore:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO plot_points (id, book_id, category, content, chapter_ref, "
-                "status, attention, priority, resolved_chapter, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (pid, book_id, cat, content, chapter_ref, "open", att, pri, "", now),
+                "status, attention, priority, resolved_chapter, planted_order, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (pid, book_id, cat, content, chapter_ref, "open", att, pri, "", planted_order, now),
             )
             self._conn.commit()
-        return PlotPoint(pid, book_id, cat, content, chapter_ref, "open", att, pri, "", now)
+        return PlotPoint(
+            pid, book_id, cat, content, chapter_ref, "open", att, pri, "", planted_order, now
+        )
 
     def list_points(self, book_id: str = "main") -> list[PlotPoint]:
         rows = self._conn.execute(
@@ -150,6 +171,7 @@ class PlotStore:
                 attention=r["attention"],
                 priority=r["priority"],
                 resolved_chapter=r["resolved_chapter"],
+                planted_order=r["planted_order"],
                 created_at=r["created_at"],
             )
             for r in rows
@@ -163,6 +185,7 @@ class PlotStore:
         attention: str | None = None,
         priority: str | None = None,
         resolved_chapter: str | None = None,
+        planted_order: int | None = None,
         chapter_ref: str | None = None,
     ) -> PlotPoint | None:
         """更新状态/关注度/优先级/回收章节（None=不变）。"""
@@ -180,6 +203,9 @@ class PlotStore:
         if resolved_chapter is not None:
             sets.append("resolved_chapter=?")
             params.append(resolved_chapter)
+        if planted_order is not None:
+            sets.append("planted_order=?")
+            params.append(planted_order)
         if chapter_ref is not None:
             sets.append("chapter_ref=?")
             params.append(chapter_ref)
@@ -205,6 +231,7 @@ class PlotStore:
             attention=row["attention"],
             priority=row["priority"],
             resolved_chapter=row["resolved_chapter"],
+            planted_order=row["planted_order"],
             created_at=row["created_at"],
         )
 
@@ -213,11 +240,15 @@ class PlotStore:
             self._conn.execute("DELETE FROM plot_points WHERE id=?", (plot_id,))
             self._conn.commit()
 
-    def render(self, book_id: str = "main", max_resolved: int = 3) -> str:
+    def render(self, book_id: str = "main", max_resolved: int = 3, current_order: int = 0) -> str:
         """渲染成注入块（当前推进状态，供写作时注入）。
 
+        S31 A/B 分级（对齐哲学：系统只对作者自己升级的承诺负责，不评价细节线索）：
         - attention=ignore 的条目不注入（用户标注"不需要"=不惦记）
-        - open 全注入；resolved 只列最近 max_resolved 条（省 token，提示推进即可）
+        - **must 钩子（作者承诺，必须回收）明确列出** + **开放时长（老龄化，中性事实）**
+        - soft 细节线索只汇总数量（旁观不打扰——回收率不是质量指标）
+        - resolved 只列最近 max_resolved 条（省 token，提示推进即可）
+        current_order：当前章节序号（计算开放时长用；0=未知则不标年龄）
         """
         points = [p for p in self.list_points(book_id) if p.attention != "ignore"]
         if not points:
@@ -230,7 +261,8 @@ class PlotStore:
             lines.append("⚠ 主线钩子（作者承诺，必须回收）：")
             for p in open_must:
                 ref = f"（{p.chapter_ref}）" if p.chapter_ref else ""
-                lines.append(f"- ★ [{p.category}] {p.content}{ref}")
+                age = _age_text(p, current_order)
+                lines.append(f"- ★ [{p.category}] {p.content}{ref}{age}")
         if open_soft:
             lines.append(f"另有 {len(open_soft)} 条细节线索开放中（写作时自然呼应即可）。")
         if resolved_pts:
@@ -240,8 +272,9 @@ class PlotStore:
                 lines.append(f"- ✓ [{p.category}] {p.content}{ref}")
         return "\n".join(lines)
 
-    def open_must(self, book_id: str = "main") -> list[PlotPoint]:
-        """S31：未回收的主线钩子（作者承诺清单——wrapup/收尾检查用）。"""
+    def open_must(self, book_id: str = "main", current_order: int = 0) -> list[PlotPoint]:
+        """S31：未回收的主线钩子（作者承诺清单——wrapup/收尾检查用）。
+        current_order：当前章节序号（老龄化提示用）。"""
         points = self.list_points(book_id)
         return [
             p
