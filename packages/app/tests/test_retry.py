@@ -119,3 +119,32 @@ def test_docx_extract_lightweight() -> None:
         zf.writestr("word/document.xml", xml)
     text = _extract_docx_text(tmp)
     assert "第一段" in text and "第二段" in text
+
+
+def test_read_chapter_cache_dedup() -> None:
+    """S21 已读缓存：同一请求内重复读同一章命中缓存；写后缓存失效。"""
+    import tempfile
+
+    from anyspark.server.tools_writing import WritingTools
+    from anyspark.store import ChapterStore
+
+    tmp = Path(tempfile.mkdtemp())
+    store = ChapterStore(tmp / "c.db")
+    store.upsert("main", "第一章", "雨夜，陈渡抵达雾城。", 0)
+    tools = WritingTools.__new__(WritingTools)
+    tools._chapters = store
+    tools._book_id = "main"
+    tools._read_cache = {}
+
+    spec = make_spec("read_chapter")
+    r1 = tools.read_chapter(spec, {"title": "第一章"})
+    r2 = tools.read_chapter(spec, {"title": "第一章"})
+    assert r1.ok and r2.ok
+    assert "已读缓存" in r2.content  # 第二次命中缓存
+    # 写后缓存失效：再读应读到新内容（无缓存标记）
+    tools.write_chapter(
+        make_spec("write_chapter"), {"title": "第一章", "content": "改写后的正文。"}
+    )
+    r3 = tools.read_chapter(spec, {"title": "第一章"})
+    assert "已读缓存" not in r3.content
+    assert "改写后的正文" in r3.content

@@ -407,6 +407,27 @@
 
 ---
 
+## S21 Agent 循环工程化（移植 pi 模式，已完成 ✅）
+
+**交付 commit**：`S21 循环工程化`
+
+**背景**：主人指出"当初想在 pi 技术上改"——深度对比 pi（pi-agent-core/agent-loop.js）与 AnySpark 循环：pi 全程流式+AbortSignal 贯穿+工具并行+截断防护+steering；AnySpark 非流式+串行+无中断+仅硬上限。按 pi 已验证模式移植（不引 pi 包，core 零依赖保持）。
+
+**实现（5 项，全部 A 类过程控制）**：
+1. **流式核心**：core `StreamModel` 协议（respond_stream + on_event 回调），事件名对齐 pi（text_delta/toolcall_delta/done）；DeepSeekModel.respond_stream；RetryingModel 透传；SSE 端点统一走 Agent 流式（不再构造 stream 模型）→ 打字机效果
+2. **截断防护**（pi 的 failToolCallsFromTruncatedMessage）：工具参数 JSON 解析失败→`_malformed` 标记→**不执行**→错误回填让模型重发（防半截参数写坏章节）
+3. **工具并行**（pi 的 executeToolCallsParallel）：ThreadPoolExecutor 并行执行 tool_calls（保序回填）；ChapterStore 读方法补锁保线程安全
+4. **协作式中断**（pi 的 AbortSignal）：core `CancellationToken`（线程安全），Agent.run(token) 循环+工具前检查点；`/api/chat/cancel` 端点（空 id=取消最近活跃会话，解决新会话 id 客户端未知）
+5. **已读缓存**：read_chapter 同请求内去重（日志实证 AI 反复读 4-8 次）；写后缓存失效
+
+**门禁**：ruff + mypy + pytest **156**（+6：流式2/截断1/并行1/取消1/缓存1）全绿
+
+**真实链路验证**：SSE 52 帧逐词打字机（第一盏→灯亮→起时…）；长写作 chat + 4 秒后 cancel → 返回"已中断（用户取消）。"
+
+**踩坑**：① RetryingModel 也要实现 respond_stream（组合包装完整性）；② Pydantic 单字段模型被 FastAPI 当 query（Body 需 Annotated 写法）；③ CancelIn 须模块级（ForwardRef 坑 S13 重演）
+
+---
+
 ## S14 T7 验证指标（已完成 ✅）
 
 **交付 commit**：`S14 T7 指标`

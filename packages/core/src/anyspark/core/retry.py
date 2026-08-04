@@ -13,7 +13,7 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Callable
-from typing import TypeVar
+from typing import Any, TypeVar, cast
 
 from .loop import Model
 from .protocol import ToolSpec
@@ -84,6 +84,25 @@ class RetryingModel:
     def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
         return retry_with_backoff(
             lambda: self.inner.respond(messages, tools),
+            retries=self._retries,
+            base=self._base,
+            max_wait=self._max_wait,
+            on_retry=self._on_retry,
+        )
+
+    def respond_stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        on_event: Callable[[Any], None] | None = None,
+    ) -> ModelOutput:
+        """流式透传（S21）：内层支持 respond_stream 则流式+重试；否则回退非流式。"""
+        inner = self.inner
+        if not hasattr(inner, "respond_stream"):
+            return self.respond(messages, tools)
+        stream_fn = inner.respond_stream
+        return retry_with_backoff(
+            lambda: cast(ModelOutput, stream_fn(messages, tools, on_event)),
             retries=self._retries,
             base=self._base,
             max_wait=self._max_wait,

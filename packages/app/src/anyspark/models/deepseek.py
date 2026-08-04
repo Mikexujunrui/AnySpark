@@ -18,6 +18,7 @@ from typing import Any
 
 from openai import OpenAI
 
+from anyspark.core.events import Event
 from anyspark.core.protocol import ToolSpec
 from anyspark.core.types import Message, ModelOutput, ToolCall
 
@@ -98,7 +99,7 @@ class DeepSeekModel:
         return self._model
 
     def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
-        """真实调用 DeepSeek，返回模型无关的 ModelOutput。"""
+        """真实调用 DeepSeek，返回模型无关的 ModelOutput（非流式路径）。"""
         openai_messages = [to_openai_message(m) for m in messages]
         kwargs: dict[str, Any] = {
             "model": self._model,
@@ -111,7 +112,7 @@ class DeepSeekModel:
             kwargs["tool_choice"] = "auto"
 
         if self._stream:
-            return self._respond_stream(kwargs)
+            return self._respond_stream(kwargs, None)
 
         def _call() -> ModelOutput:
             response = self._client.chat.completions.create(**kwargs)
@@ -125,15 +126,43 @@ class DeepSeekModel:
                     try:
                         args: dict[str, Any] = json.loads(fn.arguments) if fn.arguments else {}
                     except json.JSONDecodeError:
-                        args = {"_raw": fn.arguments}
+                        # 截断防护（S21）：参数非法→标记，不执行，让模型重发
+                        args = {"_raw": fn.arguments, "_malformed": True}
                     tool_calls.append(ToolCall(name=fn.name, arguments=args))
 
             return ModelOutput(text=text, tool_calls=tool_calls)
 
         return _call()
 
-    def _respond_stream(self, kwargs: dict[str, Any]) -> ModelOutput:
-        """流式路径：文本 delta 逐段回调 on_delta；tool_calls 分片累积。"""
+    def respond_stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        on_event: Callable[[Any], None] | None = None,
+    ) -> ModelOutput:
+        """流式协议（S21 移植 pi 模式）：边生成边 on_event 回调流式事件，
+        返回完整 ModelOutput。事件名对齐 pi：text_delta / toolcall_delta / done。
+        """
+        openai_messages = [to_openai_message(m) for m in messages]
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": openai_messages,
+            "temperature": self._temperature,
+            "max_tokens": self._max_tokens,
+        }
+        if tools:
+            kwargs["tools"] = [to_openai_tool(t) for t in tools]
+            kwargs["tool_choice"] = "auto"
+        return self._respond_stream(kwargs, on_event)
+
+    def _respond_stream(
+        self, kwargs: dict[str, Any], on_event: Callable[[Any], None] | None
+    ) -> ModelOutput:
+        """流式路径（S21 移植 pi 模式）：文本 delta / 工具参数 delta 逐段回调。
+
+        - on_event 非空：发出 text_delta / toolcall_delta / done 事件（Agent 流式核心）
+        - 同时兼容旧构造参数 on_delta（stream=True 旧路径）
+        """
         kwargs["stream"] = True
         stream = self._client.chat.completions.create(**kwargs)
         text_parts: list[str] = []
@@ -144,6 +173,8 @@ class DeepSeekModel:
             delta = chunk.choices[0].delta
             if delta.content:
                 text_parts.append(delta.content)
+                if on_event is not None:
+                    on_event(Event(type="text_delta", payload={"content": delta.content}))
                 if self._on_delta:
                     self._on_delta(delta.content)
             for tc in delta.tool_calls or []:
@@ -152,6 +183,13 @@ class DeepSeekModel:
                     acc["name"] += tc.function.name
                 if tc.function and tc.function.arguments:
                     acc["arguments"] += tc.function.arguments
+                    if on_event is not None:
+                        on_event(
+                            Event(
+                                type="toolcall_delta",
+                                payload={"content": tc.function.arguments},
+                            )
+                        )
         text = "".join(text_parts)
         tool_calls: list[ToolCall] = []
         for idx in sorted(tool_acc):
@@ -159,6 +197,9 @@ class DeepSeekModel:
             try:
                 args: dict[str, Any] = json.loads(acc["arguments"]) if acc["arguments"] else {}
             except json.JSONDecodeError:
-                args = {"_raw": acc["arguments"]}
+                # 截断防护（S21）：参数非法→标记，不执行，让模型重发
+                args = {"_raw": acc["arguments"], "_malformed": True}
             tool_calls.append(ToolCall(name=acc["name"], arguments=args))
+        if on_event is not None:
+            on_event(Event(type="done", payload={}))
         return ModelOutput(text=text, tool_calls=tool_calls)

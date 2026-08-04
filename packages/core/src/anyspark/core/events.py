@@ -18,6 +18,8 @@ from typing import Any
 # 通用事件类型名（核心只认识这些；扩展包用 register 挂自己的类型）
 GENERIC_EVENT_TYPES = {
     "text",  # 一段自然语言输出
+    "text_delta",  # 流式文本增量（打字机；事件名对齐 pi 的 stream 事件）
+    "toolcall_delta",  # 流式工具调用参数增量
     "done",  # 一轮完成
     "error",  # 出错
     "tool_call",  # 模型发起工具调用
@@ -93,6 +95,10 @@ class EventEmitter:
     @staticmethod
     def text(content: str) -> Event:
         return Event(type="text", payload={"content": content})
+
+    @staticmethod
+    def text_delta(content: str) -> Event:
+        return Event(type="text_delta", payload={"content": content})
 
     @staticmethod
     def done() -> Event:

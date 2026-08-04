@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from anyspark.core import (
     Agent,
     Message,
@@ -11,6 +13,7 @@ from anyspark.core import (
     ToolSpec,
     register_builtins,
 )
+from anyspark.core.events import Event
 
 
 class ScriptedModel:
@@ -122,3 +125,91 @@ def test_system_prompt_prepended_when_set() -> None:
     prompts = scripted.answered_prompts
     assert prompts[0][0].role == "system"
     assert "演示助手" in prompts[0][0].content
+
+
+class StreamScriptedModel:
+    """流式模型（S21 移植 pi 模式）：respond_stream 逐段发 text_delta 事件。"""
+
+    def __init__(self, chunks: list[str]) -> None:
+        self._chunks = chunks
+
+    def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
+        return ModelOutput(text="".join(self._chunks))
+
+    def respond_stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        on_event: Callable[[Event], None],
+    ) -> ModelOutput:
+        for c in self._chunks:
+            on_event(Event(type="text_delta", payload={"content": c}))
+        on_event(Event(type="done", payload={}))
+        return ModelOutput(text="".join(self._chunks))
+
+
+def test_loop_streams_text_delta_events() -> None:
+    """S21 流式核心：模型实现 respond_stream 时，Agent 循环逐段 emit text_delta。"""
+    from anyspark.core.events import Event
+
+    deltas: list[str] = []
+    model = StreamScriptedModel(["雾", "城", "侦探"])
+    agent = _make_agent(model)
+    agent.events.on(
+        "text_delta",
+        lambda e: deltas.append(e.payload["content"] if isinstance(e, Event) else str(e)),
+    )
+    turn = agent.run("问题")
+    assert turn.text == "雾城侦探"
+    assert deltas == ["雾", "城", "侦探"]
+
+
+def test_loop_falls_back_to_respond_when_no_stream() -> None:
+    """S21：模型无 respond_stream 时回退非流式 respond（向后兼容）。"""
+    scripted = ScriptedModel([_no_tool("非流式答案")])
+    turn = _make_agent(scripted).run("问题")
+    assert turn.text == "非流式答案"
+
+
+def test_loop_parallel_tools_preserve_order() -> None:
+    """S21 工具并行：一次多个工具调用并行执行，结果按调用顺序回填。"""
+    from anyspark.core import ToolCall
+
+    # 第一轮：两个工具调用（add + echo）；第二轮：终答
+    model = ScriptedModel(
+        [
+            ModelOutput(
+                tool_calls=[
+                    ToolCall(name="add", arguments={"a": 1, "b": 2}),
+                    ToolCall(name="echo", arguments={"text": "并行执行"}),
+                ]
+            ),
+            _no_tool("完成"),
+        ]
+    )
+    turn = _make_agent(model).run("测试")
+    assert turn.text == "完成"
+    assert [c.name for c in turn.tool_calls] == ["add", "echo"]
+    assert turn.tool_results[0].ok and turn.tool_results[1].ok
+    # 回填顺序与调用顺序一致
+    assert turn.tool_results[0].data == {"result": 3}
+
+
+def test_loop_cancellation_token() -> None:
+    """S21 协作式取消：token.cancel() 后 Agent 在检查点提前终止。"""
+    from anyspark.core import CancellationToken, ToolCall
+
+    # 模型永远要调工具（循环不会自然结束），token 取消应提前终止
+    always_tool = ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})])
+    model = ScriptedModel([always_tool] * 100)
+    token = CancellationToken()
+    agent = _make_agent(model)
+
+    events: list[str] = []
+    agent.events.on("aborted", lambda e: events.append("aborted"))
+
+    # 预先取消 → 第一轮检查点即终止
+    token.cancel()
+    turn = agent.run("问题", token=token)
+    assert "中断" in turn.text
+    assert "aborted" in events

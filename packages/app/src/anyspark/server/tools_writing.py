@@ -58,6 +58,8 @@ class WritingTools:
     def __init__(self, chapters: ChapterStore, book_id: str = DEFAULT_BOOK_ID) -> None:
         self._chapters = chapters
         self._book_id = book_id
+        # 已读缓存（S21）：一次请求内同一章节只查一次，抑制 AI 过度 read（日志实证 4-8 次）
+        self._read_cache: dict[str, str] = {}
 
     # -- 工具实现（签名匹配 ToolImplementer protocol）--
     def list_chapters(self, spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
@@ -73,9 +75,17 @@ class WritingTools:
         title = str(arguments.get("title", "")).strip()
         if not title:
             return ToolResult(call=call, ok=False, content="缺少参数 title。")
+        # 已读缓存（S21）：同请求内重复读同一章直接命中，不重复查库
+        if title in self._read_cache:
+            return ToolResult(
+                call=call,
+                ok=True,
+                content=f"（已读缓存）\n{self._read_cache[title]}",
+            )
         for c in self._chapters.list_by_book(self._book_id):
             if c.title == title:
                 content = f"《{c.title}》全文如下：\n{c.content}"
+                self._read_cache[title] = content
                 return ToolResult(call=call, ok=True, content=content)
         msg = f"未找到章节《{title}》。可用章节请用 list_chapters 查看。"
         return ToolResult(call=call, ok=False, content=msg)
@@ -94,6 +104,8 @@ class WritingTools:
         existing = next((c for c in all_chapters if c.title == title), None)
         order = existing.order_index if existing else len(all_chapters)
         ch = self._chapters.upsert(self._book_id, title, content, order)
+        # 写后缓存失效（S21）：同一请求内修改过的章节，下次 read 必须读到新内容
+        self._read_cache.pop(title, None)
         # 幻觉检测 fake_write 兜底：落盘后自校验（id 必须能回读）
         if self._chapters.get(ch.id) is None:
             return ToolResult(

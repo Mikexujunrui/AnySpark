@@ -14,6 +14,7 @@ anyspark.core.loop — Agent 循环（机制 1 的过程控制，硬编码）。
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -24,6 +25,23 @@ from .storage import ConversationStore, InMemoryConversationStore
 from .types import Message, ModelOutput, ToolCall, ToolResult, Turn
 
 
+class CancellationToken:
+    """协作式取消令牌（S21 移植 pi 的 AbortSignal 模式）。
+
+    线程安全：Agent 循环在工作线程跑，API 层的 cancel 端点可在任意线程
+    调用 cancel()；循环在每轮与工具执行前检查 is_cancelled() 提前终止。
+    """
+
+    def __init__(self) -> None:
+        self._event = threading.Event()
+
+    def cancel(self) -> None:
+        self._event.set()
+
+    def is_cancelled(self) -> bool:
+        return self._event.is_set()
+
+
 class Model(Protocol):
     """模型协议：输入上下文消息 + 工具清单，返回结构化 ModelOutput。
 
@@ -32,6 +50,22 @@ class Model(Protocol):
     """
 
     def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput: ...
+
+
+class StreamModel(Protocol):
+    """流式模型协议（可选）：实现后 Agent 循环以流式事件驱动。
+
+    移植自 pi 的 streamAssistantResponse 模式：模型边生成边通过 on_event
+    回调发出流式事件（text_delta / toolcall_delta / done），最后返回完整
+    ModelOutput。事件名与 pi 对齐。未实现此协议的模型走 respond 非流式路径。
+    """
+
+    def respond_stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        on_event: Callable[[Event], None],
+    ) -> ModelOutput: ...
 
 
 # 上下文压缩协议：输入完整 prompt 消息列表，输出压缩后的列表（token 预算）。
@@ -52,8 +86,16 @@ class Agent:
     max_tool_iterations: int = 8  # 防无限循环硬上限
     context_compressor: ContextCompressor | None = None  # 可选：token 预算压缩（app 注入）
 
-    def run(self, user_prompt: str, conversation_id: str | None = None) -> Turn:
-        """跑一轮：读提示 → 调工具（可多轮）→ 回填 → 输出。返回最终 Turn。"""
+    def run(
+        self,
+        user_prompt: str,
+        conversation_id: str | None = None,
+        token: CancellationToken | None = None,
+    ) -> Turn:
+        """跑一轮：读提示 → 调工具（可多轮）→ 回填 → 输出。返回最终 Turn。
+
+        token（S21）：协作式取消——循环与工具执行前检查，取消则提前终止。
+        """
         store = self.store
         if conversation_id is None:
             conv = store.create()
@@ -61,9 +103,14 @@ class Agent:
         elif store.get(conversation_id) is None:
             store.create(conversation_id)
 
-        return self._loop(conversation_id, user_prompt)
+        return self._loop(conversation_id, user_prompt, token)
 
-    def _loop(self, conversation_id: str, user_prompt: str) -> Turn:
+    def _loop(
+        self,
+        conversation_id: str,
+        user_prompt: str,
+        token: CancellationToken | None = None,
+    ) -> Turn:
         store = self.store
         store.append(conversation_id, Message(role="user", content=user_prompt))
         self.events.emit(Event(type="user_text", payload={"content": user_prompt}))
@@ -75,6 +122,14 @@ class Agent:
         system_block = self.system_prompt.strip()
 
         for _ in range(self.max_tool_iterations):
+            # 协作式取消检查（S21）：用户中断则提前终止
+            if token is not None and token.is_cancelled():
+                self.events.emit(Event(type="aborted", payload={}))
+                return Turn(
+                    text="已中断（用户取消）。",
+                    tool_calls=executed,
+                    tool_results=results,
+                )
             self.events.emit(Event(type="turn_start", payload={}))
             history = store.messages(conversation_id)
             prompt_messages = (
@@ -85,7 +140,16 @@ class Agent:
                 prompt_messages = self.context_compressor(prompt_messages)
 
             tools: list[ToolSpec] = self.registry.specs()
-            output = self.model.respond(prompt_messages, tools)
+            # 流式核心（S21 移植 pi 模式）：模型支持 respond_stream 则事件驱动流式，
+            # 否则回退非流式 respond（向后兼容）。
+            if hasattr(self.model, "respond_stream"):
+                output = self.model.respond_stream(
+                    prompt_messages,
+                    tools,
+                    on_event=lambda e: self.events.emit(e),
+                )
+            else:
+                output = self.model.respond(prompt_messages, tools)
 
             if not output.tool_calls:
                 # 本轮无工具调用 → 产出最终文本
@@ -94,12 +158,28 @@ class Agent:
                 self.events.emit(Event(type="done", payload={}))
                 return Turn(text=output.text, tool_calls=executed, tool_results=results)
 
-            # 有工具调用：执行并把结果回填
+            # 有工具调用：并行执行并把结果回填（S21 移植 pi 的 executeToolCallsParallel；
+            # ThreadPoolExecutor 保持输入顺序，写工具内部有锁保证线程安全）
             self.events.emit(
                 Event(type="tool_call", payload={"name": [c.name for c in output.tool_calls]})
             )
-            for call in output.tool_calls:
-                result = execute(self.registry, call)
+            calls = list(output.tool_calls)
+            # 工具执行前再检查取消（S21）：取消则不再执行剩余工具
+            if token is not None and token.is_cancelled():
+                self.events.emit(Event(type="aborted", payload={}))
+                return Turn(
+                    text="已中断（用户取消）。",
+                    tool_calls=executed,
+                    tool_results=results,
+                )
+            if len(calls) > 1:
+                from concurrent.futures import ThreadPoolExecutor
+
+                with ThreadPoolExecutor(max_workers=min(len(calls), 8)) as pool:
+                    results_ordered = list(pool.map(lambda c: execute(self.registry, c), calls))
+            else:
+                results_ordered = [execute(self.registry, calls[0])]
+            for call, result in zip(calls, results_ordered, strict=True):
                 executed.append(call)
                 results.append(result)
                 backfill = backfill_content_tool_result(result)

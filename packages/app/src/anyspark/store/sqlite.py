@@ -205,18 +205,21 @@ class ChapterStore:
         return self.get(cid)  # type: ignore[return-value]
 
     def get(self, chapter_id: str) -> Chapter | None:
-        row = self._conn.execute("SELECT * FROM chapters WHERE id = ?", (chapter_id,)).fetchone()
-        if not row:
-            return None
-        ver_rows = self._conn.execute(
-            "SELECT content, note, saved_at FROM chapter_versions "
-            "WHERE chapter_id = ? ORDER BY saved_at DESC",
-            (chapter_id,),
-        ).fetchall()
-        versions = [
-            {"content": v["content"], "note": v["note"], "saved_at": v["saved_at"]}
-            for v in ver_rows
-        ]
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM chapters WHERE id = ?", (chapter_id,)
+            ).fetchone()
+            if not row:
+                return None
+            ver_rows = self._conn.execute(
+                "SELECT content, note, saved_at FROM chapter_versions "
+                "WHERE chapter_id = ? ORDER BY saved_at DESC",
+                (chapter_id,),
+            ).fetchall()
+            versions = [
+                {"content": v["content"], "note": v["note"], "saved_at": v["saved_at"]}
+                for v in ver_rows
+            ]
         return Chapter(
             id=row["id"],
             book_id=row["book_id"],
@@ -229,11 +232,12 @@ class ChapterStore:
         )
 
     def list_by_book(self, book_id: str) -> list[Chapter]:
-        rows = self._conn.execute(
-            "SELECT id, title, content, order_index FROM chapters "
-            "WHERE book_id = ? ORDER BY order_index",
-            (book_id,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, title, content, order_index FROM chapters "
+                "WHERE book_id = ? ORDER BY order_index",
+                (book_id,),
+            ).fetchall()
         return [
             Chapter(
                 id=r["id"],

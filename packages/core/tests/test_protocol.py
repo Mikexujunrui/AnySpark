@@ -80,3 +80,19 @@ def test_execute_builtin_returns_natural_language() -> None:
     result = execute(reg, ToolCall(name="echo", arguments={"text": "hi"}))
     backfill = backfill_content_tool_result(result)
     assert backfill == "[工具 echo 成功] hi"
+
+
+def test_execute_malformed_arguments_not_executed() -> None:
+    """S21 截断防护：参数解析失败的调用不执行、返回错误让模型重发。"""
+    reg = _make_registry()
+    from anyspark.core.types import ToolCall
+
+    result = execute(
+        reg,
+        ToolCall(name="add", arguments={"_raw": '{"a": 3, "b"', "_malformed": True}),
+    )
+    assert result.ok is False
+    assert "解析失败" in result.content
+    # 正常调用不受影响
+    ok = execute(reg, ToolCall(name="add", arguments={"a": 1, "b": 2}))
+    assert ok.ok is True

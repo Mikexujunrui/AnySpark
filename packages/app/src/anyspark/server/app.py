@@ -11,10 +11,10 @@ import json
 import queue
 import threading
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Annotated, Any, Literal, cast
 
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, HTTPException
+from fastapi import BackgroundTasks, Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -34,7 +34,14 @@ from anyspark.align import (
     temperature_for,
 )
 from anyspark.check import compile_rule, run_review
-from anyspark.core import Agent, Message, Model, RetryingModel, ToolRegistry
+from anyspark.core import (
+    Agent,
+    CancellationToken,
+    Message,
+    Model,
+    RetryingModel,
+    ToolRegistry,
+)
 from anyspark.explore import (
     DirectionCard,
     IntentUnderstander,
@@ -217,6 +224,10 @@ class PlotPatchIn(BaseModel):
     attention: str | None = None  # care|ignore（用户标注在意/不需要）
 
 
+class CancelIn(BaseModel):
+    conversation_id: str | None = None  # 空=取消最近活跃会话（新会话 id 客户端未知）
+
+
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
@@ -238,6 +249,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     materials = MaterialStore(real_db)
     templates_external = ExternalLibrary(real_db)
     plots = PlotStore(real_db)
+    # 活跃会话的取消令牌（S21：/api/chat/cancel 可中断正在跑的 Agent）
+    _active_tokens: dict[str, CancellationToken] = {}
     manual_injector = ManualInjector(manual)
     signal_collector = SignalCollector(signals)
     # 默认真实模型套上组合式重试包装（S15：重试是 core 可拼接组件，不内嵌在模型里）
@@ -267,7 +280,6 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         system_prompt: str,
         temperature: float,
         book_id: str = "main",
-        on_delta: Any | None = None,
         agency_level: int | None = None,
         mood: dict[str, float] | None = None,
         enable_search: bool = False,
@@ -285,15 +297,11 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         if agency_level is None:
             agency_level = agency.get_level(book_id)
         eff_temp = temperature_for(agency_level) if temperature == 0.7 else temperature
-        # 解包重试包装（RetryingModel.inner）判断底层是否真实 DeepSeek（流式能力）
+        # S21 流式核心：不再构造 stream 模型——Agent 循环内部检测 respond_stream 流式；
+        # 温度映射时重建模型（档位低=精确执行温度低）；测试 fake 走共享 model
         base_model = getattr(model, "inner", model)
         m: Model
-        if on_delta is not None and isinstance(base_model, DeepSeekModel):
-            # SSE 流式：真实 DeepSeek 流式传输 + delta 回调（重试由组合包装提供）
-            m = RetryingModel(DeepSeekModel(temperature=eff_temp, stream=True, on_delta=on_delta))
-        elif on_delta is not None:
-            m = model  # 测试 fake：无逐字流，仅事件帧
-        elif isinstance(base_model, DeepSeekModel) and eff_temp != 0.7:
+        if isinstance(base_model, DeepSeekModel) and eff_temp != 0.7:
             # 真实模型 + 能动性温度映射（档位低=精确执行温度低）
             m = RetryingModel(DeepSeekModel(temperature=eff_temp))
         else:
@@ -361,6 +369,24 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         name = getattr(model, "model_name", "unknown")
         return {"status": "ok", "model": str(name), "log": log_path()}
 
+    @app.post("/api/chat/cancel")
+    def cancel_chat(
+        req: Annotated[CancelIn, Body()],
+    ) -> dict[str, bool | str]:
+        """协作式取消（S21）：中断正在跑的 Agent 循环（下个检查点生效）。
+
+        conversation_id 为空时取消最近活跃的会话（新会话 id 由服务端生成，客户端未知）。
+        """
+        token = None
+        if req.conversation_id:
+            token = _active_tokens.get(req.conversation_id)
+        elif _active_tokens:
+            token = next(reversed(_active_tokens.values()), None)
+        if token is not None:
+            token.cancel()
+            return {"ok": True}
+        return {"ok": False, "reason": "会话未在运行"}
+
     @app.get("/api/stats")
     def stats() -> dict[str, Any]:
         """T7 验证指标（代理指标，纯 SQL 统计现有表，零新表）：修改率/提问率/完成率。"""
@@ -397,11 +423,16 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             conv = agent.store.create()
             conv_id = conv.id
 
+        # 协作式取消（S21 移植 pi 的 AbortSignal）：注册 token，/api/chat/cancel 可中断
+        token = CancellationToken()
+        _active_tokens[conv_id] = token
         try:
-            turn = agent.run(req.message, conv_id)
+            turn = agent.run(req.message, conv_id, token)
         except Exception as exc:  # 记录并返回 500
             logger.exception("chat 执行异常: %s", exc)
             raise HTTPException(status_code=500, detail=f"执行失败: {exc}") from exc
+        finally:
+            _active_tokens.pop(conv_id, None)
         if not turn.tool_calls and "达到最大工具迭代" in turn.text:
             logger.warning("chat 达到最大工具迭代: conv=%s", conv_id)
             raise HTTPException(status_code=500, detail=turn.text)
@@ -446,7 +477,12 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
         def run_agent(agent: Agent, msg: str, conv_id: str) -> None:
             try:
-                turn = agent.run(msg, conv_id)
+                token = CancellationToken()
+                _active_tokens[conv_id] = token
+                try:
+                    turn = agent.run(msg, conv_id, token)
+                finally:
+                    _active_tokens.pop(conv_id, None)
                 # 图谱抽取：与 /api/chat 行为一致（write_chapter 落盘后自动抽取）
                 # extract_graph 开关（S15）：默认开保持现状，可关省 token
                 if req.extract_graph:
@@ -469,12 +505,13 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             agent = _make_agent(
                 req.system_prompt or DEFAULT_SYSTEM,
                 req.temperature,
-                on_delta=lambda c: events_queue.put(("text_delta", {"content": c})),
                 agency_level=req.agency_level,
                 mood=req.mood,
                 enable_search=req.enable_search,
                 skip_inject=set(req.skip_inject),
             )
+            # S21 流式核心：Agent 内部流式（model.respond_stream），text_delta 事件转 SSE 帧
+            agent.events.on("text_delta", lambda e: events_queue.put(("text_delta", e.payload)))
             for t in ("turn_start", "text", "tool_call", "tool_result", "done", "error"):
                 agent.events.on(t, on_event)
             conv_id = req.conversation_id

@@ -103,7 +103,21 @@ def execute(
     registry: ToolRegistry,
     call: ToolCall,
 ) -> ToolResult:
-    """按注册表执行一次工具调用，返回回填用的结果。"""
+    """按注册表执行一次工具调用，返回回填用的结果。
+
+    截断防护（S21 移植 pi 的 failToolCallsFromTruncatedMessage）：
+    参数解析失败的调用（_malformed 标记，可能是输出 token 截断）**不执行**，
+    返回错误让模型重新发起完整调用——防半截参数写坏数据。
+    """
+    if call.arguments.get("_malformed"):
+        return ToolResult(
+            call=call,
+            ok=False,
+            content=(
+                f"工具 {call.name} 的参数解析失败（可能被输出截断），"
+                "请重新发起完整调用。原始参数：" + str(call.arguments.get("_raw", ""))[:200]
+            ),
+        )
     entry = registry.get(call.name)
     if entry is None:
         return ToolResult(

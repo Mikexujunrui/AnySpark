@@ -7,7 +7,7 @@
 __version__ = "0.0.1"
 
 from .events import GENERIC_EVENT_TYPES, Event, EventEmitter, EventListener
-from .loop import Agent, ContextCompressor, Model
+from .loop import Agent, CancellationToken, ContextCompressor, Model
 from .protocol import (
     ParamSpec,
     ToolRegistry,
@@ -29,6 +29,7 @@ __all__ = [
     "GENERIC_EVENT_TYPES",
     "RETRYABLE",
     "Agent",
+    "CancellationToken",
     "ContextCompressor",
     "Conversation",
     "ConversationStore",
