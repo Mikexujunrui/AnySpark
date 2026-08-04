@@ -73,6 +73,9 @@
 | 循环健壮性对齐 pi：异常上下文平衡（失败不毒化上下文）/ 重试覆盖 429·5xx·quota 分类 / 截断防护读 finish_reason（length 全拒）/ 取消补 assistant 消息 | 模型局限弥补 + A 类过程控制 | `core/loop+retry` + `models/deepseek.py`（S22） |
 | 工具调用协议完整化：ToolCall.id + assistant 声明落库 + tool 结果 tool_call_id 配对（原生 OpenAI 格式，旧链路兼容） | §4 协议层 | `core/loop+types` + `models/deepseek.py`（S23） |
 | 压缩对齐 pi：指纹先查 + 字符粗算省精算 / token 预算切割永不切 tool 结果 / 摘要全量输入 + 增量更新模式 | 模型局限弥补 + §4 上下文管道 | `server/context.py`（S24） |
+| 运行中插话 steering / 排队追问 followUp / 工具执行事件（前端进度显示）/ 工具 sequential 串行模式 | 机制5 + A 类过程控制 | `core/loop+protocol` + `app.py` + 前端（S25） |
+| 压缩持久化回写 store（pi compaction entry 语义，跨重启）/ 模型窗口感知预算 / max_tokens 8192 | 模型局限弥补 + §4 上下文管道 | `core/storage+loop` + `deepseek.py` + `app.py`（S26） |
+| before/afterToolCall 钩子（拦截/改写）/ terminate 智能停止（整批终止）/ SSE 假 done 修复 / 流式重试防重复 delta | 机制5 + A 类过程控制 | `core/loop+retry+types` + `deepseek.py`（S27） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134

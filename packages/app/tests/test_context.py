@@ -225,3 +225,81 @@ def test_incremental_summary_uses_previous() -> None:
     b.compress(messages)
     assert prevs and prevs[0] is not None
     assert "上次摘要" in prevs[0]
+
+
+def test_persist_compression_writes_back_to_store() -> None:
+    """S26：压缩持久化回写（pi compaction entry 语义）——压缩结果写回 store：
+    消息数减少、含摘要消息、跨轮续读即压缩后上下文。"""
+    from anyspark.core import Agent, ToolRegistry
+
+    calls: list[tuple[list[Message], str | None]] = []
+
+    def fake_summarize(msgs: list[Message], previous: str | None) -> str:
+        calls.append((msgs, previous))
+        return "摘要：早期对话已压缩。"
+
+    b = TokenBudget(budget=400, summarize=fake_summarize)
+    messages = [
+        Message(role="user", content="u" * 100),
+        Message(role="assistant", content="a" * 100),
+        Message(role="user", content="继续" + "续" * 80),
+        Message(role="assistant", content="好" + "续" * 80),
+        Message(role="user", content="再继续" + "续" * 80),
+        Message(role="assistant", content="明白" + "续" * 80),
+        Message(role="user", content="继续第三章" + "续" * 80),
+    ]
+    # 直接测 store 替换 + Agent 回写链路（用 InMemory store 断言）
+    from anyspark.core import InMemoryConversationStore
+
+    store = InMemoryConversationStore()
+    store.create("pc1")
+    for m in messages:
+        store.append("pc1", m)
+
+    class StopModel:
+        def respond(self, msgs, tools):  # type: ignore[no-untyped-def]
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="终答")
+
+    agent = Agent(
+        model=StopModel(),
+        registry=ToolRegistry(),
+        store=store,
+        context_compressor=b.compress,
+        persist_compression=True,
+    )
+    turn = agent.run("继续写", "pc1")
+    assert turn.text == "终答"
+    after = store.messages("pc1")
+    # 压缩真的发生了：消息数减少，且含【历史对话摘要】system 消息
+    assert len(after) < len(messages) + 2
+    assert any("历史对话摘要" in m.content for m in after)
+    # 回写后 store 第一条是 user 或摘要（不再是原首条）
+    assert after[0].role in ("system", "user")
+
+
+def test_sqlite_replace_messages_roundtrip() -> None:
+    """S26：SQLite replace_messages——删旧插新、seq 重排、metadata 保留。"""
+
+    from anyspark.store.sqlite import SqliteConversationStore
+
+    store = SqliteConversationStore(":memory:")
+    store.create("r1")
+    store.append("r1", Message(role="user", content="一", metadata={"a": 1}))
+    store.append("r1", Message(role="assistant", content="二"))
+    store.replace_messages(
+        "r1",
+        [
+            Message(role="system", content="摘要：压过"),
+            Message(role="user", content="继续"),
+        ],
+    )
+    msgs = store.messages("r1")
+    assert [m.role for m in msgs] == ["system", "user"]
+    assert msgs[0].content == "摘要：压过"
+    assert msgs[0].metadata == {}
+    # 再 append 后 seq 延续不冲突
+    store.append("r1", Message(role="assistant", content="新"))
+    assert [m.role for m in store.messages("r1")] == ["system", "user", "assistant"]
+    store.close()

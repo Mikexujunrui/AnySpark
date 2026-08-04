@@ -170,16 +170,46 @@ class RetryingModel:
         tools: list[ToolSpec],
         on_event: Callable[[Any], None] | None = None,
     ) -> ModelOutput:
-        """流式透传（S21）：内层支持 respond_stream 则流式+重试；否则回退非流式。"""
+        """流式透传（S21）：内层支持 respond_stream 则流式+重试；否则回退非流式。
+
+        S25 防重复 delta：**只重试"零 delta 即失败"的流式调用**——若异常发生前
+        已发出过 text_delta/toolcall_delta，重试会让前端收到两段拼接重复的文本
+        （pi 用 partial 消息原地替换避免，本地 on_event 直接转发无法撤销已发内容）；
+        零 delta 失败（连接立即断）重试安全。
+        """
         inner = self.inner
         if not hasattr(inner, "respond_stream"):
             return self.respond(messages, tools)
         stream_fn = inner.respond_stream
-        return retry_with_backoff(
-            lambda: cast(ModelOutput, stream_fn(messages, tools, on_event)),
-            retries=self._retries,
-            base=self._base,
-            max_wait=self._max_wait,
-            on_retry=self._on_retry,
-            cancelled=self._cancelled,
-        )
+        emitted: list[bool] = [False]
+
+        def _guarded_on_event(e: Any) -> None:
+            emitted[0] = True
+            if on_event is not None:
+                on_event(e)
+
+        def _produce() -> ModelOutput:
+            emitted[0] = False
+            return cast(ModelOutput, stream_fn(messages, tools, _guarded_on_event))
+
+        def _cancelled() -> bool:
+            return self._cancelled() if self._cancelled is not None else False
+
+        attempt = 0
+        while True:
+            try:
+                return _produce()
+            except Exception as exc:  # 分类由 is_retryable 决定
+                if not is_retryable(exc) or emitted[0]:
+                    raise  # 已发过 delta 的重试会造成重复文本 → 直接抛（loop D1 兜底）
+                attempt += 1
+                if attempt >= self._retries:
+                    raise
+                wait = min(self._max_wait, self._base * (2 ** (attempt - 1))) + random.uniform(
+                    0, 0.5
+                )
+                if self._on_retry:
+                    self._on_retry(attempt, exc)
+                _sleep_checking_cancel(wait, _cancelled)
+                if _cancelled():
+                    raise

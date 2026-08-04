@@ -23,6 +23,8 @@ GENERIC_EVENT_TYPES = {
     "done",  # 一轮完成
     "error",  # 出错
     "tool_call",  # 模型发起工具调用
+    "tool_execution_start",  # 工具开始执行（S25 对齐 pi：前端显示"正在执行"）
+    "tool_execution_end",  # 工具执行结束（S25：带 ok/耗时，前端显示结果）
     "tool_result",  # 工具执行结果
     "turn_start",  # 一轮开始
 }

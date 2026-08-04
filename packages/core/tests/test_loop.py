@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from anyspark.core import (
     Agent,
@@ -10,6 +11,7 @@ from anyspark.core import (
     Model,
     ModelOutput,
     ToolRegistry,
+    ToolResult,
     ToolSpec,
     register_builtins,
 )
@@ -335,3 +337,173 @@ def test_tool_result_backfill_preserved() -> None:
     tool_msg = next(m for m in msgs if m.role == "tool")
     assert "5 + 7 = 12" in tool_msg.content  # 文本回填仍在
     assert tool_msg.metadata.get("tool_call_id") is None  # 无 id 则不配对（旧行为）
+
+
+def test_steer_injects_between_turns() -> None:
+    """S25 steering：运行中插话——消息在当前轮工具结果后、下一轮 LLM 前注入。"""
+    from anyspark.core import ToolCall
+
+    model = ScriptedModel(
+        [
+            ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})]),
+            _no_tool("收到插话后的回答"),
+        ]
+    )
+    agent = _make_agent(model)
+    agent.store.create("s1")
+    # 启动循环前预置插话（模拟 API 层在 agent 运行中途入队）
+    agent.steer("别写太血腥")
+    turn = agent.run("写一章", "s1")
+    assert turn.text == "收到插话后的回答"
+    # 注入时机与 pi 一致：每轮 LLM 前检查 steering 队列——插话先于本轮模型调用生效
+    roles = [m.role for m in agent.store.messages("s1")]
+    assert roles == ["user", "user", "assistant", "tool", "assistant"]
+    assert "别写太血腥" in agent.store.messages("s1")[1].content
+
+
+def test_followup_runs_after_stop() -> None:
+    """S25 followUp：agent 即将停止（无工具调用）时注入追问续跑，而不是结束。"""
+    model = ScriptedModel(
+        [
+            _no_tool("第一段回答"),
+            _no_tool("追问后的回答"),
+        ]
+    )
+    agent = _make_agent(model)
+    agent.store.create("s2")
+    agent.follow_up("继续说说细节")
+    turn = agent.run("问个问题", "s2")
+    assert turn.text == "追问后的回答"
+    roles = [m.role for m in agent.store.messages("s2")]
+    # user → assistant(第一段) → user(追问) → assistant(追问后)
+    assert roles == ["user", "assistant", "user", "assistant"]
+    assert "继续说说细节" in agent.store.messages("s2")[2].content
+
+
+def test_sequential_tool_runs_serially() -> None:
+    """S25 sequential 模式：批内含 sequential 工具时整批串行执行（保逻辑顺序）。"""
+    from anyspark.core import ToolCall
+
+    order: list[str] = []
+
+    def do_read(spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        order.append("read")
+        return ToolResult(call=ToolCall(name="slow_read", arguments={}), ok=True, content="读完了")
+
+    def do_write(spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        order.append("write")
+        return ToolResult(
+            call=ToolCall(name="critical_write", arguments={}), ok=True, content="写完了"
+        )
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="slow_read", params=[]), do_read)
+    registry.register(
+        ToolSpec(name="critical_write", params=[], execution_mode="sequential"), do_write
+    )
+    model = ScriptedModel(
+        [
+            ModelOutput(
+                tool_calls=[
+                    ToolCall(name="slow_read", arguments={}, id="c1"),
+                    ToolCall(name="critical_write", arguments={}, id="c2"),
+                ]
+            ),
+            _no_tool("完成"),
+        ]
+    )
+    agent = Agent(model=model, registry=registry)
+    turn = agent.run("测试")
+    assert turn.text == "完成"
+    assert order == ["read", "write"]  # 串行保序
+
+
+def test_tool_execution_events_emitted() -> None:
+    """S25 工具执行事件：执行前 tool_execution_start、执行后 tool_execution_end（带 ok/耗时）。"""
+    from anyspark.core import ToolCall
+
+    events: list[str] = []
+    agent = _make_agent(
+        ScriptedModel(
+            [
+                ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2}, id="c9")]),
+                _no_tool("ok"),
+            ]
+        )
+    )
+    agent.events.on("tool_execution_start", lambda e: events.append(e.type))
+    agent.events.on("tool_execution_end", lambda e: events.append(e.type))
+    agent.run("算")
+    assert events == ["tool_execution_start", "tool_execution_end"]
+
+
+def test_before_tool_call_can_block() -> None:
+    """S27 before_tool_call 钩子：返回拦截原因 → 工具不执行，回填错误。"""
+    from anyspark.core import ToolCall
+
+    executed = {"n": 0}
+
+    def do_add(spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        executed["n"] += 1
+        return ToolResult(call=ToolCall(name="add", arguments=arguments), ok=True, content="算好了")
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="add", params=[]), do_add)
+    model = ScriptedModel(
+        [
+            ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2}, id="b1")]),
+            _no_tool("拦截后继续"),
+        ]
+    )
+    agent = Agent(model=model, registry=registry)
+    agent.before_tool_call = lambda call: "危险操作" if call.name == "add" else None
+    turn = agent.run("算")
+    assert turn.text == "拦截后继续"
+    assert executed["n"] == 0  # add 从未执行
+    assert turn.tool_results[0].ok is False
+    assert "被拦截" in turn.tool_results[0].content
+
+
+def test_after_tool_call_rewrites_result() -> None:
+    """S27 after_tool_call 钩子：可改写结果（安全统一/信号采集挂点）。"""
+    from anyspark.core import ToolCall
+
+    model = ScriptedModel(
+        [
+            ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2}, id="a2")]),
+            _no_tool("完成"),
+        ]
+    )
+    agent = _make_agent(model)
+    agent.after_tool_call = lambda call, result: ToolResult(
+        call=result.call, ok=False, content="被钩子改写为失败", terminate=result.terminate
+    )
+    turn = agent.run("算")
+    assert turn.text == "完成"
+    assert turn.tool_results[0].ok is False
+    assert "钩子改写" in turn.tool_results[0].content
+
+
+def test_terminate_stops_loop() -> None:
+    """S27 terminate：批内全部工具 terminate=True → 循环立即结束（不再死磕迭代上限）。"""
+    from anyspark.core import ToolCall
+
+    def do_done(spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        return ToolResult(
+            call=ToolCall(name="finish", arguments={}),
+            ok=True,
+            content="任务完成",
+            terminate=True,
+        )
+
+    registry = ToolRegistry()
+    registry.register(ToolSpec(name="finish", params=[]), do_done)
+    # 模型永远要调 finish——没有 terminate 会撞迭代上限；有 terminate 应提前结束
+    model = ScriptedModel(
+        [ModelOutput(tool_calls=[ToolCall(name="finish", arguments={}, id="t1")])] * 100
+    )
+    agent = Agent(model=model, registry=registry, max_tool_iterations=50)
+    turn = agent.run("结束吧")
+    assert "任务完成" in turn.text or "停止" in turn.text
+    assert turn.error is None  # 不是迭代上限错误
+    assert len(turn.tool_calls) == 1  # 只跑了一轮

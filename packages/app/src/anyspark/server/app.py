@@ -231,6 +231,11 @@ class CancelIn(BaseModel):
     conversation_id: str | None = None  # 空=取消最近活跃会话（新会话 id 客户端未知）
 
 
+class SteerIn(BaseModel):
+    conversation_id: str  # 目标会话（必须正在运行才能插话）
+    message: str = Field(..., min_length=1)
+
+
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
@@ -254,6 +259,10 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     plots = PlotStore(real_db)
     # 活跃会话的取消令牌（S21：/api/chat/cancel 可中断正在跑的 Agent）
     _active_tokens: dict[str, CancellationToken] = {}
+    # 活跃会话的 Agent 实例（S25：/api/chat/steer 运行中插话用）——chat/chat_stream
+    # 启动时注册、结束时注销；steer 端点据此把插话消息投入 steer_queue。
+    _active_agents: dict[str, Agent] = {}
+    _active_lock: threading.Lock = threading.Lock()
     # 后台任务队列 + 独立 worker（S21 修 BackgroundTasks 共享线程池排队缺陷）：
     # 图谱抽取/伏笔回收不占请求线程池，请求立即返回、后台串行处理
     _bg_queue: queue.Queue[tuple[str, str, int]] = queue.Queue()
@@ -280,8 +289,13 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     graph_extractor = GraphExtractor(model)
     graph_injector = GraphInjector(graph)
     graph_verifier = GraphVerifier(graph)
-    # token 预算 + 两阶段压缩（S8：长书上下文刚需）
-    budget = TokenBudget(budget=12000, summarize=make_summarizer(model))
+    # token 预算 + 两阶段压缩（S8：长书上下文刚需；S26：预算按模型窗口配置——
+    # 窗口 64K 时预算 ~45K，不再 12K 硬编码导致长书频繁压缩）
+    _window = getattr(getattr(model, "inner", model), "context_window", 65536)
+    budget = TokenBudget(
+        budget=int(_window * 0.7),
+        summarize=make_summarizer(model),
+    )
     # 能动性协议（机制 2）+ AI 倾向档案（S9）
     agency = AgencyStore(real_db)
     bias = BiasStore(real_db)
@@ -357,6 +371,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             store=store,
             system_prompt=full_prompt,
             context_compressor=budget.compress,  # token 预算两阶段压缩（S8）
+            persist_compression=True,  # S26：压缩结果回写 store（pi compaction entry 语义）
         )
 
     def _extract_chapter(book_id: str, title: str, content: str, order: int) -> None:
@@ -405,6 +420,24 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             return {"ok": True}
         return {"ok": False, "reason": "会话未在运行"}
 
+    @app.post("/api/chat/steer")
+    def steer_chat(req: Annotated[SteerIn, Body()]) -> dict[str, bool | str]:
+        """S25：运行中插话（对齐 pi Agent.steer）——消息在当前轮工具结果后、
+        下一轮 LLM 前注入，写作时可中途说"别写太血腥"而不用取消重来。
+        conversation_id 为空时取最近活跃会话（新会话 id 客户端可先于 turn_start 帧获得）。"""
+        with _active_lock:
+            if req.conversation_id:
+                agent = _active_agents.get(req.conversation_id)
+            elif _active_agents:
+                agent = next(reversed(_active_agents.values()), None)
+            else:
+                agent = None
+        if agent is None:
+            return {"ok": False, "reason": "会话未在运行"}
+        agent.steer(req.message)
+        logger.info("steer 注入: msg=%s", req.message[:40])
+        return {"ok": True}
+
     @app.get("/api/stats")
     def stats() -> dict[str, Any]:
         """T7 验证指标（代理指标，纯 SQL 统计现有表，零新表）：修改率/提问率/完成率。"""
@@ -450,6 +483,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         # 协作式取消（S21 移植 pi 的 AbortSignal）：注册 token，/api/chat/cancel 可中断
         token = CancellationToken()
         _active_tokens[conv_id] = token
+        with _active_lock:
+            _active_agents[conv_id] = agent  # S25：steer 端点可运行中插话
         try:
             turn = agent.run(req.message, conv_id, token)
         except Exception as exc:  # 记录并返回 500
@@ -457,6 +492,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             raise HTTPException(status_code=500, detail=f"执行失败: {exc}") from exc
         finally:
             _active_tokens.pop(conv_id, None)
+            with _active_lock:
+                _active_agents.pop(conv_id, None)
         if turn.error is not None:  # S22：模型调用失败/迭代上限（不再字符串匹配）
             logger.warning("chat 非正常结束: conv=%s error=%s", conv_id, turn.error)
             raise HTTPException(status_code=500, detail=turn.error)
@@ -496,17 +533,18 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         """
         events_queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
 
-        def on_event(e: Any) -> None:
-            events_queue.put((e.type, e.payload))
-
         def run_agent(agent: Agent, msg: str, conv_id: str) -> None:
             try:
                 token = CancellationToken()
                 _active_tokens[conv_id] = token
+                with _active_lock:
+                    _active_agents[conv_id] = agent  # S25：steer 端点可运行中插话
                 try:
                     turn = agent.run(msg, conv_id, token)
                 finally:
                     _active_tokens.pop(conv_id, None)
+                    with _active_lock:
+                        _active_agents.pop(conv_id, None)
                 # 图谱抽取：与 /api/chat 行为一致（write_chapter 落盘后自动抽取）
                 # extract_graph 开关（S15）：默认开保持现状，可关省 token
                 if req.extract_graph:
@@ -535,14 +573,31 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                 enable_search=req.enable_search,
                 skip_inject=set(req.skip_inject),
             )
-            # S21 流式核心：Agent 内部流式（model.respond_stream），text_delta 事件转 SSE 帧
-            agent.events.on("text_delta", lambda e: events_queue.put(("text_delta", e.payload)))
-            for t in ("turn_start", "text", "tool_call", "tool_result", "done", "error"):
-                agent.events.on(t, on_event)
             conv_id = req.conversation_id
             if not conv_id:
                 conv = agent.store.create()
                 conv_id = conv.id
+
+            def on_event(e: Any) -> None:
+                payload = e.payload
+                # S25：turn_start 帧带 conversation_id——客户端尽早知道会话 id，运行中可 steer
+                if e.type == "turn_start":
+                    payload = {**payload, "conversation_id": conv_id}
+                events_queue.put((e.type, payload))
+
+            # S21 流式核心：Agent 内部流式（model.respond_stream），text_delta 事件转 SSE 帧
+            agent.events.on("text_delta", lambda e: events_queue.put(("text_delta", e.payload)))
+            for t in (
+                "turn_start",
+                "text",
+                "tool_call",
+                "tool_execution_start",  # S25：前端显示"正在执行…"
+                "tool_execution_end",  # S25：前端显示耗时/结果
+                "tool_result",
+                "done",
+                "error",
+            ):
+                agent.events.on(t, on_event)
             # Agent 循环在线程跑，事件经 queue 转 SSE 帧（同步生成器流式输出）
             threading.Thread(
                 target=run_agent, args=(agent, req.message, conv_id), daemon=True

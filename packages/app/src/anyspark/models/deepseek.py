@@ -100,14 +100,20 @@ class DeepSeekModel:
         api_key: str | None = None,
         model: str | None = None,
         temperature: float = 0.7,
-        max_tokens: int = 4096,
+        max_tokens: int = 8192,
         stream: bool = False,
         on_delta: Callable[[str], None] | None = None,
         timeout: float = 120.0,
+        context_window: int | None = None,
     ) -> None:
         """
         stream: 流式传输（SSE 用）；on_delta: 文本增量回调（stream=True 时逐段触发）。
         timeout: 单次请求超时（秒）。
+        max_tokens（S26）：单次输出上限 4096→8192——长章节写作（>4000 token）不再频繁触顶截断；
+            可显式传参覆盖（写超长章时调用方可调）。
+        context_window（S26）：模型上下文窗口（token），用于驱动 token 预算按窗口配置
+            （build_app 装配 TokenBudget 时使用）。默认从环境变量 DEEPSEEK_CONTEXT_WINDOW 读，
+            缺省 65536（保守；DeepSeek 兼容端点窗口未公开精确值，留安全余量）。
         重试由组合式包装提供（core.RetryingModel，S15 起不内嵌在模型内）——
         任何模型可套同一重试组件，换模型不丢流程基建。
         非流式路径与旧行为完全一致（协议向后兼容）。
@@ -122,6 +128,7 @@ class DeepSeekModel:
         self._stream = stream
         self._on_delta = on_delta
         self._timeout = timeout
+        self._context_window = context_window or int(os.getenv("DEEPSEEK_CONTEXT_WINDOW", "65536"))
         self._client = OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
@@ -131,6 +138,11 @@ class DeepSeekModel:
     @property
     def model_name(self) -> str:
         return self._model
+
+    @property
+    def context_window(self) -> int:
+        """S26：模型上下文窗口（token）——token 预算按窗口配置的输入。"""
+        return self._context_window
 
     def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
         """真实调用 DeepSeek，返回模型无关的 ModelOutput（非流式路径）。"""
@@ -243,6 +255,7 @@ class DeepSeekModel:
                 # 截断防护（S21）：参数非法→标记，不执行，让模型重发
                 args = {"_raw": acc["arguments"], "_malformed": True}
             tool_calls.append(ToolCall(name=acc["name"], arguments=args, id=acc.get("id", "")))
-        if on_event is not None:
-            on_event(Event(type="done", payload={}))
+        # 注意：这里**不发 done 事件**——done 由 Agent 循环在轮次语义完成后 emit
+        # （无工具终答/取消/错误）。若模型层发 done，SSE 端会收到"假 done"提前断开，
+        # 后续 tool_call/tool_result/text 事件全丢（S25 修复：工具场景 SSE 提前断）。
         return ModelOutput(text=text, tool_calls=tool_calls, truncated=truncated)

@@ -15,6 +15,7 @@ anyspark.core.loop — Agent 循环（机制 1 的过程控制，硬编码）。
 from __future__ import annotations
 
 import logging
+import queue
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -23,9 +24,19 @@ from typing import Protocol
 from .events import Event, EventEmitter
 from .protocol import ToolRegistry, ToolSpec, backfill_content_tool_result, execute
 from .storage import ConversationStore, InMemoryConversationStore
-from .types import Message, ModelOutput, ToolCall, ToolResult, Turn
+from .types import Message, ModelOutput, Role, ToolCall, ToolResult, Turn
 
 logger = logging.getLogger(__name__)
+
+
+def _messages_differ(a: list[Message], b: list[Message]) -> bool:
+    """S26：判断两条消息列表是否实质不同（压缩是否真的发生了）。"""
+    if len(a) != len(b):
+        return True
+    return any(
+        x.role != y.role or x.content != y.content or x.metadata != y.metadata
+        for x, y in zip(a, b, strict=True)
+    )
 
 
 class CancellationToken:
@@ -79,7 +90,13 @@ ContextCompressor = Callable[[list[Message]], list[Message]]
 
 @dataclass
 class Agent:
-    """极简 Agent：持有模型、工具注册表、存储、事件发射器。"""
+    """极简 Agent：持有模型、工具注册表、存储、事件发射器。
+
+    S25：steer_queue / followup_queue（对齐 pi 的 steeringQueue / followUpQueue）——
+    Agent 运行中可**中途插话**（steer：当前轮工具结果后、下一轮 LLM 前注入）
+    或**排队追问**（follow_up：agent 即将停止时注入续跑）。队列线程安全，
+    API 层可从任意线程入队。
+    """
 
     model: Model
     registry: ToolRegistry = field(default_factory=ToolRegistry)
@@ -90,6 +107,27 @@ class Agent:
         16  # 防无限循环硬上限（S21：读2章+写留足空间；pi 用智能终止替代硬上限）
     )
     context_compressor: ContextCompressor | None = None  # 可选：token 预算压缩（app 注入）
+    # S26：压缩持久化回写（pi compaction entry 语义）——压缩后的上下文写回 store，
+    # 跨重启/续聊用压缩后上下文，store 不再无限膨胀。默认关（测试不干扰），app 装配开启。
+    persist_compression: bool = False
+    # S27（对齐 pi beforeToolCall / afterToolCall 钩子）：
+    # before_tool_call：执行前钩子，返回非 None = 拦截原因（不执行，回填错误）；
+    # after_tool_call：执行后钩子，可改写结果（安全统一/信号采集挂点）。
+    before_tool_call: Callable[[ToolCall], str | None] | None = None
+    after_tool_call: Callable[[ToolCall, ToolResult], ToolResult] | None = None
+    # S25：运行中插话/追问队列（线程安全，pi steering/followUp 移植）
+    steer_queue: queue.SimpleQueue[Message] = field(default_factory=queue.SimpleQueue)
+    followup_queue: queue.SimpleQueue[Message] = field(default_factory=queue.SimpleQueue)
+
+    def steer(self, text: str, role: Role = "user") -> None:
+        """S25：运行中插话（对齐 pi Agent.steer）——消息在当前轮工具结果后、
+        下一轮 LLM 前注入。写作场景：用户可在 AI 写作时中途说"别写太血腥"。"""
+        self.steer_queue.put(Message(role=role, content=text))
+
+    def follow_up(self, text: str, role: Role = "user") -> None:
+        """S25：排队追问（对齐 pi Agent.followUp）——agent 即将停止（无更多工具调用）
+        时注入续跑，而不是结束。"""
+        self.followup_queue.put(Message(role=role, content=text))
 
     def run(
         self,
@@ -139,6 +177,12 @@ class Agent:
                     tool_calls=executed,
                     tool_results=results,
                 )
+            # S25 steering：运行中插话在下一轮 LLM 前注入（对齐 pi getSteeringMessages）——
+            # 模型上一轮的工具结果已回填，插话作为 user 消息接在后面，语义完整。
+            steer_msgs = self._drain(self.steer_queue)
+            for m in steer_msgs:
+                store.append(conversation_id, m)
+                self.events.emit(Event(type="user_text", payload={"content": m.content}))
             self.events.emit(Event(type="turn_start", payload={}))
             history = store.messages(conversation_id)
             prompt_messages = (
@@ -147,6 +191,12 @@ class Agent:
             # token 预算：可选压缩（prune/summarize 两阶段，实现由 app 注入）
             if self.context_compressor is not None:
                 prompt_messages = self.context_compressor(prompt_messages)
+                # S26：压缩持久化回写——压缩后的上下文（去掉 system 指令）写回 store：
+                # 下一轮/下次会话读到的就是压缩后历史（摘要+保留段），跨重启不失效。
+                if self.persist_compression:
+                    compressed_history = prompt_messages[1:] if system_block else prompt_messages
+                    if _messages_differ(history, compressed_history):
+                        store.replace_messages(conversation_id, compressed_history)
 
             tools: list[ToolSpec] = self.registry.specs()
             # 流式核心（S21 移植 pi 模式）：模型支持 respond_stream 则事件驱动流式，
@@ -178,7 +228,17 @@ class Agent:
                 )
 
             if not output.tool_calls:
-                # 本轮无工具调用 → 产出最终文本
+                # 本轮无工具调用：检查 followUp 队列（S25 对齐 pi getFollowUpMessages）——
+                # 有追问则先把本轮终答落上下文，再注入追问续跑；否则才是真正结束。
+                followup = self._drain(self.followup_queue)
+                if followup:
+                    store.append(conversation_id, Message(role="assistant", content=output.text))
+                    self.events.emit(Event(type="text", payload={"content": output.text}))
+                    for m in followup:
+                        store.append(conversation_id, m)
+                        self.events.emit(Event(type="user_text", payload={"content": m.content}))
+                    continue
+                # 真终答
                 store.append(conversation_id, Message(role="assistant", content=output.text))
                 self.events.emit(Event(type="text", payload={"content": output.text}))
                 self.events.emit(Event(type="done", payload={}))
@@ -244,13 +304,92 @@ class Agent:
                     tool_calls=executed,
                     tool_results=results,
                 )
-            if len(calls) > 1:
+            # S25：工具执行事件（对齐 pi tool_execution_start/end）——前端显示"正在执行…"；
+            # sequential 模式（对齐 pi executionMode）：批内任一工具标 sequential 则整批串行，
+            # 防止写类工具与读类工具并行产生逻辑错序（写工具内部锁只保数据不保逻辑顺序）。
+            has_sequential = False
+            for c in calls:
+                entry = self.registry.get(c.name)
+                if entry is not None and entry[0].execution_mode == "sequential":
+                    has_sequential = True
+                    break
+
+            def _run_one(call: ToolCall) -> ToolResult:
+                """S27：单工具执行——before 拦截（不执行）→ execute → after 改写。"""
+                if self.before_tool_call is not None:
+                    reason = self.before_tool_call(call)
+                    if reason is not None:
+                        return ToolResult(
+                            call=call,
+                            ok=False,
+                            content=f"工具 {call.name} 被拦截：{reason}",
+                        )
+                result = execute(self.registry, call)
+                if self.after_tool_call is not None:
+                    try:
+                        result = self.after_tool_call(call, result)
+                    except Exception as exc:  # 钩子异常不炸循环，回填错误
+                        result = ToolResult(
+                            call=call,
+                            ok=False,
+                            content=f"after_tool_call 钩子异常: {exc}",
+                        )
+                return result
+
+            if len(calls) > 1 and not has_sequential:
                 from concurrent.futures import ThreadPoolExecutor
 
+                for c in calls:
+                    self.events.emit(
+                        Event(
+                            type="tool_execution_start",
+                            payload={"name": c.name, "id": c.id},
+                        )
+                    )
+                import time as _time
+
+                started = _time.monotonic()
                 with ThreadPoolExecutor(max_workers=min(len(calls), 8)) as pool:
-                    results_ordered = list(pool.map(lambda c: execute(self.registry, c), calls))
+                    results_ordered = list(pool.map(_run_one, calls))
+                for c, r in zip(calls, results_ordered, strict=True):
+                    self.events.emit(
+                        Event(
+                            type="tool_execution_end",
+                            payload={
+                                "name": c.name,
+                                "id": c.id,
+                                "ok": r.ok,
+                                "ms": int(
+                                    (_time.monotonic() - started) * 1000 / max(len(calls), 1)
+                                ),
+                            },
+                        )
+                    )
             else:
-                results_ordered = [execute(self.registry, calls[0])]
+                results_ordered = []
+                for c in calls:
+                    self.events.emit(
+                        Event(
+                            type="tool_execution_start",
+                            payload={"name": c.name, "id": c.id},
+                        )
+                    )
+                    import time as _time
+
+                    started = _time.monotonic()
+                    r = _run_one(c)
+                    self.events.emit(
+                        Event(
+                            type="tool_execution_end",
+                            payload={
+                                "name": c.name,
+                                "id": c.id,
+                                "ok": r.ok,
+                                "ms": int((_time.monotonic() - started) * 1000),
+                            },
+                        )
+                    )
+                    results_ordered.append(r)
             for call, result in zip(calls, results_ordered, strict=True):
                 executed.append(call)
                 results.append(result)
@@ -258,10 +397,29 @@ class Agent:
                 self.events.emit(
                     Event(type="tool_result", payload={"name": call.name, "ok": result.ok})
                 )
+            # S27 智能停止（对齐 pi shouldTerminateToolBatch）：批内**全部**工具
+            # terminate=True → 不再进入下一轮，直接结束（避免无意义死磕迭代上限）。
+            if results_ordered and all(r.terminate for r in results_ordered):
+                msg = "（工具声明任务完成，Agent 停止。）"
+                store.append(conversation_id, Message(role="assistant", content=msg))
+                self.events.emit(Event(type="text", payload={"content": msg}))
+                self.events.emit(Event(type="done", payload={}))
+                return Turn(text=msg, tool_calls=executed, tool_results=results)
         # 达到迭代上限则报错返回（S22：带 error 字段，API 层直接读，不再文本匹配）
         msg = "达到最大工具迭代次数，已终止。"
         store.append(conversation_id, Message(role="assistant", content=msg))
         return Turn(text=msg, tool_calls=executed, tool_results=results, error=msg)
+
+    @staticmethod
+    def _drain(q: queue.SimpleQueue[Message]) -> list[Message]:
+        """S25：安全排空一个队列（线程安全，非阻塞）。"""
+        out: list[Message] = []
+        while not q.empty():
+            try:
+                out.append(q.get_nowait())
+            except queue.Empty:
+                break
+        return out
 
     def _finish_aborted(
         self,

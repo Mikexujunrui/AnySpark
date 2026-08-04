@@ -33,6 +33,10 @@ class ToolSpec:
     name: str
     description: str = ""
     params: list[ParamSpec] = field(default_factory=list)
+    # S25（对齐 pi AgentTool.executionMode）：
+    # "parallel"（默认）可与其他工具并行；"sequential" 时**整批串行执行**——
+    # 适合会改变共享状态的写类工具（write_chapter 等），防止与 read 类工具并行产生逻辑错序。
+    execution_mode: str = "parallel"
 
     def validate(self, arguments: dict[str, Any]) -> list[str]:
         """校验参数是否满足 schema，返回错误列表（空=通过）。"""

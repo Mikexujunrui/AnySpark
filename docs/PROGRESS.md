@@ -500,3 +500,33 @@
 **真实链路验证**：真实 DeepSeek chat（list→read→write 3 工具闭环落盘）；SSE 流式正常；cancel → `{"ok":true}` + 上下文平衡（SQLite 查证 user→assistant(声明带原生 id)→assistant(中断)）
 
 **踩坑**：① heredoc 分隔符不加引号时 bash 会吞 `\n` 导致 Python 替换脚本静默失败——heredoc 用 'EOF' 引号；② 并发取消时"最近活跃 token"可能命中另一会话（S21 既有设计，前端传 conversation_id 即可规避）；③ cancel 若在 run_agent 线程注册 token 前到达会错过——实际使用前端总传 conv_id，不受影响
+
+---
+
+## S25-S27 循环体验全面对齐 pi（已完成 ✅）
+
+**背景**：S22-S24 补齐健壮性后，主人指示"把对齐项全部做完直到完全对标使用体验"。系统性再对比 pi 全部核心机制，补齐交互层/会话层/打磨层 8 项：
+
+### S25 交互层
+- **steering 插话**（pi Agent.steer/followUp 移植）：Agent 加 steer_queue/followup_queue（线程安全）——运行中插话在当前轮工具结果后、下一轮 LLM 前注入；追问在 agent 即将停止时注入续跑。API：`POST /api/chat/steer`（空 id 取最近活跃）。SSE turn_start 帧带 conversation_id（客户端尽早知道 id）。**真实链路验证**：写作中插话"不要使用破折号"→ AI 重新覆盖章节，最终 905 字含破折号 False
+- **工具执行事件**（pi tool_execution_start/end）：SSE 新增帧 + 前端 ChatThread 显示"正在执行 X…/✓ X（ms）"
+- **工具 sequential 模式**（pi executionMode）：ToolSpec.execution_mode，批内含 sequential 工具（write_chapter/write_file）整批串行——读旧写新的逻辑错序防护
+
+### S26 会话层
+- **压缩持久化回写**（pi compaction entry 语义）：ConversationStore.replace_messages + Agent.persist_compression——压缩结果写回 store（摘要+保留段），跨重启/续聊用压缩后上下文，store 不再无限膨胀
+- **模型窗口感知**：DeepSeekModel.context_window（环境变量 DEEPSEEK_CONTEXT_WINDOW 覆盖，默认 64K）+ context_window 属性；build_app 预算 = 窗口×0.7（不再 12K 硬编码）
+- **max_tokens 4096→8192**：长章节写作不再频繁触顶截断
+
+### S27 打磨层
+- **before/afterToolCall 钩子**（pi 移植）：before 返回拦截原因（不执行）；after 可改写结果（安全统一/信号采集挂点）
+- **terminate 智能停止**（pi shouldTerminateToolBatch）：批内全部工具 terminate=True → 循环立即结束，不再死磕迭代上限
+
+### 顺带修复（S25 验证暴露的 S21 遗留 bug）
+- **SSE 假 done 提前断**：DeepSeekModel._respond_stream 原来在模型流式结束就发 done——工具场景 SSE 收到假 done 提前 break，后续 tool_call/tool_result/text 全丢（纯文本场景不暴露）。修复：模型层不发 done（done 由 Agent 轮次语义发）
+- **流式重试重复 delta**：RetryingModel.respond_stream 只重试"零 delta 即失败"——已发出部分文本后的失败直接上抛（loop D1 兜底），避免前端收到两段拼接重复文本
+
+**门禁**：ruff + mypy 全绿；pytest **182**（+10：steer 注入/followUp/sequential 串行/工具事件/before 拦截/after 改写/terminate 停止/压缩回写/SQLite replace 往返）
+
+**真实链路验证**：SSE 完整事件流（5 轮 turn_start + 82 text_delta + 5×tool_execution_start/end + 4 tool_call + 5 tool_result + text + done）；steer 插话真实生效（章节被重写且遵守新指令）；图谱后台抽取照常
+
+**踩坑**：① Python 闭包陷阱——on_event 引用 gen() 局部 conv_id 时必须在 gen 内定义（兄弟作用域不可见）；② SSE 假 done 是 S21 就存在的隐蔽 bug（纯文本验证测不出）；③ curl 在部分 Windows 环境对 SSE 流式响应异常（httpx 流式读取正常），调试时用 Python 客户端

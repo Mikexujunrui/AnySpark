@@ -52,6 +52,12 @@ class ConversationStore(ABC):
         """给某会话追加一条消息。"""
 
     @abstractmethod
+    def replace_messages(self, conversation_id: str, messages: list[Message]) -> None:
+        """S26：整体替换某会话的全部消息（压缩回写用——pi compaction entry 语义：
+        压缩后旧历史被摘要替换，持久化到 store，跨重启/续聊用压缩后上下文）。
+        会话不存在则先创建。"""
+
+    @abstractmethod
     def messages(self, conversation_id: str) -> list[Message]:
         """按会话取全部消息（保序）。不存在会话返回空列表。"""
 
@@ -81,6 +87,13 @@ class InMemoryConversationStore(ConversationStore):
         if conv is None:
             raise KeyError(f"会话不存在: {conversation_id}")
         conv.messages.append(message)
+
+    def replace_messages(self, conversation_id: str, messages: list[Message]) -> None:
+        """S26：整体替换（压缩回写）。会话不存在则先创建（对齐 append 的宽容语义）。"""
+        conv = self._conversations.get(conversation_id)
+        if conv is None:
+            conv = self.create(conversation_id)
+        conv.messages = list(messages)
 
     def messages(self, conversation_id: str) -> list[Message]:
         conv = self._conversations.get(conversation_id)

@@ -44,12 +44,18 @@ class ToolCall:
 
 @dataclass
 class ToolResult:
-    """工具执行结果，用于回填进上下文。"""
+    """工具执行结果，用于回填进上下文。
+
+    terminate（S27 对齐 pi ToolResult.terminate）：置 True 表示"本批到此为止"——
+    Agent 循环不再进入下一轮（如"完成/终止"类工具声明）；仅当批内全部 terminate 才生效
+    （pi shouldTerminateToolBatch 语义）。
+    """
 
     call: ToolCall
     ok: bool
     content: str  # 自然语言结果描述（回填给模型，模型无关）
     data: dict[str, Any] | None = field(default_factory=dict)  # 结构化负载（可选）
+    terminate: bool = False
 
 
 @dataclass

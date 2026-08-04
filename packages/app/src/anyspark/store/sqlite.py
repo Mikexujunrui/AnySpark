@@ -123,6 +123,27 @@ class SqliteConversationStore(ConversationStore):
             for row in rows
         ]
 
+    def replace_messages(self, conversation_id: str, messages: list[Message]) -> None:
+        """S26：整体替换该会话消息（压缩回写，事务内删旧插新，seq 从 0 重排）。
+        会话不存在则先创建。"""
+        self.get(conversation_id) or self.create(conversation_id)
+        with self._conn:
+            self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+            for seq, m in enumerate(messages):
+                self._conn.execute(
+                    "INSERT INTO messages (conversation_id, role, content, metadata, seq, "
+                    "created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        conversation_id,
+                        m.role,
+                        m.content,
+                        json.dumps(m.metadata, ensure_ascii=False),
+                        seq,
+                        _now(),
+                    ),
+                )
+
 
 # ---------------------------------------------------------------------------
 # 章节存储（写作产出：text 正文 + 版本历史，支持修改）

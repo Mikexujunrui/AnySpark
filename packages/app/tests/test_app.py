@@ -340,3 +340,15 @@ def test_templates_list() -> None:
     templates = r.json()
     assert len(templates) >= 5
     assert templates[0]["granularity"]  # 四要素元数据
+
+
+def test_steer_api_rejects_idle_session() -> None:
+    """S25 steer 端点：会话未运行时返回 ok=False（不虚构成功）。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(db_path=":memory:"))
+    r = client.post("/api/chat/steer", json={"conversation_id": "nonexistent", "message": "插话"})
+    assert r.status_code == 200
+    assert r.json()["ok"] is False

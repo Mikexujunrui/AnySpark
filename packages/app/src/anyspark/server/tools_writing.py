@@ -178,6 +178,9 @@ _WRITING_SPECS: list[ToolSpec] = [
             ParamSpec(name="title", type="string", required=True, description="章节标题"),
             ParamSpec(name="content", type="string", required=True, description="章节正文全文"),
         ],
+        # S25（对齐 pi executionMode）：写类工具标 sequential——与 read 类工具同批时
+        # 整批串行，防止读旧写新的逻辑错序（锁只保数据不保顺序）。
+        execution_mode="sequential",
     ),
     ToolSpec(
         name="read_file",
