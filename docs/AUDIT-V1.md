@@ -76,6 +76,7 @@
 | 运行中插话 steering / 排队追问 followUp / 工具执行事件（前端进度显示）/ 工具 sequential 串行模式 | 机制5 + A 类过程控制 | `core/loop+protocol` + `app.py` + 前端（S25） |
 | 压缩持久化回写 store（pi compaction entry 语义，跨重启）/ 模型窗口感知预算 / max_tokens 8192 | 模型局限弥补 + §4 上下文管道 | `core/storage+loop` + `deepseek.py` + `app.py`（S26） |
 | before/afterToolCall 钩子（拦截/改写）/ terminate 智能停止（整批终止）/ SSE 假 done 修复 / 流式重试防重复 delta | 机制5 + A 类过程控制 | `core/loop+retry+types` + `deepseek.py`（S27） |
+| pi 行为对照测试（7 场景语义轨迹一致）/ 性能基线存档 / 长书压力测试（暴露修保留段阈值缩放 bug + steer 终答轮丢失） | 工程验证 | `benchmarks/parity/`（S28） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134

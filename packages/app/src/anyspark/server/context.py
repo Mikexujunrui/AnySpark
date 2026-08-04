@@ -35,8 +35,12 @@ from anyspark.core.types import Message
 
 # 保留最近消息的最小条数（刚发生的对话不砍，即使很小）
 KEEP_RECENT_MIN = 4
-# 保留最近消息的 token 预算（对齐 pi keepRecentTokens 语义：按 token 而非条数保底）
+# 保留最近消息的 token 预算上限（对齐 pi keepRecentTokens 语义：按 token 而非条数保底）。
+# S28：实例化时按预算缩放（min(4000, 预算×40%)）——小窗口下保留段不能超过总预算，
+# 否则压缩形同虚设（压力测试暴露：预算 2800 时保留段 4000 > 总预算，消息数持续上涨）。
 KEEP_RECENT_TOKENS = 4000
+# 保留段占预算的比例上限（防止保留段吞噬整个预算）
+KEEP_RECENT_RATIO = 0.4
 # 预算安全系数：DeepSeek tokenizer 与 cl100k 的偏差余量
 SAFETY_FACTOR = 1.2
 # 压缩触发阈值（S21 对齐 pi：接近上限前主动压缩，避免临界突变）
@@ -58,6 +62,8 @@ class TokenBudget:
         summarize: Summarizer | None = None,
     ) -> None:
         self._budget = int(budget / SAFETY_FACTOR)
+        # S28：保留段阈值随预算缩放（小窗口不失效）
+        self._keep_recent = min(KEEP_RECENT_TOKENS, int(self._budget * KEEP_RECENT_RATIO))
         self._enc = tiktoken.get_encoding(encoding)
         self._summarize = summarize
         # 摘要结果指纹缓存（S21 修续聊卡住）：同上下文不重复调 LLM 摘要
@@ -171,7 +177,7 @@ class TokenBudget:
         acc = 0
         for i in range(n - 1, head_len - 1, -1):
             acc += len(messages[i].content)
-            if acc >= KEEP_RECENT_TOKENS and n - i >= KEEP_RECENT_MIN:
+            if acc >= self._keep_recent and n - i >= KEEP_RECENT_MIN:
                 cut = i
                 break
         # 保底：至少保留最近 KEEP_RECENT_MIN 条

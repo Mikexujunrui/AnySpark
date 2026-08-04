@@ -1,0 +1,66 @@
+{
+  "_说明": "pi vs 本地 循环行为对照测试场景。steps 是注入给双方模型的脚本化响应；trace 断言双方行为轨迹一致。",
+  "scenarios": [
+    {
+      "id": "s1_no_tool",
+      "desc": "无工具直接回答",
+      "steps": [{ "text": "直接回答" }]
+    },
+    {
+      "id": "s2_single_tool",
+      "desc": "单工具→结果回填→终答",
+      "steps": [
+        { "toolCalls": [{ "name": "add", "args": { "a": 1, "b": 2 }, "id": "c1" }] },
+        { "text": "结果是 3" }
+      ]
+    },
+    {
+      "id": "s3_parallel_tools",
+      "desc": "多工具并行+保序回填",
+      "steps": [
+        {
+          "toolCalls": [
+            { "name": "add", "args": { "a": 1, "b": 2 }, "id": "c1" },
+            { "name": "echo", "args": { "text": "并行执行" }, "id": "c2" }
+          ]
+        },
+        { "text": "完成" }
+      ]
+    },
+    {
+      "id": "s4_length_truncated",
+      "desc": "输出被截断(length)→整批工具全拒→模型重发→终答",
+      "steps": [
+        { "toolCalls": [{ "name": "add", "args": { "a": 1, "b": 2 }, "id": "c1" }], "stopReason": "length" },
+        { "toolCalls": [{ "name": "add", "args": { "a": 1, "b": 2 }, "id": "c1" }] },
+        { "text": "完成" }
+      ]
+    },
+    {
+      "id": "s5_unknown_tool",
+      "desc": "未知工具→错误回填→终答",
+      "steps": [
+        { "toolCalls": [{ "name": "not_exist", "args": {}, "id": "c1" }] },
+        { "text": "完成" }
+      ]
+    },
+    {
+      "id": "s6_tool_throws",
+      "desc": "工具抛异常→错误回填不炸循环→终答",
+      "steps": [
+        { "toolCalls": [{ "name": "boom", "args": {}, "id": "c1" }] },
+        { "text": "恢复" }
+      ]
+    },
+    {
+      "id": "s7_steer",
+      "desc": "运行中插话(steer)→第二轮模型看到插话",
+      "steps": [
+        { "toolCalls": [{ "name": "add", "args": { "a": 1, "b": 2 }, "id": "c1" }] },
+        { "text": "收到插话" }
+      ],
+      "steerAfterStep": 0,
+      "steerText": "别写太血腥"
+    }
+  ]
+}

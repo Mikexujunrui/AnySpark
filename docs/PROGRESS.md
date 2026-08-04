@@ -530,3 +530,30 @@
 **真实链路验证**：SSE 完整事件流（5 轮 turn_start + 82 text_delta + 5×tool_execution_start/end + 4 tool_call + 5 tool_result + text + done）；steer 插话真实生效（章节被重写且遵守新指令）；图谱后台抽取照常
 
 **踩坑**：① Python 闭包陷阱——on_event 引用 gen() 局部 conv_id 时必须在 gen 内定义（兄弟作用域不可见）；② SSE 假 done 是 S21 就存在的隐蔽 bug（纯文本验证测不出）；③ curl 在部分 Windows 环境对 SSE 流式响应异常（httpx 流式读取正常），调试时用 Python 客户端
+
+---
+
+## S28 效果证明测试（pi 行为对照 + 性能基线 + 长书压力）（已完成 ✅）
+
+**背景**：主人要求"搞点测试证明效果确实和 pi 一样"。判断：**token 速度对比无意义**（双方接同一 DeepSeek API，与实现无关）；**有意义的对照是行为语义一致性**。新建 `benchmarks/parity/`：
+
+### 1. pi vs 本地 行为对照（7/7 PASS）
+- `pi_harness.mjs`：Node 直接加载 pi-agent-core 的 `runAgentLoop`（dist 与源码逐字节一致），fake streamFn + TypeBox 工具 schema 脚本化驱动；`local_harness.py`：同场景驱动本地 Agent
+- 7 个场景：无工具/单工具/多工具并行保序/截断 length 全拒/未知工具/工具抛异常/steering 插话
+- **归一化轨迹逐条对比**：工具调用参数、结果回填配对（tool_call_id）、截断全拒、错误结构、插话注入位置
+- **暴露并修复真实缺陷**：本地 steer 队列只在循环开头 drain——用户在模型生成期间插话且该轮恰为终答时插话**丢失**（pi 在内层循环末尾检查，终答轮也处理）→ 终答分支统一检查 steer+followUp 队列
+- 错误消息文本不对比（双方自然语言措辞自由，符合"内容自然语言"哲学），只比结构
+
+### 2. 性能基线（存档防退化）
+- `perf_baseline.py`：真实 DeepSeek 写 300 字章节 ×3，记录 TTFT/总时长/字符/s → `report/perf-<ts>.md`
+- 基线：平均 17.5 字符/s（TTFT 含工具轮次无文本期）。改动循环后重跑对比字符/s 是否退化
+
+### 3. 长书压力测试（暴露并修复保留段阈值 bug）
+- `stress_longbook.py --real`：真实 DeepSeek + context_window=4000（预算 2800）连写 6 章
+- **暴露 bug**：KEEP_RECENT_TOKENS=4000 固定值 > 小预算 2800——保留段吞噬整个预算，压缩形同虚设，消息数持续上涨（6→15）
+- **修复**：保留段阈值随预算缩放 `min(4000, 预算×40%)`——修复后压缩触发即稳定有界（22→11 条，累计字符 1630→1216 持续下降），6/6 章节落盘
+- 脚本化模式（预算 400，10 轮）：消息数 8→6 触发压缩后稳定 6，有界 ✓
+
+**门禁**：ruff + mypy 全绿；pytest 全绿；对照 7/7 PASS；压力 6/6 PASS
+
+**踩坑**：① pi 的 fake streamFn 必须返回带 `.result()` 的 EventStream（不是 async generator）；② AgentTool 需要 TypeBox `parameters` 否则 validateToolArguments 抛 "Cannot use 'in' operator"；③ pi 侧 toolResult 消息结构与本地不同（blocks vs 字符串）——归一化为语义轨迹对比；④ 对照测试的价值：不仅证明对齐，还**反向发现本地实现缺陷**（steer 终答轮丢失、保留段阈值不缩放）

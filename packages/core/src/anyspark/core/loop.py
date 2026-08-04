@@ -228,15 +228,20 @@ class Agent:
                 )
 
             if not output.tool_calls:
-                # 本轮无工具调用：检查 followUp 队列（S25 对齐 pi getFollowUpMessages）——
-                # 有追问则先把本轮终答落上下文，再注入追问续跑；否则才是真正结束。
-                followup = self._drain(self.followup_queue)
-                if followup:
-                    store.append(conversation_id, Message(role="assistant", content=output.text))
+                # 终答前统一检查插话/追问（对齐 pi：内层循环末尾检查 steering、
+                # 外层检查 followUp）——用户在模型生成期间插话时，即使本轮恰好是
+                # 终答，插话也不丢失：先把本轮终答落上下文，再注入队列消息续跑。
+                queued = self._drain(self.steer_queue) + self._drain(self.followup_queue)
+                if queued:
+                    store.append(
+                        conversation_id, Message(role="assistant", content=output.text)
+                    )
                     self.events.emit(Event(type="text", payload={"content": output.text}))
-                    for m in followup:
+                    for m in queued:
                         store.append(conversation_id, m)
-                        self.events.emit(Event(type="user_text", payload={"content": m.content}))
+                        self.events.emit(
+                            Event(type="user_text", payload={"content": m.content})
+                        )
                     continue
                 # 真终答
                 store.append(conversation_id, Message(role="assistant", content=output.text))
