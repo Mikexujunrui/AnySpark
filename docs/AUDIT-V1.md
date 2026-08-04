@@ -1,6 +1,6 @@
-# AnySpark v4 — 设计实现审计报告（截至 25e7d54）
+# AnySpark v4 — 设计实现审计报告（截至 54e9423）
 
-> 审计日期：2026-08-02（历次复核：S12 收尾 / S13 补全 / S14 T7 / S21 循环工程化） | 当前基准 commit：`25e7d54`（S21c 后台独立 worker） | 上一基准：`62246b1`（S7 知识图谱）
+> 审计日期：2026-08-02（历次复核：S12 收尾 / S13 补全 / S14 T7 / S21 循环工程化 / S21 系统层 / S28-S31） | 当前基准 commit：`54e9423`（S31 补充：伏笔老龄化） | 上一基准：`25e7d54`（S21c）
 > 审计方式：逐项对照 `DESIGN.md` 全部规格 vs 实际代码（后端 7 包 + 前端 + 测试 78 + 门禁全绿）
 > 用途：**给下一个接手 AI 的现状快照**——哪些实现、哪些缺失、缺口在哪、先补什么。
 > 注意：本报告是"时点快照"，后续实现后需同步更新；这不是对 DESIGN.md 的修改。
@@ -80,6 +80,7 @@
 | 信号→说明书提炼闭环修复（signals 后台入队提炼，PreferenceExtractor 首次接线）/ 分支剧本哲学指标验证（修改率↓/说明书累积/偏好遵从） | 机制 3 对齐系统 + §9 T7 | `app.py` + `store/sqlite.py` + `benchmarks/system/`（S21 系统层） |
 | 多线叙事时间建模（Entity.lines + chapters.narrative_line + 时序校验按线比较） | 机制9 检测网补充 | `graph/schema+verify` + `tools_writing` + `app.py`（S29） |
 | 伏笔 A/B 分级（must 剧情钩子强追踪 / soft 细节线索旁观；完整书导入归档；不输出回收率） | 机制6 模式库 + T2 阶段3 | `template/plot.py` + `app.py`（S31） |
+| 伏笔老龄化（planted_order 登记章 + 注入/wrapup 标开放时长，中性事实不设阈值） | T2 阶段3 | `template/plot.py` + `app.py`（S31 补充） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134
