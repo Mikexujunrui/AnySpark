@@ -213,3 +213,125 @@ def test_loop_cancellation_token() -> None:
     turn = agent.run("问题", token=token)
     assert "中断" in turn.text
     assert "aborted" in events
+
+
+def test_cancellation_appends_assistant_message() -> None:
+    """S22（D5）：取消终止时 append assistant 消息——上下文保持 user/assistant 配对，
+    用户随后发"继续"不会出现 user 接 user 的失衡上下文（移植 pi 的 aborted 消息保留）。"""
+    from anyspark.core import CancellationToken, ToolCall
+
+    always_tool = ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})])
+    token = CancellationToken()
+    agent = _make_agent(ScriptedModel([always_tool] * 100))
+    token.cancel()
+    agent.run("问题", token=token)
+    msgs = agent.store.messages(agent.store.list_conversations()[0].id)
+    roles = [m.role for m in msgs]
+    assert roles == ["user", "assistant"]  # 平衡：user 后有 assistant（已中断）
+    assert "中断" in msgs[-1].content
+
+
+def test_model_failure_keeps_context_balanced() -> None:
+    """S22（D1）：模型调用抛异常（重试耗尽）→ 不冒泡不毒化上下文——
+    append assistant 失败消息保持配对，Turn.error 带错误说明。"""
+
+    class _ExplodingModel:
+        def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
+            raise ConnectionError("上游断连")
+
+    agent = _make_agent(_ExplodingModel())
+    turn = agent.run("问题")
+    assert turn.error is not None
+    assert "生成失败" in turn.text
+    # 上下文平衡：user, assistant(生成失败)
+    msgs = agent.store.messages(agent.store.list_conversations()[0].id)
+    assert [m.role for m in msgs] == ["user", "assistant"]
+    assert "生成失败" in msgs[-1].content
+    # 用户再发一条 → user, assistant(失败), user 正常续聊
+    conv_id = agent.store.list_conversations()[0].id
+    agent.run("继续", conv_id)
+    roles = [m.role for m in agent.store.messages(agent.store.list_conversations()[0].id)]
+    assert roles == ["user", "assistant", "user", "assistant"]
+
+
+def test_truncated_tool_calls_rejected() -> None:
+    """S22（D3）：输出被 token 上限截断（truncated）→ 整批工具调用**不执行**，
+    回填"被截断请重发"错误，循环继续（模型下一轮重发完整调用）。
+    仅靠 _malformed 不够：截断可能产生 JSON 合法但语义残缺的参数。"""
+    from anyspark.core import ToolCall
+
+    # 第一轮：truncated + 工具调用（应被拒绝，不执行 add）；第二轮：终答
+    model = ScriptedModel(
+        [
+            ModelOutput(
+                truncated=True,
+                tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})],
+            ),
+            _no_tool("最终回答"),
+        ]
+    )
+    agent = _make_agent(model)
+    turn = agent.run("测试")
+    assert turn.text == "最终回答"
+    # 被拒绝的调用进入了 turn 记录（回填了错误）但 add 实际未执行
+    assert len(turn.tool_calls) == 1
+    assert turn.tool_results[0].ok is False
+    assert "截断" in turn.tool_results[0].content
+    # 模型第二次调用时拿到了错误回填（tool 消息）
+    tool_msgs = [
+        m for m in agent.store.messages(agent.store.list_conversations()[0].id) if m.role == "tool"
+    ]
+    assert len(tool_msgs) == 1
+    assert "截断" in tool_msgs[0].content
+
+
+def test_tool_calls_paired_with_ids() -> None:
+    """S23 协议完整化：工具调用声明与结果**配对落 store**——
+    assistant 消息带原生 tool_calls 声明（metadata），tool 消息带 tool_call_id。
+    上下文序列为 user → assistant(声明) → tool(配对) → assistant(终答)，
+    不再是 user → tool 的畸形序列。"""
+    from anyspark.core import ToolCall
+
+    model = ScriptedModel(
+        [
+            ModelOutput(
+                tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2}, id="call_abc123")]
+            ),
+            _no_tool("结果是 3"),
+        ]
+    )
+    agent = _make_agent(model)
+    agent.store.create("c2")
+    turn = agent.run("算一下", "c2")
+    assert turn.text == "结果是 3"
+
+    msgs = agent.store.messages("c2")
+    roles = [m.role for m in msgs]
+    # 合法配对序列：user → assistant(tool_calls 声明) → tool(配对) → assistant(终答)
+    assert roles == ["user", "assistant", "tool", "assistant"]
+    # assistant 声明带原生 tool_calls
+    decl = msgs[1].metadata.get("tool_calls")
+    assert decl == [{"name": "add", "arguments": {"a": 1, "b": 2}, "id": "call_abc123"}]
+    # tool 结果带配对 id
+    assert msgs[2].metadata.get("tool_call_id") == "call_abc123"
+
+
+def test_tool_result_backfill_preserved() -> None:
+    """S23 兼容性：工具结果回填文本保留（模型可读），配对信息仅存 metadata——
+    不带 id 的旧链路（DashScope 宽容模式）行为不变。"""
+    from anyspark.core import ToolCall
+
+    model = ScriptedModel(
+        [
+            ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 5, "b": 7})]),
+            _no_tool("结果是 12"),
+        ]
+    )
+    agent = _make_agent(model)
+    agent.store.create("c3")
+    turn = agent.run("算", "c3")
+    assert turn.text == "结果是 12"
+    msgs = agent.store.messages("c3")
+    tool_msg = next(m for m in msgs if m.role == "tool")
+    assert "5 + 7 = 12" in tool_msg.content  # 文本回填仍在
+    assert tool_msg.metadata.get("tool_call_id") is None  # 无 id 则不配对（旧行为）

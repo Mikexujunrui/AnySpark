@@ -457,9 +457,9 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             raise HTTPException(status_code=500, detail=f"执行失败: {exc}") from exc
         finally:
             _active_tokens.pop(conv_id, None)
-        if not turn.tool_calls and "达到最大工具迭代" in turn.text:
-            logger.warning("chat 达到最大工具迭代: conv=%s", conv_id)
-            raise HTTPException(status_code=500, detail=turn.text)
+        if turn.error is not None:  # S22：模型调用失败/迭代上限（不再字符串匹配）
+            logger.warning("chat 非正常结束: conv=%s error=%s", conv_id, turn.error)
+            raise HTTPException(status_code=500, detail=turn.error)
 
         logger.info(
             "chat 完成: conv=%s 输出%d字 工具%d次", conv_id, len(turn.text), len(turn.tool_calls)

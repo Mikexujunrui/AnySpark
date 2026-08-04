@@ -1,4 +1,4 @@
-"""anyspark.server.context — token 预算两阶段压缩测试。"""
+"""anyspark.server.context — token 预算两阶段压缩测试（S24 对齐 pi compaction 语义）。"""
 
 from __future__ import annotations
 
@@ -38,9 +38,11 @@ def test_prune_without_summarizer() -> None:
 def test_summarize_with_llm() -> None:
     """有摘要器：旧历史压成一条历史摘要（系统消息），最近消息保留。"""
     captured: list[list[Message]] = []
+    prevs: list[str | None] = []
 
-    def fake_summarize(history: list[Message]) -> str:
+    def fake_summarize(history: list[Message], previous: str | None) -> str:
         captured.append(history)
+        prevs.append(previous)
         return "摘要：早期对话已压缩。"
 
     b = TokenBudget(budget=100, summarize=fake_summarize)
@@ -48,6 +50,7 @@ def test_summarize_with_llm() -> None:
     out = b.compress(msgs)
     # 摘要器被调用（拿到了可压缩段）
     assert captured and len(captured[0]) < len(msgs)
+    assert prevs[0] is None  # 首次摘要无 previous
     # 输出含历史摘要系统消息
     assert any("历史对话摘要" in m.content for m in out)
     # 最近消息保留
@@ -58,7 +61,7 @@ def test_summarize_with_llm() -> None:
 def test_summarize_failure_falls_back_to_prune() -> None:
     """摘要器抛异常：降级纯 prune，不中断。"""
 
-    def broken(history: list[Message]) -> str:
+    def broken(history: list[Message], previous: str | None) -> str:
         raise RuntimeError("LLM 挂了")
 
     b = TokenBudget(budget=100, summarize=broken)
@@ -79,8 +82,25 @@ def test_make_summarizer_uses_model() -> None:
 
     s = make_summarizer(FakeModel())
     assert s is not None
-    out = s([Message(role="user", content="x")])
+    out = s([Message(role="user", content="x")], None)
     assert "雨夜" in out
+
+
+def test_make_summarizer_incremental_prompt() -> None:
+    """S24（B2）：有 previous 时走 UPDATE 模式（增量合并，不是从零重写）。"""
+    prompts: list[list[Message]] = []
+
+    class FakeModel:
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            prompts.append(list(messages))
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="更新摘要")
+
+    s = make_summarizer(FakeModel())
+    s([Message(role="user", content="新进展")], "上次摘要：写了第一章")
+    assert "上次摘要" in prompts[0][0].content
+    assert "previous-summary" in prompts[0][0].content  # UPDATE 模式标记
 
 
 def test_compress_keeps_read_note() -> None:
@@ -129,7 +149,7 @@ def test_compress_cache_hits_same_context() -> None:
     """S21 修续聊卡住：同上下文二次压缩命中指纹缓存（不重复 LLM 摘要）。"""
     calls: list[int] = []
 
-    def fake_summarize(msgs: list[Message]) -> str:
+    def fake_summarize(msgs: list[Message], previous: str | None) -> str:
         calls.append(len(msgs))
         return "摘要内容" + "续" * 100
 
@@ -150,3 +170,58 @@ def test_compress_cache_hits_same_context() -> None:
     r2 = b.compress(messages)  # 同上下文
     assert len(calls) == 1  # 摘要只跑一次
     assert r1 == r2
+
+
+def test_cut_never_lands_on_tool_result() -> None:
+    """S24（B1）：切割点**永不落在 tool 结果上**——保留段第一条不能是孤立 tool
+    （其 assistant 声明已在可压缩段内被切掉，会造成畸形上下文）。"""
+    b = TokenBudget(budget=800)  # 触发压缩且保留段保底恰好撞上 tool 消息
+    # 12 条：index 7 assistant(声明) / 8 tool(结果) —— 保底 4 条时保留段 [8:] 第一条是 tool
+    messages = [Message(role="system", content="s")]
+    for i in range(1, 12):
+        if i == 3 or i == 8:
+            messages.append(Message(role="tool", content="《第X章》全文如下：\n" + "x" * 100))
+        elif i % 2 == 0:
+            messages.append(Message(role="assistant", content="a" * 100))
+        else:
+            messages.append(Message(role="user", content="u" * 100))
+    kept = b.compress(messages)
+    # 压缩后的保留段（摘要消息之后）第一条绝不能是 tool——孤立 tool 结果不允许残留
+    tail = kept[1:] if kept and kept[0].role == "system" else kept
+    if tail:
+        assert tail[0].role != "tool"
+
+
+def test_rough_count_skips_tiktoken_when_small() -> None:
+    """S24（E1）：远低于预算时字符粗算直接返回，不调用 tiktoken 精算（省每轮全量编码）。"""
+    b = TokenBudget(budget=100000)
+    msgs = [Message(role="system", content="S"), *_msgs(10, "短")]
+    # 粗算路径（budget 巨大，粗算即返回）——不会走到 count_messages
+    out = b.compress(msgs)
+    assert out == msgs
+    # 直接验证：粗算判定成立（不需要 tiktoken）
+    assert b._rough_count(msgs) <= int(100000 / 1.2 * 0.9)
+
+
+def test_incremental_summary_uses_previous() -> None:
+    """S24（B2）：第二次压缩时识别到上一次摘要（【历史对话摘要】消息）→ previous 非空。"""
+    prevs: list[str | None] = []
+
+    def fake_summarize(msgs: list[Message], previous: str | None) -> str:
+        prevs.append(previous)
+        return "摘要更新" + "续" * 50
+
+    b = TokenBudget(budget=300, summarize=fake_summarize)
+    messages = [
+        Message(role="system", content="s"),
+        # 上一次压缩产物（模拟）
+        Message(role="system", content="【历史对话摘要】（压缩自 5 条消息，省 token）\n上次摘要"),
+        Message(role="user", content="u" * 150),
+        Message(role="assistant", content="a" * 150),
+        Message(role="user", content="继续" + "续" * 100),
+        Message(role="assistant", content="好" + "续" * 100),
+        Message(role="user", content="再继续" + "续" * 100),
+    ]
+    b.compress(messages)
+    assert prevs and prevs[0] is not None
+    assert "上次摘要" in prevs[0]

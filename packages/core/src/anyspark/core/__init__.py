@@ -16,7 +16,7 @@ from .protocol import (
     backfill_content_tool_result,
     execute,
 )
-from .retry import RETRYABLE, RetryingModel, retry_with_backoff
+from .retry import RETRYABLE_EXC_TYPES, RetryingModel, retry_with_backoff
 from .storage import Conversation, ConversationStore, InMemoryConversationStore
 from .tools import (
     add_implementer,
@@ -27,7 +27,7 @@ from .types import Message, ModelOutput, ToolCall, Turn
 
 __all__ = [
     "GENERIC_EVENT_TYPES",
-    "RETRYABLE",
+    "RETRYABLE_EXC_TYPES",
     "Agent",
     "CancellationToken",
     "ContextCompressor",

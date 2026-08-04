@@ -1,6 +1,6 @@
-# AnySpark v4 — 设计实现审计报告（截至 e468d21）
+# AnySpark v4 — 设计实现审计报告（截至 25e7d54）
 
-> 审计日期：2026-08-02 | 审计基准 commit：`62246b1`（S7 知识图谱完成） | 上一基准：`9742f06`（S6 前端对话流）
+> 审计日期：2026-08-02（历次复核：S12 收尾 / S13 补全 / S14 T7 / S21 循环工程化） | 当前基准 commit：`25e7d54`（S21c 后台独立 worker） | 上一基准：`62246b1`（S7 知识图谱）
 > 审计方式：逐项对照 `DESIGN.md` 全部规格 vs 实际代码（后端 7 包 + 前端 + 测试 78 + 门禁全绿）
 > 用途：**给下一个接手 AI 的现状快照**——哪些实现、哪些缺失、缺口在哪、先补什么。
 > 注意：本报告是"时点快照"，后续实现后需同步更新；这不是对 DESIGN.md 的修改。
@@ -70,6 +70,9 @@
 | 伏笔闭环（注入写作/自动回收/关注度 care-ignore） | T2 阶段3 + 机制 | `template/plot.py` + `app.py`（S17） |
 | 角色/地点状态演化（state 增量拼接 + 演化历史表 + 注入优先显示状态） | 老愿景内核 v4 轻量实现 | `graph/`（S20） |
 | Agent 循环工程化（流式核心/截断防护/工具并行/协作式中断/已读缓存） | A 类过程控制 | `core/loop+retry` + `app`（S21） |
+| 循环健壮性对齐 pi：异常上下文平衡（失败不毒化上下文）/ 重试覆盖 429·5xx·quota 分类 / 截断防护读 finish_reason（length 全拒）/ 取消补 assistant 消息 | 模型局限弥补 + A 类过程控制 | `core/loop+retry` + `models/deepseek.py`（S22） |
+| 工具调用协议完整化：ToolCall.id + assistant 声明落库 + tool 结果 tool_call_id 配对（原生 OpenAI 格式，旧链路兼容） | §4 协议层 | `core/loop+types` + `models/deepseek.py`（S23） |
+| 压缩对齐 pi：指纹先查 + 字符粗算省精算 / token 预算切割永不切 tool 结果 / 摘要全量输入 + 增量更新模式 | 模型局限弥补 + §4 上下文管道 | `server/context.py`（S24） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134

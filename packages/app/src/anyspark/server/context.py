@@ -7,9 +7,19 @@ anyspark.server.context — token 预算 + 两阶段压缩（长书刚需）。
 
 两阶段：
   阶段 1 prune：超预算时从最早的对话消息开始切出"可压缩段"（system 永远保留，
-                最近 K 条消息保底保留——进行中的对话不能砍）。
+                最近消息按 token 预算保底保留——进行中的对话不能砍）。
   阶段 2 summarize：若注入 LLM 摘要器，把切出的历史压成一条"历史摘要"系统消息
                 插回（信息密度保留）；无摘要器则纯丢弃（prune-only 降级）。
+
+S24（对齐 pi 的 compaction 语义，修复 S21c 审计发现）：
+- E1 效率：指纹**先查**（内容未变直接返回缓存结果，连计数都不做）；计数两档——
+  字符粗算（O(n) 极快，高估安全）滤掉绝大多数"不需要压缩"的轮次，tiktoken 精算
+  只在接近预算时发生。
+- B1 切割合法性：保留段按 **token 预算**（KEEP_RECENT_TOKENS）往回找，且**永不切在
+  tool 结果上**（tool 结果必须跟在 assistant 声明后；孤立 tool 消息会让模型上下文畸形）。
+- B2 摘要信息密度：摘要输入**全量序列化**可压缩段（此前只喂最后 20 条×200 字，
+  中间关键指令全丢）；支持**增量更新**（识别上一次摘要作为 previous，用 UPDATE 模式
+  追加新进展，对齐 pi 的 previousSummary + UPDATE_SUMMARIZATION_PROMPT）。
 
 模型无关：压缩产物为自然语言消息；计数器用 tiktoken cl100k_base 近似
 （DeepSeek 自研 tokenizer 无公开编码，预算留安全余量，调用方按 ~1.2 系数）。
@@ -23,14 +33,19 @@ import tiktoken
 
 from anyspark.core.types import Message
 
-# 保留最近多少条消息（进行中对话不砍）
-KEEP_RECENT = 6
+# 保留最近消息的最小条数（刚发生的对话不砍，即使很小）
+KEEP_RECENT_MIN = 4
+# 保留最近消息的 token 预算（对齐 pi keepRecentTokens 语义：按 token 而非条数保底）
+KEEP_RECENT_TOKENS = 4000
 # 预算安全系数：DeepSeek tokenizer 与 cl100k 的偏差余量
 SAFETY_FACTOR = 1.2
 # 压缩触发阈值（S21 对齐 pi：接近上限前主动压缩，避免临界突变）
 COMPRESS_AT = 0.9
 
-Summarizer = Callable[[list[Message]], str] | None
+# 摘要器签名（S24）：(可压缩段, 上一次摘要) → 摘要文本；previous 为空则初始摘要
+Summarizer = Callable[[list[Message], str | None], str]
+
+_SUMMARY_PREFIX = "【历史对话摘要】"
 
 
 class TokenBudget:
@@ -40,7 +55,7 @@ class TokenBudget:
         self,
         budget: int = 12000,
         encoding: str = "cl100k_base",
-        summarize: Summarizer = None,
+        summarize: Summarizer | None = None,
     ) -> None:
         self._budget = int(budget / SAFETY_FACTOR)
         self._enc = tiktoken.get_encoding(encoding)
@@ -60,24 +75,33 @@ class TokenBudget:
     def count_messages(self, messages: list[Message]) -> int:
         return sum(self.count(m.content) for m in messages)
 
+    def _rough_count(self, messages: list[Message]) -> int:
+        """字符数粗算（S24 E1）：chars ≥ tokens 对中英混合基本成立（BPE 一般压缩字符），
+        高估安全——粗算不超阈值则实际一定不超，可省掉 tiktoken 精算。"""
+        return sum(len(m.content) for m in messages)
+
     # ------------------------------------------------------------------
     # 压缩（ContextCompressor 协议入口）
     # ------------------------------------------------------------------
     def compress(self, messages: list[Message]) -> list[Message]:
         """输入完整 prompt 消息，超过触发阈值（90% 预算，S21 提前触发）则压缩。
 
-        结果按消息指纹缓存：Agent 每轮迭代调用时，上下文未变则直接命中，
-        不重复执行昂贵的 LLM 摘要（续聊长上下文的卡顿主因）。
+        S24 效率链：指纹先查（缓存命中直接返回，连计数都不做）→ 字符粗算（高估安全，
+        绝大多数轮次在此被滤掉）→ tiktoken 精算（仅接近预算时）→ 压缩。
         """
-        total = self.count_messages(messages)
-        if total <= int(self._budget * COMPRESS_AT):
-            return messages
-
-        # 指纹缓存：同上下文直接返回上次压缩结果（省 LLM 摘要调用）
+        # E1：指纹先查——Agent 每轮迭代调用，上下文未变则直接命中缓存结果
         fingerprint = hash(tuple(m.content for m in messages))
         cached = self._cache.get(fingerprint)
         if cached is not None:
             return cached
+
+        threshold = int(self._budget * COMPRESS_AT)
+        # 粗算滤掉绝大多数"不需要压缩"的轮次（无需 tiktoken 编码全量历史）
+        if self._rough_count(messages) <= threshold:
+            return messages
+        total = self.count_messages(messages)
+        if total <= threshold:
+            return messages
 
         kept = self._compress_uncached(messages, total)
         self._cache[fingerprint] = kept
@@ -90,14 +114,14 @@ class TokenBudget:
     def _compress_uncached(self, messages: list[Message], total: int) -> list[Message]:
         """压缩主逻辑（被 compress 缓存包裹）。"""
 
-        # 找出可压缩段：messages[0] 可能是 system（保留），从其后开始；
-        # 保底保留最近 KEEP_RECENT 条（进行中对话）。
+        # 找出可压缩段：messages[0] 可能是 system（保留），从其后开始
         head_len = 1 if messages and messages[0].role == "system" else 0
-        if len(messages) <= head_len + KEEP_RECENT:
+        if len(messages) <= head_len + KEEP_RECENT_MIN:
             # 消息太少无法压缩，直接截断最近的到预算内
             return self._truncate_tail(messages, head_len)
 
-        cut_end = len(messages) - KEEP_RECENT  # 可压缩段 [head_len, cut_end)
+        # B1：保留段按 token 预算往回找 + 切割合法性（不切在 tool 结果上）
+        cut_end = self._find_cut_point(messages, head_len)
         if cut_end <= head_len:
             return self._truncate_tail(messages, head_len)
 
@@ -109,13 +133,13 @@ class TokenBudget:
         history_part = messages[head_len:cut_end]
         if self._summarize is not None:
             try:
-                summary = self._summarize(history_part)
+                # B2 增量更新：识别上一次摘要作为 previous，UPDATE 模式追加新进展
+                previous = _extract_previous_summary(history_part)
+                summary = self._summarize(history_part, previous)
+                head = f"{_SUMMARY_PREFIX}（压缩自 {len(history_part)} 条，省 token）"
                 summary_msg = Message(
                     role="system",
-                    content=(
-                        "【历史对话摘要】（压缩自 "
-                        f"{len(history_part)} 条消息，省 token）\n{summary}"
-                    ),
+                    content=f"{head}\n{summary}",
                 )
                 kept = (
                     [messages[0], summary_msg, *messages[cut_end:]]
@@ -135,6 +159,29 @@ class TokenBudget:
             kept.insert(head_len, read_note)
         return kept
 
+    def _find_cut_point(self, messages: list[Message], head_len: int) -> int:
+        """B1：返回保留段的起始下标（可压缩段 = [head_len, cut_end)）。
+
+        - 从后往前累计字符粗算 token，达到 KEEP_RECENT_TOKENS 即停（至少保底 KEEP_RECENT_MIN 条）
+        - 切割点**永不落在 tool 消息上**：保留段第一条若是 tool，说明它的 assistant
+          声明在可压缩段内（已被切掉）——把孤立的 tool 结果一起切掉，避免畸形上下文。
+        """
+        n = len(messages)
+        cut = n
+        acc = 0
+        for i in range(n - 1, head_len - 1, -1):
+            acc += len(messages[i].content)
+            if acc >= KEEP_RECENT_TOKENS and n - i >= KEEP_RECENT_MIN:
+                cut = i
+                break
+        # 保底：至少保留最近 KEEP_RECENT_MIN 条
+        if n - cut < KEEP_RECENT_MIN:
+            cut = max(head_len, n - KEEP_RECENT_MIN)
+        # 切割合法性：保留段第一条不能是 tool（孤立 tool 结果无声明）
+        while cut < n and messages[cut].role == "tool":
+            cut += 1
+        return cut
+
     def _truncate_tail(self, messages: list[Message], head_len: int) -> list[Message]:
         """消息太少时的兜底：从尾部逐条保留直到预算内（最近优先）。"""
         kept = list(messages)
@@ -144,15 +191,37 @@ class TokenBudget:
 
 
 def make_summarizer(model: object, max_len: int = 800) -> Summarizer:
-    """LLM 历史摘要器（真实 DeepSeek，模型无关）。"""
+    """LLM 历史摘要器（真实 DeepSeek，模型无关）。
 
-    def _summarize(history: list[Message]) -> str:
-        lines = "\n".join(f"{m.role}: {m.content[:200]}" for m in history[-20:])
-        prompt = (
-            "你是小说写作助手。把下面的对话历史压缩成一段简明摘要（保留：进行到哪、"
-            "写过什么、用户偏好/指令、关键事实）。只输出摘要正文，不要其它文字。\n\n"
-            f"对话历史（{len(history)} 条）：\n{lines}"
-        )
+    S24（B2）：摘要输入**全量序列化**可压缩段（不再截断 20 条×200 字）；若识别到
+    上一次摘要（previous 非空）则用 UPDATE 模式增量合并——对齐 pi 的
+    SUMMARIZATION_PROMPT / UPDATE_SUMMARIZATION_PROMPT 结构化格式。
+    """
+
+    def _summarize(history: list[Message], previous: str | None = None) -> str:
+        lines = "\n".join(f"{m.role}: {m.content}" for m in history)
+        if previous:
+            prompt = (
+                "你是小说写作助手。以下是**新增加的**对话消息，要并入已有的历史摘要"
+                "（<previous-summary> 标签内）。规则：\n"
+                "- 保留已有摘要的全部信息\n"
+                "- 追加新进展/新指令/新事实/关键决策\n"
+                "- 已完成的事项从 In Progress 移到 Done\n"
+                "- 保持简洁，保留章节标题、设定、角色名等关键事实\n\n"
+                f"<previous-summary>\n{previous}\n</previous-summary>\n\n"
+                f"新增对话消息（{len(history)} 条）：\n{lines}"
+            )
+        else:
+            prompt = (
+                "你是小说写作助手。把下面的对话历史压缩成一段简明摘要，必须保留：\n"
+                "- 进行到哪（当前章节/写作进度）\n"
+                "- 写过什么（章节标题、正文要点）\n"
+                "- 用户的偏好/指令（含说明书、要求）\n"
+                "- 关键事实/设定（角色、地点、事件）\n"
+                "- 下一步计划\n"
+                "只输出摘要正文，不要其它文字。\n\n"
+                f"对话历史（{len(history)} 条）：\n{lines}"
+            )
         out = model.respond(  # type: ignore[attr-defined]
             [Message(role="system", content=prompt)],
             [],
@@ -160,6 +229,14 @@ def make_summarizer(model: object, max_len: int = 800) -> Summarizer:
         return str(out.text)[:max_len]
 
     return _summarize
+
+
+def _extract_previous_summary(messages: list[Message]) -> str | None:
+    """从可压缩段里识别上一次压缩的摘要（最近一条【历史对话摘要】system 消息）。"""
+    for m in reversed(messages):
+        if m.role == "system" and m.content.startswith(_SUMMARY_PREFIX):
+            return m.content
+    return None
 
 
 def _collect_read_note(messages: list[Message]) -> Message | None:

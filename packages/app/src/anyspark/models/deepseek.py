@@ -53,8 +53,42 @@ def to_openai_tool(spec: ToolSpec) -> dict[str, Any]:
 
 
 def to_openai_message(m: Message) -> dict[str, Any]:
-    """把 core 的 Message 转成 OpenAI chat 消息。"""
-    return {"role": m.role, "content": m.content}
+    """把 core 的 Message 转成 OpenAI chat 消息。
+
+    S23 协议完整化：metadata 里的结构化信息转成原生字段——
+    - assistant 消息带 metadata.tool_calls → OpenAI 原生 tool_calls 数组（配对声明）
+    - tool 消息带 metadata.tool_call_id → OpenAI 原生 tool_call_id（配对结果）
+    旧数据（无 metadata）保持纯文本，兼容 DashScope 宽容模式。
+    """
+    msg: dict[str, Any] = {"role": m.role, "content": m.content}
+    if m.role == "assistant":
+        calls = m.metadata.get("tool_calls")
+        # 仅当全部调用都带真实 id 才发原生 tool_calls 声明（配对完整性）：
+        # 无 id 的旧链路保持纯文本（DashScope 宽容模式）；否则 assistant 声明了
+        # 而 tool 消息不配对会导致严格模式 400。
+        if (
+            isinstance(calls, list)
+            and calls
+            and all(isinstance(c, dict) and c.get("id") for c in calls)
+        ):
+            native_calls: list[dict[str, Any]] = []
+            for c in calls:
+                native_calls.append(
+                    {
+                        "id": str(c.get("id")),
+                        "type": "function",
+                        "function": {
+                            "name": str(c.get("name") or ""),
+                            "arguments": json.dumps(c.get("arguments") or {}, ensure_ascii=False),
+                        },
+                    }
+                )
+            msg["tool_calls"] = native_calls
+    elif m.role == "tool":
+        tid = m.metadata.get("tool_call_id")
+        if isinstance(tid, str) and tid:
+            msg["tool_call_id"] = tid
+    return msg
 
 
 class DeepSeekModel:
@@ -117,6 +151,8 @@ class DeepSeekModel:
         def _call() -> ModelOutput:
             response = self._client.chat.completions.create(**kwargs)
             message = response.choices[0].message
+            # S22（D3）：finish_reason=="length" = 输出被 token 上限截断 → 标记
+            truncated = bool(response.choices and response.choices[0].finish_reason == "length")
 
             text = message.content or ""
             tool_calls: list[ToolCall] = []
@@ -128,9 +164,9 @@ class DeepSeekModel:
                     except json.JSONDecodeError:
                         # 截断防护（S21）：参数非法→标记，不执行，让模型重发
                         args = {"_raw": fn.arguments, "_malformed": True}
-                    tool_calls.append(ToolCall(name=fn.name, arguments=args))
+                    tool_calls.append(ToolCall(name=fn.name, arguments=args, id=tc.id or ""))
 
-            return ModelOutput(text=text, tool_calls=tool_calls)
+            return ModelOutput(text=text, tool_calls=tool_calls, truncated=truncated)
 
         return _call()
 
@@ -167,10 +203,15 @@ class DeepSeekModel:
         stream = self._client.chat.completions.create(**kwargs)
         text_parts: list[str] = []
         tool_acc: dict[int, dict[str, str]] = {}  # index -> {name, arguments}
+        # S22（D3）：流式路径跟踪 finish_reason——"length" = 输出被截断
+        truncated = False
         for chunk in stream:
             if not chunk.choices:
                 continue
-            delta = chunk.choices[0].delta
+            choice = chunk.choices[0]
+            delta = choice.delta
+            if choice.finish_reason:
+                truncated = truncated or choice.finish_reason == "length"
             if delta.content:
                 text_parts.append(delta.content)
                 if on_event is not None:
@@ -178,7 +219,7 @@ class DeepSeekModel:
                 if self._on_delta:
                     self._on_delta(delta.content)
             for tc in delta.tool_calls or []:
-                acc = tool_acc.setdefault(tc.index, {"name": "", "arguments": ""})
+                acc = tool_acc.setdefault(tc.index, {"name": "", "arguments": "", "id": ""})
                 if tc.function and tc.function.name:
                     acc["name"] += tc.function.name
                 if tc.function and tc.function.arguments:
@@ -190,6 +231,8 @@ class DeepSeekModel:
                                 payload={"content": tc.function.arguments},
                             )
                         )
+                if tc.id and not acc["id"]:
+                    acc["id"] = tc.id
         text = "".join(text_parts)
         tool_calls: list[ToolCall] = []
         for idx in sorted(tool_acc):
@@ -199,7 +242,7 @@ class DeepSeekModel:
             except json.JSONDecodeError:
                 # 截断防护（S21）：参数非法→标记，不执行，让模型重发
                 args = {"_raw": acc["arguments"], "_malformed": True}
-            tool_calls.append(ToolCall(name=acc["name"], arguments=args))
+            tool_calls.append(ToolCall(name=acc["name"], arguments=args, id=acc.get("id", "")))
         if on_event is not None:
             on_event(Event(type="done", payload={}))
-        return ModelOutput(text=text, tool_calls=tool_calls)
+        return ModelOutput(text=text, tool_calls=tool_calls, truncated=truncated)

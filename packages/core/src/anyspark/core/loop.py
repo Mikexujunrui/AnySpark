@@ -14,6 +14,7 @@ anyspark.core.loop — Agent 循环（机制 1 的过程控制，硬编码）。
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -23,6 +24,8 @@ from .events import Event, EventEmitter
 from .protocol import ToolRegistry, ToolSpec, backfill_content_tool_result, execute
 from .storage import ConversationStore, InMemoryConversationStore
 from .types import Message, ModelOutput, ToolCall, ToolResult, Turn
+
+logger = logging.getLogger(__name__)
 
 
 class CancellationToken:
@@ -122,11 +125,15 @@ class Agent:
 
         # 系统提示（核心不注入工具语法文本；工具由 Model 适配器以原生 schema 传递）
         system_block = self.system_prompt.strip()
+        # S22：重试睡眠可中断——把取消回调注入模型包装（RetryingModel 支持）
+        self._set_cancelled_hook(model=self.model, token=token)
 
         for _ in range(self.max_tool_iterations):
-            # 协作式取消检查（S21）：用户中断则提前终止
+            # 协作式取消检查（S21）：用户中断则提前终止。
+            # S22（D5）：终止前 append assistant 消息——上下文永远平衡（user, assistant 成对），
+            # 用户随后发"继续"时不会出现 user 接 user 的失衡上下文。
             if token is not None and token.is_cancelled():
-                self.events.emit(Event(type="aborted", payload={}))
+                self._finish_aborted(conversation_id, store, executed, results)
                 return Turn(
                     text="已中断（用户取消）。",
                     tool_calls=executed,
@@ -144,14 +151,31 @@ class Agent:
             tools: list[ToolSpec] = self.registry.specs()
             # 流式核心（S21 移植 pi 模式）：模型支持 respond_stream 则事件驱动流式，
             # 否则回退非流式 respond（向后兼容）。
-            if hasattr(self.model, "respond_stream"):
-                output = self.model.respond_stream(
-                    prompt_messages,
-                    tools,
-                    on_event=lambda e: self.events.emit(e),
+            # S22（D1）：模型调用包异常——调用失败（网络/API 错误，重试耗尽后）时
+            # **不冒泡不毒化上下文**：append assistant 失败消息保持 user/assistant 配对，
+            # 结束本轮并把错误说明带给 API 层（转 5xx / SSE error 帧）。
+            try:
+                if hasattr(self.model, "respond_stream"):
+                    output = self.model.respond_stream(
+                        prompt_messages,
+                        tools,
+                        on_event=lambda e: self.events.emit(e),
+                    )
+                else:
+                    output = self.model.respond(prompt_messages, tools)
+            except Exception as exc:  # 任何模型/网络异常都要保持上下文平衡
+                logger.warning("模型调用失败: %s", exc)
+                err_text = f"（生成失败）{exc}"
+                store.append(conversation_id, Message(role="assistant", content=err_text))
+                self.events.emit(Event(type="text", payload={"content": err_text}))
+                self.events.emit(Event(type="error", payload={"message": err_text}))
+                self.events.emit(Event(type="done", payload={}))
+                return Turn(
+                    text=err_text,
+                    tool_calls=executed,
+                    tool_results=results,
+                    error=err_text,
                 )
-            else:
-                output = self.model.respond(prompt_messages, tools)
 
             if not output.tool_calls:
                 # 本轮无工具调用 → 产出最终文本
@@ -166,9 +190,55 @@ class Agent:
                 Event(type="tool_call", payload={"name": [c.name for c in output.tool_calls]})
             )
             calls = list(output.tool_calls)
+
+            # S23 协议完整化：**先把 assistant 消息（含原生 tool_calls 声明）落进 store**，
+            # 再回填 tool 结果——上下文序列变为合法配对：
+            #   user → assistant(tool_calls 声明) → tool(带 tool_call_id) → ...
+            # （此前只存 tool 结果、assistant 声明丢失，DashScope 宽容模式能跑但不规范，
+            #   多工具并行时模型只能靠文本前缀猜归属）
+            store.append(
+                conversation_id,
+                Message(
+                    role="assistant",
+                    content=output.text,
+                    metadata={
+                        "tool_calls": [
+                            {
+                                "name": c.name,
+                                "arguments": c.arguments,
+                                "id": c.id or "",
+                            }
+                            for c in calls
+                        ]
+                    },
+                ),
+            )
+
+            # S22（D3）截断防护完整化（移植 pi 的 stopReason=length 全拒）：
+            # 输出被 token 上限截断时，工具参数可能 JSON 合法但语义残缺——无条件拒绝整批，
+            # 回填错误让模型下一轮重发。仅靠 _malformed（JSON 解析失败）不够：
+            # 流式参数可能恰好凑出完整 JSON。
+            if output.truncated:
+                for call in calls:
+                    result = ToolResult(
+                        call=call,
+                        ok=False,
+                        content=(
+                            f"工具 {call.name} 未执行：模型输出被 token 上限截断"
+                            "（参数可能不完整），请重新发起完整调用。"
+                        ),
+                    )
+                    executed.append(call)
+                    results.append(result)
+                    self._append_tool_result(store, conversation_id, call, result)
+                    self.events.emit(
+                        Event(type="tool_result", payload={"name": call.name, "ok": False})
+                    )
+                continue  # 下一轮：模型看到错误回填后重发完整调用
+
             # 工具执行前再检查取消（S21）：取消则不再执行剩余工具
             if token is not None and token.is_cancelled():
-                self.events.emit(Event(type="aborted", payload={}))
+                self._finish_aborted(conversation_id, store, executed, results)
                 return Turn(
                     text="已中断（用户取消）。",
                     tool_calls=executed,
@@ -184,14 +254,49 @@ class Agent:
             for call, result in zip(calls, results_ordered, strict=True):
                 executed.append(call)
                 results.append(result)
-                backfill = backfill_content_tool_result(result)
-                store.append(conversation_id, Message(role="tool", content=backfill))
+                self._append_tool_result(store, conversation_id, call, result)
                 self.events.emit(
                     Event(type="tool_result", payload={"name": call.name, "ok": result.ok})
                 )
-        # 达到迭代上限则报错返回
-        return Turn(
-            text="达到最大工具迭代次数，已终止。",
-            tool_calls=executed,
-            tool_results=results,
-        )
+        # 达到迭代上限则报错返回（S22：带 error 字段，API 层直接读，不再文本匹配）
+        msg = "达到最大工具迭代次数，已终止。"
+        store.append(conversation_id, Message(role="assistant", content=msg))
+        return Turn(text=msg, tool_calls=executed, tool_results=results, error=msg)
+
+    def _finish_aborted(
+        self,
+        conversation_id: str,
+        store: ConversationStore,
+        executed: list[ToolCall],
+        results: list[ToolResult],
+    ) -> None:
+        """取消终止的收尾（S22 D5）：append assistant 消息保持上下文平衡 + 发事件。"""
+        cancel_text = "已中断（用户取消）。"
+        store.append(conversation_id, Message(role="assistant", content=cancel_text))
+        self.events.emit(Event(type="aborted", payload={}))
+        self.events.emit(Event(type="text", payload={"content": cancel_text}))
+        self.events.emit(Event(type="done", payload={}))
+
+    @staticmethod
+    def _append_tool_result(
+        store: ConversationStore,
+        conversation_id: str,
+        call: ToolCall,
+        result: ToolResult,
+    ) -> None:
+        """S23：tool 结果回填——metadata 带 tool_call_id（与 assistant 声明配对）。"""
+        backfill = backfill_content_tool_result(result)
+        metadata: dict[str, object] = {}
+        if call.id:
+            metadata["tool_call_id"] = call.id
+        store.append(conversation_id, Message(role="tool", content=backfill, metadata=metadata))
+
+    @staticmethod
+    def _set_cancelled_hook(model: Model, token: CancellationToken | None) -> None:
+        """S22（D2）：把取消回调注入模型包装（RetryingModel.set_cancelled），
+        使重试退避睡眠期间可被 cancel 中断（分段检查）。模型不支持则静默跳过。"""
+        if token is None:
+            return
+        setter = getattr(model, "set_cancelled", None)
+        if setter is not None:
+            setter(token.is_cancelled)

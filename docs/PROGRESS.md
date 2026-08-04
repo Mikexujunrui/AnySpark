@@ -223,8 +223,8 @@
 | S18 benchmark 对比层 | 裸 LLM 基线三任务（诚实：短程相当） | 报告已生成 | ✅ 完成 |
 | S19 人工层 | 盲测材料（匿名A/B+三档打分表） | 材料待主人打分 | ✅ 完成 |
 | S20 状态演化 | 角色/地点 state 增量+历史表+注入 | 真实链路验证 | ✅ 完成 |
-| **S21 系统层**（待做） | 分支剧本测哲学过程指标（提问率↓/修改率↓/说明书累积），复用 /api/stats | 待设计 | ⏳ |
-| **Backlog**（按需） | 多线叙事时间建模（narrative_order 防倒叙误报）/ 后台任务独立 worker / httpx2 迁移 | | ⏳ |
+| **S21 系统层**（规划中） | 分支剧本测哲学过程指标（提问率↓/修改率↓/说明书累积），复用 /api/stats（S21 主体「Agent 循环工程化」已完成，见下方；系统层为其在整书规模上的指标验证） | 待设计 | ⏳ |
+| **Backlog**（按需） | 多线叙事时间建模（narrative_order 防倒叙误报）/ httpx2 迁移（后台任务独立 worker 已随 S21c 完成，从 backlog 划除） | | ⏳ |
 
 ---
 
@@ -472,3 +472,31 @@
 - `docs/DESIGN.md` §0 战略定位 / §9 T6 阶段0·6 验收 / §10 整节——删除"旧数据一次性导入/数据切换导入"路线，改为"不做旧数据导入/转移，绿地空库起步"（决策 A 2026-08-02，修订说明已加在 §10 开头）
 - `docs/AUDIT-V1.md`：T7 指标转 ✅（§1 表 + §3 清单）
 
+
+---
+
+## S22-S24 循环健壮性对齐 pi（已完成 ✅）
+
+**背景**：主人要求"先把本地做到和 pi 系统一样好用"。S21 移植了 pi 的 5 项循环能力，但全量对比 `E:\Desktop\pi\pi-main`（pi-monorepo 源码，与运行时 node_modules 逐字节一致）后确认：**约一半健壮性/效率机制没抄**——Agent 循环无异常处理、重试不覆盖 429/5xx、截断防护只半套、tool 消息无 tool_call_id 配对、压缩 cut 点可能落在 tool 结果上、摘要输入截断 80%。分三阶段补齐：
+
+### S22 健壮性底线（D1/D2/D3/D5）
+- **D1 异常上下文平衡**（对齐 pi `handleRunFailure`）：`core/loop.py` 模型调用包 try/except——失败不再冒泡成 500 且毒化上下文，而是 **append assistant 失败消息保持 user/assistant 配对** + `Turn.error` 字段（API 层直接读，不再文本匹配"达到最大工具迭代"）
+- **D2 重试覆盖 429/5xx**（对齐 pi `pi-ai/dist/utils/retry.js` 分类）：`core/retry.py` 重试判定升级为**类型+错误文本双通道**——瞬时类（429/500/502/503/524/rate limit/overloaded/connection/timeout）可重试；quota/billing 类（insufficient_quota/out of budget/quota exceeded/billing）**立刻失败不浪费退避**。覆盖 OpenAI SDK 的 APIStatusError（非 TimeoutError/ConnectionError 子类）。退避睡眠可取消（`cancelled` 回调 + 200ms 分段检查，Agent 每轮注入 `RetryingModel.set_cancelled`）
+- **D3 截断防护完整化**（对齐 pi `stopReason==="length"` 全拒）：`deepseek.py` 流式/非流式路径**读 finish_reason**，`ModelOutput.truncated` 标记；Agent 循环对 truncated 的整批工具调用**无条件拒绝**回填错误让模型重发（此前只靠 JSON 解析失败，截断可能产生 JSON 合法但语义残缺的参数）
+- **D5 取消上下文平衡**：cancel 分支 append assistant "已中断（用户取消）。"——上下文永远配对，续聊不再 user 接 user
+
+### S23 协议完整化（D4）
+- `ToolCall.id` 字段 + **assistant 的 tool_calls 声明落 store**（此前只存 tool 结果，序列畸形：user→tool，DashScope 宽容模式才跑通）+ tool 结果 metadata 带 `tool_call_id` 配对
+- `to_openai_message` 转换原生 `tool_calls`/`tool_call_id`（仅当全部调用带真实 id；旧数据/无 id 链路保持纯文本兼容）
+- **真实链路验证**：DeepSeek 自主 list→read→write 三工具闭环正常；取消场景序列 `user → assistant(tool_calls 声明, 带原生 id) → assistant(已中断)` 平衡无畸形
+
+### S24 压缩重构（对齐 pi compaction）
+- **E1 效率**：指纹**先查**（缓存命中直接返回，连计数都不做）→ 字符粗算（高估安全，滤掉绝大多数轮次）→ tiktoken 精算仅接近预算时——省每轮全量编码
+- **B1 切割合法性**：保留段按 **token 预算**（KEEP_RECENT_TOKENS=4000，至少 KEEP_RECENT_MIN=4 条）往回找，**永不切在 tool 结果上**（孤立 tool 一起切掉）
+- **B2 摘要信息密度**：摘要输入**全量序列化**可压缩段（此前只喂最后 20 条×200 字，中间关键指令全丢）；**增量更新**——识别上一次摘要作 previous，UPDATE 模式追加新进展（对齐 pi previousSummary + UPDATE_SUMMARIZATION_PROMPT）
+
+**门禁**：ruff + mypy 全绿；pytest **110**（+6：异常平衡/取消平衡/截断全拒/配对落库/无 id 兼容/重试 429·503·quota·取消 + 压缩 5 项）
+
+**真实链路验证**：真实 DeepSeek chat（list→read→write 3 工具闭环落盘）；SSE 流式正常；cancel → `{"ok":true}` + 上下文平衡（SQLite 查证 user→assistant(声明带原生 id)→assistant(中断)）
+
+**踩坑**：① heredoc 分隔符不加引号时 bash 会吞 `\n` 导致 Python 替换脚本静默失败——heredoc 用 'EOF' 引号；② 并发取消时"最近活跃 token"可能命中另一会话（S21 既有设计，前端传 conversation_id 即可规避）；③ cancel 若在 run_agent 线程注册 token 前到达会错过——实际使用前端总传 conv_id，不受影响

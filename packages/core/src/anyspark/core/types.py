@@ -31,10 +31,15 @@ class Message:
 # ---------------------------------------------------------------------------
 @dataclass
 class ToolCall:
-    """模型发起的一次工具调用（由 loop 解析模型输出得到）。"""
+    """模型发起的一次工具调用（由 loop 解析模型输出得到）。
+
+    id: 厂商返回的工具调用 ID（S23 协议完整化——tool 消息回填时配对用）；
+        厂商未提供时为空字符串，回填仍可依赖名称+自然语言前缀（兼容旧链路）。
+    """
 
     name: str
     arguments: dict[str, Any]
+    id: str = ""
 
 
 @dataclass
@@ -49,11 +54,16 @@ class ToolResult:
 
 @dataclass
 class Turn:
-    """Agent 循环的一步：一次输出，可能含文本与若干工具调用。"""
+    """Agent 循环的一步：一次输出，可能含文本与若干工具调用。
+
+    error（S22）：本轮非正常结束的错误说明（模型调用失败/达到迭代上限）；
+    None 表示正常结束。API 层据此返回 5xx，而不是依赖文本前缀匹配。
+    """
 
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_results: list[ToolResult] = field(default_factory=list)
+    error: str | None = None
 
 
 @dataclass
@@ -62,7 +72,12 @@ class ModelOutput:
 
     core 定义此结构，任何真实模型适配器（如 anyspark-app 的 DeepSeekModel）
     把自家 API 的响应翻译成此结构返回给 Agent 循环。
+
+    truncated（S22 移植 pi 的 stopReason=length 判定）：输出被 token 上限截断。
+    适配器在 finish_reason=="length" 时置 True；Agent 循环据此**批量拒绝**工具调用
+    （截断的参数可能 JSON 合法但语义残缺，执行会写坏数据），让模型重发。
     """
 
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
+    truncated: bool = False
