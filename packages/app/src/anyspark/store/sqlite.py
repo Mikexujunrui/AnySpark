@@ -144,6 +144,22 @@ class SqliteConversationStore(ConversationStore):
                     ),
                 )
 
+    def recent_messages(self, limit: int = 10) -> list[Message]:
+        """S28：跨会话最近消息（按全局 id 倒序）——信号提炼的对话上下文。
+        返回保序（最旧在前）。"""
+        rows = self._conn.execute(
+            "SELECT role, content, metadata FROM messages ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [
+            Message(
+                role=row["role"],
+                content=row["content"],
+                metadata=json.loads(row["metadata"] or "{}"),
+            )
+            for row in reversed(rows)
+        ]
+
 
 # ---------------------------------------------------------------------------
 # 章节存储（写作产出：text 正文 + 版本历史，支持修改）

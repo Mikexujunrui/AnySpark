@@ -26,6 +26,7 @@ from anyspark.align import (
     ManualEntry,
     ManualInjector,
     ManualStore,
+    PreferenceExtractor,
     SignalCollector,
     SignalStore,
     build_agency_block,
@@ -264,26 +265,60 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     _active_agents: dict[str, Agent] = {}
     _active_lock: threading.Lock = threading.Lock()
     # 后台任务队列 + 独立 worker（S21 修 BackgroundTasks 共享线程池排队缺陷）：
-    # 图谱抽取/伏笔回收不占请求线程池，请求立即返回、后台串行处理
-    _bg_queue: queue.Queue[tuple[str, str, int]] = queue.Queue()
+    # 图谱抽取/伏笔回收/信号提炼不占请求线程池，请求立即返回、后台串行处理。
+    # 任务负载类型（S28 扩展）：("chapter", title, content, order) 图谱抽取/伏笔回收；
+    # ("refine",) 信号→说明书提炼。
+    _bg_queue: queue.Queue[tuple[str, str, str, int] | tuple[str]] = queue.Queue()
 
     def _bg_worker() -> None:
         while True:
             try:
-                title, content, order = _bg_queue.get()
-                _extract_chapter("main", title, content, order)
+                task = _bg_queue.get()
+                if task and task[0] == "chapter" and len(task) == 4:
+                    _, title, content, order = task
+                    _extract_chapter("main", title, content, order)
+                elif task and task[0] == "refine":
+                    _refine_from_signals()
             except Exception as exc:
                 logger.warning("后台任务异常: %s", exc)
             finally:
                 _bg_queue.task_done()
 
     threading.Thread(target=_bg_worker, daemon=True).start()
+
+    def _refine_from_signals() -> None:
+        """S28：信号 → 偏好提炼 → 说明书（后台异步，不阻塞用户操作）。
+
+        修复对齐闭环缺口：此前 /api/signals 只记录信号，说明书永不自动更新
+        （PreferenceExtractor 存在但从未在 API 层接线）——用户操作无法变成
+        写作约束，T7"修改率↓/说明书累积"的机制前提缺失。
+        """
+        try:
+            recent = signals.recent(limit=20)
+            if not recent:
+                return
+            # 最近对话（任意会话，取最近 10 条）作为提炼上下文
+            dialogue = store.recent_messages(10)
+            entries = preference_extractor.extract(dialogue, recent, max_items=3)
+            existing = {e.content for e in manual.list("project", "main")}
+            added = 0
+            for e in entries:
+                if e.content in existing:
+                    continue
+                manual.add(e)
+                added += 1
+            if added:
+                logger.info("信号提炼: +%d 条说明书条目", added)
+        except Exception as exc:
+            logger.warning("信号提炼失败(不影响主链路): %s", exc)
+
     manual_injector = ManualInjector(manual)
     signal_collector = SignalCollector(signals)
     # 默认真实模型套上组合式重试包装（S15：重试是 core 可拼接组件，不内嵌在模型里）
     model = model or RetryingModel(DeepSeekModel())
     plot_generator = PlotGenerator(model)  # 依赖 model，须在其初始化之后
     plot_resolver = PlotResolver(model)  # 伏笔自动回收（S17：章节落盘后台识别揭开）
+    preference_extractor = PreferenceExtractor(model)  # S28：信号→说明书提炼（后台）
     # 知识图谱（S7：AI 事实源）
     graph = GraphStore(real_db)
     graph_extractor = GraphExtractor(model)
@@ -512,7 +547,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                         chs = chapters.list_by_book("main")
                         order = next((c.order_index for c in chs if c.title == title), len(chs))
                         logger.info("后台图谱抽取挂载: 《%s》", title)
-                        _bg_queue.put((title, content, order))
+                        _bg_queue.put(("chapter", title, content, order))
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
         # AI 档位声明解析（机制 2：AI 可声明，用户点选确认）
         declared = parse_agency_declaration(turn.text)
@@ -559,7 +594,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                                     len(chs),
                                 )
                                 # 后台队列处理（不阻塞 SSE 的 done 帧）
-                                _bg_queue.put((title, content, order))
+                                _bg_queue.put(("chapter", title, content, order))
             except Exception as exc:  # 异常转 error 帧（不中断连接）
                 logger.exception("chat/stream 执行异常: %s", exc)
                 events_queue.put(("error", {"message": f"执行失败: {exc}"}))
@@ -673,6 +708,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             sig = signal_collector.custom(req.content, req.context)
         else:  # modified
             sig = signal_collector.modified(req.content, req.new_content or "", req.context)
+        # S28：信号 → 后台提炼 → 说明书（异步，不阻塞操作；修复对齐闭环缺口）
+        _bg_queue.put(("refine",))
         return sig.to_dict()
 
     @app.post("/api/explore/intent", response_model=dict[str, object])

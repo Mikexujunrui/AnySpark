@@ -352,3 +352,41 @@ def test_steer_api_rejects_idle_session() -> None:
     r = client.post("/api/chat/steer", json={"conversation_id": "nonexistent", "message": "插话"})
     assert r.status_code == 200
     assert r.json()["ok"] is False
+
+
+def test_signal_triggers_manual_refine() -> None:
+    """S28 对齐闭环修复：POST /api/signals → 后台提炼 → 说明书自动出现条目。"""
+    import time
+
+    from fastapi.testclient import TestClient
+
+    from anyspark.core import ModelOutput
+    from anyspark.server.app import build_app
+
+    class RefineModel:
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            return ModelOutput(
+                text='[{"content": "避免血腥描写", "confidence": 0.8, "activity": "high"}]'
+            )
+
+    client = TestClient(build_app(model=RefineModel(), db_path=":memory:"))
+    r = client.post(
+        "/api/signals",
+        json={
+            "kind": "modified",
+            "content": "这段太血腥了，改含蓄一点",
+            "new_content": "改了版本",
+            "context": "第一章",
+        },
+    )
+    assert r.status_code == 200
+    # 后台提炼是异步的：轮询等待 manual 出现自动条目
+    for _ in range(20):
+        time.sleep(0.3)
+        entries = client.get("/api/manual").json()
+        if any(e["content"] == "避免血腥描写" for e in entries):
+            break
+    assert any(e["content"] == "避免血腥描写" for e in entries), "信号未被提炼成说明书条目"
+    # 来源为 auto（自动提炼），scope 为 project
+    auto = next(e for e in entries if e["content"] == "避免血腥描写")
+    assert auto["source"] == "auto"

@@ -557,3 +557,25 @@
 **门禁**：ruff + mypy 全绿；pytest 全绿；对照 7/7 PASS；压力 6/6 PASS
 
 **踩坑**：① pi 的 fake streamFn 必须返回带 `.result()` 的 EventStream（不是 async generator）；② AgentTool 需要 TypeBox `parameters` 否则 validateToolArguments 抛 "Cannot use 'in' operator"；③ pi 侧 toolResult 消息结构与本地不同（blocks vs 字符串）——归一化为语义轨迹对比；④ 对照测试的价值：不仅证明对齐，还**反向发现本地实现缺陷**（steer 终答轮丢失、保留段阈值不缩放）
+
+
+---
+
+## S21 系统层（已完成 ✅）
+
+**背景**：S21 主体（Agent 循环工程化）此前已完成；系统层是 T7 验证标准要求的**整书规模哲学指标验证**——修改率↓ / 说明书累积 / 偏好遵从，用分支剧本真实测。
+
+### 修复前置缺口：信号→说明书提炼闭环（S28 发现）
+**真实缺口**：`PreferenceExtractor` 存在于 align 包（S2 冒烟脚本直接调过），但 **app.py 从未接线**——`/api/signals` 只记录信号+调节能动性，说明书永不自动更新。用户在真实产品里操作，约束不会变成写作指令——**对齐闭环（操作→信号→提炼→说明书→注入）在真实链路是断的**。
+**修复**：`_bg_queue` 扩展任务类型（"chapter"/"refine"），signals 端点入队提炼任务，后台 worker 调 PreferenceExtractor → manual.add（去重）；SqliteConversationStore 加 `recent_messages()`（跨会话最近对话作提炼上下文，避开 :memory: 每连接独立库的坑）。
+
+### 分支剧本验证（benchmarks/system/learn_curve.py，真实 DeepSeek，A/B 隔离实例）
+- **分支 A（对齐学习）**：轮 1 写（无偏好）→ 用户 rejected+modified（"不要破折号"）→ 后台提炼说明书 → 轮 2/3 续写（不重复指令）→ accepted
+- **分支 B（对照组）**：3 轮直接写，无信号
+- **结果**：
+  - 说明书累积：A=1 条（"避免使用破折号（——），一律用句号断句"）✅ / B=0 条 ✅
+  - 修改率趋势：A 分支 accepted=2 / changed=2（轮 1 全改 → 轮 2/3 全接受，↓ 方向）✅
+  - 偏好遵从：A 分支破折号 4→2（末章 < 首章，注入真实生效，无需重复指令）✅；B 分支无学习信号
+- **学习曲线真实形态**：轮 2 破折号 5（提炼注入有延迟，非立刻收敛）——符合"对齐是渐进的"预期，诚实记录
+
+**门禁**：ruff + mypy 全绿；pytest **183**（+1：信号触发提炼 API 测试）；总闸全绿
