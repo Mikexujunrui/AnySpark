@@ -68,6 +68,7 @@
 | 氛围滑块注入归属 align（mood.py，B 类载体与 agency/bias 同包） | 机制4 | `align/mood.py`（S15） |
 | 前端抽屉按需加载（React.lazy + Suspense，独立 chunk） | 机制5 抽屉 | `frontend/src/app/App.tsx`（S15） |
 | 伏笔闭环（注入写作/自动回收/关注度 care-ignore） | T2 阶段3 + 机制 | `template/plot.py` + `app.py`（S17） |
+| 角色/地点状态演化（state 增量拼接 + 演化历史表 + 注入优先显示状态） | 老愿景内核 v4 轻量实现 | `graph/`（S20） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134

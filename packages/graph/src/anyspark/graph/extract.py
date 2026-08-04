@@ -24,10 +24,13 @@ EXTRACT_PROMPT = (
     "2. 实体类型只能是：角色/地点/事件/物件/设定（五选一）。\n"
     "3. 关系：两个实体之间明确的关系（如 认识/兄妹/师徒/居住/敌视），类型用自然语言。\n"
     "4. 事件：本章发生的具体事件（time_point=章节号，如'第3章'），involved 列出涉及实体名。\n"
-    "5. 已在'已有实体'清单里的不要重复抽取，但可以在 relations/events 的 involved 里引用。\n"
+    "5. 已在'已有实体'清单里的不要重复抽取（不出现在 entities），"
+    "但若本章该实体状态发生变化，在 states 里单独更新（见下）。\n"
     "输出（严格 JSON，不要其它文字）：\n"
     '{"entities": [{"name": "实体名", "type": "角色", "aliases": ["别名"], '
-    '"description": "一句明确无歧义的描述"}],\n'
+    '"description": "一句明确无歧义的描述", '
+    '"state": "本章该实体发生的变化/新处境（一句话；本章无变化可省略）"}],\n'
+    ' "states": [{"name": "已有实体名", "state": "本章该实体状态变化（一句话）"}],\n'
     ' "relations": [{"from": "甲", "to": "乙", "type": "关系类型", '
     '"description": "关系说明"}],\n'
     ' "events": [{"time_point": "第N章", "label": "事件名", "description": "事件说明", '
@@ -45,6 +48,7 @@ class EntityDraft:
     entity_type: str
     aliases: list[str] = field(default_factory=list)
     description: str = ""
+    state: str = ""  # 本章状态变化（S20：增量拼接成角色/地点演化）
 
 
 @dataclass
@@ -74,6 +78,15 @@ class Extraction:
     entities: list[EntityDraft] = field(default_factory=list)
     relations: list[RelationDraft] = field(default_factory=list)
     events: list[EventDraft] = field(default_factory=list)
+    states: list[StateUpdate] = field(default_factory=list)  # S20：已有实体状态更新
+
+
+@dataclass
+class StateUpdate:
+    """已有实体的状态变化（不出现在 entities，仅更新 state）。"""
+
+    name: str
+    state: str
 
 
 class GraphExtractor:
@@ -105,9 +118,12 @@ class GraphExtractor:
                 [Message(role="system", content=prompt)],
                 [],
             )
-            parsed = self._parse(output.text)
-            if parsed.entities:
+            candidate = self._parse(output.text)
+            # 实体或状态更新任一非空即接受（S20：states 也是有效产出）
+            if candidate.entities or candidate.states:
+                parsed = candidate
                 break
+            parsed = candidate
         return parsed
 
     def _parse(self, raw: str) -> Extraction:
@@ -129,6 +145,7 @@ class GraphExtractor:
                     entity_type=etype,
                     aliases=aliases,
                     description=str(item.get("description", "")).strip(),
+                    state=str(item.get("state", "")).strip(),
                 )
             )
 
@@ -159,6 +176,12 @@ class GraphExtractor:
                     involved=involved,
                 )
             )
+        # S20：已有实体状态更新（不建新实体，仅更新 state）
+        for item in _as_dict_list(data.get("states")):
+            name = str(item.get("name", "")).strip()
+            state = str(item.get("state", "")).strip()
+            if name and state:
+                extraction.states.append(StateUpdate(name=name, state=state))
         return extraction
 
 

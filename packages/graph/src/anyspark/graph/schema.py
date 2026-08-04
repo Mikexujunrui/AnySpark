@@ -24,6 +24,23 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+
+def _merge_state(old_state: str, delta: str) -> str:
+    """状态增量拼接：旧状态 + 本章变化（S20 角色/地点随时间演化）。
+
+    - 无变化（delta 空）→ 保留旧状态
+    - 旧状态空 → 直接取 delta
+    - 都有 → "旧；本章：变化"（自然语言承载，模型无关）
+    """
+    d = delta.strip().rstrip("；;").strip()
+    o = old_state.strip().rstrip("；;").strip()
+    if not d:
+        return old_state
+    if not o:
+        return d
+    return f"{o}；{d}"
+
+
 # 实体类型：明确无歧义的自然语言分类（模型无关）
 ENTITY_TYPES = ("角色", "地点", "事件", "物件", "设定")
 
@@ -42,6 +59,7 @@ class Entity:
     name: str
     aliases: list[str] = field(default_factory=list)
     description: str = ""
+    state: str = ""  # 截至最新章节的状态（自然语言增量拼接；S20 角色/地点随时间演化）
     first_chapter: str = ""
     last_chapter: str = ""
     first_order: int = 0
@@ -55,6 +73,7 @@ class Entity:
             "name": self.name,
             "aliases": self.aliases,
             "description": self.description,
+            "state": self.state,
             "first_chapter": self.first_chapter,
             "last_chapter": self.last_chapter,
             "first_order": self.first_order,
@@ -138,6 +157,7 @@ class GraphStore:
                 name TEXT NOT NULL,
                 aliases TEXT NOT NULL DEFAULT '[]',
                 description TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT '',
                 first_chapter TEXT NOT NULL DEFAULT '',
                 last_chapter TEXT NOT NULL DEFAULT '',
                 first_order INTEGER NOT NULL DEFAULT 0,
@@ -146,6 +166,15 @@ class GraphStore:
                 updated_at TEXT NOT NULL,
                 UNIQUE(book_id, name)
             );
+            CREATE TABLE IF NOT EXISTS entity_states (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_id TEXT NOT NULL,
+                chapter_ref TEXT NOT NULL DEFAULT '',
+                state_after TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_entity_states_eid
+                ON entity_states(entity_id, id);
             CREATE TABLE IF NOT EXISTS graph_relations (
                 id TEXT PRIMARY KEY,
                 book_id TEXT NOT NULL,
@@ -180,6 +209,12 @@ class GraphStore:
                 ON graph_events(book_id, chapter_order);
             """
         )
+        # 旧库兼容（S20）：state 列
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(graph_entities)")}
+        if "state" not in cols:
+            self._conn.execute(
+                "ALTER TABLE graph_entities ADD COLUMN state TEXT NOT NULL DEFAULT ''"
+            )
         self._conn.commit()
 
     def close(self) -> None:
@@ -197,10 +232,14 @@ class GraphStore:
         description: str = "",
         chapter_ref: str = "",
         chapter_order: int = 0,
+        state_delta: str = "",
     ) -> Entity:
-        """同名实体合并：别名并集、描述覆盖、出现章节范围累计。"""
+        """同名实体合并：别名并集、描述覆盖、出现章节范围累计。
+
+        state_delta（S20）：本章状态变化——增量拼接到旧状态（"旧；本章：变化"），
+        并记录演化快照到 entity_states（角色/地点随时间自然变化）。
+        """
         aliases = aliases or []
-        etype = entity_type if entity_type in ENTITY_TYPES else "设定"
         eid = uuid.uuid4().hex
         now = _now()
         with self._lock:
@@ -210,19 +249,25 @@ class GraphStore:
             ).fetchone()
             if row:
                 eid = row["id"]
+                # 类型：空串=保留原类型（S20 states 只更新状态时用）
+                etype = entity_type if entity_type in ENTITY_TYPES else row["entity_type"]
                 merged = list(dict.fromkeys(json.loads(row["aliases"]) + aliases))
                 first_ch = row["first_chapter"] or chapter_ref
                 first_ord = row["first_order"] or chapter_order
                 last_ch = chapter_ref if chapter_order >= row["last_order"] else row["last_chapter"]
                 last_ord = max(row["last_order"], chapter_order)
+                # 状态增量拼接（S20）：旧状态 + 本章变化
+                old_state = str(row["state"] or "")
+                new_state = _merge_state(old_state, state_delta)
                 self._conn.execute(
                     "UPDATE graph_entities SET entity_type=?, aliases=?, description=?, "
-                    "first_chapter=?, last_chapter=?, first_order=?, last_order=?, updated_at=? "
-                    "WHERE id=?",
+                    "state=?, first_chapter=?, last_chapter=?, first_order=?, "
+                    "last_order=?, updated_at=? WHERE id=?",
                     (
                         etype,
                         json.dumps(merged, ensure_ascii=False),
                         description,
+                        new_state,
                         first_ch,
                         last_ch,
                         first_ord,
@@ -232,10 +277,12 @@ class GraphStore:
                     ),
                 )
             else:
+                etype = entity_type if entity_type in ENTITY_TYPES else "设定"
+                new_state = state_delta
                 self._conn.execute(
                     "INSERT INTO graph_entities (id, book_id, entity_type, name, aliases, "
-                    "description, first_chapter, last_chapter, first_order, last_order, "
-                    "created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "description, state, first_chapter, last_chapter, first_order, "
+                    "last_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         eid,
                         book_id,
@@ -243,6 +290,7 @@ class GraphStore:
                         name,
                         json.dumps(aliases, ensure_ascii=False),
                         description,
+                        new_state,
                         chapter_ref,
                         chapter_ref,
                         chapter_order,
@@ -250,6 +298,13 @@ class GraphStore:
                         now,
                         now,
                     ),
+                )
+            # 状态演化快照（S20）：有变化才记录
+            if new_state and (not row or new_state != str(row["state"] or "")):
+                self._conn.execute(
+                    "INSERT INTO entity_states (entity_id, chapter_ref, state_after, created_at) "
+                    "VALUES (?,?,?,?)",
+                    (eid, chapter_ref, new_state, now),
                 )
             self._sync_fts(eid, name, aliases)
             self._conn.commit()
@@ -550,6 +605,7 @@ class GraphStore:
                 e.description,
                 chapter_ref,
                 chapter_order,
+                getattr(e, "state", ""),
             )
         # 补建引用缺失实体（引用完整性）
         referenced: list[str] = []
@@ -560,6 +616,21 @@ class GraphStore:
         for name in referenced:
             if not self.get_entity(book_id, name):
                 self.upsert_entity(book_id, name, "设定", [], "", chapter_ref, chapter_order)
+        # S20：已有实体状态更新（仅更新已存在实体的 state，不建新实体）
+        states = getattr(extraction, "states", [])
+        for st in states:
+            if not self.get_entity(book_id, st.name):
+                continue  # states 语义=已有实体；不存在则跳过（防误建）
+            self.upsert_entity(
+                book_id,
+                st.name,
+                "",
+                None,
+                "",
+                chapter_ref,
+                chapter_order,
+                st.state,
+            )
         for r in relations:
             self.upsert_relation(
                 book_id, r.from_name, r.to_name, r.rel_type, r.description, chapter_ref
@@ -598,6 +669,7 @@ class GraphStore:
             name=row["name"],
             aliases=json.loads(row["aliases"] or "[]"),
             description=row["description"],
+            state=row["state"] or "",
             first_chapter=row["first_chapter"],
             last_chapter=row["last_chapter"],
             first_order=row["first_order"],

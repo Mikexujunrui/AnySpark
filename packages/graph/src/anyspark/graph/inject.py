@@ -35,7 +35,8 @@ class GraphInjector:
         if facts["entities"]:
             lines.append("# 已固化事实（知识图谱）")
             for e in facts["entities"]:
-                note = e.description[:80] if e.description else ""
+                # S20：优先显示截至当前时空点的状态（角色/地点随时间演化），无状态退回静态描述
+                note = (e.state or e.description or "")[:120]
                 lines.append(f"- {e.name}（{e.entity_type}）{('：' + note) if note else ''}")
         if facts["relations"]:
             lines.append("实体关系：")

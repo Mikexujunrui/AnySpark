@@ -15,6 +15,7 @@ from anyspark.graph import (
     GraphStore,
     GraphVerifier,
     RelationDraft,
+    StateUpdate,
 )
 
 EXTRACT_JSON = """
@@ -65,6 +66,52 @@ def test_upsert_entity_merges_aliases_and_range() -> None:
     # 非法类型映射为"设定"
     e3 = g.upsert_entity("main", "怪谈", "weird", [], "", "第一章", 1)
     assert e3.entity_type == "设定"
+
+
+def test_entity_state_incremental_merge() -> None:
+    """S20：状态增量拼接 + 演化快照 + 无变化不覆盖。"""
+    g = _store()
+    e1 = g.upsert_entity("main", "陈渡", "角色", [], "", "第一章", 1, "收到死亡预告信")
+    assert e1.state == "收到死亡预告信"
+    e2 = g.upsert_entity("main", "陈渡", "角色", [], "", "第二章", 2, "破解怀表密码")
+    assert e2.state == "收到死亡预告信；破解怀表密码"
+    # 无变化不覆盖、不新增快照
+    e3 = g.upsert_entity("main", "陈渡", "角色", [], "", "第三章", 3, "")
+    assert e3.state == "收到死亡预告信；破解怀表密码"
+    # 演化快照：两次变化两条记录
+    rows = g._conn.execute(
+        "SELECT chapter_ref, state_after FROM entity_states WHERE entity_id=? ORDER BY id",
+        (e1.id,),
+    ).fetchall()
+    assert len(rows) == 2
+    assert rows[0]["state_after"] == "收到死亡预告信"
+    assert rows[1]["state_after"] == "收到死亡预告信；破解怀表密码"
+
+
+def test_ingest_state_updates_existing_entity_only() -> None:
+    """S20 states：只更新已有实体状态（保留类型/章节推进），不存在的跳过。"""
+    g = _store()
+    g.upsert_entity("main", "陈渡", "角色", [], "雾城侦探", "第一章", 1, "收到死亡预告信")
+    # 第二章：states 更新陈渡（类型空=保留"角色"）；同时一个新实体
+    g.ingest_chapter(
+        "main",
+        "第二章",
+        2,
+        Extraction(
+            entities=[EntityDraft("沈青山", "角色", [], "法医", "与陈渡对峙")],
+            states=[
+                StateUpdate("陈渡", "破解怀表密码，决定找沈青山对质"),
+                StateUpdate("不存在的人", "不应建实体"),
+            ],
+        ),
+    )
+    chen = g.get_entity("main", "陈渡")
+    assert chen is not None
+    assert chen.state == "收到死亡预告信；破解怀表密码，决定找沈青山对质"
+    assert chen.entity_type == "角色"  # 类型保留
+    assert chen.last_chapter == "第二章"  # 章节推进
+    # states 里不存在的名字：不建实体（防误建）
+    assert g.get_entity("main", "不存在的人") is None
 
 
 def test_get_and_list_entities() -> None:
@@ -236,15 +283,17 @@ def test_injector_block() -> None:
         "第一章",
         1,
         Extraction(
-            entities=[EntityDraft("陈渡", "角色", [], "侦探")],
+            entities=[EntityDraft("陈渡", "角色", [], "侦探", "收到死亡预告信")],
             relations=[RelationDraft("陈渡", "雾城", "抵达", "抵达雾城")],
             events=[EventDraft("第一章", "抵达雾城", "雨夜抵达", ["陈渡"])],
         ),
     )
     block = GraphInjector(g).build_block("main", up_to_order=1)
     assert "已固化事实" in block
-    assert "陈渡" in block and "侦探" in block
+    assert "陈渡" in block
     assert "抵达" in block and "雨夜抵达" in block
+    # S20：注入优先显示当前状态（而非静态 description）
+    assert "收到死亡预告信" in block
 
 
 def test_verifier_facts_for() -> None:

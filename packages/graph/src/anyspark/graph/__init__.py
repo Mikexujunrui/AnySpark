@@ -6,7 +6,14 @@
 #
 __version__ = "0.0.1"
 
-from .extract import EntityDraft, EventDraft, Extraction, GraphExtractor, RelationDraft
+from .extract import (
+    EntityDraft,
+    EventDraft,
+    Extraction,
+    GraphExtractor,
+    RelationDraft,
+    StateUpdate,
+)
 from .inject import GraphInjector
 from .schema import ENTITY_TYPES, Entity, GraphEvent, GraphStore, Relation
 from .verify import FactEvidence, GraphVerifier
@@ -25,4 +32,5 @@ __all__ = [
     "GraphVerifier",
     "Relation",
     "RelationDraft",
+    "StateUpdate",
 ]
