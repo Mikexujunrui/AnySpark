@@ -46,3 +46,4 @@ Thumbs.db
 benchmarks/report/
 benchmarks/assets/
 benchmarks/unit/gold/
+benchmarks/hp_compare/hp_test.db
