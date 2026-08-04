@@ -79,6 +79,10 @@ DEFAULT_SYSTEM = (
     "若章节内容已在本轮对话历史或【已固化事实】注入中，直接基于它们，不要重复读取。"
     "写正文可用 write_chapter 保存。"
     "正文要具体、有画面感，杜绝空泛总结。"
+    # S32：首要目标是写出来并落盘；方向模糊才探索（不怂恿无关工具调用）
+    "首要目标是把正文写出来并落盘，不要为了准备而反复调用与当前任务无关的工具。"
+    "仅当用户给的任务方向不明确（种子含糊、无明确脉络、不知往哪个方向写）时，"
+    "先调用 explore_direction 生成方向建议并在回复中列出询问用户选择；方向明确时直接写。"
 )
 
 
@@ -102,6 +106,7 @@ class ChatRequest(BaseModel):
     mood: dict[str, float] | None = None  # 氛围滑块：维度→强度 0-100（如 tension: 80）
     # 增强按需装配（S15："你要什么再装什么"——默认关的增强，点亮才挂）
     enable_search: bool = False  # 网络搜索工具按需注册（默认关：写作主链路不背考据能力）
+    enable_extras: bool = False  # S32 扩展工具（read_material/check_text）按需点亮
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood/plot 子集
 
@@ -363,10 +368,26 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         agency_level: int | None = None,
         mood: dict[str, float] | None = None,
         enable_search: bool = False,
+        enable_extras: bool = False,
         skip_inject: set[str] | None = None,
     ) -> Agent:
         registry = ToolRegistry()
         register_writing_tools(registry, chapters)
+        # S32：探索工具无条件注册（修复核心——方向模糊时 Agent 可自觉探索；仅此工具常驻，
+        # 其余扩展（查资料/自查）按 enable_extras 点亮，防无关调用干扰主链路（本次实测踩坑））
+        from anyspark.server.tools_extras import (
+            make_check_implementer,
+            make_explore_implementer,
+            make_read_material_implementer,
+        )
+
+        explore_spec, explore_impl = make_explore_implementer(model)
+        registry.register(explore_spec, explore_impl)
+        if enable_extras:
+            material_spec, material_impl = make_read_material_implementer(materials)
+            registry.register(material_spec, material_impl)
+            check_spec, check_impl = make_check_implementer(model)
+            registry.register(check_spec, check_impl)
         # 网络搜索工具：按需注册（S15 起默认关——写作主链路不背考据能力，需要时点亮）
         if enable_search:
             from anyspark.server.tools_web import make_search_implementer
@@ -510,6 +531,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             agency_level=req.agency_level,
             mood=req.mood,
             enable_search=req.enable_search,
+            enable_extras=req.enable_extras,
             skip_inject=set(req.skip_inject),
         )
         agent.events.on(
@@ -624,6 +646,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                 agency_level=req.agency_level,
                 mood=req.mood,
                 enable_search=req.enable_search,
+                enable_extras=req.enable_extras,
                 skip_inject=set(req.skip_inject),
             )
             conv_id = req.conversation_id
