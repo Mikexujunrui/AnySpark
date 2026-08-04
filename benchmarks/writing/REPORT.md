@@ -46,7 +46,7 @@
 
 ## 五、给主人的评审请求
 
-请手工阅读 4 篇正文（`benchmarks/writing/out_{fine,mid,coarse,none}.md`），重点关注：
+请手工阅读 4 篇正文（`benchmarks/writing/hp/out_{fine,mid,coarse,none}.md`），重点关注：
 1. **哪篇最接近"可发表的小说"**（不是"最像原著"）？—— 判断写作水平本身
 2. 粗脉络的文笔亮点 vs 无脉络的原创结尾，哪个更打动人？
 3. 字数：7000 字要求下，宁可超（细/中）还是宁可丢细节（粗/无）？
@@ -55,7 +55,7 @@
 
 ## 六、产物清单
 
-- 4 篇正文：`benchmarks/writing/out_fine.md` / `out_mid.md` / `out_coarse.md` / `out_none.md`
+- 4 篇正文：`benchmarks/writing/hp/out_fine.md` / `hp/out_mid.md` / `hp/out_coarse.md` / `hp/out_none.md`
 - 交互日志：`data/dev/runs/writing_test/{01_fine,02_mid,03_coarse,04_none}/response.json`
-- 提示词与脉络：`benchmarks/writing/prompt_*.json` / `pitch_{coarse,mid,fine}.md` / `first3.txt`
+- 提示词与脉络：`benchmarks/writing/hp/prompt_*.json` / `hp/pitch_{coarse,mid,fine}.md` / `hp/first3.txt`
 - 隔离库：`data/dev/bench_{writing,coarse,none}.db`
