@@ -79,6 +79,7 @@
 | pi 行为对照测试（7 场景语义轨迹一致）/ 性能基线存档 / 长书压力测试（暴露修保留段阈值缩放 bug + steer 终答轮丢失） | 工程验证 | `benchmarks/parity/`（S28） |
 | 信号→说明书提炼闭环修复（signals 后台入队提炼，PreferenceExtractor 首次接线）/ 分支剧本哲学指标验证（修改率↓/说明书累积/偏好遵从） | 机制 3 对齐系统 + §9 T7 | `app.py` + `store/sqlite.py` + `benchmarks/system/`（S21 系统层） |
 | 多线叙事时间建模（Entity.lines + chapters.narrative_line + 时序校验按线比较） | 机制9 检测网补充 | `graph/schema+verify` + `tools_writing` + `app.py`（S29） |
+| 伏笔 A/B 分级（must 剧情钩子强追踪 / soft 细节线索旁观；完整书导入归档；不输出回收率） | 机制6 模式库 + T2 阶段3 | `template/plot.py` + `app.py`（S31） |
 
 **已完成的真实链路验证**（均有冒烟脚本 `scripts/*_smoke.py`）：
 - `real_smoke.py`：DeepSeek 原生工具调用 12345+6789=19134

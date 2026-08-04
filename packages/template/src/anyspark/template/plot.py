@@ -30,7 +30,15 @@ def _now() -> str:
 
 @dataclass
 class PlotPoint:
-    """一个关键点（可增删改、标注在意/不需要——操作即对齐信号）。"""
+    """一个关键点（可增删改、标注在意/不需要——操作即对齐信号）。
+
+    S31 A/B 分级：
+    - priority="must"（剧情钩子）：作者/AI 主动声明的**主线承诺**（对读者的契约）——
+      必须回收，注入明确列出、超期强烈提醒。默认不升级，机制不裁决内容重要性。
+    - priority="soft"（细节线索）：写作中自然捕捉/生成的铺垫细节——
+      回收是加分、不回收无损，影子层旁观不打扰。
+    - resolved_chapter：回收章节（resolved 时记录）——完整书导入归档时验证结构。
+    """
 
     id: str
     book_id: str
@@ -39,6 +47,8 @@ class PlotPoint:
     chapter_ref: str = ""  # 关联章节（可空=全局）
     status: str = "open"  # open|resolved
     attention: str = "care"  # care|ignore（用户标注在意/不需要；ignore 不注入不回收）
+    priority: str = "soft"  # S31: must（剧情钩子，必须回收）| soft（细节线索）
+    resolved_chapter: str = ""  # S31: 回收章节
     created_at: str = field(default_factory=_now)
 
     def to_dict(self) -> dict[str, Any]:
@@ -50,6 +60,8 @@ class PlotPoint:
             "chapter_ref": self.chapter_ref,
             "status": self.status,
             "attention": self.attention,
+            "priority": self.priority,
+            "resolved_chapter": self.resolved_chapter,
             "created_at": self.created_at,
         }
 
@@ -73,18 +85,28 @@ class PlotStore:
                 chapter_ref TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'open',
                 attention TEXT NOT NULL DEFAULT 'care',
+                priority TEXT NOT NULL DEFAULT 'soft',
+                resolved_chapter TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS idx_plot_book ON plot_points(book_id, category);
             """
         )
-        # 旧库兼容：attention 列（S17 新增）
+        # 旧库兼容：attention（S17）/ priority + resolved_chapter（S31）
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(plot_points)")}
         if "attention" not in cols:
             self._conn.execute(
                 "ALTER TABLE plot_points ADD COLUMN attention TEXT NOT NULL DEFAULT 'care'"
             )
-            self._conn.commit()
+        if "priority" not in cols:
+            self._conn.execute(
+                "ALTER TABLE plot_points ADD COLUMN priority TEXT NOT NULL DEFAULT 'soft'"
+            )
+        if "resolved_chapter" not in cols:
+            self._conn.execute(
+                "ALTER TABLE plot_points ADD COLUMN resolved_chapter TEXT NOT NULL DEFAULT ''"
+            )
+        self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
@@ -96,21 +118,24 @@ class PlotStore:
         content: str,
         chapter_ref: str = "",
         attention: str = "care",
+        priority: str = "soft",
     ) -> PlotPoint:
         pid = uuid.uuid4().hex
         cat = category if category in PLOT_CATEGORIES else "主线冲突"
         att = attention if attention in ("care", "ignore") else "care"
+        pri = priority if priority in ("must", "soft") else "soft"
         now = _now()
         with self._lock:
             self._conn.execute(
                 "INSERT INTO plot_points (id, book_id, category, content, chapter_ref, "
-                "status, attention, created_at) VALUES (?,?,?,?,?,?,?,?)",
-                (pid, book_id, cat, content, chapter_ref, "open", att, now),
+                "status, attention, priority, resolved_chapter, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (pid, book_id, cat, content, chapter_ref, "open", att, pri, "", now),
             )
             self._conn.commit()
-        return PlotPoint(pid, book_id, cat, content, chapter_ref, "open", att, now)
+        return PlotPoint(pid, book_id, cat, content, chapter_ref, "open", att, pri, "", now)
 
-    def list(self, book_id: str = "main") -> list[PlotPoint]:
+    def list_points(self, book_id: str = "main") -> list[PlotPoint]:
         rows = self._conn.execute(
             "SELECT * FROM plot_points WHERE book_id=? ORDER BY rowid", (book_id,)
         ).fetchall()
@@ -123,6 +148,8 @@ class PlotStore:
                 chapter_ref=r["chapter_ref"],
                 status=r["status"],
                 attention=r["attention"],
+                priority=r["priority"],
+                resolved_chapter=r["resolved_chapter"],
                 created_at=r["created_at"],
             )
             for r in rows
@@ -134,9 +161,11 @@ class PlotStore:
         *,
         status: str | None = None,
         attention: str | None = None,
+        priority: str | None = None,
+        resolved_chapter: str | None = None,
         chapter_ref: str | None = None,
     ) -> PlotPoint | None:
-        """更新状态/关注度/关联章节（None=不变）。"""
+        """更新状态/关注度/优先级/回收章节（None=不变）。"""
         sets: list[str] = []
         params: list[Any] = []
         if status is not None:
@@ -145,6 +174,12 @@ class PlotStore:
         if attention is not None:
             sets.append("attention=?")
             params.append(attention if attention in ("care", "ignore") else "care")
+        if priority is not None:
+            sets.append("priority=?")
+            params.append(priority if priority in ("must", "soft") else "soft")
+        if resolved_chapter is not None:
+            sets.append("resolved_chapter=?")
+            params.append(resolved_chapter)
         if chapter_ref is not None:
             sets.append("chapter_ref=?")
             params.append(chapter_ref)
@@ -168,6 +203,8 @@ class PlotStore:
             chapter_ref=row["chapter_ref"],
             status=row["status"],
             attention=row["attention"],
+            priority=row["priority"],
+            resolved_chapter=row["resolved_chapter"],
             created_at=row["created_at"],
         )
 
@@ -182,23 +219,48 @@ class PlotStore:
         - attention=ignore 的条目不注入（用户标注"不需要"=不惦记）
         - open 全注入；resolved 只列最近 max_resolved 条（省 token，提示推进即可）
         """
-        points = [p for p in self.list(book_id) if p.attention != "ignore"]
+        points = [p for p in self.list_points(book_id) if p.attention != "ignore"]
         if not points:
             return ""
-        open_pts = [p for p in points if p.status == "open"]
+        open_must = [p for p in points if p.status == "open" and p.priority == "must"]
+        open_soft = [p for p in points if p.status == "open" and p.priority == "soft"]
         resolved_pts = [p for p in points if p.status == "resolved"][-max_resolved:]
         lines = ["# 关键点图谱（当前推进状态）"]
-        if open_pts:
-            lines.append("进行中（写作时注意呼应/推进）：")
-            for p in open_pts:
+        if open_must:
+            lines.append("⚠ 主线钩子（作者承诺，必须回收）：")
+            for p in open_must:
                 ref = f"（{p.chapter_ref}）" if p.chapter_ref else ""
-                lines.append(f"- ○ [{p.category}] {p.content}{ref}")
+                lines.append(f"- ★ [{p.category}] {p.content}{ref}")
+        if open_soft:
+            lines.append(f"另有 {len(open_soft)} 条细节线索开放中（写作时自然呼应即可）。")
         if resolved_pts:
             lines.append("已回收：")
             for p in resolved_pts:
                 ref = f"（{p.chapter_ref}）" if p.chapter_ref else ""
                 lines.append(f"- ✓ [{p.category}] {p.content}{ref}")
         return "\n".join(lines)
+
+    def open_must(self, book_id: str = "main") -> list[PlotPoint]:
+        """S31：未回收的主线钩子（作者承诺清单——wrapup/收尾检查用）。"""
+        points = self.list_points(book_id)
+        return [
+            p
+            for p in points
+            if p.status == "open" and p.priority == "must" and p.attention != "ignore"
+        ]
+
+    def resolve_all(self, book_id: str = "main", chapter_ref: str = "全书导入") -> int:
+        """S31：完整书导入归档——所有 open 标 resolved + 记录归档章。
+
+        语义：完整导入的书已写完，伏笔都已揭开——提取的价值是归档验证，
+        不是追踪。不输出"回收率"（伏笔管理烂不影响作品伟大性，不做质量评分）。
+        """
+        n = 0
+        for p in self.list_points(book_id):
+            if p.status == "open":
+                self.update(p.id, status="resolved", resolved_chapter=chapter_ref)
+                n += 1
+        return n
 
 
 PLOT_PROMPT = (
@@ -278,7 +340,7 @@ class PlotResolver:
     def resolve(self, book_id: str, title: str, content: str, store: PlotStore) -> list[str]:
         """返回被回收的关键点 content 列表（失败返回空，绝不抛异常）。"""
         open_pts = [
-            p for p in store.list(book_id) if p.status == "open" and p.attention != "ignore"
+            p for p in store.list_points(book_id) if p.status == "open" and p.attention != "ignore"
         ]
         if not open_pts:
             return []

@@ -600,3 +600,33 @@
 - line_b 截止第 0 章提白泽 → **2 警告**（同线超前=真倒叙）✅
 
 **踩坑**：① bash heredoc 无引号会把 `\"` 转义吃掉——SQL DEFAULT '["main"]' 内嵌双引号与外层字符串冲突导致 SyntaxError（heredoc 分隔符必须加引号或用 edit）；② dataclass 有默认值字段不能放无默认值字段前（narrative_line 放 Chapter 末尾）；③ 验证脚本读错响应字段（temporal_warnings 非 temporal）——API 层返回结构未对齐造成误判
+
+
+---
+
+## S31 伏笔 A/B 分级（哲学修正，已完成 ✅）
+
+**背景**：主人提出伏笔设计的三个深层问题——① 冰与火式烂尾（铺陈超出控制）② 海贼王式找补（偶然追认为伏笔）③ 护栏担忧（伏笔管理不应变成强制清单，且**伏笔管理烂不影响作品伟大性——没有完美回收的作品**）。结论设计：**伏笔 = 开放线索的影子层（镜子非警察）**，并按 A/B 分级管理：
+
+### 设计（两条哲学红线）
+1. **系统绝不输出"回收率"指标**——回收率不是质量评分（伏笔管理烂不影响伟大性）；只报告**承诺状态**（"还有 N 条主线钩子未回收"）
+2. **分级不靠系统判断内容**——默认都是 B（软），作者/AI 一句话升级为 A（硬钩子）；机制不裁决"这算不算重要伏笔"，只尊重作者承诺
+
+### A/B 分级
+- **A 类剧情钩子（must，必须回收）**：作者主动声明的**主线承诺**（对读者的契约）——注入**明确列出（★）**、wrapup 收尾检查、不回收=违约风险
+- **B 类细节线索（soft，可回收可不回收）**：写作中自然捕捉/生成的铺垫——**旁观不打扰**（只汇总数量），回收是加分不回收无损
+
+### 实现
+- PlotPoint 加 `priority`（must/soft 默认 soft）+ `resolved_chapter`（回收章）；schema ALTER 兼容
+- render 分级：must+open 明确列出（⚠ 主线钩子 ★），soft+open 只汇总（"另有 N 条细节线索开放中"）
+- `POST /api/plot/item`（主动登记，priority 可 must）+ `PATCH /api/plot/{id}` 支持 priority/resolved_chapter
+- `POST /api/plot/import-resolve`（完整书导入归档：全 resolved + 归档章——书已写完线索已揭开，提取=归档验证）
+- wrapup 输出 `open_hooks`（仍未回收的主线钩子清单——提醒非门禁）
+- 修 PlotStore.list → list_points（方法名遮蔽内置 list 的 mypy 顽固问题，S0 已知坑复发）
+
+**门禁**：pytest **186**（+2：分级渲染/归档 + wrapup 钩子清单）；总闸全绿
+
+**真实链路验证**：主动登记 must 钩子（priority=must）✓；完整书归档 9 条 open → 全 resolved ✓
+
+**踩坑**：① bash heredoc 中 `
+` 会被 python 解析为换行导致替换匹配失败——涉及转义序列的文本替换必须用 edit 工具；② PlotStore.list 方法名遮蔽内置 list 导致 mypy valid-type 错误顽固——改名 list_points 一劳永逸

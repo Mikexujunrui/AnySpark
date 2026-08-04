@@ -390,3 +390,72 @@ def test_signal_triggers_manual_refine() -> None:
     # 来源为 auto（自动提炼），scope 为 project
     auto = next(e for e in entries if e["content"] == "避免血腥描写")
     assert auto["source"] == "auto"
+
+
+def test_plot_priority_and_resolve_all() -> None:
+    """S31 A/B 分级：主动登记 must 钩子（注入明确列出）、soft 细节（只汇总）、
+    完整书导入归档（resolve_all 全回收，不输出回收率）。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(db_path=":memory:"))
+    # 主动登记：一条 must 钩子 + 一条 soft 线索
+    r1 = client.post(
+        "/api/plot/item",
+        json={
+            "content": "怀表背面刻有一串数字",
+            "category": "伏笔",
+            "chapter_ref": "第1章",
+            "priority": "must",
+        },
+    )
+    assert r1.status_code == 200 and r1.json()["priority"] == "must"
+    client.post(
+        "/api/plot/item",
+        json={"content": "走廊画像总是目送哈利", "category": "伏笔", "chapter_ref": "第3章"},
+    )
+    # 生成式草案仍为 soft（默认）
+    # 注入渲染分级：must 明确列出、soft 只汇总
+    from anyspark.template import PlotStore
+
+    # 归档：完整书导入 → 全回收
+    r2 = client.post("/api/plot/import-resolve")
+    assert r2.status_code == 200 and r2.json()["resolved"] == 2
+    pts = client.get("/api/plot").json()
+    assert all(p["status"] == "resolved" for p in pts)
+    assert all(p["resolved_chapter"] == "全书导入" for p in pts)
+    # 归档后注入块：open 全无（已回收）
+    import tempfile
+    from pathlib import Path
+
+    tmp = Path(tempfile.mkdtemp()) / "p.db"
+    store = PlotStore(tmp)
+    store.add("main", "伏笔", "测试钩子", "第1章", priority="must")
+    rendered = store.render()
+    assert "主线钩子" in rendered and "★" in rendered  # must 明确列出
+    store.add("main", "伏笔", "测试细节", "第2章")
+    rendered2 = store.render()
+    assert "另有 1 条细节线索" in rendered2  # soft 只汇总
+    assert store.open_must("main") and len(store.open_must("main")) == 1
+
+
+def test_wrapup_lists_open_hooks() -> None:
+    """S31：一章收尾列出仍未回收的主线钩子（提醒非门禁）。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(db_path=":memory:"))
+    # 先登记 must 钩子
+    client.post(
+        "/api/plot/item",
+        json={"content": "怀表密码必须解开", "category": "伏笔", "priority": "must"},
+    )
+    # 写一章
+    client.post("/api/chat", json={"message": "写《第1章》50字：陈渡发现怀表"})
+    chs = client.get("/api/chapters").json()
+    assert chs
+    wrap = client.post(f"/api/chapters/{chs[-1]['id']}/wrapup", json={})
+    assert wrap.status_code == 200
+    assert any(h["content"] == "怀表密码必须解开" for h in wrap.json()["open_hooks"])

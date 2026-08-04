@@ -131,7 +131,7 @@ def test_plot_generate_and_store() -> None:
     points = gen.generate("main", store, "雾城侦探故事")
     assert len(points) == 2
     assert points[0].category == "主线冲突"
-    listed = store.list()
+    listed = store.list_points()
     assert len(listed) == 2
     # 状态流转 + 关注度（S17：attention 字段 + update 取代 update_status）
     p = store.update(listed[0].id, status="resolved")
@@ -143,7 +143,7 @@ def test_plot_generate_and_store() -> None:
     # ignore 条目不注入
     assert listed[1].content not in rendered
     store.delete(listed[1].id)
-    assert len(store.list()) == 1
+    assert len(store.list_points()) == 1
 
 
 def test_plot_auto_resolve() -> None:
@@ -156,7 +156,7 @@ def test_plot_auto_resolve() -> None:
         "main", "第4章", "怀表内部刻着沈青山的名字，陈渡终于明白了。", store
     )
     assert resolved == ["怀表刻着沈青山"]
-    points = {p.content: p for p in store.list()}
+    points = {p.content: p for p in store.list_points()}
     assert points["怀表刻着沈青山"].status == "resolved"
     assert points["怀表刻着沈青山"].chapter_ref == "第4章"
     # 未涉及的伏笔仍 open
@@ -168,13 +168,13 @@ def test_plot_resolve_ignores_attention_ignore() -> None:
     store = PlotStore(Path(tempfile.mkdtemp()) / "i.db")
     gen = PlotGenerator(FakePlotModel())
     gen.generate("main", store, "")
-    for p in store.list():
+    for p in store.list_points():
         if p.content == "怀表刻着沈青山":
             store.update(p.id, attention="ignore")
     resolver = PlotResolver(FakeResolveModel())
     resolved = resolver.resolve("main", "第4章", "怀表内部刻着沈青山的名字", store)
     assert resolved == []
-    points = {p.content: p for p in store.list()}
+    points = {p.content: p for p in store.list_points()}
     assert points["怀表刻着沈青山"].status == "open"  # ignore 不回收
 
 

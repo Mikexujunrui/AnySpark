@@ -227,6 +227,17 @@ class PlotIn(BaseModel):
 class PlotPatchIn(BaseModel):
     status: str | None = None  # open|resolved
     attention: str | None = None  # care|ignore（用户标注在意/不需要）
+    priority: str | None = None  # S31: must（剧情钩子，必须回收）| soft（细节线索）
+    resolved_chapter: str | None = None  # S31: 回收章节
+
+
+class PlotItemIn(BaseModel):
+    """S31：主动登记一个关键点/伏笔（作者/AI 声明，非 LLM 生成）。"""
+
+    content: str = Field(..., min_length=1)
+    category: str = "伏笔"
+    chapter_ref: str = ""
+    priority: str = "soft"  # must=剧情钩子（作者承诺必须回收）/ soft=细节线索
 
 
 class CancelIn(BaseModel):
@@ -829,19 +840,41 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
     @app.get("/api/plot", response_model=list[dict[str, object]])
     def list_plot() -> list[dict[str, object]]:
-        return [p.to_dict() for p in plots.list()]
+        return [p.to_dict() for p in plots.list_points()]
 
     @app.patch("/api/plot/{plot_id}", response_model=dict[str, object])
     def update_plot_status(plot_id: str, req: PlotPatchIn) -> dict[str, object]:
-        """更新关键点：状态（回收/重开）+ 关注度（在意/不需要）——操作即对齐信号。"""
+        """更新关键点：状态/关注度/优先级/回收章节——操作即对齐信号。"""
         p = plots.update(
             plot_id,
             status=req.status,
             attention=req.attention,
+            priority=req.priority,
+            resolved_chapter=req.resolved_chapter,
         )
         if p is None:
             raise HTTPException(status_code=404, detail="关键点不存在")
         return p.to_dict()
+
+    @app.post("/api/plot/item", response_model=dict[str, object])
+    def add_plot_item(req: PlotItemIn) -> dict[str, object]:
+        """S31：主动登记伏笔/关键点（作者或 AI 声明）——
+        priority=must 表示这是作者对读者的主线承诺（剧情钩子，必须回收）。"""
+        p = plots.add(
+            "main",
+            req.category,
+            req.content,
+            req.chapter_ref,
+            priority=req.priority,
+        )
+        return p.to_dict()
+
+    @app.post("/api/plot/import-resolve")
+    def resolve_all_plots() -> dict[str, int]:
+        """S31：完整书导入归档——所有 open 伏笔标 resolved（书已写完，线索已揭开）。
+        只报告归档数量，不输出回收率（伏笔管理烂不影响作品伟大性，不做质量评分）。"""
+        n = plots.resolve_all("main")
+        return {"resolved": n}
 
     @app.delete("/api/plot/{plot_id}")
     def delete_plot(plot_id: str) -> dict[str, bool]:
@@ -1002,12 +1035,27 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                 pass
         # 图谱统计（本章涉及的实体）
         involved = graph_verifier.facts_for("main", ch.content[:2000])
+        # S31：主线钩子检查——作者承诺的剧情钩子仍未回收的（轻量提示，建议非门禁）
+        open_hooks = plots.open_must("main") or []
+        hook_check = (
+            [
+                {
+                    "content": h.content[:60],
+                    "chapter_ref": h.chapter_ref,
+                    "category": h.category,
+                }
+                for h in open_hooks
+            ][:8]
+            if open_hooks
+            else []
+        )
         return {
             "chapter_id": chapter_id,
             "title": ch.title,
             "summary": summary or out.text.strip()[:100],
             "next_hint": hint,
             "graph_entities": [f.entity.name for f in involved][:10],
+            "open_hooks": hook_check,  # S31：仍未回收的主线钩子（提醒，不阻断）
         }
 
     @app.get("/api/chapters", response_model=list[ChapterOut])
