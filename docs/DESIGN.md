@@ -539,3 +539,14 @@ v4 从空库起步，数据在 v4 内自然生长
 - **读路径零改动**：list/read 章节读库镜像；图谱抽取/检测/伏笔回收/影响分析全读库——双写保证一致性
 - **Token/效率**：注入（token 大头）只依赖状态库与存储无关；md 化买的是 agent 文件本能（模型对文件系统的理解是训练固有）+ 人工可直接打开编辑 + git 友好
 - **哲学保持**：机制（目录结构/文件名规范/双写/import 语义）硬编码；内容（正文/卡片）自然语言；无 front-matter、无卡片双轨同步、无隐藏目录、无原件复制
+
+### 12.11 领域能力工具化（S48-P2，小说特化 agent 闭环）
+- **目标**：图谱/伏笔/计划/设定档从"HTTP API（人驱动）"→"agent 可自主调用的工具"——写作 Agent 写前查证、边写边登记承诺、写后推进计划
+- **工具集**（`server/tools_domain.py`，随 `enable_domain` 点亮，**默认开**）：
+  - `graph_query`（查实体含当前状态/关系，写作前查证细节）
+  - `plot_register`（登记伏笔，must/soft 分级，一句话"记一下"）/ `plot_list`（看开放承诺，must ★ + 开放章数）
+  - `plan_list`（当前章+后续计划）/ `plan_mark_done`（标记完成推进）
+  - `read_setting`（查设定档正典：人物卡/能力体系/规则）
+- **边界（哲学）**：只读/轻量登记，无删除修改权限——内容裁决权保留用户/API；自然语言输入输出（模型无关）；返回裁剪（limit 防 token 爆炸）
+- **开关**：ChatRequest `enable_domain`（默认 True）；`enable_extras`（read_material/check_text，默认关）维持 S32 现状——领域能力是"小说写作必需"默认给，通用能力按需
+- **真实链路**：DeepSeek 写《第一章 雾渡》自主调用 plan_list→plot_list→read_setting→graph_query→write_chapter→plot_register×3→plan_mark_done——查证→写作→埋钩子→推进全闭环

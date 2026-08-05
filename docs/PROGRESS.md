@@ -237,6 +237,23 @@
 
 ---
 
+## S48b 领域能力工具化（P2：写作 Agent 自主闭环，已完成 ✅）
+
+**背景（主人路线 P2）**：图谱/设定/伏笔/计划此前是 HTTP API（人驱动），写作 Agent 看不到——补齐为 agent 可自主调用的工具，小说特化闭环成立。
+
+**实现**（`server/tools_domain.py` 新文件 + ChatRequest `enable_domain` 默认开）：
+- `graph_query`：图谱查证（实体含 state/关系，模糊匹配别名；limit 裁剪防 token 爆炸）
+- `plot_register`/`plot_list`：登记伏笔（must/soft 分级）+ 看开放承诺（must ★ + 开放章数，soft 只汇总数量——S31 设计）
+- `plan_list`/`plan_mark_done`：看计划（当前+后续）+ 标记完成推进
+- `read_setting`：查设定档正典（人物卡/能力体系/规则，关键词/列出全部）
+- **边界**：只读/轻量登记，无删除修改权限（内容裁决权在用户/API）；自然语言 IO；`enable_domain` 默认开，`enable_extras`（查资料/自查）维持默认关
+
+**门禁**：pytest **235**（+5：图谱查证/伏笔登记列表/计划推进/设定查证/开关探测）；总闸 ✅
+
+**真实链路验证（关键）**：预置设定档+计划+must 伏笔 → 真实 DeepSeek 写《第一章 雾渡》**自主调用**：plan_list→plot_list→list_chapters→read_setting→graph_query→write_chapter→**plot_register×3**（新埋 3 个伏笔：画像秘密/守夜人失踪/红绳旧俗）→plan_mark_done——查证→写作→埋钩子→推进计划**全闭环**；835 字落库+落文件
+
+---
+
 ## S48 工作区化：每项目一路径（小说特化版 pi 第一步，已完成 ✅）
 
 **背景（主人战略）**：把 AnySpark 做成"小说特化版 pi"——舍弃通用能力（代码/媒体/TUI），增加小说必须工具（已有图谱/对齐/检测/设定/伏笔/计划），保留核心哲学（智能体驱动/机制硬编码内容自然语言/模型无关/极简）。第一步=形态变革：每项目一路径，章节 md 文件为操作主场。

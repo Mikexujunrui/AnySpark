@@ -124,6 +124,7 @@ class ChatRequest(BaseModel):
     # 增强按需装配（S15："你要什么再装什么"——默认关的增强，点亮才挂）
     enable_search: bool = False  # 网络搜索工具按需注册（默认关：写作主链路不背考据能力）
     enable_extras: bool = False  # S32 扩展工具（read_material/check_text）按需点亮
+    enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认开
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood/plot 子集
     # S47 运行时模型选择：缺省用注册表当前激活模型；thinking 覆盖该模型默认思考强度
@@ -599,6 +600,7 @@ def build_app(
         mood: dict[str, float] | None = None,
         enable_search: bool = False,
         enable_extras: bool = False,
+        enable_domain: bool = True,
         skip_inject: set[str] | None = None,
         model_id: str | None = None,
         thinking: str | None = None,
@@ -615,6 +617,26 @@ def build_app(
 
         explore_spec, explore_impl = make_explore_implementer(model)
         registry.register(explore_spec, explore_impl)
+        # S48-P2 领域工具：图谱查证/伏笔登记/伏笔列表/计划列表/计划推进/设定查证
+        # 默认开（小说写作必需能力）；skip_inject 无关（工具注册非注入）
+        if enable_domain:
+            from anyspark.server.tools_domain import (
+                make_graph_query_implementer,
+                make_plan_implementer,
+                make_plot_implementer,
+                make_setting_implementer,
+            )
+
+            gq_spec, gq_impl = make_graph_query_implementer(graph)
+            registry.register(gq_spec, gq_impl)
+            plot_specs, plot_impls = make_plot_implementer(plots)
+            for s, i in zip(plot_specs, plot_impls, strict=True):
+                registry.register(s, i)
+            plan_specs, plan_impls = make_plan_implementer(plans)
+            for s, i in zip(plan_specs, plan_impls, strict=True):
+                registry.register(s, i)
+            st_spec, st_impl = make_setting_implementer(settings)
+            registry.register(st_spec, st_impl)
         if enable_extras:
             material_spec, material_impl = make_read_material_implementer(materials)
             registry.register(material_spec, material_impl)
@@ -860,6 +882,7 @@ def build_app(
             mood=req.mood,
             enable_search=req.enable_search,
             enable_extras=req.enable_extras,
+            enable_domain=req.enable_domain,
             skip_inject=set(req.skip_inject),
             model_id=req.model_id,
             thinking=req.thinking,
@@ -985,6 +1008,7 @@ def build_app(
                 mood=req.mood,
                 enable_search=req.enable_search,
                 enable_extras=req.enable_extras,
+                enable_domain=req.enable_domain,
                 skip_inject=set(req.skip_inject),
                 model_id=req.model_id,
                 thinking=req.thinking,
