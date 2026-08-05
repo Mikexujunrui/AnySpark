@@ -370,8 +370,12 @@ def make_ingest_implementer(
     return spec, implementer
 
 
-def make_codex_implementer() -> tuple[Any, Any]:
-    """代码扩展工具（S48-P5 anyspark-codex）：沙箱执行 Python，固定工具做不了时用。"""
+def make_codex_implementer(workspace: Any, chapters: Any, graph: Any) -> tuple[Any, Any]:
+    """代码扩展工具（S48-P5 anyspark-codex）：沙箱执行 Python，固定工具做不了时用。
+
+    S48-P4/A：注入只读数据环境 ws_*（章节/图谱/上传）——可真实统计/自定义分析，
+    如全书字数分布、高频词、角色出现频率、对话占比等（数据进沙箱内存，不占模型 token）。
+    """
 
     spec = ToolSpec(
         name="run_code",
@@ -405,9 +409,9 @@ def make_codex_implementer() -> tuple[Any, Any]:
             timeout = float(str(arguments.get("timeout", "10")) or "10")
         except ValueError:
             timeout = 10.0
-        from anyspark.server.codex import run_code
+        from anyspark.server.codex import make_data_env, run_code
 
-        r = run_code(code, timeout)
+        r = run_code(code, timeout, data_env=make_data_env(workspace, chapters, graph))
         lines = []
         if r["stdout"]:
             lines.append("【输出】\n" + r["stdout"].rstrip())

@@ -678,7 +678,7 @@ def build_app(
         if enable_codex:
             from anyspark.server.tools_domain import make_codex_implementer
 
-            cx_spec, cx_impl = make_codex_implementer()
+            cx_spec, cx_impl = make_codex_implementer(workspace, chapters, graph)
             registry.register(cx_spec, cx_impl)
         if enable_extras:
             material_spec, material_impl = make_read_material_implementer(materials)
@@ -1810,10 +1810,10 @@ def build_app(
     # -----------------------------------------------------------------------
     @app.post("/api/codex/run", response_model=dict[str, Any])
     def codex_run(req: CodexIn) -> dict[str, Any]:
-        """沙箱执行 Python 代码（白名单安全：无文件/网络，超时硬上限）。"""
-        from anyspark.server.codex import run_code
+        """沙箱执行 Python 代码（白名单安全 + 只读数据环境 ws_*：真实统计/自定义分析）。"""
+        from anyspark.server.codex import make_data_env, run_code
 
-        return run_code(req.code, req.timeout)
+        return run_code(req.code, req.timeout, data_env=make_data_env(workspace, chapters, graph))
 
     # -----------------------------------------------------------------------
     # S48-P3 输入消化管线：上传区原始文件 → 格式化区（章节 md / 摘要卡）

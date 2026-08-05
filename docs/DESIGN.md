@@ -560,12 +560,13 @@ v4 从空库起步，数据在 v4 内自然生长
 - **导出**：`GET /api/export/book` txt/md/**epub**（EPUB 3 零依赖 zipfile：xhtml + OPF + nav + container；收集 md 图片引用复制进 images/ 并改写 src）
 - **agent 工具** `ingest_document`（enable_domain）：用户上传后 agent 可自主消化
 
-### 12.13 代码扩展 anyspark-codex（S48-P5，机制 8 预留落地）
+### 12.13 代码扩展 anyspark-codex（S48-P5 + P4/A 深化，机制 8 预留落地）
 - **定位**：固定工具无法实现的自定义处理（特殊格式解析/批量转换/统计）+ 自我修复（Agent 写代码验证逻辑）
 - **沙箱安全（A 类硬编码）**：白名单受限命名空间（仅 math/re/json/random/itertools 等，无 open/import 逃逸）；timeout 硬上限（默认 10s ≤60s）；调用即烧无副作用
+- **只读数据环境（P4/A，主人拍板"小说需要真实计算数据"）**：`make_data_env` 注入 ws_* 快照函数——`ws_chapters`（全书章节全文）/`ws_entities`/`ws_relations`/`ws_events`（图谱）/`ws_read`（项目内受限只读，防越界+限大小）/`ws_uploads`——沙箱代码可对真实工作区数据自由统计/分析（数据进沙箱内存，**不占模型 token**，长书全文本地可算）
 - **API**：`POST /api/codex/run`；**agent 工具** `run_code`（`enable_codex` 默认关——安全按需点亮，S15 哲学）
 - **自我修复边界**：run_code 只验证代码正确性；真正"修工具"= Agent 生成补丁文本 → 用户确认 → 系统应用（沙箱不直接改源码）
-- **真实链路**：DeepSeek 自主调 run_code 算 1..100 平方和 = 338350 ✓；import shutil/open 被拦截 ✓
+- **真实链路**：DeepSeek 自主调 run_code 算 1..100 平方和 = 338350 ✓；import shutil/open 被拦截 ✓；全书真实统计（23 章/23451 字/高频词 TOP5/实体类型分布）✓
 
 ### 12.14 角色推演（S48-P4：角色视角多路探索 + 选优）
 - **主人设计**：低成本多探索，最后选择最好的作为参考（复用 pi-multi-agent 的 room_compare 模式——复用机制非代码；pi-subagents 是通用任务委派无角色概念，不适用）

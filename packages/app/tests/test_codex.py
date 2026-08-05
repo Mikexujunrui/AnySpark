@@ -65,7 +65,16 @@ def _call_tool(impl: Any, **kwargs: object) -> ToolResult:
 
 
 def test_run_code_tool() -> None:
-    _, impl = make_codex_implementer()
+    from anyspark.graph import GraphStore
+    from anyspark.server.workspace import Workspace
+    from anyspark.store import ChapterStore
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    _, impl = make_codex_implementer(
+        Workspace(root=Path(tempfile.mkdtemp()) / "ws"),
+        ChapterStore(db),
+        GraphStore(db),
+    )
     r = _call_tool(impl, code="print('hi' * 3)")
     assert r.ok is True and "hihihi" in r.content
     r2 = _call_tool(impl, code="import os")
@@ -103,3 +112,63 @@ def test_codex_api_and_switch() -> None:
     # 点亮后可见
     client.post("/api/chat", json={"message": "写《第2章》20字：灯塔。", "enable_codex": True})
     assert "run_code" in model.last_tools
+
+
+# ---------------------------------------------------------------------------
+# S48-P4/A：沙箱只读数据环境（真实统计/自定义分析）
+# ---------------------------------------------------------------------------
+
+
+def test_run_code_with_data_env() -> None:
+    """沙箱代码可调用 ws_chapters 等做真实统计（数据进沙箱内存，不占 token）。"""
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    from anyspark.graph import GraphStore
+    from anyspark.server.codex import make_data_env
+    from anyspark.server.workspace import Workspace
+    from anyspark.store import ChapterStore
+
+    store = ChapterStore(db)
+    store.upsert("main", "第一章", "雨夜，陈渡抵达雾城站。陈渡撑伞。", 0, "main")
+    store.upsert("main", "第二章", "钟楼敲了十三下。", 1, "main")
+    graph = GraphStore(db)
+    graph.upsert_entity("main", "陈渡", "角色", description="侦探")
+    ws = Workspace(root=Path(tempfile.mkdtemp()) / "ws")
+
+    env = make_data_env(ws, store, graph)
+    r = run_code(
+        """
+chapters = ws_chapters()
+total = sum(len(c['content']) for c in chapters)
+print('章节数:', len(chapters))
+print('总字数:', total)
+print('陈渡出现章数:', sum(1 for c in chapters if '陈渡' in c['content']))
+entities = ws_entities()
+print('实体数:', len(entities), '| 类型:', entities[0]['entity_type'])
+""",
+        timeout=10,
+        data_env=env,
+    )
+    assert r["ok"] is True, r["error"]
+    assert "章节数: 2" in r["stdout"]
+    assert "总字数:" in r["stdout"]
+    assert "陈渡出现章数: 1" in r["stdout"]
+    assert "实体数: 1" in r["stdout"]
+
+
+def test_ws_read_path_guard() -> None:
+    """ws_read 路径限制：越界抛错；项目内可读。"""
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    from anyspark.graph import GraphStore
+    from anyspark.server.codex import make_data_env
+    from anyspark.server.workspace import Workspace
+    from anyspark.store import ChapterStore
+
+    ws = Workspace(root=Path(tempfile.mkdtemp()) / "ws")
+    ws.save_upload("main", "设定.txt", "雾城是江边之城。".encode())
+    env = make_data_env(ws, ChapterStore(db), GraphStore(db))
+
+    r = run_code("print(ws_read('上传/设定.txt'))", data_env=env)
+    assert r["ok"] is True and "江边之城" in r["stdout"]
+
+    r2 = run_code("print(ws_read('../../etc/passwd'))", data_env=env)
+    assert r2["ok"] is False and "越界" in r2["error"]

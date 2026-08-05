@@ -109,10 +109,67 @@ class _SafeImporter:
         return self._real(name, *args, **kwargs)
 
 
-def run_code(code: str, timeout: float = 10.0) -> dict[str, Any]:
+# 文件读取上限（ws_read：防沙箱代码读超大文件拖垮线程）
+_WS_READ_MAX = 200_000
+
+
+def make_data_env(workspace: Any, chapters: Any, graph: Any) -> dict[str, Any]:
+    """构建沙箱只读数据环境（S48-P4/A：沙箱可读数据——真实统计/自定义分析）。
+
+    注入的 ws_* 函数是**只读快照管道**：沙箱代码可调用它们拿到工作区数据
+    （章节全文/图谱实体关系事件/上传列表/受限文件读取），然后自由计算。
+    安全边界（A 类硬编码）：只读不可写；路径限制在项目目录内防越界；
+    文件读取限大小；超时由 run_code 兜底。
+
+    设计：数据进沙箱内存（不占模型 token——模型只看到代码与输出），
+    长书全文本地可算。
+    """
+
+    def ws_chapters() -> list[dict[str, Any]]:
+        return [{"title": c.title, "content": c.content} for c in chapters.list_by_book("main")]
+
+    def ws_entities() -> list[dict[str, Any]]:
+        return [e.to_dict() for e in graph.list_entities("main", limit=10000)]
+
+    def ws_relations() -> list[dict[str, Any]]:
+        return [r.to_dict() for r in graph.list_relations("main", limit=10000)]
+
+    def ws_events() -> list[dict[str, Any]]:
+        return [ev.to_dict() for ev in graph.list_events("main", limit=10000)]
+
+    def ws_read(rel_path: str) -> str:
+        """只读项目目录内文件（相对项目根，如 '上传/设定.txt'）。"""
+        base = workspace.project_dir("main").resolve()
+        p = (base / rel_path).resolve()
+        if not str(p).startswith(str(base)):
+            raise ValueError(f"越界：{rel_path}")
+        if not p.exists() or not p.is_file():
+            raise FileNotFoundError(rel_path)
+        if p.stat().st_size > _WS_READ_MAX:
+            raise ValueError(f"文件过大（>{_WS_READ_MAX} 字节），请用 ws_chapters 等快照")
+        return str(p.read_text(encoding="utf-8", errors="ignore"))
+
+    def ws_uploads() -> list[dict[str, Any]]:
+        return [{"name": u["name"], "size": u["size"]} for u in workspace.list_uploads("main")]
+
+    return {
+        "ws_chapters": ws_chapters,
+        "ws_entities": ws_entities,
+        "ws_relations": ws_relations,
+        "ws_events": ws_events,
+        "ws_read": ws_read,
+        "ws_uploads": ws_uploads,
+    }
+
+
+def run_code(
+    code: str, timeout: float = 10.0, data_env: dict[str, Any] | None = None
+) -> dict[str, Any]:
     """在受限沙箱执行 Python 代码，返回 {ok, stdout, stderr, error}。
 
     - 白名单命名空间（无文件/网络/任意 import）
+    - data_env（可选）：注入只读数据函数（ws_chapters/ws_entities/ws_read/…），
+      沙箱可真实计算工作区数据，但不接触文件系统原始能力
     - timeout 硬上限（默认 10s，≤60s）；超时终止线程
     - 调用即烧（无副作用），只返回文本
     """
@@ -134,6 +191,8 @@ def run_code(code: str, timeout: float = 10.0) -> dict[str, Any]:
             safe_builtins = dict(_SAFE_BUILTINS)
             safe_builtins["__import__"] = _SafeImporter(real_import)
             namespace: dict[str, Any] = {"__builtins__": safe_builtins}
+            if data_env:
+                namespace.update(data_env)  # 注入只读数据函数（沙箱可调用）
             with contextlib.redirect_stdout(out_buf), contextlib.redirect_stderr(err_buf):
                 exec(compile(code, "<sandbox>", "exec"), namespace, namespace)
             result["stdout"] = out_buf.getvalue()
