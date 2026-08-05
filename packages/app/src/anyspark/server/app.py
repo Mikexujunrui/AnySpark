@@ -30,10 +30,13 @@ from anyspark.align import (
     SignalCollector,
     SignalStore,
     WorldSettingStore,
+    WritingSkillStore,
     build_agency_block,
     build_mood_block,
     parse_agency_declaration,
     render_settings,
+    render_skill_index,
+    render_skills_content,
 )
 from anyspark.check import compile_rule, run_review
 from anyspark.core import (
@@ -80,15 +83,11 @@ DEFAULT_SYSTEM = (
     "若章节内容已在本轮对话历史或【已固化事实】注入中，直接基于它们，不要重复读取。"
     "写正文可用 write_chapter 保存。"
     "正文要具体、有画面感，杜绝空泛总结。"
-    # S32：首要目标是写出来并落盘；方向模糊才探索（不怂恿无关工具调用）
+    # S43：DEFAULT_SYSTEM 回归极简（只留行为底线）——写作技巧类规则已抽为内容载体
+    # （WritingSkill：粒度感知/认知边界等，见【写作技巧】注入块），不再堆行为守则
     "首要目标是把正文写出来并落盘，不要为了准备而反复调用与当前任务无关的工具。"
     "仅当用户给的任务方向不明确（种子含糊、无明确脉络、不知往哪个方向写）时，"
     "先调用 explore_direction 生成方向建议并在回复中列出询问用户选择；方向明确时直接写。"
-    # S33：脉络粒度感知——粗脉络不是"约束松的细脉络"，而是"需要自主设计"
-    "剧情脉络按颗粒度处理：脉络越细（逐场景/要点全），越要严格遵循、不得遗漏；"
-    "脉络越粗（只有主干或种子），意味着场景推进、细节、节奏需要你自主设计——"
-    "动笔前先在心中构思本章场景序列与要点（不必输出），正文要体现自主设计的层次"
-    "（原创细节、节奏变化、氛围经营），不要只把主干复述一遍。"
 )
 
 
@@ -237,6 +236,22 @@ class WorldSettingExtractIn(BaseModel):
     """S42：从图谱提炼设定草案（LLM 生成候选，作者逐条确认）。"""
 
     book_id: str = "main"
+
+
+class WritingSkillIn(BaseModel):
+    """S43：写作技巧（skill 式）。"""
+
+    name: str
+    description: str = ""
+    content: str
+    enabled: bool = True
+
+
+class WritingSkillPatch(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    content: str | None = None
+    enabled: bool | None = None
 
 
 class BiasIn(BaseModel):
@@ -474,6 +489,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     agency = AgencyStore(real_db)
     bias = BiasStore(real_db)
     settings = WorldSettingStore(real_db)  # S41 设定档（作者正典）
+    skills = WritingSkillStore(real_db)  # S43 写作技巧（skill 式内容载体）
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
@@ -563,6 +579,14 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         settings_block = render_settings(settings.list())
         if "settings" not in skip and settings_block:
             full_prompt = full_prompt + "\n\n" + settings_block
+        # 写作技巧注入（S43：skill 式内容载体——粒度感知/认知边界等；索引+内容渐进式披露）
+        skill_list = skills.list_skills()
+        skill_block = render_skill_index(skill_list)
+        if "skills" not in skip and skill_block:
+            full_prompt = full_prompt + "\n\n" + skill_block
+        skill_content = render_skills_content(skill_list)
+        if "skills" not in skip and skill_content:
+            full_prompt = full_prompt + "\n\n" + skill_content
         # 氛围滑块注入（机制 4：本段氛围要求）
         mood_block = build_mood_block(mood)
         if "mood" not in skip and mood_block:
@@ -1258,6 +1282,33 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         except Exception:
             return {"draft": [], "raw": out.text[:500]}
         return {"draft": draft, "raw": ""}
+
+    # ------------------------------------------------------------------
+    # S43 写作技巧（skill 式内容载体：粒度感知/认知边界等，可增删改/开关）
+    # ------------------------------------------------------------------
+    @app.get("/api/skills", response_model=list[dict[str, Any]])
+    def list_skills() -> list[dict[str, Any]]:
+        """全部写作技巧。"""
+        return [s.to_dict() for s in skills.list_skills()]
+
+    @app.post("/api/skills", response_model=dict[str, Any])
+    def add_skill(req: WritingSkillIn) -> dict[str, Any]:
+        s = skills.add(req.name, req.description, req.content)
+        return s.to_dict()
+
+    @app.patch("/api/skills/{skill_id}", response_model=dict[str, Any])
+    def patch_skill(skill_id: str, req: WritingSkillPatch) -> dict[str, Any]:
+        s = skills.update(skill_id, req.name, req.description, req.content, req.enabled)
+        if s is None:
+            raise HTTPException(status_code=404, detail="技巧不存在")
+        return s.to_dict()
+
+    @app.delete("/api/skills/{skill_id}", response_model=dict[str, bool])
+    def delete_skill(skill_id: str) -> dict[str, bool]:
+        ok = skills.delete(skill_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="技巧不存在")
+        return {"ok": True}
 
     @app.get("/api/bias", response_model=list[dict[str, Any]])
     def list_bias() -> list[dict[str, Any]]:

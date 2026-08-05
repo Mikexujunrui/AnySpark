@@ -23,12 +23,20 @@ from .inject import ManualInjector, MemoryInjector
 from .manual import ManualEntry, ManualStore, render_manual
 from .mood import MOOD_DIMS, build_mood_block
 from .signals import Signal, SignalCollector, SignalStore
+from .skills import (
+    DEFAULT_SKILLS,
+    WritingSkill,
+    WritingSkillStore,
+    render_skill_index,
+    render_skills_content,
+)
 from .summarize import MemoryStore, SceneMemory, SessionSummarizer
 from .worldsettings import WorldSetting, WorldSettingStore, render_settings
 
 __all__ = [
     "DEFAULT_ID",
     "DEFAULT_LEVELS",
+    "DEFAULT_SKILLS",
     "MOOD_DIMS",
     "AgencyLevel",
     "AgencyStore",
@@ -46,10 +54,14 @@ __all__ = [
     "SignalStore",
     "WorldSetting",
     "WorldSettingStore",
+    "WritingSkill",
+    "WritingSkillStore",
     "build_agency_block",
     "build_mood_block",
     "parse_agency_declaration",
     "render_manual",
     "render_settings",
+    "render_skill_index",
+    "render_skills_content",
     "temperature_for",
 ]
