@@ -233,6 +233,12 @@ class WorldSettingPatch(BaseModel):
     name: str | None = None
 
 
+class WorldSettingExtractIn(BaseModel):
+    """S42：从图谱提炼设定草案（LLM 生成候选，作者逐条确认）。"""
+
+    book_id: str = "main"
+
+
 class BiasIn(BaseModel):
     content: str
     source: str = "ai"
@@ -1197,6 +1203,61 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         if not ok:
             raise HTTPException(status_code=404, detail="设定条目不存在")
         return {"ok": True}
+
+    @app.post("/api/settings/extract", response_model=dict[str, object])
+    def extract_settings(req: WorldSettingExtractIn) -> dict[str, object]:
+        """S42：从图谱提炼设定草案（只含已揭示信息，LLM 生成，作者确认后入库）。
+
+        提炼边界（防止"角色认知越界/未来设定泄露"）：只基于图谱已有实体/事件——
+        图谱覆盖=已写章节=角色与叙事者都可能知道的信息；未来设定需作者手写补充。
+        """
+        assert model is not None
+        es = graph.list_entities(req.book_id, limit=10000)
+        core = [e for e in es if e.weight >= 3]
+        evs = sorted(graph.list_events(req.book_id, limit=10000), key=lambda x: x.chapter_order)
+        ent_txt = "\n".join(
+            f"- {e.name}（{e.entity_type}，出场{e.weight}章）"
+            f"{('：' + (e.state or e.description)[:60]) if (e.state or e.description) else ''}"
+            for e in sorted(core, key=lambda x: -x.weight)[:60]
+        )
+        ev_txt = "\n".join(
+            f"[{ev.chapter_ref}] {ev.label}：{ev.description[:60]}" for ev in evs[:80]
+        )
+        prompt = (
+            "根据以下小说知识图谱数据（实体/事件），提炼【设定档草案】——"
+            "只包含图谱中已出现的信息（不编造未来设定）。按类别输出：\n"
+            "人物卡（主要角色：身份/性格/当前状态）/ 能力体系（已出现的职业能力）/ "
+            "世界观规则 / 势力 / 地点 / 物品。\n"
+            '输出 JSON：{"settings": [{"category": "人物卡", '
+            '"name": "顾欣桐", "content": "..."}]}\n'
+            f"【实体】\n{ent_txt}\n【事件】\n{ev_txt}"
+        )
+        from anyspark.core.types import Message
+
+        out = model.respond(
+            [
+                Message(
+                    role="system",
+                    content="你是设定考据者。严格基于图谱数据提炼设定草案，不编造。",
+                ),
+                Message(role="user", content=prompt),
+            ],
+            [],
+        )
+        import json as _json
+        import re as _re
+
+        m = _re.search(r"\{.*\}", out.text, _re.DOTALL)
+        if not m:
+            return {"draft": [], "raw": out.text[:500]}
+        try:
+            data = _json.loads(m.group(0))
+            draft = [
+                s for s in data.get("settings", []) if isinstance(s, dict) and s.get("content")
+            ]
+        except Exception:
+            return {"draft": [], "raw": out.text[:500]}
+        return {"draft": draft, "raw": ""}
 
     @app.get("/api/bias", response_model=list[dict[str, Any]])
     def list_bias() -> list[dict[str, Any]]:

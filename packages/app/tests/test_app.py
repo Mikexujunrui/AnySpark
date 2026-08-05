@@ -580,3 +580,12 @@ def test_batch_review_and_rewrite_api() -> None:
     # 无效输入
     assert client.post("/api/batch/review", json={"chapter_ids": []}).status_code == 400
     assert client.get("/api/batch/notexist").status_code == 404
+
+
+def test_settings_extract_api() -> None:
+    """S42：从图谱提炼设定草案（fake 模型返回空草案不报错）。"""
+    client = _make_client()
+    r = client.post("/api/settings/extract", json={"book_id": "main"})
+    assert r.status_code == 200
+    body = r.json()
+    assert "draft" in body and "raw" in body
