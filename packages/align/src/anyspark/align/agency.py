@@ -127,7 +127,31 @@ class AgencyStore:
             """
         )
         self._conn.commit()
+        self._migrate_legacy_state()
         self._seed_defaults()
+
+    def _migrate_legacy_state(self) -> None:
+        """S35 遗留迁移：agency_state 旧结构是 (book_id, level INTEGER)，
+        S35 改档位记录集后新代码查 level_id（旧库无此列会 500）。
+        检测缺列 → ALTER 加列 + 旧数字档位迁移为 default-N id。
+        （graph/schema.py 的 _ensure_column 同模式；agency 此前漏做。）"""
+        with self._lock:
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(agency_state)")]
+            if "level_id" in cols:
+                return
+            self._conn.execute(
+                "ALTER TABLE agency_state ADD COLUMN level_id TEXT NOT NULL DEFAULT 'default-2'"
+            )
+            rows = self._conn.execute("SELECT book_id, level FROM agency_state").fetchall()
+            for book_id, lv in rows:
+                if lv is None:
+                    continue
+                n = max(0, min(int(lv), 4))
+                self._conn.execute(
+                    "UPDATE agency_state SET level_id=? WHERE book_id=?",
+                    (f"default-{n}", book_id),
+                )
+            self._conn.commit()
 
     # -- 默认档位种子 --
     def _seed_defaults(self) -> None:
@@ -320,7 +344,6 @@ def build_agency_block(level: AgencyLevel | int) -> str:
         "在输出末尾附一行【能动级别: N】（N=排序位 0 起），供用户一键确认。"
     )
     return block
-
 
 
 def parse_agency_declaration(text: str) -> int | None:

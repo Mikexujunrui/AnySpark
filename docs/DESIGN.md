@@ -514,3 +514,12 @@ v4 从空库起步，数据在 v4 内自然生长
 
 ### 12.8 新增注入块与 skip_inject 清单（S41-S46 后）
 `manual / graph / agency / bias / plot / mood / settings（设定档）/ skills（技巧）/ plan（计划）`——均可 skip_inject 细粒度关闭
+
+### 12.9 运行时模型配置与思考强度（S47）
+- **背景**：此前模型固定 DeepSeek（`.env` 启动时静态配置），无运行时切换、无思考强度选择
+- **模型注册表**（`anyspark.models.registry`）：SQLite 持久化多模型配置（供应商端点/模型名/api_key/窗口/温度/思考强度），空库从 `.env` 播种默认——升级即用、旧行为不变；CRUD + 激活切换（`GET/POST /api/models`、`DELETE /api/models/{id}`、`POST /api/models/{id}/activate`）
+- **ModelProvider**：实现 core Model 协议，委托给**当前激活配置**——切换后所有持有它的组件（Agent/图谱抽取/检测/探索/后台任务）即时跟随，无需重启、无需改组件（组件只认识 Model 协议）
+- **请求级覆盖**：ChatRequest 加 `model_id`（指定模型，缺省用激活）+ `thinking`（思考强度覆盖）——显式指定 > 当前激活
+- **思考强度**：DeepSeek v4 系列默认开思考；`reasoning_effort`（OpenAI 标准参数，顶层直传，low/medium/high/xhigh/max）控制强度；`off` 用 `extra_body={"enable_thinking": False}` 显式关闭（非标准参数）。思考内容经 `reasoning_content` 返回（当前不展示，仅用于生成）
+- **哲学保持**：配置内容（供应商/模型名/强度）是自然语言数据可增删改；机制（表结构/激活语义/委托/缓存）硬编码；说明书/图谱等载体"模型无关，换模型不丢"继续成立；重试/压缩等流程基建不依赖具体模型（S15 组合式）
+- **已知限制**：token 预算窗口在启动时按当时激活模型计算，切到窗口不同的模型后重启才更新预算（activate 时打日志提示）；换非 DeepSeek 兼容供应商需新适配器（core Model 协议不变，YAGNI 不预建）

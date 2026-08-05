@@ -219,7 +219,7 @@ class GraphStore:
                 ON graph_events(book_id, chapter_order);
             """
         )
-        # 旧库兼容（S20 state / S29 lines）
+        # 旧库兼容（S20 state / S29 lines / S37 weight）
         cols = {r[1] for r in self._conn.execute("PRAGMA table_info(graph_entities)")}
         if "state" not in cols:
             self._conn.execute(
@@ -229,6 +229,12 @@ class GraphStore:
             self._conn.execute(
                 "ALTER TABLE graph_entities ADD COLUMN lines TEXT NOT NULL DEFAULT '[\"main\"]'"
             )
+        if "weight" not in cols:
+            # S37 遗留：声称"老库 ALTER 补列回填 1"但实际漏写——已存在实体至少出场 1 章
+            self._conn.execute(
+                "ALTER TABLE graph_entities ADD COLUMN weight INTEGER NOT NULL DEFAULT 0"
+            )
+            self._conn.execute("UPDATE graph_entities SET weight = 1 WHERE weight = 0")
         self._conn.commit()
 
     def close(self) -> None:

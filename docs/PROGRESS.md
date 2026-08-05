@@ -237,6 +237,31 @@
 
 ---
 
+## S47 运行时模型配置 + 思考强度（已完成 ✅）
+
+**背景（主人需求）**：此前模型固定 DeepSeek（`.env` 启动时静态配置 DEEPSEEK_*），无运行时切换供应商/模型、无思考强度选择。本次补齐：运行时模型注册表（可增删改/切换激活）+ 请求级 model_id/thinking 覆盖 + 前端模型选择器。
+
+**实现**（`packages/app/src/anyspark/models/registry.py` 新文件 + deepseek.py 扩展 + app.py 装配/API + 前端）：
+- **ModelRegistry**：SQLite 持久化 `model_configs`（供应商端点/模型名/api_key/窗口/温度/思考强度），空库从 `.env` 播种默认 DeepSeek——升级即用、旧行为不变；CRUD + 激活（仅一个 is_active，删除保底回落）
+- **ModelProvider**：实现 core Model 协议，**委托给当前激活配置**——切换后所有持有它的组件（Agent/图谱抽取/检测/探索/后台任务）即时跟随，无需重启/改组件；实例按 (config, temp, thinking) 组合缓存
+- **思考强度**：DeepSeek v4 系列默认开思考——`reasoning_effort`（OpenAI 标准参数顶层直传，low/medium/high/xhigh/max）；`off` 用 `extra_body={"enable_thinking": False}` 显式关闭（非标准参数）；思考内容经 `reasoning_content` 返回
+- **请求级覆盖**：ChatRequest 加 `model_id`（指定模型，缺省用激活）+ `thinking`（覆盖模型默认强度）；`_make_agent` 解析：显式 model_id > 当前激活配置（+档位温度）> 共享模型
+- **API**：GET/POST /api/models、DELETE /api/models/{id}、POST /api/models/{id}/activate（切窗口不同模型时日志提示预算重启生效）；health 的 model 字段跟随激活
+- **前端**：ModelPicker（模型下拉 + 思考强度下拉，WritingContext 第二层），随 chat 请求带 model_id/thinking
+- **顺带修复**：全局异常处理器（未捕获异常打 ERROR 日志，此前 try 外异常静默 500 零日志）；`AgencyStore._migrate_legacy_state`（S35 遗留：agency_state 旧库缺 level_id 列，主库 500——补 ALTER + 旧数字档位迁移 default-N）；`GraphStore` 补 weight 列迁移（S37 声称做了实际漏写）
+
+**门禁**：ruff + mypy + pytest **223**（+14：registry 种子/CRUD/保底/activate、thinking 参数映射、Provider 跟随/覆盖、API 端点）+ 前端 tsc/eslint/build 全绿；总闸 ✅
+
+**真实链路验证**（anyspark_api 实测，真实 DeepSeek）：
+- `model_id=deepseek-v4-pro + thinking=max` → 写《测试章A》落盘 ✓（请求级指定+思考强度）
+- `model_id=default + thinking=off` → flash 关思考 ✓
+- 缺省（激活=v4-pro）→ 自动用 v4-pro ✓；health 跟随 `deepseek-v4-pro` ✓
+- 裸调确认：v4-pro + reasoning_effort=max 返回 reasoning_content（思考真实开启）
+
+**遗留**：token 预算窗口按启动时激活模型计算（切不同窗口模型需重启生效，activate 已日志提示）；非 DeepSeek 兼容供应商需新适配器（YAGNI 不预建）；思考内容（reasoning_content）当前不展示给用户（仅影响生成）
+
+---
+
 ## S7 知识图谱（已完成 ✅）
 
 **交付 commit**：`62246b1`

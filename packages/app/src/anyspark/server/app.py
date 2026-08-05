@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -56,7 +56,16 @@ from anyspark.explore import (
     run_exploration,
 )
 from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
-from anyspark.models.deepseek import DeepSeekModel
+from anyspark.models.deepseek import DEFAULT_BASE_URL, DeepSeekModel
+from anyspark.models.registry import (
+    DEFAULT_CONTEXT_WINDOW,
+    DEFAULT_MAX_TOKENS,
+    DEFAULT_TEMPERATURE,
+    ModelConfig,
+    ModelProvider,
+    ModelRegistry,
+    slugify,
+)
 from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.stats import compute_stats
@@ -116,6 +125,23 @@ class ChatRequest(BaseModel):
     enable_extras: bool = False  # S32 扩展工具（read_material/check_text）按需点亮
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood/plot 子集
+    # S47 运行时模型选择：缺省用注册表当前激活模型；thinking 覆盖该模型默认思考强度
+    model_id: str | None = None  # 指定用哪个已配置模型（未配置/不存在 → 400）
+    thinking: str | None = None  # 思考强度覆盖：off/low/medium/high/xhigh/max（None=用模型配置）
+
+
+class ModelIn(BaseModel):
+    """S47 模型配置写入（新增或更新；id 缺省由 name 生成 slug）。"""
+
+    id: str | None = None
+    name: str
+    base_url: str | None = None  # 缺省用 env 默认端点（DEEPSEEK_BASE_URL）
+    model: str  # 模型名（如 deepseek-v4-flash / deepseek-v4-pro）
+    api_key: str | None = None  # 缺省用 env DEEPSEEK_API_KEY
+    context_window: int | None = None
+    max_tokens: int | None = None
+    temperature: float | None = None
+    thinking: str | None = None  # off/low/medium/high/xhigh/max（None=交模型默认）
 
 
 class ToolEvent(BaseModel):
@@ -497,8 +523,12 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
     manual_injector = ManualInjector(manual)
     signal_collector = SignalCollector(signals)
-    # 默认真实模型套上组合式重试包装（S15：重试是 core 可拼接组件，不内嵌在模型里）
-    model = model or RetryingModel(DeepSeekModel())
+    # S47 运行时模型：注册表（持久化多配置）+ 动态 Provider——
+    # 默认装配 RetryingModel(ModelProvider(registry))，所有组件跟随当前激活配置；
+    # 测试可注入 fake model（实现 core Model 协议），走共享分支不受影响。
+    models = ModelRegistry(real_db)
+    provider = ModelProvider(models)
+    model = model or RetryingModel(provider)
     plot_generator = PlotGenerator(model)  # 依赖 model，须在其初始化之后
     plot_resolver = PlotResolver(model)  # 伏笔自动回收（S17：章节落盘后台识别揭开）
     preference_extractor = PreferenceExtractor(model)  # S28：信号→说明书提炼（后台）
@@ -529,6 +559,13 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         allow_headers=["*"],
     )
 
+    @app.exception_handler(Exception)
+    async def _unhandled(request: Request, exc: Exception) -> Response:
+        """全局兜底：未捕获异常打 ERROR 日志（含 traceback）再返回 500——
+        此前 _make_agent 等 try 块外的异常静默 500 零日志，排查无据。"""
+        logger.exception("未捕获异常: %s %s", request.method, request.url.path, exc_info=exc)
+        return Response(status_code=500, content="Internal Server Error")
+
     def _make_agent(
         system_prompt: str,
         temperature: float,
@@ -538,6 +575,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         enable_search: bool = False,
         enable_extras: bool = False,
         skip_inject: set[str] | None = None,
+        model_id: str | None = None,
+        thinking: str | None = None,
     ) -> Agent:
         registry = ToolRegistry()
         register_writing_tools(registry, chapters)
@@ -576,7 +615,26 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         # 温度映射时重建模型（档位低=精确执行温度低）；测试 fake 走共享 model
         base_model = getattr(model, "inner", model)
         m: Model
-        if isinstance(base_model, DeepSeekModel) and eff_temp != 0.7:
+        if model_id:
+            # S47 请求级指定模型：按该配置构造（显式指定 > 当前激活）
+            cfg = models.get(model_id)
+            if cfg is None:
+                raise ValueError(f"模型配置不存在: {model_id}")
+            m = RetryingModel(
+                DeepSeekModel(
+                    base_url=cfg.base_url,
+                    api_key=cfg.resolved_api_key(),
+                    model=cfg.model,
+                    temperature=eff_temp,
+                    max_tokens=cfg.max_tokens,
+                    context_window=cfg.context_window,
+                    thinking=cfg.thinking if thinking is None else thinking,
+                )
+            )
+        elif isinstance(base_model, ModelProvider):
+            # S47 运行时模型：按当前激活配置 + 档位温度 + 思考强度覆盖构造
+            m = RetryingModel(base_model.build(temperature=eff_temp, thinking=thinking))
+        elif isinstance(base_model, DeepSeekModel) and eff_temp != 0.7:
             # 真实模型 + 能动性温度映射（档位低=精确执行温度低）
             m = RetryingModel(DeepSeekModel(temperature=eff_temp))
         else:
@@ -664,6 +722,58 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         name = getattr(model, "model_name", "unknown")
         return {"status": "ok", "model": str(name), "log": log_path()}
 
+    # -----------------------------------------------------------------------
+    # S47 运行时模型配置：注册表 CRUD + 激活切换（换供应商/换模型/选思考强度）
+    # -----------------------------------------------------------------------
+    @app.get("/api/models", response_model=dict[str, Any])
+    def list_models() -> dict[str, Any]:
+        cfgs = models.list()
+        active_id = next((c.id for c in cfgs if c.is_active), cfgs[0].id if cfgs else None)
+        return {"active_id": active_id, "models": [c.to_dict() for c in cfgs]}
+
+    @app.post("/api/models", response_model=dict[str, Any])
+    def upsert_model(req: ModelIn) -> dict[str, Any]:
+        """新增或更新模型配置（同 id 覆盖；id 缺省由 name 生成 slug）。"""
+        from anyspark.models.deepseek import _validate_thinking
+
+        try:
+            _validate_thinking(req.thinking)  # 非法思考强度 → 400（尽早暴露配置错误）
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        cfg = ModelConfig(
+            id=req.id or slugify(req.name),
+            name=req.name,
+            base_url=req.base_url or DEFAULT_BASE_URL,
+            model=req.model,
+            api_key=req.api_key,
+            context_window=req.context_window or DEFAULT_CONTEXT_WINDOW,
+            max_tokens=req.max_tokens or DEFAULT_MAX_TOKENS,
+            temperature=req.temperature or DEFAULT_TEMPERATURE,
+            thinking=req.thinking,
+        )
+        saved = models.upsert(cfg)
+        return {"ok": True, "model": saved.to_dict(), "active": saved.is_active}
+
+    @app.delete("/api/models/{model_id}", response_model=dict[str, Any])
+    def delete_model(model_id: str) -> dict[str, Any]:
+        if not models.delete(model_id):
+            raise HTTPException(status_code=400, detail="无法删除：至少保留一条配置，或配置不存在")
+        return {"ok": True}
+
+    @app.post("/api/models/{model_id}/activate", response_model=dict[str, Any])
+    def activate_model(model_id: str) -> dict[str, Any]:
+        """切换当前激活模型——所有组件（Agent/抽取/检测/探索/后台）即时跟随。"""
+        cfg = models.activate(model_id)
+        if cfg is None:
+            raise HTTPException(status_code=404, detail=f"模型配置不存在: {model_id}")
+        if cfg.context_window != _window:
+            logger.warning(
+                "模型窗口 %d != token 预算窗口 %d——重启后预算按新窗口生效（S26）",
+                cfg.context_window,
+                _window,
+            )
+        return {"ok": True, "active": cfg.to_dict()}
+
     @app.post("/api/chat/cancel")
     def cancel_chat(
         req: Annotated[CancelIn, Body()],
@@ -707,6 +817,9 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
     @app.post("/api/chat", response_model=ChatResponse)
     def chat(req: ChatRequest) -> ChatResponse:
+        # S47 请求级指定模型：不存在 → 400（不是 500）
+        if req.model_id and models.get(req.model_id) is None:
+            raise HTTPException(status_code=400, detail=f"模型配置不存在: {req.model_id}")
         # steering 防护（S21）：会话正在处理中时拒绝并发新消息，提示等待/取消
         if req.conversation_id and req.conversation_id in _active_tokens:
             raise HTTPException(
@@ -723,6 +836,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             enable_search=req.enable_search,
             enable_extras=req.enable_extras,
             skip_inject=set(req.skip_inject),
+            model_id=req.model_id,
+            thinking=req.thinking,
         )
         agent.events.on(
             "tool_call", lambda e: events.append(ToolEvent(type=e.type, payload=e.payload))
@@ -830,6 +945,14 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                 events_queue.put(("error", {"message": f"执行失败: {exc}"}))
 
         def gen() -> Any:
+            # S47 请求级指定模型：不存在 → 400（SSE 里转 error 帧）
+            if req.model_id and models.get(req.model_id) is None:
+                events_queue.put(("error", {"message": f"模型配置不存在: {req.model_id}"}))
+                yield (
+                    "event: error\n"
+                    + f"data: {json.dumps({'message': f'模型配置不存在: {req.model_id}'})}\n\n"
+                )
+                return
             agent = _make_agent(
                 req.system_prompt or DEFAULT_SYSTEM,
                 req.temperature,
@@ -838,6 +961,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                 enable_search=req.enable_search,
                 enable_extras=req.enable_extras,
                 skip_inject=set(req.skip_inject),
+                model_id=req.model_id,
+                thinking=req.thinking,
             )
             conv_id = req.conversation_id
             if not conv_id:

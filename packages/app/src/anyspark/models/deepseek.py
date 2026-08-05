@@ -7,6 +7,13 @@ anyspark.models.deepseek — 真实 DeepSeek 模型适配器（OpenAI 兼容）�
 配置（优先级从高到低）：
 1. 构造时显式传 base_url / api_key / model
 2. 环境变量 DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / DEEPSEEK_MODEL
+
+思考强度（thinking，S47 新增）：deepseek-v4 系列默认开启思考模式，
+通过 OpenAI 标准参数 reasoning_effort 调整强度（low/medium/high/xhigh/max），
+非标准参数 enable_thinking 走 extra_body 显式开关。取值：
+- None  不传（交给模型默认）
+- "off"  extra_body={"enable_thinking": False}（显式关闭思考）
+- low/medium/high/xhigh/max  顶层 reasoning_effort（按模型支持映射）
 """
 
 from __future__ import annotations
@@ -27,6 +34,38 @@ DEFAULT_BASE_URL = os.getenv(
     "DEEPSEEK_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
 DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+
+# 思考强度合法取值（S47）：None=不传（模型默认）；off=显式关闭；
+# low/medium/high/xhigh/max = reasoning_effort（OpenAI 标准参数，可顶层直传）
+THINKING_VALUES: tuple[str, ...] = ("off", "low", "medium", "high", "xhigh", "max")
+
+
+def _validate_thinking(thinking: str | None) -> str | None:
+    """校验思考强度取值；非法值抛 ValueError（配置错误应尽早暴露）。"""
+    if thinking is None:
+        return None
+    v = str(thinking).strip().lower()
+    if v not in THINKING_VALUES:
+        raise ValueError(f"非法思考强度 {thinking!r}：可选 {THINKING_VALUES}（或省略交模型默认）")
+    return v
+
+
+def _apply_thinking(kwargs: dict[str, Any], thinking: str | None) -> None:
+    """把思考强度写入请求参数（S47）。
+
+    - "off"：enable_thinking 非 OpenAI 标准参数 → extra_body 显式关闭思考
+      （v4 系列默认开思考，需要关闭时必须显式传）
+    - low/medium/high/xhigh/max：reasoning_effort 是 OpenAI 标准参数 → 顶层直传
+      （v4-flash 默认思考开，effort 控制推理强度；low/medium 映射 high、xhigh 映射 max）
+    """
+    if thinking is None:
+        return
+    if thinking == "off":
+        extra = dict(kwargs.get("extra_body") or {})
+        extra["enable_thinking"] = False
+        kwargs["extra_body"] = extra
+    else:
+        kwargs["reasoning_effort"] = thinking
 
 
 def to_openai_tool(spec: ToolSpec) -> dict[str, Any]:
@@ -105,6 +144,7 @@ class DeepSeekModel:
         on_delta: Callable[[str], None] | None = None,
         timeout: float = 120.0,
         context_window: int | None = None,
+        thinking: str | None = None,
     ) -> None:
         """
         stream: 流式传输（SSE 用）；on_delta: 文本增量回调（stream=True 时逐段触发）。
@@ -128,6 +168,7 @@ class DeepSeekModel:
         self._stream = stream
         self._on_delta = on_delta
         self._timeout = timeout
+        self._thinking = _validate_thinking(thinking)
         self._context_window = context_window or int(os.getenv("DEEPSEEK_CONTEXT_WINDOW", "65536"))
         self._client = OpenAI(
             base_url=self._base_url,
@@ -156,6 +197,7 @@ class DeepSeekModel:
         if tools:
             kwargs["tools"] = [to_openai_tool(t) for t in tools]
             kwargs["tool_choice"] = "auto"
+        _apply_thinking(kwargs, self._thinking)
 
         if self._stream:
             return self._respond_stream(kwargs, None)
@@ -201,6 +243,7 @@ class DeepSeekModel:
         if tools:
             kwargs["tools"] = [to_openai_tool(t) for t in tools]
             kwargs["tool_choice"] = "auto"
+        _apply_thinking(kwargs, self._thinking)
         return self._respond_stream(kwargs, on_event)
 
     def _respond_stream(
