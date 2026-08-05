@@ -29,9 +29,11 @@ from anyspark.align import (
     PreferenceExtractor,
     SignalCollector,
     SignalStore,
+    WorldSettingStore,
     build_agency_block,
     build_mood_block,
     parse_agency_declaration,
+    render_settings,
 )
 from anyspark.check import compile_rule, run_review
 from anyspark.core import (
@@ -215,6 +217,20 @@ class BatchReviewIn(BaseModel):
     """S40：批量审读——多章检测网审读。"""
 
     chapter_ids: list[str]
+
+
+class WorldSettingIn(BaseModel):
+    """S41：设定档条目。"""
+
+    content: str
+    category: str = "世界观"
+    name: str = ""
+
+
+class WorldSettingPatch(BaseModel):
+    content: str | None = None
+    category: str | None = None
+    name: str | None = None
 
 
 class BiasIn(BaseModel):
@@ -451,6 +467,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     # 能动性协议（机制 2）+ AI 倾向档案（S9）
     agency = AgencyStore(real_db)
     bias = BiasStore(real_db)
+    settings = WorldSettingStore(real_db)  # S41 设定档（作者正典）
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
@@ -536,6 +553,10 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         plot_block = plots.render("main", current_order=len(chapters.list_by_book(book_id)))
         if "plot" not in skip and plot_block:
             full_prompt = full_prompt + "\n\n" + plot_block
+        # 设定档注入（S41 作者正典：人物卡/能力体系/世界观规则——与图谱互补）
+        settings_block = render_settings(settings.list())
+        if "settings" not in skip and settings_block:
+            full_prompt = full_prompt + "\n\n" + settings_block
         # 氛围滑块注入（机制 4：本段氛围要求）
         mood_block = build_mood_block(mood)
         if "mood" not in skip and mood_block:
@@ -1148,6 +1169,34 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             "total": batch["total"],
             "results": batch["results"],
         }
+
+    # ------------------------------------------------------------------
+    # S41 设定档（作者正典：人物卡/能力体系/世界观规则）
+    # ------------------------------------------------------------------
+    @app.get("/api/settings", response_model=list[dict[str, Any]])
+    def list_settings() -> list[dict[str, Any]]:
+        """设定档全部条目。"""
+        return [s.to_dict() for s in settings.list()]
+
+    @app.post("/api/settings", response_model=dict[str, Any])
+    def add_setting(req: WorldSettingIn) -> dict[str, Any]:
+        """新增设定条目（作者手写）。"""
+        s = settings.add(req.content, req.category, req.name, source="manual")
+        return s.to_dict()
+
+    @app.patch("/api/settings/{setting_id}", response_model=dict[str, Any])
+    def patch_setting(setting_id: str, req: WorldSettingPatch) -> dict[str, Any]:
+        s = settings.update(setting_id, req.content, req.category, req.name)
+        if s is None:
+            raise HTTPException(status_code=404, detail="设定条目不存在")
+        return s.to_dict()
+
+    @app.delete("/api/settings/{setting_id}", response_model=dict[str, bool])
+    def delete_setting(setting_id: str) -> dict[str, bool]:
+        ok = settings.delete(setting_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="设定条目不存在")
+        return {"ok": True}
 
     @app.get("/api/bias", response_model=list[dict[str, Any]])
     def list_bias() -> list[dict[str, Any]]:
