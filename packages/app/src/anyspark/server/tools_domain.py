@@ -494,3 +494,146 @@ def make_roleplay_implementer(workspace: Any, graph: Any, model: Any) -> tuple[A
             return ToolResult(call=call, ok=False, content=f"推演失败：{exc}")
 
     return spec, implementer
+
+
+def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
+    """正文检索工具（S48-P4/B：图谱是结构化事实检索，正文定位靠这个）。
+
+    对齐 pi 的 grep 定位 + 计数：关键词/意象/短语在哪些章节出现、
+    出现次数、上下文片段——长书一致性核对/意象追踪的刚需
+    （图谱只存抽取后的实体关系，正文原文细节不在图谱里）。
+    """
+
+    spec = ToolSpec(
+        name="search_chapters",
+        description=(
+            "在全书正文中检索关键词/意象/短语：返回命中的章节、每章出现次数、"
+            "上下文片段（含统计'共命中 N 章 M 次'）。用于确认某个细节/意象/名字"
+            "在哪些章节出现过（一致性核对、伏笔追踪、避免重复描写）。"
+        ),
+        params=[
+            ParamSpec(
+                name="keyword",
+                type="string",
+                required=True,
+                description="要检索的关键词/短语（如'红绳'、'怀表'）",
+            )
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        kw = str(arguments.get("keyword", "")).strip()
+        if not kw:
+            return ToolResult(call=call, ok=False, content="缺少参数 keyword。")
+        try:
+            items = chapters.list_by_book("main")
+            if not items:
+                return ToolResult(call=call, ok=True, content="暂无章节。")
+            hits: list[dict[str, Any]] = []
+            total = 0
+            for c in items:
+                n = c.content.count(kw)
+                if n > 0:
+                    total += n
+                    # 上下文片段：首次出现位置前后 40 字
+                    idx = c.content.find(kw)
+                    ctx = c.content[max(0, idx - 40) : idx + 40 + len(kw)]
+                    hits.append({"title": c.title, "count": n, "context": "…" + ctx + "…"})
+            if not hits:
+                return ToolResult(
+                    call=call, ok=True, content=f"全书未找到「{kw}」（共检索 {len(items)} 章）。"
+                )
+            lines = [f"「{kw}」命中 {len(hits)} 章共 {total} 次："]
+            for h in hits:
+                lines.append(f"- 《{h['title']}》×{h['count']}：{h['context'][:80]}")
+            return ToolResult(
+                call=call,
+                ok=True,
+                content="\n".join(lines),
+                data={"hits": hits, "chapters": len(hits), "total": total},
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"检索失败：{exc}")
+
+    return spec, implementer
+
+
+def make_register_tool_implementer(ext_tools: Any) -> tuple[Any, Any]:
+    """扩展工具登记工具（S48-P4/B）：Agent 写代码给自己加工具（人工批准生效）。"""
+
+    spec = ToolSpec(
+        name="register_tool",
+        description=(
+            "编写并登记一个可复用的自定义工具（扩展工具）。当固定工具无法实现某个"
+            "反复需要的处理时使用——写 Python 函数 `run(args: dict) -> str` 登记，"
+            "经用户人工批准后生效，之后可直接调用该工具。"
+        ),
+        params=[
+            ParamSpec(
+                name="name",
+                type="string",
+                required=True,
+                description="工具名（英文小写，唯一，如 analyze_dialogue）",
+            ),
+            ParamSpec(
+                name="description",
+                type="string",
+                required=True,
+                description="工具描述（说明何时调用、做什么，agent 靠它判断）",
+            ),
+            ParamSpec(
+                name="code",
+                type="string",
+                required=True,
+                description=(
+                    "Python 代码，定义 def run(args: dict) -> str。可用 ws_chapters/"
+                    "ws_entities/ws_read 等只读数据函数（沙箱安全）。"
+                ),
+            ),
+            ParamSpec(
+                name="params_json",
+                type="string",
+                required=False,
+                description=(
+                    "参数定义 JSON 数组（可选），如 [{'name':'x','type':'string','required':true}]"
+                ),
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        name = str(arguments.get("name", "")).strip()
+        description = str(arguments.get("description", "")).strip()
+        code = str(arguments.get("code", "")).strip()
+        params_json = str(arguments.get("params_json", "[]")).strip() or "[]"
+        if not name or not description or not code:
+            return ToolResult(call=call, ok=False, content="缺少 name/description/code 参数。")
+        if "def run(" not in code:
+            return ToolResult(
+                call=call, ok=False, content="代码必须定义 def run(args: dict) -> str 函数。"
+            )
+        try:
+            import json as _json
+
+            params = _json.loads(params_json)
+            if not isinstance(params, list):
+                raise ValueError("params 必须是数组")
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"params_json 解析失败：{exc}")
+        try:
+            t = ext_tools.add(name, description, params, code)
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"登记失败：{exc}")
+        return ToolResult(
+            call=call,
+            ok=True,
+            content=(
+                f"已登记扩展工具「{name}」（#{t.id[:8]}）状态=draft。"
+                "已提交待审——请向用户说明并请求批准（批准后生效，可被直接调用）。"
+            ),
+            data={"tool_id": t.id, "name": name},
+        )
+
+    return spec, implementer

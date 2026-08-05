@@ -69,6 +69,11 @@ from anyspark.models.registry import (
 from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.stats import compute_stats
+from anyspark.server.tools_extensions import (
+    ExtensionToolStore,
+    execute_extension,
+    tool_spec_from_ext,
+)
 from anyspark.server.tools_writing import register_writing_tools
 from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore, SqliteConversationStore
@@ -152,6 +157,15 @@ class RoleCardIn(BaseModel):
 
     name: str
     content: str
+
+
+class ToolRegisterIn(BaseModel):
+    """S48-P4/B 扩展工具登记（Agent 或用户提交，人工批准后生效）。"""
+
+    name: str  # 工具名（唯一，agent 可见）
+    description: str  # 工具描述（agent 判断何时调用用）
+    params_json: str = "[]"  # 参数定义 JSON 数组
+    code: str  # Python 代码：def run(args: dict) -> str
 
 
 class RolePlayIn(BaseModel):
@@ -444,6 +458,7 @@ def build_app(
         else:
             workspace = Workspace(root=Path(real_db).parent / "workspace")
     chapters = ChapterStore(real_db)
+    ext_tools = ExtensionToolStore(real_db)  # S48-P4/B：扩展工具注册表（人工批准生效）
     manual = ManualStore(real_db)
     signals = SignalStore(real_db)
     archive = ProjectArchive(real_db)
@@ -656,7 +671,9 @@ def build_app(
                 make_ingest_implementer,
                 make_plan_implementer,
                 make_plot_implementer,
+                make_register_tool_implementer,
                 make_roleplay_implementer,
+                make_search_chapters_implementer,
                 make_setting_implementer,
             )
 
@@ -674,6 +691,23 @@ def build_app(
             registry.register(st_spec, st_impl)
             rp_spec, rp_impl = make_roleplay_implementer(workspace, graph, model)
             registry.register(rp_spec, rp_impl)
+            sc_spec, sc_impl = make_search_chapters_implementer(chapters)
+            registry.register(sc_spec, sc_impl)
+            rt_spec, rt_impl = make_register_tool_implementer(ext_tools)
+            registry.register(rt_spec, rt_impl)
+        # S48-P4/B 扩展工具注册表：已批准（active）的扩展注入工具集（无需重启生效）
+        from anyspark.server.codex import make_data_env
+
+        _ext_data_env = make_data_env(workspace, chapters, graph)
+
+        def _make_ext_impl(e: Any, env: dict[str, Any]) -> Any:
+            def impl(spec_: Any, arguments: dict[str, Any]) -> Any:
+                return execute_extension(e, arguments, env)
+
+            return impl
+
+        for _ext in ext_tools.active_tools():
+            registry.register(tool_spec_from_ext(_ext), _make_ext_impl(_ext, _ext_data_env))
         # S48-P5 代码扩展（沙箱 run_code）：默认关，按需点亮（固定工具做不了的自定义处理）
         if enable_codex:
             from anyspark.server.tools_domain import make_codex_implementer
@@ -1804,6 +1838,57 @@ def build_app(
             result.best.strategy if result.best else "?",
         )
         return result.to_dict()
+
+    # -----------------------------------------------------------------------
+    # S48-P4/B 扩展工具注册表：Agent 写的工具，人工批准才生效
+    # -----------------------------------------------------------------------
+    @app.get("/api/tools", response_model=list[dict[str, Any]])
+    def list_ext_tools() -> list[dict[str, Any]]:
+        return [t.to_dict() for t in ext_tools.list_all()]
+
+    @app.post("/api/tools/register", response_model=dict[str, Any])
+    def register_ext_tool(req: ToolRegisterIn) -> dict[str, Any]:
+        """登记扩展工具（status=draft；人工批准后才注入 Agent 工具集）。"""
+        try:
+            params = json.loads(req.params_json) if req.params_json else []
+            if not isinstance(params, list):
+                raise ValueError("params 必须是 JSON 数组")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"params 解析失败：{exc}") from exc
+        if not req.code.strip() or "def run(" not in req.code:
+            raise HTTPException(
+                status_code=400, detail="工具代码必须定义 run(args: dict) -> str 函数"
+            )
+        t = ext_tools.add(req.name, req.description, params, req.code)
+        return {
+            "ok": True,
+            "id": t.id,
+            "name": t.name,
+            "status": "draft",
+            "note": "已登记待审——人工批准后才生效",
+        }
+
+    @app.post("/api/tools/{tool_id}/approve", response_model=dict[str, Any])
+    def approve_ext_tool(tool_id: str) -> dict[str, Any]:
+        """人工批准：工具进入 active，后续请求注入 Agent 工具集（无需重启）。"""
+        t = ext_tools.set_status(tool_id, "active")
+        if t is None:
+            raise HTTPException(status_code=404, detail="扩展工具不存在")
+        logger.info("扩展工具已批准生效: %s", t.name)
+        return {"ok": True, "id": t.id, "name": t.name, "status": "active"}
+
+    @app.post("/api/tools/{tool_id}/disable", response_model=dict[str, Any])
+    def disable_ext_tool(tool_id: str) -> dict[str, Any]:
+        t = ext_tools.set_status(tool_id, "draft")
+        if t is None:
+            raise HTTPException(status_code=404, detail="扩展工具不存在")
+        return {"ok": True, "id": t.id, "name": t.name, "status": "draft"}
+
+    @app.delete("/api/tools/{tool_id}", response_model=dict[str, Any])
+    def delete_ext_tool(tool_id: str) -> dict[str, Any]:
+        if not ext_tools.delete(tool_id):
+            raise HTTPException(status_code=404, detail="扩展工具不存在")
+        return {"ok": True}
 
     # -----------------------------------------------------------------------
     # S48-P5 代码扩展（anyspark-codex）：沙箱执行，固定工具做不了时用
