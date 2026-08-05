@@ -623,6 +623,82 @@ class GraphStore:
         events = [self._event_from_row(r) for r in erows]
         return {"entities": entities, "relations": rels, "events": events}
 
+    def impact_chapters(
+        self,
+        book_id: str,
+        changed_order: int,
+        entities: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """S45 影响分析（连锁修改）：改第 changed_order 章（涉及实体）→
+        后续章节中引用这些实体的事件/关系所在章 = 受影响下游。
+
+        输入：被改章节序号 + 涉及实体（缺省自动取该章图谱事件涉及的实体）。
+        输出：受影响章节列表（按 order 排序，含涉及实体与事件摘要）。
+        """
+        changed_entities: set[str] = set(entities or [])
+        if not changed_entities:
+            # 自动提取：该章图谱事件 involved 并集
+            rows = self._conn.execute(
+                "SELECT involved FROM graph_events WHERE book_id=? AND chapter_order=?",
+                (book_id, changed_order),
+            ).fetchall()
+            for r in rows:
+                for name in json.loads(r["involved"] or "[]"):
+                    changed_entities.add(str(name))
+        if not changed_entities:
+            return []
+        # 受影响章节：后续事件/关系涉及这些实体
+        hits: dict[str, dict[str, Any]] = {}
+        for name in changed_entities:
+            ev_rows = self._conn.execute(
+                "SELECT DISTINCT chapter_ref, chapter_order, label FROM graph_events "
+                "WHERE book_id=? AND chapter_order>? AND involved LIKE ?",
+                (book_id, changed_order, f"%{name}%"),
+            ).fetchall()
+            for r in ev_rows:
+                key = r["chapter_ref"]
+                hit = hits.setdefault(
+                    key,
+                    {
+                        "chapter_ref": key,
+                        "order": int(r["chapter_order"]),
+                        "entities": set(),
+                        "events": [],
+                    },
+                )
+                hit["entities"].add(name)
+                hit["events"].append(r["label"])
+            rel_rows = self._conn.execute(
+                "SELECT DISTINCT r.chapter_ref, e.chapter_order AS o FROM graph_relations r "
+                "JOIN graph_entities fe ON fe.id = r.from_id "
+                "JOIN graph_entities te ON te.id = r.to_id "
+                "JOIN graph_events e ON e.chapter_ref = r.chapter_ref "
+                "WHERE r.book_id=? AND (fe.name=? OR te.name=?) AND e.chapter_order>?",
+                (book_id, name, name, changed_order),
+            ).fetchall()
+            for r in rel_rows:
+                hits.setdefault(
+                    r["chapter_ref"],
+                    {
+                        "chapter_ref": r["chapter_ref"],
+                        "order": int(r["o"]),
+                        "entities": set(),
+                        "events": [],
+                    },
+                )["entities"].add(name)
+        result = []
+        for h in hits.values():
+            result.append(
+                {
+                    "chapter_ref": h["chapter_ref"],
+                    "chapter_order": h["order"],
+                    "entities": sorted(h["entities"]),
+                    "events": list(dict.fromkeys(h["events"]))[:5],
+                }
+            )
+        result.sort(key=lambda x: x["chapter_order"])
+        return result
+
     def ingest_chapter(
         self,
         book_id: str,

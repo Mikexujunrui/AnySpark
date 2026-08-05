@@ -260,6 +260,13 @@ class ChapterPatchIn(BaseModel):
     operations: list[dict[str, Any]]
 
 
+class ImpactIn(BaseModel):
+    """S45：影响分析（连锁修改）——改某章（涉及实体）→ 受影响下游章节。"""
+
+    chapter_order: int
+    entities: list[str] | None = None
+
+
 class BiasIn(BaseModel):
     content: str
     source: str = "ai"
@@ -1548,6 +1555,12 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     def graph_context() -> dict[str, str]:
         """当前时空点已知事实注入块（预览）。"""
         return {"block": graph_injector.build_block("main")}
+
+    @app.post("/api/impact", response_model=dict[str, object])
+    def impact_route(req: ImpactIn) -> dict[str, object]:
+        """S45：影响分析——改第 N 章（涉及实体）→ 后续受影响章节（连锁修改依据）。"""
+        hits = graph.impact_chapters("main", req.chapter_order, req.entities)
+        return {"changed_order": req.chapter_order, "impacted": hits, "count": len(hits)}
 
     @app.post("/api/graph/extract", response_model=dict[str, int])
     def graph_extract_route(req: GraphExtractIn) -> dict[str, int]:

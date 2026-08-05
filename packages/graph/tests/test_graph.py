@@ -390,3 +390,52 @@ def test_known_facts_mixes_high_frequency_entities() -> None:
     assert "新角色35" in names  # 最近实体也在
     # 高频优先：陈渡在序中靠前（weight 排序组）
     assert names.index("陈渡") < len(names)  # 存在即可
+
+
+def test_impact_chapters() -> None:
+    """S45：影响分析——改第 N 章（涉及实体）→ 后续受影响章节。"""
+    g = _store()
+    # 第 1 章：陈渡登场
+    g.ingest_chapter(
+        "main",
+        "第一章",
+        1,
+        Extraction(
+            entities=[EntityDraft("陈渡", "角色", [], "侦探")],
+            relations=[],
+            events=[EventDraft("第一章", "抵达", "雨夜抵达", ["陈渡"])],
+        ),
+    )
+    # 第 2 章：沈歆登场（兄妹）
+    g.ingest_chapter(
+        "main",
+        "第二章",
+        2,
+        Extraction(
+            entities=[EntityDraft("沈歆", "角色", [], "妹妹")],
+            relations=[RelationDraft("陈渡", "沈歆", "兄妹", "亲兄妹")],
+            events=[EventDraft("第二章", "相认", "兄妹相认", ["陈渡", "沈歆"])],
+        ),
+    )
+    # 第 3 章：提到陈渡的旧案
+    g.ingest_chapter(
+        "main",
+        "第三章",
+        3,
+        Extraction(
+            entities=[],
+            relations=[],
+            events=[EventDraft("第三章", "旧案", "陈渡旧案重提", ["陈渡"])],
+        ),
+    )
+    # 改第 1 章（涉及陈渡）→ 第 2/3 章受影响（后续引用陈渡）
+    hits = g.impact_chapters("main", 1, ["陈渡"])
+    refs = [h["chapter_ref"] for h in hits]
+    assert "第二章" in refs and "第三章" in refs
+    assert all(h["chapter_order"] > 1 for h in hits)
+    # 改第 2 章（涉及沈歆）→ 第 3 章不受影响（沈歆未在第 3 章出现）
+    hits2 = g.impact_chapters("main", 2, ["沈歆"])
+    assert hits2 == []
+    # 无实体参数：自动取该章事件 involved（第 1 章→陈渡）
+    hits3 = g.impact_chapters("main", 1)
+    assert any("陈渡" in h["entities"] for h in hits3)
