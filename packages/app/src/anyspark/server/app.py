@@ -29,11 +29,13 @@ from anyspark.align import (
     PreferenceExtractor,
     SignalCollector,
     SignalStore,
+    StoryPlanStore,
     WorldSettingStore,
     WritingSkillStore,
     build_agency_block,
     build_mood_block,
     parse_agency_declaration,
+    render_plan,
     render_settings,
     render_skill_index,
     render_skills_content,
@@ -265,6 +267,20 @@ class ImpactIn(BaseModel):
 
     chapter_order: int
     entities: list[str] | None = None
+
+
+class ChapterPlanIn(BaseModel):
+    """S46：剧情计划条目。"""
+
+    chapter_order: int
+    title: str = ""
+    content: str = ""
+
+
+class ChapterPlanPatch(BaseModel):
+    title: str | None = None
+    content: str | None = None
+    status: str | None = None
 
 
 class BiasIn(BaseModel):
@@ -503,6 +519,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     bias = BiasStore(real_db)
     settings = WorldSettingStore(real_db)  # S41 设定档（作者正典）
     skills = WritingSkillStore(real_db)  # S43 写作技巧（skill 式内容载体）
+    plans = StoryPlanStore(real_db)  # S46 剧情计划（计划→执行）
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
@@ -600,6 +617,10 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         skill_content = render_skills_content(skill_list)
         if "skills" not in skip and skill_content:
             full_prompt = full_prompt + "\n\n" + skill_content
+        # 剧情计划注入（S46：当前章+后续计划——AI 知道接下来写什么）
+        plan_block = render_plan(plans.list())
+        if "plan" not in skip and plan_block:
+            full_prompt = full_prompt + "\n\n" + plan_block
         # 氛围滑块注入（机制 4：本段氛围要求）
         mood_block = build_mood_block(mood)
         if "mood" not in skip and mood_block:
@@ -1561,6 +1582,33 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         """S45：影响分析——改第 N 章（涉及实体）→ 后续受影响章节（连锁修改依据）。"""
         hits = graph.impact_chapters("main", req.chapter_order, req.entities)
         return {"changed_order": req.chapter_order, "impacted": hits, "count": len(hits)}
+
+    # ------------------------------------------------------------------
+    # S46 剧情计划（计划→执行：固化章节计划，写作注入，推进标记）
+    # ------------------------------------------------------------------
+    @app.get("/api/plan", response_model=list[dict[str, Any]])
+    def list_plan() -> list[dict[str, Any]]:
+        """全部章节计划（按 chapter_order）。"""
+        return [p.to_dict() for p in plans.list()]
+
+    @app.post("/api/plan", response_model=dict[str, Any])
+    def add_plan(req: ChapterPlanIn) -> dict[str, Any]:
+        p = plans.add(req.chapter_order, req.title, req.content)
+        return p.to_dict()
+
+    @app.patch("/api/plan/{plan_id}", response_model=dict[str, Any])
+    def patch_plan(plan_id: str, req: ChapterPlanPatch) -> dict[str, Any]:
+        p = plans.update(plan_id, req.title, req.content, req.status)
+        if p is None:
+            raise HTTPException(status_code=404, detail="计划不存在")
+        return p.to_dict()
+
+    @app.delete("/api/plan/{plan_id}", response_model=dict[str, bool])
+    def delete_plan(plan_id: str) -> dict[str, bool]:
+        ok = plans.delete(plan_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="计划不存在")
+        return {"ok": True}
 
     @app.post("/api/graph/extract", response_model=dict[str, int])
     def graph_extract_route(req: GraphExtractIn) -> dict[str, int]:

@@ -22,6 +22,7 @@ from .extract import PreferenceExtractor
 from .inject import ManualInjector, MemoryInjector
 from .manual import ManualEntry, ManualStore, render_manual
 from .mood import MOOD_DIMS, build_mood_block
+from .plan import ChapterPlan, StoryPlanStore, render_plan
 from .signals import Signal, SignalCollector, SignalStore
 from .skills import (
     DEFAULT_SKILLS,
@@ -41,6 +42,7 @@ __all__ = [
     "AgencyLevel",
     "AgencyStore",
     "BiasStore",
+    "ChapterPlan",
     "ManualEntry",
     "ManualInjector",
     "ManualStore",
@@ -52,6 +54,7 @@ __all__ = [
     "Signal",
     "SignalCollector",
     "SignalStore",
+    "StoryPlanStore",
     "WorldSetting",
     "WorldSettingStore",
     "WritingSkill",
@@ -60,6 +63,7 @@ __all__ = [
     "build_mood_block",
     "parse_agency_declaration",
     "render_manual",
+    "render_plan",
     "render_settings",
     "render_skill_index",
     "render_skills_content",
