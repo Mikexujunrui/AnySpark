@@ -671,6 +671,7 @@ def build_app(
                 make_ingest_implementer,
                 make_plan_implementer,
                 make_plot_implementer,
+                make_read_context_implementer,
                 make_register_tool_implementer,
                 make_roleplay_implementer,
                 make_search_chapters_implementer,
@@ -693,6 +694,8 @@ def build_app(
             registry.register(rp_spec, rp_impl)
             sc_spec, sc_impl = make_search_chapters_implementer(chapters)
             registry.register(sc_spec, sc_impl)
+            rc_spec, rc_impl = make_read_context_implementer(chapters)
+            registry.register(rc_spec, rc_impl)
             rt_spec, rt_impl = make_register_tool_implementer(ext_tools)
             registry.register(rt_spec, rt_impl)
         # S48-P4/B 扩展工具注册表：已批准（active）的扩展注入工具集（无需重启生效）

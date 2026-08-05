@@ -496,6 +496,24 @@ def make_roleplay_implementer(workspace: Any, graph: Any, model: Any) -> tuple[A
     return spec, implementer
 
 
+def _sentence_at(content: str, idx: int) -> str:
+    """返回 content 中包含位置 idx 的分句（按 。！？；， 换行 切分）。"""
+    import re as _re
+
+    pos = 0
+    for s in _re.split(r"(?<=[。！？；，\n])", content):
+        if pos <= idx < pos + len(s):
+            return s
+        pos += len(s)
+    return content
+
+
+def _sent_has(content: str, idx: int, kw_len: int, exclude: str) -> bool:
+    """句级排除：命中所在句子含 exclude 则 True（防短句互相污染/否定语境）。"""
+    sent = _sentence_at(content, idx)
+    return exclude in sent
+
+
 def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
     """正文检索工具（S48-P4/B：图谱是结构化事实检索，正文定位靠这个）。
 
@@ -510,14 +528,38 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
             "在全书正文中检索关键词/意象/短语：返回命中的章节、每章出现次数、"
             "上下文片段（含统计'共命中 N 章 M 次'）。用于确认某个细节/意象/名字"
             "在哪些章节出现过（一致性核对、伏笔追踪、避免重复描写）。"
+            "注意：这是字面命中，需阅读上下文片段判断是否真正相关"
+            "（否定/比喻/指代等不算真相关）；需要看命中处前后完整段落时"
+            "再用 read_context。选词用独特短语（如'怀表背面'）而非高频词。"
         ),
         params=[
             ParamSpec(
                 name="keyword",
                 type="string",
                 required=True,
-                description="要检索的关键词/短语（如'红绳'、'怀表'）",
-            )
+                description="要检索的关键词/短语（如'红绳'、'怀表背面'）",
+            ),
+            ParamSpec(
+                name="exclude",
+                type="string",
+                required=False,
+                description="排除词：命中位置片段内包含该词的命中不算（如搜'怀表'排除'没有'）",
+            ),
+            ParamSpec(
+                name="fragment",
+                type="string",
+                required=False,
+                description=(
+                    "上下文宽度（命中位置前后各多少字；默认 20——定位够用；"
+                    "需要更多时加大或直接用 read_context 看完整段落；0=只要章节和次数）"
+                ),
+            ),
+            ParamSpec(
+                name="regex",
+                type="string",
+                required=False,
+                description="true 时 keyword 按正则表达式匹配（模糊/多形，如'怀表|怀表盖'）",
+            ),
         ],
     )
 
@@ -527,26 +569,72 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
         if not kw:
             return ToolResult(call=call, ok=False, content="缺少参数 keyword。")
         try:
+            import re as _re
+
+            exclude = str(arguments.get("exclude", "")).strip() or None
+            try:
+                frag = max(0, min(int(str(arguments.get("fragment", "20")) or "20"), 500))
+            except ValueError:
+                frag = 20
+            use_regex = str(arguments.get("regex", "")).strip().lower() in ("true", "1", "yes")
             items = chapters.list_by_book("main")
             if not items:
                 return ToolResult(call=call, ok=True, content="暂无章节。")
             hits: list[dict[str, Any]] = []
             total = 0
             for c in items:
-                n = c.content.count(kw)
+                n = 0
+                first_ctx = ""
+                if use_regex:
+                    try:
+                        matches = list(_re.finditer(kw, c.content))
+                    except _re.error as exc:
+                        return ToolResult(call=call, ok=False, content=f"正则表达式错误：{exc}")
+                    for m in matches:
+                        if not m:
+                            continue
+                        if frag > 0:
+                            ctx = c.content[max(0, m.start() - frag) : m.end() + frag]
+                            if exclude is not None and _sent_has(
+                                c.content, m.start(), m.end() - m.start(), exclude
+                            ):
+                                continue
+                            n += 1
+                            if not first_ctx:
+                                first_ctx = "…" + ctx + "…"
+                        else:
+                            n += 1
+                else:
+                    start = 0
+                    while True:
+                        idx = c.content.find(kw, start)
+                        if idx == -1:
+                            break
+                        if frag > 0:
+                            ctx = c.content[max(0, idx - frag) : idx + len(kw) + frag]
+                            if exclude is not None and _sent_has(c.content, idx, len(kw), exclude):
+                                start = idx + len(kw)
+                                continue
+                            n += 1
+                            if not first_ctx:
+                                first_ctx = "…" + ctx + "…"
+                        else:
+                            n += 1
+                        start = idx + len(kw)
                 if n > 0:
                     total += n
-                    # 上下文片段：首次出现位置前后 40 字
-                    idx = c.content.find(kw)
-                    ctx = c.content[max(0, idx - 40) : idx + 40 + len(kw)]
-                    hits.append({"title": c.title, "count": n, "context": "…" + ctx + "…"})
+                    hits.append({"title": c.title, "count": n, "context": first_ctx})
             if not hits:
                 return ToolResult(
                     call=call, ok=True, content=f"全书未找到「{kw}」（共检索 {len(items)} 章）。"
                 )
             lines = [f"「{kw}」命中 {len(hits)} 章共 {total} 次："]
             for h in hits:
-                lines.append(f"- 《{h['title']}》×{h['count']}：{h['context'][:80]}")
+                if h["context"]:
+                    lines.append(f"- 《{h['title']}》×{h['count']}：{h['context']}")
+                else:
+                    lines.append(f"- 《{h['title']}》×{h['count']}")
+            lines.append("（字面命中，需读上下文判断相关性；看命中处完整段落用 read_context）")
             return ToolResult(
                 call=call,
                 ok=True,
@@ -635,5 +723,92 @@ def make_register_tool_implementer(ext_tools: Any) -> tuple[Any, Any]:
             ),
             data={"tool_id": t.id, "name": name},
         )
+
+    return spec, implementer
+
+
+def make_read_context_implementer(chapters: Any) -> tuple[Any, Any]:
+    """上下文段落阅读（S48-P4/B：命中后看上下段落，不读全文省 token）。
+
+    与 search_chapters 配套：检索定位到章节后，用锚点读该处前后 N 段
+    （段落=空行分隔，中文正文自然分段）——比 read_chapter 读全文省 token。
+    """
+
+    spec = ToolSpec(
+        name="read_context",
+        description=(
+            "读取某章中指定锚点位置的前后若干段落（不读全文，省 token）。"
+            "search_chapters 定位到命中章节后，想确认命中处的完整语境时用——"
+            "段落=空行分隔；锚点用章内出现的短语/句子。"
+        ),
+        params=[
+            ParamSpec(
+                name="title",
+                type="string",
+                required=True,
+                description="章节标题",
+            ),
+            ParamSpec(
+                name="anchor",
+                type="string",
+                required=True,
+                description="章内锚点文本（含它的段落将被定位）",
+            ),
+            ParamSpec(
+                name="before",
+                type="string",
+                required=False,
+                description="锚点前读几段（默认 2，上限 5）",
+            ),
+            ParamSpec(
+                name="after",
+                type="string",
+                required=False,
+                description="锚点后读几段（默认 2，上限 5）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        title = str(arguments.get("title", "")).strip()
+        anchor = str(arguments.get("anchor", "")).strip()
+        if not title or not anchor:
+            return ToolResult(call=call, ok=False, content="缺少参数 title 或 anchor。")
+        try:
+            before = min(max(int(str(arguments.get("before", "2")) or "2"), 0), 5)
+            after = min(max(int(str(arguments.get("after", "2")) or "2"), 0), 5)
+        except ValueError:
+            before, after = 2, 2
+        try:
+            ch = next((c for c in chapters.list_by_book("main") if c.title == title), None)
+            if ch is None:
+                return ToolResult(
+                    call=call,
+                    ok=False,
+                    content=f"未找到章节《{title}》（可用 list_chapters 查看）。",
+                )
+            paras = [p.strip() for p in ch.content.split("\n\n") if p.strip()]
+            if not paras:
+                return ToolResult(call=call, ok=False, content=f"《{title}》为空。")
+            idx = next((i for i, p in enumerate(paras) if anchor in p), None)
+            if idx is None:
+                # 锚点未命中：返回开头若干段 + 提示
+                head = "\n\n".join(paras[: min(before + after + 1, 3)])
+                return ToolResult(
+                    call=call,
+                    ok=False,
+                    content=(
+                        f"《{title}》未找到锚点「{anchor}」（共 {len(paras)} 段）。"
+                        f"开头片段：\n{head[:300]}"
+                    ),
+                )
+            lo = max(0, idx - before)
+            hi = min(len(paras), idx + after + 1)
+            body = "\n\n".join(paras[lo:hi])
+            marker = f"（第 {idx + 1}/{len(paras)} 段附近）"
+            return ToolResult(call=call, ok=True, content=f"《{title}》{marker}\n\n{body}")
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"读取失败：{exc}")
 
     return spec, implementer

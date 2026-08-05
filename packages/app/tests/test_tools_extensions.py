@@ -191,3 +191,58 @@ def test_register_requires_run_function() -> None:
         json={"name": "no_func", "description": "x", "params_json": "[]", "code": "print('hi')"},
     )
     assert r.status_code == 400
+
+
+def test_search_chapters_exclude_and_fragment() -> None:
+    """exclude 排除否定语境；fragment 控制上下文宽度（默认小片段定位用）。"""
+    store = _seed_chapters()
+    _, impl = make_search_chapters_implementer(store)
+    # 默认：小片段（前后 20 字）
+    r = _call(impl, keyword="陈渡")
+    assert r.ok is True and "命中 1 章共 2 次" in r.content
+    # fragment=0：只要章节和次数，无片段
+    r0 = _call(impl, keyword="陈渡", fragment="0")
+    assert r0.ok is True and "×2" in r0.content and "…" not in r0.content
+    # exclude：片段内含排除词的命中跳过
+    store2 = _seed_chapters()
+    store2.upsert("main", "第三章", "他没有陈渡的消息，也找不到陈渡。", 2, "main")
+    _, impl2 = make_search_chapters_implementer(store2)
+    r_ex = _call(impl2, keyword="陈渡", exclude="没有")
+    # 第一章 2 次 + 第三章 1 次（"他没有陈渡的消息"被排除，剩"也找不到陈渡"）
+    assert "命中 2 章共 3 次" in r_ex.content
+
+
+def test_search_chapters_regex() -> None:
+    """regex 模糊匹配：多形/跨字。"""
+    store = _seed_chapters()
+    store.upsert("main", "第三章", "他攥着怀表盖，怀表链在指间转。", 2, "main")
+    _, impl = make_search_chapters_implementer(store)
+    r = _call(impl, keyword="怀表(盖|链)", regex="true")
+    assert r.ok is True
+    assert "命中 1 章共 2 次" in r.content  # 怀表盖 + 怀表链
+    # 非法正则 → 报错
+    r2 = _call(impl, keyword="怀表(", regex="true")
+    assert r2.ok is False and "正则" in r2.content
+
+
+def test_read_context_paragraphs() -> None:
+    """read_context：锚点定位读前后段落（不读全文）。"""
+    store = _seed_chapters()
+    store.upsert(
+        "main",
+        "第三章",
+        "第一段。\n\n第二段提到怀表。\n\n第三段。\n\n第四段。",
+        2,
+        "main",
+    )
+    from anyspark.server.tools_domain import make_read_context_implementer
+
+    _, impl = make_read_context_implementer(store)
+    r = _call(impl, title="第三章", anchor="怀表")
+    assert r.ok is True
+    assert "第二段提到怀表" in r.content
+    assert "第一段" in r.content  # 前 2 段
+    assert "第四段" in r.content  # 后 2 段（含第三段）
+    # 锚点未命中 → 返回开头提示
+    r2 = _call(impl, title="第三章", anchor="不存在的锚点")
+    assert r2.ok is False and "未找到锚点" in r2.content
