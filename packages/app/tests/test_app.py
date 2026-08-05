@@ -534,3 +534,49 @@ def test_plot_planted_order_via_api() -> None:
     # 列表返回 planted_order
     pts = client.get("/api/plot").json()
     assert pts[0]["planted_order"] == 1
+
+
+def test_batch_review_and_rewrite_api() -> None:
+    """S40：批量审读/改写 API（fake 模型：快速返回，不真跑 LLM）。"""
+    client = _make_client()
+    # 先写一章
+    r = client.post("/api/chat", json={"message": "写《第一章》50字：陈渡发现怀表"})
+    assert r.status_code == 200
+    chs = client.get("/api/chapters").json()
+    assert chs
+    cid = chs[-1]["id"]
+    # 批量审读：提交 → 后台执行 → 轮询状态
+    r = client.post("/api/batch/review", json={"chapter_ids": [cid]})
+    assert r.status_code == 200
+    bid = r.json()["batch_id"]
+    # 轮询（后台 worker 串行，可能稍慢）
+    status = None
+    for _ in range(20):
+        st = client.get(f"/api/batch/{bid}").json()
+        if st["status"] == "done":
+            status = st
+            break
+        import time
+
+        time.sleep(0.5)
+    assert status is not None, "批量审读未完成"
+    assert status["done"] == 1 and status["total"] == 1
+    # 批量改写：提交（fake 模型返回固定文本）
+    r = client.post(
+        "/api/batch/rewrite", json={"chapter_ids": [cid], "instruction": "改成轻松诙谐风格"}
+    )
+    assert r.status_code == 200
+    bid2 = r.json()["batch_id"]
+    status2 = None
+    for _ in range(20):
+        st = client.get(f"/api/batch/{bid2}").json()
+        if st["status"] == "done":
+            status2 = st
+            break
+        import time
+
+        time.sleep(0.5)
+    assert status2 is not None and status2["done"] == 1
+    # 无效输入
+    assert client.post("/api/batch/review", json={"chapter_ids": []}).status_code == 400
+    assert client.get("/api/batch/notexist").status_code == 404

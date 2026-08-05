@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import queue
 import threading
+import uuid
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
@@ -203,6 +204,19 @@ class AgencyLevelIn(BaseModel):
     temperature: float = 0.7
 
 
+class BatchRewriteIn(BaseModel):
+    """S40：批量改写（全书变换）——多章统一指令改写。"""
+
+    chapter_ids: list[str]
+    instruction: str
+
+
+class BatchReviewIn(BaseModel):
+    """S40：批量审读——多章检测网审读。"""
+
+    chapter_ids: list[str]
+
+
 class BiasIn(BaseModel):
     content: str
     source: str = "ai"
@@ -297,8 +311,75 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     # 后台任务队列 + 独立 worker（S21 修 BackgroundTasks 共享线程池排队缺陷）：
     # 图谱抽取/伏笔回收/信号提炼不占请求线程池，请求立即返回、后台串行处理。
     # 任务负载类型（S28 扩展）：("chapter", title, content, order) 图谱抽取/伏笔回收；
-    # ("refine",) 信号→说明书提炼。
-    _bg_queue: queue.Queue[tuple[str, str, str, int, str] | tuple[str]] = queue.Queue()
+    # ("refine",) 信号→说明书提炼；("batch_rewrite", batch_id, ids, instruction) 批量改写；
+    # ("batch_review", batch_id, ids) 批量审读（S40）。
+    _bg_queue: queue.Queue[Any] = queue.Queue()  # 任务负载类型见 _bg_worker（S28/S40）
+    # S40 批量任务状态（内存会话级）：id → {status, done, total, results}
+    _batches: dict[str, dict[str, Any]] = {}
+    _batch_lock: threading.Lock = threading.Lock()
+
+    def _run_batch_rewrite(batch_id: str, chapter_ids: list[str], instruction: str) -> None:
+        """批量改写：逐章 LLM 按指令改写 → upsert（覆盖前旧版进版本历史）。"""
+        batch = _batches.get(batch_id)
+        if not batch:
+            return
+        for cid in chapter_ids:
+            try:
+                assert model is not None  # 真实装配必有模型
+                ch = chapters.get(cid)
+                if ch is None:
+                    batch["results"].append({"id": cid, "ok": False, "error": "章节不存在"})
+                else:
+                    prompt = (
+                        "按用户指令改写以下章节。保持剧情走向/人物/设定/时间线一致，"
+                        "只按指令调整（风格/情节/表达）。直接输出改写后的完整正文。\n"
+                        f"【指令】{instruction}\n【原章】\n{ch.content}\n【改写后正文】"
+                    )
+                    from anyspark.core.types import Message
+
+                    out = model.respond([Message(role="user", content=prompt)], [])
+                    new_text = (out.text or "").strip()
+                    if new_text:
+                        chapters.upsert(
+                            "main", ch.title, new_text, ch.order_index, ch.narrative_line
+                        )
+                        batch["results"].append(
+                            {"id": cid, "title": ch.title, "ok": True, "chars": len(new_text)}
+                        )
+                    else:
+                        batch["results"].append(
+                            {"id": cid, "title": ch.title, "ok": False, "error": "空输出"}
+                        )
+            except Exception as exc:
+                batch["results"].append({"id": cid, "ok": False, "error": str(exc)[:150]})
+            batch["done"] += 1
+        batch["status"] = "done"
+
+    def _run_batch_review(batch_id: str, chapter_ids: list[str]) -> None:
+        """批量审读：逐章检测网审读，汇总报告。"""
+        batch = _batches.get(batch_id)
+        if not batch:
+            return
+        for cid in chapter_ids:
+            try:
+                ch = chapters.get(cid)
+                if ch is None:
+                    batch["results"].append({"id": cid, "ok": False, "error": "章节不存在"})
+                else:
+                    report = run_review(model, ch.title, ch.content[:20000])
+                    batch["results"].append(
+                        {
+                            "id": cid,
+                            "title": ch.title,
+                            "ok": True,
+                            "hard": report.hard_count,
+                            "report": report.render(),
+                        }
+                    )
+            except Exception as exc:
+                batch["results"].append({"id": cid, "ok": False, "error": str(exc)[:150]})
+            batch["done"] += 1
+        batch["status"] = "done"
 
     def _bg_worker() -> None:
         while True:
@@ -309,6 +390,12 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
                     _extract_chapter("main", title, content, order, line)
                 elif task and task[0] == "refine":
                     _refine_from_signals()
+                elif task and task[0] == "batch_rewrite" and len(task) == 4:
+                    _, bid, ids, inst = task
+                    _run_batch_rewrite(bid, ids, inst)
+                elif task and task[0] == "batch_review" and len(task) == 3:
+                    _, bid, ids = task
+                    _run_batch_review(bid, ids)
             except Exception as exc:
                 logger.warning("后台任务异常: %s", exc)
             finally:
@@ -1004,6 +1091,62 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         return {
             "current": agency.get_current().to_dict(),
             "levels": [lv.to_dict() for lv in levels],
+        }
+
+    # ------------------------------------------------------------------
+    # S40 批量任务（场景 4 全书变换核心）：批量改写 / 批量审读
+    # 后台队列执行（不阻塞请求），GET /api/batch/{id} 查进度；状态内存级（会话内）
+    # ------------------------------------------------------------------
+    @app.post("/api/batch/rewrite", response_model=dict[str, object])
+    def batch_rewrite(req: BatchRewriteIn) -> dict[str, object]:
+        """批量改写：多章统一指令改写（改文风/改情节），覆盖前旧版进版本历史。"""
+        if not req.chapter_ids:
+            raise HTTPException(status_code=400, detail="chapter_ids 不能为空")
+        if not req.instruction.strip():
+            raise HTTPException(status_code=400, detail="instruction 不能为空")
+        bid = uuid.uuid4().hex
+        with _batch_lock:
+            _batches[bid] = {
+                "status": "queued",
+                "done": 0,
+                "total": len(req.chapter_ids),
+                "results": [],
+                "kind": "rewrite",
+                "instruction": req.instruction,
+            }
+        _bg_queue.put(("batch_rewrite", bid, req.chapter_ids, req.instruction))
+        return {"batch_id": bid, "total": len(req.chapter_ids)}
+
+    @app.post("/api/batch/review", response_model=dict[str, object])
+    def batch_review(req: BatchReviewIn) -> dict[str, object]:
+        """批量审读：多章检测网审读（一致性/动机因果/情感连贯等 7 类）。"""
+        if not req.chapter_ids:
+            raise HTTPException(status_code=400, detail="chapter_ids 不能为空")
+        bid = uuid.uuid4().hex
+        with _batch_lock:
+            _batches[bid] = {
+                "status": "queued",
+                "done": 0,
+                "total": len(req.chapter_ids),
+                "results": [],
+                "kind": "review",
+            }
+        _bg_queue.put(("batch_review", bid, req.chapter_ids))
+        return {"batch_id": bid, "total": len(req.chapter_ids)}
+
+    @app.get("/api/batch/{batch_id}", response_model=dict[str, object])
+    def batch_status(batch_id: str) -> dict[str, object]:
+        """批量任务状态/进度/结果。"""
+        with _batch_lock:
+            batch = _batches.get(batch_id)
+        if batch is None:
+            raise HTTPException(status_code=404, detail="批量任务不存在")
+        return {
+            "batch_id": batch_id,
+            "status": batch["status"],
+            "done": batch["done"],
+            "total": batch["total"],
+            "results": batch["results"],
         }
 
     @app.get("/api/bias", response_model=list[dict[str, Any]])

@@ -16,22 +16,29 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = r"E:/Desktop/新建文件夹/soushu2023.com@《猎手准则》（校对版全本） 作者：你是不是笨蛋[搜书吧].txt"
+SRC = (
+    r"E:/Desktop/新建文件夹/soushu2023.com@《猎手准则》（校对版全本） "
+    r"作者：你是不是笨蛋[搜书吧].txt"
+)
 
 
 def load_chapters() -> list[tuple[str, str]]:
     """第一卷 164 章：(章题, 正文)。"""
-    text = open(SRC, encoding="gb18030").read()
+    with open(SRC, encoding="gb18030") as fh:
+        text = fh.read()
     start = text.find("第一卷 倒吊人")
     vol2 = text.find("第二卷 世界", start)
     seg = text[start:vol2] if vol2 > start else text[start:]
-    titles = [(m.start(), m.group().strip()) for m in re.finditer(r"第[一二三四五六七八九十百]+章\s+\S+", seg)]
+    titles = [
+        (m.start(), m.group().strip())
+        for m in re.finditer(r"第[一二三四五六七八九十百]+章\s+\S+", seg)
+    ]
     chapters: list[tuple[str, str]] = []
     for i, (pos, title) in enumerate(titles):
         end = titles[i + 1][0] if i + 1 < len(titles) else len(seg)
         body = seg[pos:end]
         body = re.sub(r"^第[一二三四五六七八九十百]+章.*?\n", "", body)
-        body = "\n".join(l.rstrip() for l in body.split("\n") if l.strip())
+        body = "\n".join(x.rstrip() for x in body.split("\n") if x.strip())
         chapters.append((title, body))
     return chapters
 
@@ -61,9 +68,9 @@ def main() -> None:
     out_dir = ROOT / "data/dev/runs/batch_ingest"
     out_dir.mkdir(parents=True, exist_ok=True)
     log_path = out_dir / f"vol1_{args.start}-{args.end}.jsonl"
-    log = open(log_path, "w", encoding="utf-8")
+    log = open(log_path, "w", encoding="utf-8")  # noqa: SIM115
 
-    def ingest_one(idx: int) -> dict:
+    def ingest_one(idx: int) -> dict[str, object]:
         """灌一章：existing → extract（失败重试 2 次）→ ingest。"""
         title, body = chapters[idx - 1]
         t0 = time.time()
@@ -83,7 +90,13 @@ def main() -> None:
                 }
             except Exception as exc:
                 if attempt == 2:
-                    return {"order": idx, "title": title, "ok": False, "error": str(exc)[:200], "secs": round(time.time() - t0, 1)}
+                    return {
+                        "order": idx,
+                        "title": title,
+                        "ok": False,
+                        "error": str(exc)[:200],
+                        "secs": round(time.time() - t0, 1),
+                    }
                 time.sleep(2 * (attempt + 1))
         return {"order": idx, "title": title, "ok": False, "error": "unreachable"}
 
@@ -91,26 +104,31 @@ def main() -> None:
     total_entities = total_relations = total_events = 0
     t_start = time.time()
     with ThreadPoolExecutor(max_workers=args.workers) as pool:
-        futs = {pool.submit(ingest_one, i): i for i in range(args.start, min(args.end, len(chapters)) + 1)}
-        done = 0
-        for fut in as_completed(futs):
+        futs = {
+            pool.submit(ingest_one, i): i
+            for i in range(args.start, min(args.end, len(chapters)) + 1)
+        }
+        for done, fut in enumerate(as_completed(futs), 1):
             r = fut.result()
             log.write(json.dumps(r, ensure_ascii=False) + "\n")
             log.flush()
             done += 1
             if r["ok"]:
                 ok += 1
-                total_entities += r["entities"]
-                total_relations += r["relations"]
-                total_events += r["events"]
+                total_entities += int(str(r["entities"]))
+                total_relations += int(str(r["relations"]))
+                total_events += int(str(r["events"]))
             else:
                 fail += 1
             if done % 10 == 0 or done == len(futs):
                 el = time.time() - t_start
-                print(f"[{done}/{len(futs)}] ok={ok} fail={fail} 实体累计={total_entities} "
-                      f"({el/60:.1f}min, {el/max(done,1):.1f}s/章)", flush=True)
+                print(
+                    f"[{done}/{len(futs)}] ok={ok} fail={fail} 实体累计={total_entities} "
+                    f"({el / 60:.1f}min, {el / max(done, 1):.1f}s/章)",
+                    flush=True,
+                )
     log.close()
-    print(f"\n完成: ok={ok} fail={fail} 总耗时 {(time.time()-t_start)/60:.1f}min")
+    print(f"\n完成: ok={ok} fail={fail} 总耗时 {(time.time() - t_start) / 60:.1f}min")
     print(f"累计: 实体{total_entities} 关系{total_relations} 事件{total_events}")
     print(f"日志: {log_path}")
 

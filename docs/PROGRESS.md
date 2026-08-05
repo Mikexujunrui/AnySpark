@@ -792,3 +792,23 @@
 **附带发现**：`list_events`/`list_relations` 默认 limit=200——超长书（>200 事件）会被截断，调用方需显式传大 limit（本次已用 limit=10000）。
 
 **产物**：`benchmarks/writing/hunter/vol1_storyline_full.md` / `vol1_analysis.md` / `vol1_ch165.md`（不入库）
+
+---
+
+## S40 批量任务（场景 4 全书变换核心）：批量改写 + 批量审读（已完成 ✅）
+
+**背景**：场景 4（全书变换：改文风/改情节/筛选插入）需要"多章批量处理"——`_bg_queue` 已有（章节抽取/信号提炼），扩展批量任务类型。
+
+**实现**：
+- `_bg_queue` 扩展任务类型：`("batch_rewrite", batch_id, chapter_ids, instruction)` / `("batch_review", batch_id, chapter_ids)`——后台 worker 串行执行（不阻塞请求）
+- `_run_batch_rewrite`：逐章读 → LLM 按指令改写 → `chapters.upsert`（**覆盖前旧版进版本历史**，可回退）
+- `_run_batch_review`：逐章 `run_review`（检测网 7 类）→ 汇总（含 hard 数 + 报告全文）
+- 批状态：内存 dict（会话级，queued/running/done + done/total/results）
+- API：`POST /api/batch/rewrite` / `POST /api/batch/review`（提交即返回 batch_id）/ `GET /api/batch/{id}`（进度/结果）
+- 已知限制：批量改写单次输出（长章 >8192 token 可能截断，需分段改写）；批状态内存级（重启丢失）
+
+**验证**：
+- 单测 +1（批审读/批改写 API 全链路 + 非法输入 400/404），pytest **200** 全绿，总闸 ✅
+- 真实链路：写 1 章 → 批审读（hard=0 + 情感连贯建议）→ 批改写"结尾加悬念"（365 字，悬念成功加上，旧版进版本历史）
+
+**意义**：场景 4（全书变换）的基础执行器就位——改文风/统一指令批量应用可行；连锁情节修改（蝴蝶效应）仍需"结构计划/依赖分析"（后续候选）。
