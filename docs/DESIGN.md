@@ -550,3 +550,12 @@ v4 从空库起步，数据在 v4 内自然生长
 - **边界（哲学）**：只读/轻量登记，无删除修改权限——内容裁决权保留用户/API；自然语言输入输出（模型无关）；返回裁剪（limit 防 token 爆炸）
 - **开关**：ChatRequest `enable_domain`（默认 True）；`enable_extras`（read_material/check_text，默认关）维持 S32 现状——领域能力是"小说写作必需"默认给，通用能力按需
 - **真实链路**：DeepSeek 写《第一章 雾渡》自主调用 plan_list→plot_list→read_setting→graph_query→write_chapter→plot_register×3→plan_mark_done——查证→写作→埋钩子→推进全闭环
+
+### 12.12 输入消化管线（S48-P3：原始区 → 格式化区）
+- **管线**：上传区（txt/md/docx/pdf，零依赖提取；图片仅存档+引用）→ 判别 → 章节 md（规则拆章）/ 摘要卡（LLM digest）→ 格式化区产物，原始文件原地存档
+- **零依赖提取**：txt/md 直读 / docx zipfile / pdf zlib 轻量（FlateDecode 流抽 Tj/TJ 文本，仅非扫描简单 PDF；扫描件返回提示）
+- **规则拆章**：章节标题模式正则（第X章/Chapter N）切分；无标题整篇一章——机制硬编码，内容自然语言
+- **摘要卡**：复用 MaterialDigestor → 卡片/摘要卡-{name}.md + SQLite materials（图谱关联兼容）
+- **图片（主人拍板，多模态放未来）**：上传区存档 → md 相对引用（`../上传/x.png`，相对章节目录）→ 导出携带
+- **导出**：`GET /api/export/book` txt/md/**epub**（EPUB 3 零依赖 zipfile：xhtml + OPF + nav + container；收集 md 图片引用复制进 images/ 并改写 src）
+- **agent 工具** `ingest_document`（enable_domain）：用户上传后 agent 可自主消化

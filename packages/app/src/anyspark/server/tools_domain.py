@@ -270,3 +270,101 @@ def make_setting_implementer(settings: Any) -> tuple[Any, Any]:
             return ToolResult(call=call, ok=False, content=f"查询失败：{exc}")
 
     return spec, implementer
+
+
+def make_ingest_implementer(
+    workspace: Any, chapters: Any, materials: Any, model: Any
+) -> tuple[Any, Any]:
+    """上传消化工具（S48-P3）：把上传区原始文档消化成章节 md 或摘要卡。
+
+    Agent 在用户上传了原稿/设定文档后调用——拆章进格式化区（可继续写作），
+    或生成摘要卡（设定/资料，进卡片区 + 图谱关联）。
+    """
+
+    spec = ToolSpec(
+        name="ingest_document",
+        description=(
+            "消化上传区的原始文档：长文（小说/多章稿件）按章节标题拆成章节文件，"
+            "资料/设定类生成摘要卡。用户上传 txt/md/docx/pdf 后、需要基于它写作时使用。"
+            "mode=chapters 强制拆章，mode=card 强制摘要卡，缺省自动判别。"
+        ),
+        params=[
+            ParamSpec(
+                name="filename",
+                type="string",
+                required=True,
+                description="上传区文件名（如'原稿.docx'，可先列上传区确认）",
+            ),
+            ParamSpec(
+                name="mode",
+                type="string",
+                required=False,
+                description="auto/chapters/card（缺省 auto）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        filename = str(arguments.get("filename", "")).strip()
+        mode = str(arguments.get("mode", "auto")).strip() or "auto"
+        if not filename:
+            return ToolResult(call=call, ok=False, content="缺少参数 filename。")
+        try:
+            from anyspark.server.pipeline import chapterize, extract_text
+
+            path = workspace.read_upload("main", filename)
+            if path is None:
+                ups = workspace.list_uploads("main")
+                names = "、".join(u["name"] for u in ups) or "（空）"
+                return ToolResult(
+                    call=call, ok=False, content=f"上传区无「{filename}」。现有：{names}"
+                )
+            text = extract_text(path)
+            if not text.strip():
+                return ToolResult(
+                    call=call,
+                    ok=False,
+                    content="无法提取文本（扫描件 OCR 放未来计划），可先列上传区确认文件格式。",
+                )
+            chaps = chapterize(text, fallback_title=path.stem)
+            is_card = mode == "card" or (
+                mode != "chapters" and len(chaps) == 1 and len(text) < 3000
+            )
+            if is_card:
+                from anyspark.template import MaterialDigestor
+
+                digestor = MaterialDigestor(model)
+                saved = materials.save(digestor.digest(text))
+                card_md = (
+                    f"# {saved.title}\n\n主题：{saved.topic}\n\n"
+                    + "要点："
+                    + "；".join(saved.key_points[:6])
+                    + "\n设定："
+                    + "；".join(saved.key_settings[:6])
+                    + "\n角色："
+                    + "、".join(saved.characters[:8])
+                    + "\n术语："
+                    + "、".join(saved.terms[:8])
+                )
+                f = workspace.write_card("main", "摘要卡", saved.title, card_md)
+                return ToolResult(
+                    call=call,
+                    ok=True,
+                    content=f"已消化「{filename}」为摘要卡《{saved.title}》（{f.name}）。"
+                    f"\n主题：{saved.topic}\n要点：{'；'.join(saved.key_points[:4])}",
+                )
+            written: list[str] = []
+            for i, ch in enumerate(chaps):
+                workspace.write_chapter("main", i, ch["title"], ch["content"])
+                chapters.upsert("main", ch["title"], ch["content"], i, "main")
+                written.append(f"{i + 1}. {ch['title']}（{len(ch['content'])}字）")
+            return ToolResult(
+                call=call,
+                ok=True,
+                content=f"已消化「{filename}」为 {len(written)} 章：\n" + "\n".join(written),
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"消化失败：{exc}")
+
+    return spec, implementer

@@ -146,6 +146,13 @@ class ModelIn(BaseModel):
     thinking: str | None = None  # off/low/medium/high/xhigh/max（None=交模型默认）
 
 
+class IngestIn(BaseModel):
+    """S48-P3 消化上传区文件。mode：auto（自动判别）/ chapters（强制拆章）/ card（强制摘要卡）。"""
+
+    filename: str
+    mode: str = "auto"
+
+
 class UploadIn(BaseModel):
     """S48 上传存档（base64 JSON，零新依赖）。"""
 
@@ -622,6 +629,7 @@ def build_app(
         if enable_domain:
             from anyspark.server.tools_domain import (
                 make_graph_query_implementer,
+                make_ingest_implementer,
                 make_plan_implementer,
                 make_plot_implementer,
                 make_setting_implementer,
@@ -629,6 +637,8 @@ def build_app(
 
             gq_spec, gq_impl = make_graph_query_implementer(graph)
             registry.register(gq_spec, gq_impl)
+            ig_spec, ig_impl = make_ingest_implementer(workspace, chapters, materials, model)
+            registry.register(ig_spec, ig_impl)
             plot_specs, plot_impls = make_plot_implementer(plots)
             for s, i in zip(plot_specs, plot_impls, strict=True):
                 registry.register(s, i)
@@ -1715,6 +1725,104 @@ def build_app(
         dest = workspace.save_upload("main", req.filename, data)
         logger.info("上传存档: %s -> %s", req.filename, dest.name)
         return {"ok": True, "name": dest.name, "path": str(dest), "size": len(data)}
+
+    # -----------------------------------------------------------------------
+    # S48-P3 输入消化管线：上传区原始文件 → 格式化区（章节 md / 摘要卡）
+    # -----------------------------------------------------------------------
+    @app.post("/api/ingest", response_model=dict[str, Any])
+    def ingest_upload(req: IngestIn) -> dict[str, Any]:
+        """消化上传区文件：长文（多章）拆成章节 md；资料/短文本生成摘要卡。
+
+        原始文件原地不动（存档）；产物进格式化区（章节/ 或 卡片/）。
+        多模态（扫描件 OCR/图片理解）明确不做，放未来计划。
+        """
+        from anyspark.server.pipeline import chapterize, extract_text
+
+        path = workspace.read_upload("main", req.filename)
+        if path is None:
+            raise HTTPException(status_code=404, detail=f"上传区无此文件：{req.filename}")
+        if path.suffix.lower() not in (".txt", ".md", ".markdown", ".docx", ".pdf"):
+            raise HTTPException(
+                status_code=400, detail="仅支持 txt/md/docx/pdf 文本消化（图片放未来）"
+            )
+        text = extract_text(path)
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="无法提取文本（扫描件 OCR 放未来计划）")
+        chaps = chapterize(text, fallback_title=path.stem)
+        # 判别：mode 强制 / 单章短文本 → 摘要卡；否则拆章
+        is_card = req.mode == "card" or (
+            req.mode != "chapters" and len(chaps) == 1 and len(text) < 3000
+        )
+        if is_card:
+            digestor = MaterialDigestor(model)
+            card = digestor.digest(text)
+            saved = materials.save(card)
+            card_md = (
+                f"# {saved.title}\n\n主题：{saved.topic}\n\n"
+                + "要点："
+                + "；".join(saved.key_points[:6])
+                + "\n设定："
+                + "；".join(saved.key_settings[:6])
+                + "\n角色："
+                + "、".join(saved.characters[:8])
+                + "\n术语："
+                + "、".join(saved.terms[:8])
+            )
+            f = workspace.write_card("main", "摘要卡", saved.title, card_md)
+            return {
+                "ok": True,
+                "kind": "card",
+                "title": saved.title,
+                "card_file": f.name,
+                "material_id": saved.id,
+            }
+        written: list[dict[str, Any]] = []
+        for i, ch in enumerate(chaps):
+            workspace.write_chapter("main", i, ch["title"], ch["content"])
+            chapters.upsert("main", ch["title"], ch["content"], i, "main")
+            written.append({"order": i, "title": ch["title"], "chars": len(ch["content"])})
+        logger.info("消化: %s → %d 章", req.filename, len(written))
+        return {"ok": True, "kind": "chapters", "count": len(written), "chapters": written}
+
+    @app.get("/api/export/book", response_model=None)
+    def export_book(format: str = "md") -> Response:
+        """全书导出（S48-P3）：txt/md/epub（epub 携带 md 引用的图片）。"""
+        from anyspark.server.export import export_epub, export_md, export_txt
+
+        items = chapters.list_by_book("main")
+        chs = [{"title": c.title, "content": c.content} for c in items]
+        fmt = format if format in ("txt", "md", "epub") else "md"
+        if fmt == "epub":
+            data = export_epub(
+                "AnySpark 作品",
+                "AnySpark",
+                chs,
+                image_dir=workspace.chapters_dir("main"),  # md 引用相对章节目录（../上传/x.png）
+            )
+            from urllib.parse import quote
+
+            safe = quote("anyspark-book.epub")
+            return Response(
+                content=data,
+                media_type="application/epub+zip",
+                headers={
+                    "Content-Disposition": (
+                        f"attachment; filename=book.epub; filename*=UTF-8''{safe}"
+                    )
+                },
+            )
+        body = export_txt(chs) if fmt == "txt" else export_md(chs)
+        media = "text/plain; charset=utf-8" if fmt == "txt" else "text/markdown; charset=utf-8"
+        from urllib.parse import quote
+
+        safe = quote(f"anyspark-book.{fmt}")
+        return Response(
+            content=body,
+            media_type=media,
+            headers={
+                "Content-Disposition": (f"attachment; filename=book.{fmt}; filename*=UTF-8''{safe}")
+            },
+        )
 
     @app.get("/api/chapters", response_model=list[ChapterOut])
     def list_chapters() -> list[ChapterOut]:

@@ -142,6 +142,12 @@ class Workspace:
                 out.append({"name": f.name, "size": f.stat().st_size, "path": str(f)})
         return out
 
+    def read_upload(self, book_id: str, filename: str) -> Path | None:
+        """上传区文件路径（文件名消毒防穿越）；不存在返回 None。"""
+        safe = _safe_title(Path(filename).name)
+        p = self.upload_dir(book_id) / safe
+        return p if p.exists() and p.is_file() else None
+
     # -- 卡片区 --
     def write_card(self, book_id: str, kind: str, name: str, content: str) -> Path:
         """写卡片文件：{kind}-{name}.md（kind 如 角色卡/场景卡/摘要卡）。"""

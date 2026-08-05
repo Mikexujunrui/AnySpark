@@ -237,6 +237,26 @@
 
 ---
 
+## S48c 输入消化管线（P3：原始区→格式化区，已完成 ✅）
+
+**背景（主人路线 P3 + 拍板）**：原始区存档、格式化区操作。多模态（图片理解/OCR）不做放未来；图片只做上传存档+md 引用+导出携带（EPUB）。
+
+**实现**（`server/pipeline.py` + `server/export.py` 新文件 + /api/ingest、/api/export/book + ingest_document 工具）：
+- **零依赖提取**：txt/md 直读 / docx zipfile / pdf zlib 轻量（FlateDecode 抽 Tj/TJ 文本，扫描件提示 OCR 放未来）
+- **规则拆章**：第X章/Chapter N 标题正则切分；无标题整篇一章
+- **摘要卡**：短文本/资料 → MaterialDigestor → 卡片/摘要卡-*.md + materials SQLite（图谱关联兼容）
+- **判别**：mode auto/chapters/card（自动：多章→拆章；单章短文本→卡片）
+- **EPUB 导出**：零依赖 zipfile（xhtml+OPF+nav+container）；md 图片引用（相对章节目录 `../上传/x.png`）收集进 images/ 并改写 src；txt/md 全书导出同端点
+- **agent 工具** `ingest_document`（enable_domain）：用户上传后可自主消化
+
+**门禁**：pytest **242**（+7：txt/docx/pdf 提取/中英拆章/回退/图片引用/ingest 链路/EPUB 携图）；总闸 ✅
+
+**真实链路验证**：docx 三章原稿上传 → ingest 拆 3 章（雾城来客/钟楼/怀表）落文件+库 ✓；短设定 → 摘要卡《雾城传说》✓；章节 md 引用封面图 → EPUB 导出携带 `OEBPS/images/*.png` ✓
+
+**踩坑**：md 图片引用是相对**章节目录**（`../上传/x.png`）——export 的 image_dir 须传 chapters_dir 而非 project_dir（语义错位导致收集失败）
+
+---
+
 ## S48b 领域能力工具化（P2：写作 Agent 自主闭环，已完成 ✅）
 
 **背景（主人路线 P2）**：图谱/设定/伏笔/计划此前是 HTTP API（人驱动），写作 Agent 看不到——补齐为 agent 可自主调用的工具，小说特化闭环成立。
