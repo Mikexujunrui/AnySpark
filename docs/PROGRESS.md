@@ -237,6 +237,23 @@
 
 ---
 
+## S48d 代码扩展 anyspark-codex（P5：沙箱 run_code，已完成 ✅）
+
+**背景（主人路线 P5）**：DESIGN 机制 8 预留的"编码扩展包"落地——固定工具无法实现的东西（自定义处理）+ 自我修复（验证代码逻辑）。
+
+**实现**（`server/codex.py` 新文件 + /api/codex/run + run_code 工具）：
+- **沙箱**：白名单受限命名空间（math/re/json/random/itertools/collections/statistics，无 open/__import__ 逃逸——`__import__` 从 builtins 注入受限版，import 语句走 builtins 是踩坑点）；timeout 硬上限（默认 10s ≤60s，线程 join 超时终止）；调用即烧
+- **开关**：`enable_codex` 默认关（安全按需点亮）；run_code 工具描述明确"不可用于读写文件或访问网络"
+- **自我修复边界**：run_code 只验证代码；改源码=Agent 出补丁→用户确认→系统应用（沙箱不直接改）
+
+**门禁**：pytest **248**（+6：基础/白名单/拦截/错误超时/工具/API+开关）；总闸 ✅
+
+**真实链路验证**：codex API 统计字数分布 ✓；import shutil 拦截 ✓；open 拦截 ✓；**DeepSeek 自主调 run_code 算 1..100 平方和=338350 正确** ✓
+
+**踩坑**：exec 里 `import` 语句从 `__builtins__.__import__` 找（不是 globals[__import__]）——必须把受限 __import__ 注入 builtins 副本，否则所有 import 报 "__import__ not found"
+
+---
+
 ## S48c 输入消化管线（P3：原始区→格式化区，已完成 ✅）
 
 **背景（主人路线 P3 + 拍板）**：原始区存档、格式化区操作。多模态（图片理解/OCR）不做放未来；图片只做上传存档+md 引用+导出携带（EPUB）。

@@ -125,6 +125,7 @@ class ChatRequest(BaseModel):
     enable_search: bool = False  # 网络搜索工具按需注册（默认关：写作主链路不背考据能力）
     enable_extras: bool = False  # S32 扩展工具（read_material/check_text）按需点亮
     enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认开
+    enable_codex: bool = False  # S48-P5 代码扩展 run_code（沙箱，默认关：安全按需点亮）
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood/plot 子集
     # S47 运行时模型选择：缺省用注册表当前激活模型；thinking 覆盖该模型默认思考强度
@@ -144,6 +145,13 @@ class ModelIn(BaseModel):
     max_tokens: int | None = None
     temperature: float | None = None
     thinking: str | None = None  # off/low/medium/high/xhigh/max（None=交模型默认）
+
+
+class CodexIn(BaseModel):
+    """S48-P5 代码执行请求（沙箱安全）。"""
+
+    code: str
+    timeout: float = 10.0
 
 
 class IngestIn(BaseModel):
@@ -608,6 +616,7 @@ def build_app(
         enable_search: bool = False,
         enable_extras: bool = False,
         enable_domain: bool = True,
+        enable_codex: bool = False,
         skip_inject: set[str] | None = None,
         model_id: str | None = None,
         thinking: str | None = None,
@@ -647,6 +656,12 @@ def build_app(
                 registry.register(s, i)
             st_spec, st_impl = make_setting_implementer(settings)
             registry.register(st_spec, st_impl)
+        # S48-P5 代码扩展（沙箱 run_code）：默认关，按需点亮（固定工具做不了的自定义处理）
+        if enable_codex:
+            from anyspark.server.tools_domain import make_codex_implementer
+
+            cx_spec, cx_impl = make_codex_implementer()
+            registry.register(cx_spec, cx_impl)
         if enable_extras:
             material_spec, material_impl = make_read_material_implementer(materials)
             registry.register(material_spec, material_impl)
@@ -893,6 +908,7 @@ def build_app(
             enable_search=req.enable_search,
             enable_extras=req.enable_extras,
             enable_domain=req.enable_domain,
+            enable_codex=req.enable_codex,
             skip_inject=set(req.skip_inject),
             model_id=req.model_id,
             thinking=req.thinking,
@@ -1019,6 +1035,7 @@ def build_app(
                 enable_search=req.enable_search,
                 enable_extras=req.enable_extras,
                 enable_domain=req.enable_domain,
+                enable_codex=req.enable_codex,
                 skip_inject=set(req.skip_inject),
                 model_id=req.model_id,
                 thinking=req.thinking,
@@ -1725,6 +1742,16 @@ def build_app(
         dest = workspace.save_upload("main", req.filename, data)
         logger.info("上传存档: %s -> %s", req.filename, dest.name)
         return {"ok": True, "name": dest.name, "path": str(dest), "size": len(data)}
+
+    # -----------------------------------------------------------------------
+    # S48-P5 代码扩展（anyspark-codex）：沙箱执行，固定工具做不了时用
+    # -----------------------------------------------------------------------
+    @app.post("/api/codex/run", response_model=dict[str, Any])
+    def codex_run(req: CodexIn) -> dict[str, Any]:
+        """沙箱执行 Python 代码（白名单安全：无文件/网络，超时硬上限）。"""
+        from anyspark.server.codex import run_code
+
+        return run_code(req.code, req.timeout)
 
     # -----------------------------------------------------------------------
     # S48-P3 输入消化管线：上传区原始文件 → 格式化区（章节 md / 摘要卡）

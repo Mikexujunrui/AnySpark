@@ -128,11 +128,15 @@ def test_extract_graph_switch() -> None:
         finally:
             db.close()
 
-    # 默认开：抽取入库
+    # 默认开：抽取入库（后台 worker 异步——轮询等待，S7 既有踩坑）
     db = Path(tempfile.mkdtemp()) / "on.db"
     client = TestClient(build_app(model=GraphModel(), db_path=db))
     resp = client.post("/api/chat", json={"message": "写第一章"})
     assert resp.status_code == 200
+    for _ in range(40):  # 最多等 4s（后台抽取正常秒级完成）
+        if entity_count(db) == 1:
+            break
+        time.sleep(0.1)
     assert entity_count(db) == 1
 
     # 关闭：不抽取（写章节但不入库）

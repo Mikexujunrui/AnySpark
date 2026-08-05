@@ -368,3 +368,54 @@ def make_ingest_implementer(
             return ToolResult(call=call, ok=False, content=f"消化失败：{exc}")
 
     return spec, implementer
+
+
+def make_codex_implementer() -> tuple[Any, Any]:
+    """代码扩展工具（S48-P5 anyspark-codex）：沙箱执行 Python，固定工具做不了时用。"""
+
+    spec = ToolSpec(
+        name="run_code",
+        description=(
+            "在受限沙箱执行 Python 代码（安全：无文件/网络/任意 import，白名单 "
+            "math/re/json/random 等，超时上限）。用于固定工具无法实现的自定义处理："
+            "特殊格式解析、批量数据转换、统计计算等。不可用于读写文件或访问网络。"
+        ),
+        params=[
+            ParamSpec(
+                name="code",
+                type="string",
+                required=True,
+                description="要执行的 Python 代码（print 输出会被返回）",
+            ),
+            ParamSpec(
+                name="timeout",
+                type="string",
+                required=False,
+                description="超时秒数（默认 10，上限 60）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        code = str(arguments.get("code", "")).strip()
+        if not code:
+            return ToolResult(call=call, ok=False, content="缺少参数 code。")
+        try:
+            timeout = float(str(arguments.get("timeout", "10")) or "10")
+        except ValueError:
+            timeout = 10.0
+        from anyspark.server.codex import run_code
+
+        r = run_code(code, timeout)
+        lines = []
+        if r["stdout"]:
+            lines.append("【输出】\n" + r["stdout"].rstrip())
+        if r["stderr"]:
+            lines.append("【stderr】\n" + r["stderr"].rstrip())
+        if r["error"]:
+            lines.append(f"【错误】{r['error']}")
+        body = "\n\n".join(lines) if lines else "（无输出）"
+        return ToolResult(call=call, ok=r["ok"], content=body)
+
+    return spec, implementer

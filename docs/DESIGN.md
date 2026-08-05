@@ -559,3 +559,10 @@ v4 从空库起步，数据在 v4 内自然生长
 - **图片（主人拍板，多模态放未来）**：上传区存档 → md 相对引用（`../上传/x.png`，相对章节目录）→ 导出携带
 - **导出**：`GET /api/export/book` txt/md/**epub**（EPUB 3 零依赖 zipfile：xhtml + OPF + nav + container；收集 md 图片引用复制进 images/ 并改写 src）
 - **agent 工具** `ingest_document`（enable_domain）：用户上传后 agent 可自主消化
+
+### 12.13 代码扩展 anyspark-codex（S48-P5，机制 8 预留落地）
+- **定位**：固定工具无法实现的自定义处理（特殊格式解析/批量转换/统计）+ 自我修复（Agent 写代码验证逻辑）
+- **沙箱安全（A 类硬编码）**：白名单受限命名空间（仅 math/re/json/random/itertools 等，无 open/import 逃逸）；timeout 硬上限（默认 10s ≤60s）；调用即烧无副作用
+- **API**：`POST /api/codex/run`；**agent 工具** `run_code`（`enable_codex` 默认关——安全按需点亮，S15 哲学）
+- **自我修复边界**：run_code 只验证代码正确性；真正"修工具"= Agent 生成补丁文本 → 用户确认 → 系统应用（沙箱不直接改源码）
+- **真实链路**：DeepSeek 自主调 run_code 算 1..100 平方和 = 338350 ✓；import shutil/open 被拦截 ✓
