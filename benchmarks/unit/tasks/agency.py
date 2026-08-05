@@ -45,12 +45,14 @@ def t14_agency_crud(api: ApiClient) -> tuple[bool, dict, str]:
     levels = get_resp.get("levels", [])
     names = [l.get("name") for l in levels] if isinstance(levels, list) else []
     ok_five = names == ["只听写", "执行+填肉", "补全标注", "建议扩展", "自主发挥"]
+    # S35：POST 返回 current（档位记录），level 兼容=排序位
     set_resp = api.post("/api/agency", {"level": 2})
-    level_ok = set_resp.get("level") == 2
+    cur = set_resp.get("current") or {}
+    level_ok = cur.get("order") == 2 or cur.get("id") == "default-2"
     # 恢复默认
     api.post("/api/agency", {"level": 4})
     return (
         ok_five and level_ok,
-        {"levels": names, "set_level": set_resp.get("level")},
+        {"levels": names, "set_level": cur.get("order")},
         "",
     )

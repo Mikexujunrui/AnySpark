@@ -45,9 +45,9 @@ def t9_signals(api: ApiClient) -> tuple[bool, dict, str]:
     m = api.post("/api/signals", {"kind": "modified", "content": "原文", "new_content": "改后", "context": "chat"})
     d = api.post("/api/signals", {"kind": "deleted", "content": "删掉这段", "context": "chat"})
     ok = all(x.get("kind") in ("accepted", "modified", "deleted") for x in (a, m, d))
-    # 接受=升级 → 能动档位应 >= 0 且存在
+    # 接受=升级 → 能动档位应存在（S35：current.order）
     agency = api.get("/api/agency")
-    level = agency.get("level")
+    level = (agency.get("current") or {}).get("order")
     return (
         ok and level is not None,
         {"accepted": a.get("kind"), "modified": m.get("kind"), "deleted": d.get("kind"), "agency_level_after": level},
