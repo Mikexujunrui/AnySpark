@@ -686,3 +686,27 @@
 **结论**：粒度感知引导真实生效——粗脉络下模型从"草草扩写"变为"先设计后落笔"，且设计质量（成套异常观察点服务反转）高于 v1。字数仍超标（2918/2200，+33%）——字数控制单列待修。
 
 **门禁**：ruff ✓ pytest 25 ✓；DEFAULT_SYSTEM 改动无测试断言破坏。
+
+---
+
+## S35 档位记录集：可增删改 + 恢复默认 + 心智模型指导（已完成 ✅）
+
+**背景（主人定架构）**：档位不再固定五级——① 全局可增删改（一个用户也可能希望有不同档位）② 可恢复默认（**不重置心智模型**）③ 项目级不做。哲学：档位本身是内容（自然语言）可改，机制（结构/注入/温度映射）硬编码。
+
+### 实现
+- **agency.py 重构**：`AGENCY_LEVELS` 常量 → `agency_levels` 表（id/name/description/temperature/order_index/is_default）+ AgencyLevel 记录；默认五级种子
+  - CRUD：`add_level`（追加末尾）/ `update_level`（名称/描述/温度）/ `delete_level`（至少留一条，删当前回落默认）/ `reset_defaults`（**只重置档位表，manual 心智天然保留**）
+  - **温度入档**：自定义档位自带温度（不再按 level 数字查表）；`temperature_for` 兼容旧数字调用
+  - adjust（反馈调节）按排序位 ±1 有界
+  - `build_agency_block(level, mental_notes)`：可附用户心智偏好
+- **manual 加 `affect_agency` 心智标记**（ALTER 兼容）：标记"影响能动性"的偏好条目 → 注入档位块（"用户心智偏好：…"）——**心智模型指导档位的 L1 通道**
+- **API**：GET /api/agency（current+levels）、POST（level_id 优先，兼容 level 数字=排序位）、/api/agency/add、PATCH/DELETE /api/agency/{id}、POST /api/agency/reset；/api/manual 支持 affect_agency
+- **兼容**：旧数字档位调用（ChatRequest.agency_level int → 按 order 找档位）；前端 AgencyPicker 的 level 字段保留（=order）
+
+### 验证
+- 单测 +9（CRUD/reset/adjust 按位/删除保底/注入含心智/API 全链路），pytest **198** 全绿，总闸 ✅
+- **真实链路**：新增"极简风"档位（temp 0.3）+ manual 心智条目（"不喜欢形容词堆砌"）→ chat 输出短句克制风（档位+心智组合生效）✓；恢复默认 → 档位回 5、manual 保留 ✓
+
+### 遗留（后续）
+- L2（AI 建议档位）/L3（自然语言生成档位）未做——心智接入已打通 L1（标记→注入），L2/L3 按需
+- 前端 AgencyPicker 未改（API 兼容旧字段，显示自定义档位待前端按需）

@@ -9,7 +9,9 @@ anyspark.align — 对齐系统包。
 """
 
 from .agency import (
-    AGENCY_LEVELS,
+    DEFAULT_ID,
+    DEFAULT_LEVELS,
+    AgencyLevel,
     AgencyStore,
     build_agency_block,
     parse_agency_declaration,
@@ -24,8 +26,10 @@ from .signals import Signal, SignalCollector, SignalStore
 from .summarize import MemoryStore, SceneMemory, SessionSummarizer
 
 __all__ = [
-    "AGENCY_LEVELS",
+    "DEFAULT_ID",
+    "DEFAULT_LEVELS",
     "MOOD_DIMS",
+    "AgencyLevel",
     "AgencyStore",
     "BiasStore",
     "ManualEntry",

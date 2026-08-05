@@ -20,7 +20,6 @@ from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from anyspark.align import (
-    AGENCY_LEVELS,
     AgencyStore,
     BiasStore,
     ManualEntry,
@@ -32,7 +31,6 @@ from anyspark.align import (
     build_agency_block,
     build_mood_block,
     parse_agency_declaration,
-    temperature_for,
 )
 from anyspark.check import compile_rule, run_review
 from anyspark.core import (
@@ -142,11 +140,13 @@ class ManualEntryIn(BaseModel):
     content: str
     confidence: float = 0.5
     scope: str = "project"
+    affect_agency: bool = False  # S35 心智模型：影响能动性的偏好（进档位注入）
 
 
 class ManualEntryPatch(BaseModel):
     content: str | None = None
     locked: bool | None = None
+    affect_agency: bool | None = None
 
 
 class SignalIn(BaseModel):
@@ -193,7 +193,16 @@ class GraphExtractIn(BaseModel):
 
 
 class AgencyIn(BaseModel):
-    level: int
+    level: int | None = None  # 兼容旧调用：排序位数字（0 起）
+    level_id: str | None = None  # S35：档位记录 id（优先）
+
+
+class AgencyLevelIn(BaseModel):
+    """S35：新增/修改自定义档位。"""
+
+    name: str
+    description: str = ""
+    temperature: float = 0.7
 
 
 class BiasIn(BaseModel):
@@ -399,10 +408,16 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
             search_spec, search_impl = make_search_implementer()
             registry.register(search_spec, search_impl)
-        # 能动级别：显式传入 > 已存档位；温度映射（档位低=精确执行温度低）
+        # 能动级别：显式传入 > 已存档位（S35：档位记录，温度入档；兼容旧数字=排序位）
         if agency_level is None:
-            agency_level = agency.get_level(book_id)
-        eff_temp = temperature_for(agency_level) if temperature == 0.7 else temperature
+            current = agency.get_current(book_id)
+        else:
+            levels = agency.list_levels()
+            current = next(
+                (lv for lv in levels if lv.order == int(agency_level)),
+                agency.get_level(f"default-{int(agency_level)}") or agency.get_current(book_id),
+            )
+        eff_temp = current.temperature if temperature == 0.7 else temperature
         # S21 流式核心：不再构造 stream 模型——Agent 循环内部检测 respond_stream 流式；
         # 温度映射时重建模型（档位低=精确执行温度低）；测试 fake 走共享 model
         base_model = getattr(model, "inner", model)
@@ -423,8 +438,13 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         graph_block = graph_injector.build_block(book_id)
         if "graph" not in skip and graph_block:
             full_prompt = full_prompt + "\n\n" + graph_block
-        # 能动性注入：本轮档位（机制 2）
-        agency_block = build_agency_block(agency_level)
+        # 能动性注入：当前档位（机制 2；S35 心智模型：affect_agency 偏好条目附加）
+        mental_notes = [
+            e.content
+            for e in manual.list("project", book_id) + manual.list("global", "main")
+            if e.affect_agency
+        ]
+        agency_block = build_agency_block(current, mental_notes)
         if "agency" not in skip and agency_block:
             full_prompt = full_prompt + "\n\n" + agency_block
         # AI 倾向档案注入（双向黑盒解法）
@@ -719,6 +739,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             confidence=req.confidence,
             scope=scope,
             book_id="main",
+            affect_agency=req.affect_agency,
         )
         manual.add(entry)
         return entry.to_dict()
@@ -726,7 +747,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     @app.patch("/api/manual/{entry_id}", response_model=dict[str, Any])
     def update_manual(entry_id: str, req: ManualEntryPatch) -> dict[str, Any]:
         """修改条目内容（锁定条目拒绝，用户主权）。"""
-        entry = manual.update(entry_id, content=req.content)
+        entry = manual.update(entry_id, content=req.content, affect_agency=req.affect_agency)
         if entry is None:
             raise HTTPException(status_code=404, detail="条目不存在")
         if req.locked is not None:
@@ -941,14 +962,57 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
 
     @app.get("/api/agency", response_model=dict[str, object])
     def get_agency() -> dict[str, object]:
-        """能动档位（机制 2）：当前级别 + 五级协议描述。"""
-        return {"level": agency.get_level(), "levels": AGENCY_LEVELS}
+        """能动档位（机制 2 + S35 记录集）：当前档位 + 全部档位（含自定义）。"""
+        return {
+            "current": agency.get_current().to_dict(),
+            "levels": [lv.to_dict() for lv in agency.list_levels()],
+        }
 
     @app.post("/api/agency", response_model=dict[str, object])
     def set_agency(req: AgencyIn) -> dict[str, object]:
-        """用户点选档位（一键修正，摩擦前置）。"""
-        level = agency.set_level(req.level)
-        return {"level": level, "levels": AGENCY_LEVELS}
+        """用户点选档位（level_id 优先；兼容旧 level 数字=排序位）。"""
+        if req.level_id:
+            lv = agency.set_current(req.level_id)
+        elif req.level is not None:
+            levels = agency.list_levels()
+            target = next((x for x in levels if x.order == req.level), None)
+            lv = agency.set_current(target.id) if target else None
+        else:
+            lv = None
+        if lv is None:
+            raise HTTPException(status_code=404, detail="档位不存在")
+        return {"current": lv.to_dict(), "levels": [x.to_dict() for x in agency.list_levels()]}
+
+    @app.post("/api/agency/add", response_model=dict[str, object])
+    def add_agency_level(req: AgencyLevelIn) -> dict[str, object]:
+        """S35：新增自定义档位（全局，追加到末尾）。"""
+        lv = agency.add_level(req.name, req.description, req.temperature)
+        return {"level": lv.to_dict(), "levels": [x.to_dict() for x in agency.list_levels()]}
+
+    @app.patch("/api/agency/{level_id}", response_model=dict[str, object])
+    def patch_agency_level(level_id: str, req: AgencyLevelIn) -> dict[str, object]:
+        """S35：修改档位名称/描述/温度。"""
+        lv = agency.update_level(level_id, req.name, req.description, req.temperature)
+        if lv is None:
+            raise HTTPException(status_code=404, detail="档位不存在")
+        return {"level": lv.to_dict(), "levels": [x.to_dict() for x in agency.list_levels()]}
+
+    @app.delete("/api/agency/{level_id}", response_model=dict[str, object])
+    def delete_agency_level(level_id: str) -> dict[str, object]:
+        """S35：删除档位（至少保留一条；删当前则回落默认）。"""
+        ok = agency.delete_level(level_id)
+        if not ok:
+            raise HTTPException(status_code=400, detail="无法删除（至少保留一条或不存在）")
+        return {"levels": [x.to_dict() for x in agency.list_levels()]}
+
+    @app.post("/api/agency/reset", response_model=dict[str, object])
+    def reset_agency() -> dict[str, object]:
+        """S35：恢复默认五级档位（不重置心智模型——manual 在不同表，天然保留）。"""
+        levels = agency.reset_defaults()
+        return {
+            "current": agency.get_current().to_dict(),
+            "levels": [lv.to_dict() for lv in levels],
+        }
 
     @app.get("/api/bias", response_model=list[dict[str, Any]])
     def list_bias() -> list[dict[str, Any]]:

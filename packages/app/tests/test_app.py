@@ -167,30 +167,80 @@ def test_chat_stream_error_frame() -> None:
 
 
 def test_agency_api_and_injection() -> None:
-    """S9：能动档位 CRUD + chat 注入档位块（fake 模型无 AI 声明）。"""
+    """S9+S35：能动档位 API（current + levels 记录集）+ 兼容旧 level 数字。"""
     client = _make_client()
     # 默认档位 2
     r = client.get("/api/agency")
     assert r.status_code == 200
     body = r.json()
-    assert body["level"] == 2
+    assert body["current"]["id"] == "default-2"
     assert len(body["levels"]) == 5
-    # 设置档位 0（只听写）并回读
+    # 设置档位 0（只听写）并回读（旧数字语义 = 排序位）
     r2 = client.post("/api/agency", json={"level": 0})
-    assert r2.json()["level"] == 0
-    # 越界钳制
-    assert client.post("/api/agency", json={"level": 99}).json()["level"] == 4
+    assert r2.json()["current"]["order"] == 0
+    # 越界钳制：order 99 不存在 → 404（旧版钳制为 4，S35 改为明确报错）
+    assert client.post("/api/agency", json={"level": 99}).status_code == 404
+
+
+def test_agency_crud_api() -> None:
+    """S35：新增/修改/删除/恢复默认档位 API。"""
+    client = _make_client()
+    # 新增自定义档位
+    r = client.post(
+        "/api/agency/add",
+        json={"name": "大胆但不血腥", "description": "自由发挥但规避血腥", "temperature": 0.9},
+    )
+    assert r.status_code == 200
+    lid = r.json()["level"]["id"]
+    assert len(r.json()["levels"]) == 6
+    # 选中自定义档位
+    client.post("/api/agency", json={"level_id": lid})
+    assert client.get("/api/agency").json()["current"]["id"] == lid
+    # 修改
+    rp = client.patch(f"/api/agency/{lid}", json={"name": "大胆克制", "temperature": 0.8})
+    assert rp.json()["level"]["name"] == "大胆克制"
+    assert rp.json()["level"]["temperature"] == 0.8
+    # 删除
+    assert client.delete(f"/api/agency/{lid}").status_code == 200
+    assert len(client.get("/api/agency").json()["levels"]) == 5
+    # 恢复默认
+    client.post("/api/agency/add", json={"name": "临时", "description": "", "temperature": 0.5})
+    client.post("/api/agency", json={"level": 4})
+    rr = client.post("/api/agency/reset")
+    assert rr.status_code == 200
+    assert len(rr.json()["levels"]) == 5
+    assert rr.json()["current"]["id"] == "default-2"
+
+
+def test_manual_affect_agency() -> None:
+    """S35：manual affect_agency 标记 → 档位注入块附加用户心智偏好。"""
+    client = _make_client()
+    # 新增心智偏好条目（affect_agency=True）
+    r = client.post(
+        "/api/manual",
+        json={"content": "我喜欢黑暗文风，可以大胆想象", "affect_agency": True},
+    )
+    assert r.status_code == 200
+    assert r.json()["affect_agency"] is True
+    # 普通条目（不影响能动性）
+    client.post("/api/manual", json={"content": "避免使用破折号", "affect_agency": False})
+    # 修改心智标记
+    eid = r.json()["id"]
+    rp = client.patch(f"/api/manual/{eid}", json={"affect_agency": False})
+    assert rp.json()["affect_agency"] is False
+    rp2 = client.patch(f"/api/manual/{eid}", json={"affect_agency": True})
+    assert rp2.json()["affect_agency"] is True
 
 
 def test_signal_adjusts_agency() -> None:
-    """S9：反馈自动调节——接受升级、拒绝降级。"""
+    """S9：反馈自动调节——接受升级、拒绝降级（S35 按排序位移动）。"""
     client = _make_client()
     client.post("/api/agency", json={"level": 2})
     client.post("/api/signals", json={"kind": "accepted", "content": "这段很好"})
-    assert client.get("/api/agency").json()["level"] == 3
+    assert client.get("/api/agency").json()["current"]["order"] == 3
     client.post("/api/signals", json={"kind": "rejected", "content": "这段不对"})
     client.post("/api/signals", json={"kind": "deleted", "content": "删掉"})
-    assert client.get("/api/agency").json()["level"] == 1
+    assert client.get("/api/agency").json()["current"]["order"] == 1
 
 
 def test_bias_api_and_render() -> None:

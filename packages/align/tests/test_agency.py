@@ -1,4 +1,4 @@
-"""anyspark.align — 能动性协议（机制 2）+ AI 倾向档案（§2）测试。"""
+"""anyspark.align — 能动性协议（机制 2，S35 档位记录集）+ AI 倾向档案（§2）测试。"""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import tempfile
 from pathlib import Path
 
 from anyspark.align import (
-    AGENCY_LEVELS,
+    DEFAULT_ID,
+    DEFAULT_LEVELS,
+    AgencyLevel,
     AgencyStore,
     BiasStore,
     build_agency_block,
@@ -16,36 +18,82 @@ from anyspark.align import (
 
 
 def test_agency_levels_defaults() -> None:
-    assert len(AGENCY_LEVELS) == 5
-    assert [lv["level"] for lv in AGENCY_LEVELS] == [0, 1, 2, 3, 4]
-    names = [lv["name"] for lv in AGENCY_LEVELS]
-    assert names[0] == "只听写" and names[4] == "自主发挥"
+    """S35：默认五级档位作为稳定基线（id 固定）。"""
+    assert len(DEFAULT_LEVELS) == 5
+    ids = [lv["id"] for lv in DEFAULT_LEVELS]
+    assert ids == [f"default-{i}" for i in range(5)]
+    assert DEFAULT_LEVELS[0]["name"] == "只听写"
+    assert DEFAULT_LEVELS[4]["name"] == "自主发挥"
 
 
 def test_temperature_mapping() -> None:
+    """温度入档：默认档位 by 数字查表兼容 + 记录自带温度。"""
     assert temperature_for(0) == 0.2
-    assert temperature_for(2) == 0.6
     assert temperature_for(4) == 1.0
-    assert temperature_for(9) == 0.7  # 未知档位回退默认
+    assert temperature_for(9) == 0.7  # 未知数字回退默认
+    lv = AgencyLevel(id="custom-1", name="自定义", description="", temperature=0.55, order=5)
+    assert temperature_for(lv) == 0.55
 
 
 def test_build_agency_block() -> None:
+    """注入块：数字（默认档位 by order）/ 记录 / 心智附加。"""
     b = build_agency_block(3)
     assert "能动级别 3" in b and "建议扩展" in b
     assert build_agency_block(9) == ""
+    lv = AgencyLevel(
+        id="x",
+        name="大胆但不血腥",
+        description="自由发挥但规避血腥描写。",
+        temperature=0.9,
+        order=5,
+    )
+    b2 = build_agency_block(lv, mental_notes=["我喜欢黑暗文风", "不要写血腥"])
+    assert "大胆但不血腥" in b2 and "用户心智偏好" in b2 and "不要写血腥" in b2
 
 
-def test_agency_store_clamps_and_adjusts() -> None:
+def test_agency_store_crud_and_reset() -> None:
+    """S35 核心：增删改 + 恢复默认 + adjust 按排序位。"""
     store = AgencyStore(Path(tempfile.mkdtemp()) / "agency.db")
-    assert store.get_level() == 2  # 默认
-    assert store.set_level(9) == 4  # 上限钳制
-    assert store.set_level(-3) == 0  # 下限钳制
-    store.set_level(2)
-    assert store.adjust(+1) == 3  # 接受=升级
-    store.set_level(0)
-    assert store.adjust(-1) == 0  # 拒绝=降级（下限 0 不动）
-    store.set_level(4)
-    assert store.adjust(+1) == 4  # 上限 4 不动
+    # 默认 5 档 + 当前 default-2
+    assert len(store.list_levels()) == 5
+    assert store.get_current().id == DEFAULT_ID
+    # 增：自定义档位追加末尾
+    lv = store.add_level("大胆但不血腥", "自由发挥但规避血腥描写。", 0.9)
+    levels = store.list_levels()
+    assert len(levels) == 6
+    assert levels[-1].id == lv.id and levels[-1].order == 5
+    # 选：切到自定义档位
+    store.set_current(lv.id)
+    assert store.get_current().id == lv.id
+    # 改：名称/描述/温度
+    store.update_level(lv.id, name="大胆克制", description="发挥但克制", temperature=0.8)
+    got = store.get_level(lv.id)
+    assert got is not None and got.name == "大胆克制" and got.temperature == 0.8
+    # adjust 按排序位：自定义档位 order=5 → 升到 6 被钳制在末尾
+    assert store.adjust(+1) == lv.id
+    store.set_current("default-1")
+    assert store.adjust(+1) == "default-2"  # 升一级
+    # 删：删自定义档位
+    assert store.delete_level(lv.id)
+    assert store.get_level(lv.id) is None
+    assert len(store.list_levels()) == 5
+    # 恢复默认：自定义档位清除 + 当前回落 default-2
+    store.add_level("临时档", "测试", 0.5)
+    store.set_current("default-4")
+    store.reset_defaults()
+    assert len(store.list_levels()) == 5
+    assert store.get_current().id == DEFAULT_ID
+    assert all(x.is_default for x in store.list_levels())
+
+
+def test_agency_delete_keeps_at_least_one() -> None:
+    store = AgencyStore(Path(tempfile.mkdtemp()) / "agency.db")
+    # 删到只剩 1 条时拒绝再删
+    for lv in list(store.list_levels())[1:]:
+        store.delete_level(lv.id)
+    assert len(store.list_levels()) == 1
+    assert not store.delete_level(store.list_levels()[0].id)
+    assert len(store.list_levels()) == 1
 
 
 def test_parse_agency_declaration() -> None:
