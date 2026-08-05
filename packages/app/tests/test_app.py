@@ -589,3 +589,55 @@ def test_settings_extract_api() -> None:
     assert r.status_code == 200
     body = r.json()
     assert "draft" in body and "raw" in body
+
+
+def test_chapter_patch_api() -> None:
+    """S44：定点编辑 API——插入/删除/替换指定位置，不重写整章。"""
+    client = _make_client()
+    # 写一章
+    r = client.post("/api/chat", json={"message": "写《第一章》100字：陈渡在灯塔发现日记"})
+    assert r.status_code == 200
+    chs = client.get("/api/chapters").json()
+    assert chs
+    cid = chs[-1]["id"]
+    orig = chs[-1]["content"]
+    # 取一个锚点段落
+    paras = [p for p in orig.split("\n") if p.strip()]
+    assert paras, "章节应有内容"
+    anchor = paras[0][:8]
+    # 插入：锚点段后插入新段
+    r = client.post(
+        f"/api/chapters/{cid}/patch",
+        json={"operations": [{"type": "insert", "anchor": anchor, "content": "新增段。"}]},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    assert "新增段" in body["results"][0].get("inserted", "")
+    after_insert = client.get("/api/chapters").json()[-1]["content"]
+    assert "新增段" in after_insert
+    assert len(after_insert) > len(orig)
+    # 删除：删掉新增段
+    r = client.post(
+        f"/api/chapters/{cid}/patch",
+        json={"operations": [{"type": "delete", "anchor": "新增段"}]},
+    )
+    assert r.json()["ok"] is True
+    after_del = client.get("/api/chapters").json()[-1]["content"]
+    assert "新增段" not in after_del
+    # 替换：替换锚点段
+    r = client.post(
+        f"/api/chapters/{cid}/patch",
+        json={"operations": [{"type": "replace", "anchor": anchor, "content": "替换后的开头。"}]},
+    )
+    assert r.json()["ok"] is True
+    after_rep = client.get("/api/chapters").json()[-1]["content"]
+    assert "替换后的开头" in after_rep
+    # 未命中锚点 → ok=False
+    r = client.post(
+        f"/api/chapters/{cid}/patch",
+        json={"operations": [{"type": "delete", "anchor": "不存在的锚点"}]},
+    )
+    assert r.json()["ok"] is False
+    # 404
+    assert client.post("/api/chapters/nonexist/patch", json={"operations": []}).status_code == 404

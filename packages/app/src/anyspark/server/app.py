@@ -254,6 +254,12 @@ class WritingSkillPatch(BaseModel):
     enabled: bool | None = None
 
 
+class ChapterPatchIn(BaseModel):
+    """S44：定点编辑操作列表。"""
+
+    operations: list[dict[str, Any]]
+
+
 class BiasIn(BaseModel):
     content: str
     source: str = "ai"
@@ -1482,6 +1488,24 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             order_index=ch.order_index,
             updated_at=ch.updated_at,
         )
+
+    @app.post("/api/chapters/{chapter_id}/patch", response_model=dict[str, object])
+    def patch_chapter_route(chapter_id: str, req: ChapterPatchIn) -> dict[str, object]:
+        """S44：定点编辑（锚点定位段落的插入/删除/替换，不重写整章）。"""
+        from anyspark.server.tools_writing import apply_patch
+
+        ch = chapters.get(chapter_id)
+        if ch is None:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        new_content, results = apply_patch(ch.content, req.operations)
+        ok_all = all(r.get("ok") for r in results)
+        chapters.upsert("main", ch.title, new_content, ch.order_index, ch.narrative_line)
+        return {
+            "title": ch.title,
+            "ok": ok_all,
+            "results": results,
+            "chars": len(new_content),
+        }
 
     @app.get("/api/chapters/{chapter_id}/export")
     def export_chapter(chapter_id: str, format: str = "txt") -> Response:

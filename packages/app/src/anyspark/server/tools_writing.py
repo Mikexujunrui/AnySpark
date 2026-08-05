@@ -36,6 +36,45 @@ def _resolve_sandbox_path(raw: str) -> Path | None:
     return resolved
 
 
+def apply_patch(content: str, operations: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
+    """定点编辑（S44）：按自然语言锚点定位段落，插入/删除/替换，不重写整章。
+
+    段落边界 = 换行（中文正文自然分段）。锚点匹配 = 段包含 anchor 子串。
+    operations: [{"type": "insert|delete|replace", "anchor": str, "content": str}]
+      insert  → 在锚点所在段之后插入 content（新段）
+      delete  → 删除锚点所在段
+      replace → 用 content 替换锚点所在段
+    返回 (新正文, 每步结果)。未命中锚点=该步失败（不应用），其余继续。
+    """
+    paras = content.split("\n")
+    results: list[dict[str, Any]] = []
+    for op in operations:
+        typ = str(op.get("type", ""))
+        anchor = str(op.get("anchor", "")).strip()
+        new_text = str(op.get("content", ""))
+        if typ not in ("insert", "delete", "replace") or not anchor:
+            results.append({"type": typ, "ok": False, "error": "非法操作或缺少锚点"})
+            continue
+        # 找含锚点的段落（第一个）
+        idx = next((i for i, p in enumerate(paras) if anchor in p), None)
+        if idx is None:
+            results.append({"type": typ, "anchor": anchor, "ok": False, "error": "锚点未命中"})
+            continue
+        if typ == "delete":
+            removed = paras.pop(idx)
+            results.append({"type": typ, "anchor": anchor, "ok": True, "removed": removed[:60]})
+        elif typ == "replace":
+            old = paras[idx]
+            paras[idx] = new_text
+            results.append(
+                {"type": typ, "anchor": anchor, "ok": True, "old": old[:60], "new": new_text[:60]}
+            )
+        else:  # insert
+            paras.insert(idx + 1, new_text)
+            results.append({"type": typ, "anchor": anchor, "ok": True, "inserted": new_text[:60]})
+    return "\n".join(paras), results
+
+
 def _extract_docx_text(path: Path) -> str:
     """轻量 docx 文本提取（零依赖：zipfile 读 document.xml）。"""
     try:
@@ -123,6 +162,49 @@ class WritingTools:
         )
 
     # -- S11 文件工具（沙箱读 txt/md/docx）--
+    def patch_chapter(self, spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        """S44 定点编辑：按自然语言锚点定位段落，插入/删除/替换，不重写整章。"""
+        call = ToolCall(name=spec.name, arguments=arguments)
+        title = str(arguments.get("title", "")).strip()
+        raw_ops = str(arguments.get("operations", ""))
+        if not title or not raw_ops:
+            return ToolResult(call=call, ok=False, content="缺少参数 title 或 operations。")
+        try:
+            import json as _json
+
+            ops = _json.loads(raw_ops)
+            if not isinstance(ops, list):
+                raise ValueError("operations 必须是 JSON 数组")
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"operations 解析失败：{exc}")
+        for c in self._chapters.list_by_book(self._book_id):
+            if c.title == title:
+                new_content, results = apply_patch(c.content, ops)
+                ok_all = all(r.get("ok") for r in results)
+                # 保存（旧版进版本历史）；写后缓存失效
+                self._chapters.upsert(
+                    self._book_id, title, new_content, c.order_index, c.narrative_line
+                )
+                self._read_cache.pop(title, None)
+                lines = [
+                    f"步骤 {i + 1}: {'✓' if r.get('ok') else '✗'} "
+                    + str(
+                        r.get("error")
+                        or r.get("removed")
+                        or r.get("old")
+                        or r.get("inserted")
+                        or ""
+                    )[:60]
+                    for i, r in enumerate(results)
+                ]
+                status = "全部命中" if ok_all else "部分未命中"
+                return ToolResult(
+                    call=call,
+                    ok=ok_all,
+                    content=f"已定点编辑《{title}》（{status}）：\n" + "\n".join(lines),
+                )
+        return ToolResult(call=call, ok=False, content=f"未找到章节《{title}》。")
+
     def read_file(self, spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec.name, arguments=arguments)
         raw = str(arguments.get("path", "")).strip()
@@ -189,6 +271,24 @@ _WRITING_SPECS: list[ToolSpec] = [
         ],
         # S25（对齐 pi executionMode）：写类工具标 sequential——与 read 类工具同批时
         # 整批串行，防止读旧写新的逻辑错序（锁只保数据不保顺序）。
+        execution_mode="sequential",
+    ),
+    ToolSpec(
+        name="patch_chapter",
+        description=(
+            "定点编辑章节：按自然语言锚点定位段落，插入/删除/替换指定位置"
+            "（不用重写整章）。operations 传 JSON 数组："
+            '[{"type":"insert|delete|replace","anchor":"锚点文本","content":"新内容"}]'
+        ),
+        params=[
+            ParamSpec(name="title", type="string", required=True, description="章节标题"),
+            ParamSpec(
+                name="operations",
+                type="string",
+                required=True,
+                description="JSON 数组字符串：[{type, anchor, content}]，锚点=定位段落的文本片段",
+            ),
+        ],
         execution_mode="sequential",
     ),
     ToolSpec(
