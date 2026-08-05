@@ -34,7 +34,6 @@ class ManualEntry:
     locked: bool = False
     scope: Scope = "project"
     book_id: str = "main"  # scope=global 时忽略
-    affect_agency: bool = False  # S35 心智模型：标记"影响能动性"的偏好（进档位注入块）
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     created_at: str = field(default_factory=lambda: _now())
     updated_at: str = field(default_factory=lambda: _now())
@@ -49,7 +48,6 @@ class ManualEntry:
             "locked": self.locked,
             "scope": self.scope,
             "book_id": self.book_id,
-            "affect_agency": self.affect_agency,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
         }
@@ -83,26 +81,18 @@ class ManualStore:
                     locked INTEGER NOT NULL DEFAULT 0,
                     scope TEXT NOT NULL DEFAULT 'project',
                     book_id TEXT NOT NULL DEFAULT 'main',
-                    affect_agency INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 )
                 """
             )
-            # S35 心智模型：旧库 ALTER 补列
-            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(manual_entries)")]
-            if "affect_agency" not in cols:
-                self._conn.execute(
-                    "ALTER TABLE manual_entries ADD COLUMN affect_agency INTEGER NOT NULL DEFAULT 0"
-                )
             self._conn.commit()
 
     def add(self, entry: ManualEntry) -> ManualEntry:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO manual_entries (id, content, source, confidence, activity, "
-                "locked, scope, book_id, affect_agency, created_at, updated_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "locked, scope, book_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     entry.id,
                     entry.content,
@@ -112,7 +102,6 @@ class ManualStore:
                     1 if entry.locked else 0,
                     entry.scope,
                     entry.book_id,
-                    1 if entry.affect_agency else 0,
                     entry.created_at,
                     entry.updated_at,
                 ),
@@ -143,13 +132,9 @@ class ManualStore:
         return _entry_from_row(row) if row else None
 
     def update(
-        self,
-        entry_id: str,
-        content: str | None = None,
-        confidence: float | None = None,
-        affect_agency: bool | None = None,
+        self, entry_id: str, content: str | None = None, confidence: float | None = None
     ) -> ManualEntry | None:
-        """更新条目内容/置信度/心智标记（锁定条目不可改，用户主权）。"""
+        """更新条目内容/置信度（锁定条目不可改，用户主权）。"""
         entry = self.get(entry_id)
         if entry is None:
             return None
@@ -164,9 +149,6 @@ class ManualStore:
             if confidence is not None:
                 sets.append("confidence=?")
                 params.append(confidence)
-            if affect_agency is not None:
-                sets.append("affect_agency=?")
-                params.append(1 if affect_agency else 0)
             sets.append("updated_at=?")
             params.append(_now())
             params.append(entry_id)
@@ -193,10 +175,6 @@ class ManualStore:
 
 
 def _entry_from_row(row: sqlite3.Row) -> ManualEntry:
-    try:
-        affect = bool(row["affect_agency"])
-    except IndexError:  # 旧库兼容
-        affect = False
     return ManualEntry(
         id=row["id"],
         content=row["content"],
@@ -206,7 +184,6 @@ def _entry_from_row(row: sqlite3.Row) -> ManualEntry:
         locked=bool(row["locked"]),
         scope=row["scope"],
         book_id=row["book_id"],
-        affect_agency=affect,
         created_at=row["created_at"],
         updated_at=row["updated_at"],
     )

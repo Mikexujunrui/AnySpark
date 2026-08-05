@@ -212,26 +212,6 @@ def test_agency_crud_api() -> None:
     assert rr.json()["current"]["id"] == "default-2"
 
 
-def test_manual_affect_agency() -> None:
-    """S35：manual affect_agency 标记 → 档位注入块附加用户心智偏好。"""
-    client = _make_client()
-    # 新增心智偏好条目（affect_agency=True）
-    r = client.post(
-        "/api/manual",
-        json={"content": "我喜欢黑暗文风，可以大胆想象", "affect_agency": True},
-    )
-    assert r.status_code == 200
-    assert r.json()["affect_agency"] is True
-    # 普通条目（不影响能动性）
-    client.post("/api/manual", json={"content": "避免使用破折号", "affect_agency": False})
-    # 修改心智标记
-    eid = r.json()["id"]
-    rp = client.patch(f"/api/manual/{eid}", json={"affect_agency": False})
-    assert rp.json()["affect_agency"] is False
-    rp2 = client.patch(f"/api/manual/{eid}", json={"affect_agency": True})
-    assert rp2.json()["affect_agency"] is True
-
-
 def test_signal_adjusts_agency() -> None:
     """S9：反馈自动调节——接受升级、拒绝降级（S35 按排序位移动）。"""
     client = _make_client()

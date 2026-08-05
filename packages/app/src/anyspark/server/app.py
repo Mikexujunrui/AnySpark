@@ -140,13 +140,11 @@ class ManualEntryIn(BaseModel):
     content: str
     confidence: float = 0.5
     scope: str = "project"
-    affect_agency: bool = False  # S35 心智模型：影响能动性的偏好（进档位注入）
 
 
 class ManualEntryPatch(BaseModel):
     content: str | None = None
     locked: bool | None = None
-    affect_agency: bool | None = None
 
 
 class SignalIn(BaseModel):
@@ -438,13 +436,8 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         graph_block = graph_injector.build_block(book_id)
         if "graph" not in skip and graph_block:
             full_prompt = full_prompt + "\n\n" + graph_block
-        # 能动性注入：当前档位（机制 2；S35 心智模型：affect_agency 偏好条目附加）
-        mental_notes = [
-            e.content
-            for e in manual.list("project", book_id) + manual.list("global", "main")
-            if e.affect_agency
-        ]
-        agency_block = build_agency_block(current, mental_notes)
+        # 能动性注入：当前档位（机制 2；职责边界：档位只管能动性，心智模型独立系统）
+        agency_block = build_agency_block(current)
         if "agency" not in skip and agency_block:
             full_prompt = full_prompt + "\n\n" + agency_block
         # AI 倾向档案注入（双向黑盒解法）
@@ -739,7 +732,6 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             confidence=req.confidence,
             scope=scope,
             book_id="main",
-            affect_agency=req.affect_agency,
         )
         manual.add(entry)
         return entry.to_dict()
@@ -747,7 +739,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
     @app.patch("/api/manual/{entry_id}", response_model=dict[str, Any])
     def update_manual(entry_id: str, req: ManualEntryPatch) -> dict[str, Any]:
         """修改条目内容（锁定条目拒绝，用户主权）。"""
-        entry = manual.update(entry_id, content=req.content, affect_agency=req.affect_agency)
+        entry = manual.update(entry_id, content=req.content)
         if entry is None:
             raise HTTPException(status_code=404, detail="条目不存在")
         if req.locked is not None:

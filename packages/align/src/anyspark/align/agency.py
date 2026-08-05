@@ -5,8 +5,10 @@ S35 重构：档位从"固定五级枚举"升级为"全局档位记录集"（可
 - 默认五级（只听写/执行+填肉/补全标注/建议扩展/自主发挥）作为稳定基线
 - 用户可全局增删改档位（名称/描述/温度），恢复默认（不重置心智模型 manual）
 - 温度进档位记录（自定义档位自带温度，不再按 level 数字查表）
-- 心智模型指导档位：manual 中 affect_agency 标记的偏好条目附加进档位注入块
 - 反馈自动调节：接受=当前档位在排序中升级，删除/拒绝=降级（零打字）
+
+职责边界（S35b 修正）：档位只描述**能动性**（主动程度/做什么）——文风喜好、
+毒点、边界等个性化属于**心智模型**（独立系统，渐进式披露），不混入档位。
 
 半硬编码（哲学：机制硬编码、内容自然语言）：
 - 机制：档位结构（id/name/description/temperature/order）、注入块、声明解析、调整规则——硬编码
@@ -284,11 +286,11 @@ def _row_to_level(row: sqlite3.Row) -> AgencyLevel:
     )
 
 
-def build_agency_block(
-    level: AgencyLevel | int | str, mental_notes: list[str] | None = None
-) -> str:
-    """档位 → 自然语言系统提示块（模型无关；可附用户心智偏好）。
+def build_agency_block(level: AgencyLevel | int | str) -> str:
+    """档位 → 自然语言系统提示块（模型无关）。
 
+    职责边界（S35b）：档位只描述**能动性**（主动程度/做什么），
+    不含文风/喜好/毒点等心智内容——那些是心智模型（独立系统，渐进式披露）的职责。
     level 兼容：AgencyLevel 记录 / int（默认档位 by order）/ str（档位 id）。
     """
     lv: AgencyLevel | None = None
@@ -317,8 +319,6 @@ def build_agency_block(
     if lv is None:
         return ""
     block = f"# 能动级别 {lv.order}（{lv.name}）\n本轮写作请按此档执行：{lv.description}\n"
-    if mental_notes:
-        block += f"用户心智偏好：{'；'.join(mental_notes[:3])}\n"
     block += (
         "若你认为需要更高/更低档位（例如任务更适合自主发挥），"
         "在输出末尾附一行【能动级别: N】（N=排序位 0 起），供用户一键确认。"

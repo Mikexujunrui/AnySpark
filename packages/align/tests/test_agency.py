@@ -36,7 +36,7 @@ def test_temperature_mapping() -> None:
 
 
 def test_build_agency_block() -> None:
-    """注入块：数字（默认档位 by order）/ 记录 / 心智附加。"""
+    """注入块：数字（默认档位 by order）/ 记录。职责边界：档位只含能动性，无心智内容。"""
     b = build_agency_block(3)
     assert "能动级别 3" in b and "建议扩展" in b
     assert build_agency_block(9) == ""
@@ -47,8 +47,8 @@ def test_build_agency_block() -> None:
         temperature=0.9,
         order=5,
     )
-    b2 = build_agency_block(lv, mental_notes=["我喜欢黑暗文风", "不要写血腥"])
-    assert "大胆但不血腥" in b2 and "用户心智偏好" in b2 and "不要写血腥" in b2
+    b2 = build_agency_block(lv)
+    assert "大胆但不血腥" in b2 and "用户心智" not in b2
 
 
 def test_agency_store_crud_and_reset() -> None:
