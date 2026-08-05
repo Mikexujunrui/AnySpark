@@ -64,6 +64,9 @@ class Entity:
     last_chapter: str = ""
     first_order: int = 0
     last_order: int = 0
+    # S37（重要性信号）：实体出现的**不同章节数**（中性事实——出场越广=贯穿性越强）。
+    # 注入时"高频保底 + 最近补充"混合选取，保证百章级超长书早期主线不丢（S37）。
+    weight: int = 0
     # S29（多线叙事）：实体出现过的叙事线（如 ["main", "line_b"]）——时序校验按线比较，
     # 跨线首现不误报"时空倒置"（A 线第 3 章提到 B 线第 5 章才首现的角色是并行叙事，非倒叙）。
     lines: list[str] = field(default_factory=lambda: ["main"])
@@ -81,6 +84,7 @@ class Entity:
             "last_chapter": self.last_chapter,
             "first_order": self.first_order,
             "last_order": self.last_order,
+            "weight": self.weight,
             "lines": self.lines,
         }
 
@@ -166,6 +170,7 @@ class GraphStore:
                 last_chapter TEXT NOT NULL DEFAULT '',
                 first_order INTEGER NOT NULL DEFAULT 0,
                 last_order INTEGER NOT NULL DEFAULT 0,
+                weight INTEGER NOT NULL DEFAULT 0,
                 lines TEXT NOT NULL DEFAULT '["main"]',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
@@ -267,6 +272,10 @@ class GraphStore:
                 first_ord = row["first_order"] or chapter_order
                 last_ch = chapter_ref if chapter_order >= row["last_order"] else row["last_chapter"]
                 last_ord = max(row["last_order"], chapter_order)
+                # S37 重要性：新章节首次出现 → weight+1（同章重复 upsert 不累计）
+                new_weight = int(row["weight"] or 0) + (
+                    1 if chapter_order > row["last_order"] else 0
+                )
                 # 状态增量拼接（S20）：旧状态 + 本章变化
                 old_state = str(row["state"] or "")
                 new_state = _merge_state(old_state, state_delta)
@@ -276,7 +285,7 @@ class GraphStore:
                 self._conn.execute(
                     "UPDATE graph_entities SET entity_type=?, aliases=?, description=?, "
                     "state=?, first_chapter=?, last_chapter=?, first_order=?, "
-                    "last_order=?, lines=?, updated_at=? WHERE id=?",
+                    "last_order=?, weight=?, lines=?, updated_at=? WHERE id=?",
                     (
                         etype,
                         json.dumps(merged, ensure_ascii=False),
@@ -286,6 +295,7 @@ class GraphStore:
                         last_ch,
                         first_ord,
                         last_ord,
+                        new_weight,
                         json.dumps(merged_lines, ensure_ascii=False),
                         now,
                         eid,
@@ -294,11 +304,12 @@ class GraphStore:
             else:
                 etype = entity_type if entity_type in ENTITY_TYPES else "设定"
                 new_state = state_delta
+                new_weight = 1  # S37：新实体首章出现，出场章节数=1
                 self._conn.execute(
                     "INSERT INTO graph_entities (id, book_id, entity_type, name, aliases, "
                     "description, state, first_chapter, last_chapter, first_order, "
-                    "last_order, lines, created_at, updated_at) VALUES "
-                    "(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "last_order, weight, lines, created_at, updated_at) VALUES "
+                    "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         eid,
                         book_id,
@@ -311,6 +322,7 @@ class GraphStore:
                         chapter_ref,
                         chapter_order,
                         chapter_order,
+                        new_weight,
                         json.dumps([line], ensure_ascii=False),
                         now,
                         now,
@@ -575,11 +587,23 @@ class GraphStore:
         if up_to_order is not None:
             where += " AND last_order<=?"
             args.append(up_to_order)
+        # S37：最近 N×2/3 + 高频 N/3 混合（高频=出场章节数多=贯穿主线，保证早期核心不丢）
+        n_recent = max(1, int(max_entities * 2 / 3))
+        n_high = max_entities - n_recent
         rows = self._conn.execute(
             f"SELECT * FROM graph_entities WHERE {where} "
             "ORDER BY last_order DESC, rowid DESC LIMIT ?",
-            (*args, max_entities),
+            (*args, n_recent),
         ).fetchall()
+        recent_ids = [r["id"] for r in rows]
+        if n_high > 0:
+            placeholders = ",".join("?" * len(recent_ids)) or "NULL"
+            extra = self._conn.execute(
+                f"SELECT * FROM graph_entities WHERE {where} AND id NOT IN ({placeholders}) "
+                "ORDER BY weight DESC, last_order DESC LIMIT ?",
+                (*args, *recent_ids, n_high),
+            ).fetchall()
+            rows = rows + extra
         entities = [self._entity_from_row(r) for r in rows]
         ids = {e.id for e in entities}
         rels = [r for r in self.list_relations(book_id) if r.from_id in ids and r.to_id in ids][
@@ -668,6 +692,17 @@ class GraphStore:
                 ev.involved,
             )
 
+    def _ensure_weight_column(self) -> None:
+        """S37：旧库 ALTER 补 weight 列（老数据 weight=1 起步，后续按新逻辑累计）。"""
+        with self._lock:
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(graph_entities)")]
+            if "weight" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE graph_entities ADD COLUMN weight INTEGER NOT NULL DEFAULT 0"
+                )
+                self._conn.execute("UPDATE graph_entities SET weight=1 WHERE weight=0")
+                self._conn.commit()
+
     def rebuild_fts(self) -> None:
         """重建 FTS 派生索引（可恢复）。"""
         with self._lock:
@@ -696,6 +731,7 @@ class GraphStore:
             last_chapter=row["last_chapter"],
             first_order=row["first_order"],
             last_order=row["last_order"],
+            weight=int(row["weight"] or 0),
             lines=json.loads(row["lines"] or '["main"]'),
         )
 

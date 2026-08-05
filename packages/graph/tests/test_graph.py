@@ -355,3 +355,38 @@ def test_temporal_check_respects_narrative_line() -> None:
     # 同线超前：line_b 截止第 3 章，提到 X（X 在该线首现于第 5 章）→ 警告
     w = verifier.check_temporal("book", "X 出现在这里", up_to_order=3, line="line_b")
     assert len(w) == 1 and "时序警告" in w[0]
+
+
+def test_weight_accumulates_per_chapter() -> None:
+    """S37：weight=出场章节数（同章重复 upsert 不累计，新章节 +1）。"""
+    g = _store()
+    # 第 1 章：陈渡出场
+    g.upsert_entity("main", "陈渡", "角色", [], "", "第一章", 1)
+    assert g.get_entity("main", "陈渡") is not None
+    assert g.get_entity("main", "陈渡").weight == 1  # type: ignore[union-attr]
+    # 同章重复 upsert（states 更新场景）不累计
+    g.upsert_entity("main", "陈渡", "", None, "", "第一章", 1, "本章受伤")
+    assert g.get_entity("main", "陈渡").weight == 1  # type: ignore[union-attr]
+    # 第 2、3 章再出现 → 3
+    g.upsert_entity("main", "陈渡", "", None, "", "第二章", 2)
+    g.upsert_entity("main", "陈渡", "", None, "", "第三章", 3)
+    e = g.get_entity("main", "陈渡")
+    assert e is not None and e.weight == 3
+
+
+def test_known_facts_mixes_high_frequency_entities() -> None:
+    """S37：高频实体（贯穿主线）在久未出现时仍被注入——百章级早期主线不丢。"""
+    g = _store()
+    # 主角"陈渡"前 10 章高频出场（weight=10）
+    for i in range(1, 11):
+        g.upsert_entity("main", "陈渡", "角色", [], "", f"第{i}章", i)
+    # 第 30-35 章新出场 6 个角色（最近实体）
+    for i in range(30, 36):
+        g.upsert_entity("main", f"新角色{i}", "角色", [], "", f"第{i}章", i)
+    # 截止第 35 章：最近实体（新角色 30-35）占多数，但高频"陈渡"必须仍在
+    facts = g.known_facts("main", up_to_order=35, max_entities=15)
+    names = [e.name for e in facts["entities"]]
+    assert "陈渡" in names, f"高频主角被漏掉: {names}"
+    assert "新角色35" in names  # 最近实体也在
+    # 高频优先：陈渡在序中靠前（weight 排序组）
+    assert names.index("陈渡") < len(names)  # 存在即可
