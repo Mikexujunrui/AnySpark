@@ -237,6 +237,26 @@
 
 ---
 
+## S48 工作区化：每项目一路径（小说特化版 pi 第一步，已完成 ✅）
+
+**背景（主人战略）**：把 AnySpark 做成"小说特化版 pi"——舍弃通用能力（代码/媒体/TUI），增加小说必须工具（已有图谱/对齐/检测/设定/伏笔/计划），保留核心哲学（智能体驱动/机制硬编码内容自然语言/模型无关/极简）。第一步=形态变革：每项目一路径，章节 md 文件为操作主场。
+
+**实现**（`server/workspace.py` 新文件 + tools_writing 双写 + app.py 端点）：
+- **Workspace**（每项目一路径）：上传/（原始存档，只读不碰）、章节/（md 正文权威，文件名 `{order:03d}-{title}.md`）、卡片/（可读产物）
+- **双写**：write_chapter/patch_chapter 写 md 文件（权威）+ SQLite chapters 表（镜像）——图谱抽取/检测/伏笔回收/影响分析等既有管线**零改动**（读库镜像）
+- **import 单向同步**：`POST /api/workspace/import` 扫描章节 md → 入库（内容变化才写版本历史）——人工直接编辑 md 后调用
+- **上传存档**：`POST /api/upload`（base64 JSON 零新依赖）→ 上传区；`GET /api/workspace` 结构总览
+- **隔离**：build_app 的 workspace 默认与 db 配对（默认 db→data/workspace；临时 db→db 同目录；:memory:→临时目录）——防测试污染全局（实测抓到的坑：真实模型测试写《第一章》双写到全局工作区）
+- **Token/效率**：注入（token 大头）只依赖状态库；md 化买的是 agent 文件本能 + 人工可编辑 + git 友好（主人拍板：不搞 front-matter/卡片双轨/隐藏目录/原件复制）
+
+**门禁**：ruff + mypy + pytest **230**（+7：结构/文件名/读写/上传卡片/双写往返/patch 双写/API+import）+ 前端全绿
+
+**真实链路验证**：上传设定.txt → 真实 DeepSeek 写《测试章W》落 md 文件 → 人工改写 md → import 同步（changed=1，库镜像更新）→ 结构总览正确
+
+**遗留（后续阶段，按主人路线）**：P2 领域能力工具化（图谱/设定/伏笔/计划/检测全部 agent 可自主调用）；P3 格式管线（docx/pdf/md→章节 md 的输入消化，原始区→格式化区）；P4 人格推演；P5 代码扩展 anyspark-codex（自我修复，DESIGN 机制 8 预留）；P6 前端壳
+
+---
+
 ## S47 运行时模型配置 + 思考强度（已完成 ✅）
 
 **背景（主人需求）**：此前模型固定 DeepSeek（`.env` 启动时静态配置 DEEPSEEK_*），无运行时切换供应商/模型、无思考强度选择。本次补齐：运行时模型注册表（可增删改/切换激活）+ 请求级 model_id/thinking 覆盖 + 前端模型选择器。

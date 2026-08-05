@@ -70,6 +70,7 @@ from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.stats import compute_stats
 from anyspark.server.tools_writing import register_writing_tools
+from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import (
     ExternalLibrary,
@@ -142,6 +143,13 @@ class ModelIn(BaseModel):
     max_tokens: int | None = None
     temperature: float | None = None
     thinking: str | None = None  # off/low/medium/high/xhigh/max（None=交模型默认）
+
+
+class UploadIn(BaseModel):
+    """S48 上传存档（base64 JSON，零新依赖）。"""
+
+    filename: str
+    data_b64: str  # base64 编码的文件内容
 
 
 class ToolEvent(BaseModel):
@@ -376,17 +384,34 @@ class SteerIn(BaseModel):
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
-def build_app(model: Model | None = None, db_path: str | Path | None = None) -> FastAPI:
+def build_app(
+    model: Model | None = None,
+    db_path: str | Path | None = None,
+    workspace: Workspace | None = None,
+) -> FastAPI:
     """装配后端应用。
 
     - model: 真实 DeepSeekModel（默认）；测试可注入 fake model（实现 core.Model 协议）
     - db_path: 默认 data/anyspark.db；测试可注入临时路径
+    - workspace: S48 工作区（默认 data/workspace）；测试可注入临时路径隔离
     """
     load_dotenv(PROJECT_ROOT / ".env")
     setup_logging()
 
     real_db = db_path or DB_PATH
     store = SqliteConversationStore(real_db)
+    # S48 工作区化：每项目一路径（上传/章节/卡片），章节 md 文件为权威
+    # 默认与 db 配对隔离（防测试污染全局）：未显式注入时——
+    #   默认 db → data/workspace；临时 db → db 同目录 workspace；:memory: → 临时目录
+    if workspace is None:
+        if real_db == ":memory:":
+            import tempfile
+
+            workspace = Workspace(root=Path(tempfile.mkdtemp()))
+        elif db_path is None:
+            workspace = Workspace()
+        else:
+            workspace = Workspace(root=Path(real_db).parent / "workspace")
     chapters = ChapterStore(real_db)
     manual = ManualStore(real_db)
     signals = SignalStore(real_db)
@@ -579,7 +604,7 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
         thinking: str | None = None,
     ) -> Agent:
         registry = ToolRegistry()
-        register_writing_tools(registry, chapters)
+        register_writing_tools(registry, chapters, workspace=workspace)
         # S32：探索工具无条件注册（修复核心——方向模糊时 Agent 可自觉探索；仅此工具常驻，
         # 其余扩展（查资料/自查）按 enable_extras 点亮，防无关调用干扰主链路（本次实测踩坑））
         from anyspark.server.tools_extras import (
@@ -1612,6 +1637,60 @@ def build_app(model: Model | None = None, db_path: str | Path | None = None) -> 
             "graph_entities": [f.entity.name for f in involved][:10],
             "open_hooks": hook_check,  # S31：仍未回收的主线钩子（提醒，不阻断）
         }
+
+    # -----------------------------------------------------------------------
+    # S48 工作区：每项目一路径（上传存档/章节 md/卡片），md 文件为章节权威
+    # -----------------------------------------------------------------------
+    @app.get("/api/workspace", response_model=dict[str, Any])
+    def workspace_overview() -> dict[str, Any]:
+        """项目工作区结构总览：上传存档 / 章节文件 / 卡片。"""
+        return workspace.describe("main")
+
+    @app.post("/api/workspace/import", response_model=dict[str, Any])
+    def workspace_import_chapters() -> dict[str, Any]:
+        """S48：扫描章节 md 文件 → 同步入库（人工直接编辑 md 后调用）。
+
+        仅内容变化才 upsert（版本历史只在变化时记录）。
+        权威始终在文件——import 是"文件 → 库镜像"的单向同步。
+        """
+        imported: list[dict[str, Any]] = []
+        for item in workspace.list_chapter_files("main"):
+            content = workspace.read_chapter("main", item["order"], item["title"])
+            if content is None:
+                continue
+            existing = next(
+                (c for c in chapters.list_by_book("main") if c.title == item["title"]),
+                None,
+            )
+            changed = existing is None or existing.content != content
+            if changed:
+                line = existing.narrative_line if existing else "main"
+                chapters.upsert("main", item["title"], content, item["order"], line)
+            imported.append({"title": item["title"], "order": item["order"], "changed": changed})
+        return {
+            "ok": True,
+            "files": len(imported),
+            "changed": sum(1 for i in imported if i["changed"]),
+            "imported": imported,
+        }
+
+    @app.post("/api/upload", response_model=dict[str, Any])
+    def upload_to_workspace(req: UploadIn) -> dict[str, Any]:
+        """S48：上传原始文件进上传区（存档，不参与操作；后续消化为格式化产物）。
+
+        用 base64 JSON（零新依赖 python-multipart）；前端/agent 都可直接传。
+        """
+        import base64
+
+        try:
+            data = base64.b64decode(req.data_b64)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"base64 解码失败：{exc}") from exc
+        if len(data) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="文件超过 20MB 上限")
+        dest = workspace.save_upload("main", req.filename, data)
+        logger.info("上传存档: %s -> %s", req.filename, dest.name)
+        return {"ok": True, "name": dest.name, "path": str(dest), "size": len(data)}
 
     @app.get("/api/chapters", response_model=list[ChapterOut])
     def list_chapters() -> list[ChapterOut]:

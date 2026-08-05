@@ -37,7 +37,8 @@ data/dev/
 5. **探索**：`POST /api/explore/intent {seed}` → `POST /api/explore/cards`
 6. **检测**：`POST /api/check {text}`（响应含 `graph_evidence` 图谱证据）→ `POST /api/check/rule`
 7. **资料**：`POST /api/materials {text}`（摘要卡 + 图谱关联）→ `GET /api/materials`
-8. `anyspark_state` 核对产物 → 改动后 `anyspark_gate` 回归
+8. **工作区（S48）**：`POST /api/upload {filename, data_b64}`（原始存档）→ chat 写章 → `find data/workspace/main/章节` 验证 md 落盘 → 人工改 md 后 `POST /api/workspace/import` 同步入库
+9. `anyspark_state` 核对产物 → 改动后 `anyspark_gate` 回归
 
 ## 4. 已知要点（踩坑）
 

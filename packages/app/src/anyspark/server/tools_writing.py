@@ -15,6 +15,7 @@ from typing import Any
 
 from anyspark.core.protocol import ParamSpec, ToolRegistry, ToolResult, ToolSpec
 from anyspark.core.types import ToolCall
+from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore
 
 # 默认当前写作书籍（阶段1 单本书；多书/切换在后续阶段引入）
@@ -92,13 +93,34 @@ def _extract_docx_text(path: Path) -> str:
 
 
 class WritingTools:
-    """持有章节存储的写作工具实现组（注入共享 store，生命周期跟随 server）。"""
+    """持有章节存储的写作工具实现组（注入共享 store，生命周期跟随 server）。
 
-    def __init__(self, chapters: ChapterStore, book_id: str = DEFAULT_BOOK_ID) -> None:
+    S48 工作区化：注入 Workspace 后 write/patch 双写（md 文件权威 + SQLite 镜像），
+    未注入（测试）时纯库行为不变。list/read 读库镜像（既有管线零改动）。
+    """
+
+    def __init__(
+        self,
+        chapters: ChapterStore,
+        book_id: str = DEFAULT_BOOK_ID,
+        workspace: Workspace | None = None,
+    ) -> None:
         self._chapters = chapters
         self._book_id = book_id
+        self._workspace = workspace
         # 已读缓存（S21）：一次请求内同一章节只查一次，抑制 AI 过度 read（日志实证 4-8 次）
         self._read_cache: dict[str, str] = {}
+
+    # -- S48 双写辅助（md 文件权威 + SQLite 镜像） --
+    def _write_dual(self, title: str, content: str, order: int, line: str) -> str | None:
+        """双写：md 文件（权威）→ 返回章节 id；文件写入失败返回 None（不写库）。"""
+        ws = getattr(self, "_workspace", None)  # 防御：测试用 __new__ 手工构造可能缺属性
+        if ws is not None:
+            try:
+                ws.write_chapter(self._book_id, order, title, content)
+            except OSError:
+                return None
+        return self._chapters.upsert(self._book_id, title, content, order, line).id
 
     # -- 工具实现（签名匹配 ToolImplementer protocol）--
     def list_chapters(self, spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
@@ -145,11 +167,17 @@ class WritingTools:
         all_chapters = self._chapters.list_by_book(self._book_id)
         existing = next((c for c in all_chapters if c.title == title), None)
         order = existing.order_index if existing else len(all_chapters)
-        ch = self._chapters.upsert(self._book_id, title, content, order, line)
+        cid = self._write_dual(title, content, order, line)
+        if cid is None:
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=f"章节文件写入失败：《{title}》（工作区不可写？）。",
+            )
         # 写后缓存失效（S21）：同一请求内修改过的章节，下次 read 必须读到新内容
         self._read_cache.pop(title, None)
         # 幻觉检测 fake_write 兜底：落盘后自校验（id 必须能回读）
-        if self._chapters.get(ch.id) is None:
+        if self._chapters.get(cid) is None:
             return ToolResult(
                 call=call, ok=False, content=f"落盘校验失败：章节《{title}》未能读回。"
             )
@@ -157,8 +185,8 @@ class WritingTools:
         return ToolResult(
             call=call,
             ok=True,
-            content=f"已{note}章节《{title}》({ch.id})。",
-            data={"chapter_id": ch.id, "title": title},
+            content=f"已{note}章节《{title}》({cid})。",
+            data={"chapter_id": cid, "title": title},
         )
 
     # -- S11 文件工具（沙箱读 txt/md/docx）--
@@ -181,10 +209,10 @@ class WritingTools:
             if c.title == title:
                 new_content, results = apply_patch(c.content, ops)
                 ok_all = all(r.get("ok") for r in results)
-                # 保存（旧版进版本历史）；写后缓存失效
-                self._chapters.upsert(
-                    self._book_id, title, new_content, c.order_index, c.narrative_line
-                )
+                # 保存（旧版进版本历史，S48 双写文件权威）；写后缓存失效
+                cid = self._write_dual(title, new_content, c.order_index, c.narrative_line)
+                if cid is None:
+                    return ToolResult(call=call, ok=False, content=f"章节文件写入失败：《{title}》")
                 self._read_cache.pop(title, None)
                 lines = [
                     f"步骤 {i + 1}: {'✓' if r.get('ok') else '✗'} "
@@ -321,8 +349,9 @@ def register_writing_tools(
     registry: ToolRegistry,
     chapters: ChapterStore,
     book_id: str = DEFAULT_BOOK_ID,
+    workspace: Workspace | None = None,
 ) -> None:
-    """把写作工具集注册进注册表。"""
-    tools = WritingTools(chapters, book_id)
+    """把写作工具集注册进注册表。S48：注入 workspace 后 write/patch 双写文件权威。"""
+    tools = WritingTools(chapters, book_id, workspace)
     for spec in _WRITING_SPECS:
         registry.register(spec, getattr(tools, spec.name))
