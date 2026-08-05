@@ -286,20 +286,16 @@ def _row_to_level(row: sqlite3.Row) -> AgencyLevel:
     )
 
 
-def build_agency_block(level: AgencyLevel | int | str) -> str:
-    """档位 → 自然语言系统提示块（模型无关）。
+def build_agency_block(level: AgencyLevel | int) -> str:
+    """档位 → 自然语言系统提示块（模型无关，纯函数——无全局状态，对齐 pi 闭包注入风格）。
 
     职责边界（S35b）：档位只描述**能动性**（主动程度/做什么），
     不含文风/喜好/毒点等心智内容——那些是心智模型（独立系统，渐进式披露）的职责。
-    level 兼容：AgencyLevel 记录 / int（默认档位 by order）/ str（档位 id）。
+    level 兼容：AgencyLevel 记录 / int（默认档位 by order）。
     """
     lv: AgencyLevel | None = None
     if isinstance(level, AgencyLevel):
         lv = level
-    elif isinstance(level, str):
-        store = _STORE_HOOK(level)
-        if store:
-            lv = store.get_level(level)
     else:  # int：默认档位 by order（兼容旧调用）
         for d in DEFAULT_LEVELS:
             if d["id"] == f"default-{int(level)}":
@@ -325,15 +321,6 @@ def build_agency_block(level: AgencyLevel | int | str) -> str:
     )
     return block
 
-
-# build_agency_block 的 str 分支需要一个 store 钩子（避免函数签名背 store）
-_STORE_HOOK: Any = lambda _: None  # noqa: E731
-
-
-def bind_agency_store(store: Any) -> None:
-    """app 装配时绑定 AgencyStore（build_agency_block 字符串 id 解析用）。"""
-    global _STORE_HOOK
-    _STORE_HOOK = lambda lid: store  # noqa: E731
 
 
 def parse_agency_declaration(text: str) -> int | None:

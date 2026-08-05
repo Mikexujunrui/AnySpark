@@ -724,3 +724,23 @@
 - 包罗万象：文风/喜好/毒点/边界/目标/信息偏好……不限于"说明书"（manual 是雏形）
 - 渐进式披露：索引/摘要常驻上下文，完整条目按需注入（对齐 pi skills 模式）——避免心智条目多了全量注入爆 token
 - 与档位正交：档位管"敢不敢做"，心智管"怎么做/别做什么"
+
+---
+
+## S36 架构审计：对照 pi 检查主体简洁/拓展强大（已完成 ✅）
+
+**审计项**（S32-S35 演进后，对照 pi 的"core 极简 + 功能外置 + 无横向耦合"）：
+
+| 检查项 | 结果 |
+|---|---|
+| core 零依赖 | ✅ `dependencies=[]`，无任何兄弟 import——主体极简 |
+| 兄弟包互相依赖 | ✅ align/explore/check/template/graph 之间**零 import**（grep 验证）——单向依赖 core ← 功能包 ← app 组合根 |
+| 注入链模块化 | ✅ 6 注入块（manual/graph/agency/bias/plot/mood）各自独立模块，app 只拼装+skip_inject 开关 |
+| 工具=包薄壳 | ✅ tools_extras 的 explore/check/material 工具是薄封装（对齐 pi extension→包 模式） |
+| **全局状态钩子** | ❌ **S35 引入的 `_STORE_HOOK`/`bind_agency_store` 全局可变钩子**——`build_agency_block` 的 str 分支依赖它；grep 证实 str 分支与 bind_agency_store **零调用**（死代码） |
+
+**修复（S36）**：删除 str 分支 + `_STORE_HOOK` + `bind_agency_store`（纯函数化 `build_agency_block(level: AgencyLevel | int)`，无全局状态）——对齐 pi 的闭包注入风格（依赖随构造传入，不藏全局）。
+
+**结论**：与 pi 一致——主体简洁（core 零依赖）、拓展强大（兄弟包独立、功能外置组合根装配）；S35 的全局钩子是唯一真实耦合点，已清。组合根 app.py（1241 行/7 参数）是组合根正常形态（显式装配），非过度耦合。
+
+**门禁**：pytest 108 全绿；总闸 ✅
