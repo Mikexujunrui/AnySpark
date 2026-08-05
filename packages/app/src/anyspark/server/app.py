@@ -147,6 +147,21 @@ class ModelIn(BaseModel):
     thinking: str | None = None  # off/low/medium/high/xhigh/max（None=交模型默认）
 
 
+class RoleCardIn(BaseModel):
+    """S48-P4 角色卡（卡片/角色卡-{name}.md）。"""
+
+    name: str
+    content: str
+
+
+class RolePlayIn(BaseModel):
+    """S48-P4 角色推演请求。"""
+
+    role: str  # 角色名（角色卡文件名 + 图谱实体）
+    scenario: str  # 推演场景（自然语言）
+    n: int = 4  # 推演路数（2-6）
+
+
 class CodexIn(BaseModel):
     """S48-P5 代码执行请求（沙箱安全）。"""
 
@@ -641,6 +656,7 @@ def build_app(
                 make_ingest_implementer,
                 make_plan_implementer,
                 make_plot_implementer,
+                make_roleplay_implementer,
                 make_setting_implementer,
             )
 
@@ -656,6 +672,8 @@ def build_app(
                 registry.register(s, i)
             st_spec, st_impl = make_setting_implementer(settings)
             registry.register(st_spec, st_impl)
+            rp_spec, rp_impl = make_roleplay_implementer(workspace, graph, model)
+            registry.register(rp_spec, rp_impl)
         # S48-P5 代码扩展（沙箱 run_code）：默认关，按需点亮（固定工具做不了的自定义处理）
         if enable_codex:
             from anyspark.server.tools_domain import make_codex_implementer
@@ -1742,6 +1760,50 @@ def build_app(
         dest = workspace.save_upload("main", req.filename, data)
         logger.info("上传存档: %s -> %s", req.filename, dest.name)
         return {"ok": True, "name": dest.name, "path": str(dest), "size": len(data)}
+
+    # -----------------------------------------------------------------------
+    # S48-P4 角色推演：低成本多探索 + 选优（复用 explore 并行基建）
+    # -----------------------------------------------------------------------
+    @app.post("/api/role/card", response_model=dict[str, Any])
+    def role_card_upsert(req: RoleCardIn) -> dict[str, Any]:
+        """创建/更新角色卡（卡片/角色卡-{name}.md）。"""
+        f = workspace.write_card("main", "角色卡", req.name, req.content)
+        return {"ok": True, "name": req.name, "file": f.name}
+
+    @app.post("/api/role/play", response_model=dict[str, Any])
+    def role_play(req: RolePlayIn) -> dict[str, Any]:
+        """角色推演：角色卡 + 当前状态 + 场景 → N 路隔离推演 → 判别选优（作为参考）。"""
+        from anyspark.explore.roleplay import run_roleplay
+
+        # 角色卡：文件优先，缺省从图谱实体描述兜底
+        card_path = workspace.cards_dir("main") / f"角色卡-{req.role}.md"
+        role_card = ""
+        if card_path.exists():
+            role_card = card_path.read_text(encoding="utf-8", errors="ignore")
+        if not role_card.strip():
+            ent = graph.get_entity("main", req.role)
+            if ent is not None:
+                desc = getattr(ent, "description", "") or ""
+                state = getattr(ent, "state", "") or ""
+                role_card = f"# {req.role}\n{desc}\n\n当前状态：{state}"
+        if not role_card.strip():
+            raise HTTPException(
+                status_code=404, detail=f"角色卡不存在（可先 POST /api/role/card 创建）：{req.role}"
+            )
+        state = ""
+        ent = graph.get_entity("main", req.role)
+        if ent is not None:
+            state = getattr(ent, "state", "") or ""
+        result = run_roleplay(model, role_card, state=state, scenario=req.scenario, n=req.n)
+        if not result.candidates:
+            raise HTTPException(status_code=502, detail="推演失败（无有效候选）")
+        logger.info(
+            "角色推演: %s × %d 路 → best=%s",
+            req.role,
+            len(result.candidates),
+            result.best.strategy if result.best else "?",
+        )
+        return result.to_dict()
 
     # -----------------------------------------------------------------------
     # S48-P5 代码扩展（anyspark-codex）：沙箱执行，固定工具做不了时用

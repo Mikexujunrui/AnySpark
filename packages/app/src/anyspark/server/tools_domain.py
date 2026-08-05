@@ -419,3 +419,74 @@ def make_codex_implementer() -> tuple[Any, Any]:
         return ToolResult(call=call, ok=r["ok"], content=body)
 
     return spec, implementer
+
+
+def make_roleplay_implementer(workspace: Any, graph: Any, model: Any) -> tuple[Any, Any]:
+    """角色推演工具（S48-P4）：低成本多路探索，选最好的作为参考。"""
+
+    spec = ToolSpec(
+        name="role_play",
+        description=(
+            "推演某个角色在给定场景中的反应（心理/言语/动作）。"
+            "写作时不确定角色会怎么做、或需要角色视角的灵感时使用——"
+            "系统多路并行推演（最可能/最戏剧化/最反常/最克制）并选最优，"
+            "返回最佳推演与备选作为写作参考（不直接写入正文）。"
+        ),
+        params=[
+            ParamSpec(
+                name="role",
+                type="string",
+                required=True,
+                description="角色名（须有角色卡或图谱实体）",
+            ),
+            ParamSpec(
+                name="scenario",
+                type="string",
+                required=True,
+                description="推演场景（自然语言描述）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        role = str(arguments.get("role", "")).strip()
+        scenario = str(arguments.get("scenario", "")).strip()
+        if not role or not scenario:
+            return ToolResult(call=call, ok=False, content="缺少参数 role 或 scenario。")
+        try:
+            from anyspark.explore.roleplay import run_roleplay
+
+            card_path = workspace.cards_dir("main") / f"角色卡-{role}.md"
+            role_card = ""
+            if card_path.exists():
+                role_card = card_path.read_text(encoding="utf-8", errors="ignore")
+            state = ""
+            ent = graph.get_entity("main", role)
+            if ent is not None:
+                st = getattr(ent, "state", "") or ""
+                desc = getattr(ent, "description", "") or ""
+                state = st
+                if not role_card.strip():
+                    role_card = f"# {role}\n{desc}\n\n当前状态：{st}"
+            if not role_card.strip():
+                return ToolResult(
+                    call=call,
+                    ok=False,
+                    content=f"角色「{role}」没有角色卡或图谱实体，可先创建角色卡。",
+                )
+            result = run_roleplay(model, role_card, state=state, scenario=scenario, n=4)
+            if not result.candidates:
+                return ToolResult(call=call, ok=False, content="推演失败（无有效候选）。")
+            lines = [f"【{role} 在「{scenario}」的推演】"]
+            if result.best:
+                lines.append(f"★ 最佳（{result.best.strategy}）：\n{result.best.text}")
+            lines.append("\n【备选】")
+            for i, c in enumerate(result.candidates, 1):
+                mark = "（最佳）" if result.best and c.strategy == result.best.strategy else ""
+                lines.append(f"{i}. [{c.strategy}]{mark} {c.text[:80]}…")
+            return ToolResult(call=call, ok=True, content="\n".join(lines))
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"推演失败：{exc}")
+
+    return spec, implementer
