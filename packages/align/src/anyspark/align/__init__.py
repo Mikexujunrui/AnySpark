@@ -22,6 +22,12 @@ from .extract import PreferenceExtractor
 from .inject import ManualInjector, MemoryInjector
 from .manual import ManualEntry, ManualStore, render_manual
 from .mind import MindPlanner, SessionPlan
+from .mindup import (
+    NegativeCapture,
+    build_reconcile_prompt,
+    parse_reconcile_result,
+    weak_signal_from_text,
+)
 from .mood import (
     DEFAULT_MOOD_DIMS,
     MoodDim,
@@ -30,6 +36,7 @@ from .mood import (
 )
 from .plan import ChapterPlan, StoryPlanStore, render_plan
 from .signals import Signal, SignalCollector, SignalStore
+from .skillgen import SkillGenerator, render_skill_candidates
 from .skills import (
     DEFAULT_SKILLS,
     WritingSkill,
@@ -58,6 +65,7 @@ __all__ = [
     "MindPlanner",
     "MoodDim",
     "MoodDimStore",
+    "NegativeCapture",
     "PreferenceExtractor",
     "SceneMemory",
     "SessionPlan",
@@ -65,6 +73,7 @@ __all__ = [
     "Signal",
     "SignalCollector",
     "SignalStore",
+    "SkillGenerator",
     "StoryPlanStore",
     "WorldSetting",
     "WorldSettingStore",
@@ -72,12 +81,16 @@ __all__ = [
     "WritingSkillStore",
     "build_agency_block",
     "build_mood_block",
+    "build_reconcile_prompt",
     "parse_agency_declaration",
+    "parse_reconcile_result",
     "render_manual",
     "render_plan",
     "render_settings",
+    "render_skill_candidates",
     "render_skill_index",
     "render_skills_content",
     "select_skills_for",
     "temperature_for",
+    "weak_signal_from_text",
 ]

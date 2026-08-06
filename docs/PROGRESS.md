@@ -1247,3 +1247,34 @@
 - 端到端验证：manual style="喜欢白话文风" + skill"白话叙事"(tags=白话) → chat 注入含【用户文风偏好】+【白话叙事】技能 ✓
 
 **哲学**：心智=偏好（作者喜欢什么），skill=能力（怎么做到）——两系统解耦，装配时联动。
+
+## S54 叙事技巧生成器（文风提炼 → skill 候选，已完成 ✅）
+
+**背景（主人需求）**：作者喜欢某篇小说文风（如斗破苍穹）→ 导入原文 → 提炼成可执行 skill。
+此前 skill 只能手工 CRUD，无生成机制。
+
+**场景洞察（主人实测经验）**：LLM 生成 skill 天然倾向**描述性语言**（"文风大气磅礴"
+"节奏明快"）——抽象评价对模型写作零指导价值。最有指导价值的是：
+- ① 负面约束（"不要铺垫环境再推进"）
+- ② 直接案例（原文摘录 + 为何有效）
+
+**设计决策（S54b 主人纠偏）**：**引导而非禁止**——不硬禁抽象描述（规则驱动违背
+"相信模型"哲学），而是 prompt 强调"什么最有指导价值 + 案例尽量摘录原文"，
+让模型自然产出可执行内容。抽象认知可作背景，但每条技法落到可执行层面。
+
+**实现**：
+- `skillgen.py`：`SkillGenerator`（原文 → skill 候选五段式：name/description/
+  content/example/tags），GENERATE_PROMPT 引导负面约束+真实案例+覆盖维度
+- **A 手动**：`POST /api/skills/generate`（传 source_text/hint）→ 候选（去重）
+- **B 心智联动**：新增 style 偏好（manual）→ 后台 `_refine_skill_drafts` 用偏好
+  作 hint 生成候选草稿
+- **C 信号驱动**：`POST /api/signals` 触发后台从接受/修改信号提炼候选草稿
+- **人工确认闸门**：候选进 `skill_drafts`（草稿表，未生效）→
+  `POST /api/skills/drafts/{id}/promote` 转正 / DELETE 拒绝——对齐
+  tools_extensions"人工批准生效"哲学（错误 skill 污染主链路 S32 实证）
+- drafts API：list/promote/delete
+
+**验证**：
+- pytest：test_skillgen（7）+ drafts 转正 + API 全绿
+- 端到端：A 导入原文→候选（负面约束✓真实案例✓）；B style 偏好→后台草稿→确认转正✓
+- ruff 0 / format 0 / mypy 0（111 文件）

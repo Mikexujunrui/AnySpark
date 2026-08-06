@@ -25,21 +25,28 @@ from anyspark.align import (
     BiasStore,
     ManualEntry,
     ManualStore,
+    MemoryStore,
     MindPlanner,
     MoodDimStore,
+    NegativeCapture,
     PreferenceExtractor,
+    SessionSummarizer,
     SignalCollector,
     SignalStore,
+    SkillGenerator,
     StoryPlanStore,
     WorldSettingStore,
     WritingSkillStore,
     build_agency_block,
     build_mood_block,
+    build_reconcile_prompt,
     parse_agency_declaration,
+    parse_reconcile_result,
     render_plan,
     render_settings,
     render_skill_index,
     render_skills_content,
+    weak_signal_from_text,
 )
 from anyspark.check import compile_rule, run_review
 from anyspark.core import (
@@ -243,10 +250,16 @@ class ManualEntryPatch(BaseModel):
 
 
 class SignalIn(BaseModel):
-    kind: str  # accepted|modified|deleted|rejected|custom
+    kind: str  # accepted|modified|deleted|rejected|custom|negative
     content: str
     new_content: str | None = None
     context: str = ""
+
+
+class ReconcileIn(BaseModel):
+    """S53c 跨会话对账请求（可选限定书）。"""
+
+    book_id: str = "main"
 
 
 class ExploreIntentIn(BaseModel):
@@ -379,6 +392,14 @@ class WritingSkillPatch(BaseModel):
     example: str | None = None
     tags: str | None = None
     enabled: bool | None = None
+
+
+class SkillGenerateIn(BaseModel):
+    """S54：文风提炼生成 skill 候选（人工确认后入库）。"""
+
+    source_text: str  # 待提炼正文（导入的小说/片段，真实原文）
+    hint: str = ""  # 可选指引（如"侧重打斗文风"）
+    max_items: int = 5
 
 
 class MoodDimIn(BaseModel):
@@ -631,6 +652,10 @@ def build_app(
                     _extract_chapter("main", title, content, order, line)
                 elif task and task[0] == "refine":
                     _refine_from_signals()
+                elif task and task[0] == "skill_drafts":
+                    _refine_skill_drafts()
+                elif task and task[0] == "summarize" and len(task) == 2:
+                    _summarize_conversation(task[1])
                 elif task and task[0] == "batch_rewrite" and len(task) == 4:
                     _, bid, ids, inst = task
                     _run_batch_rewrite(bid, ids, inst)
@@ -670,8 +695,68 @@ def build_app(
         except Exception as exc:
             logger.warning("信号提炼失败(不影响主链路): %s", exc)
 
+    def _refine_skill_drafts() -> None:
+        """S54 B/C：心智联动 + 信号驱动 → 生成 skill 候选草稿（人工确认生效）。
+
+        B 心智联动：manual 有 style 偏好（如"喜欢白话文风"）但没有对应 skill →
+          用偏好作 hint 调 SkillGenerator 生成候选草稿。
+        C 信号驱动：信号/对话里体现的稳定写法 → 提炼成候选草稿。
+
+        产出只进 skill_drafts（未生效），人工确认后转正进 writing_skills——
+        对齐 tools_extensions 的"人工批准生效"哲学（S32 实证：错误内容进上下文污染主链路）。
+        """
+        try:
+            # 素材：style 偏好条目 + 最近修改/接受信号（体现用户认可写法）
+            manual_entries = manual.list("project", "main")
+            style_prefs = [e.content for e in manual_entries if e.category == "style"][:3]
+            recent = signals.recent(limit=20)
+            signal_texts = [s.content for s in recent if s.kind in ("accepted", "modified")][:5]
+            source_material = "\n".join(style_prefs + signal_texts).strip()
+            if not source_material:
+                return
+            hint = ""
+            if style_prefs:
+                hint = f"用户文风偏好：{'；'.join(style_prefs)}"
+            candidates = skill_generator.generate(source_material, hint, max_items=3)
+            added = 0
+            for c in candidates:
+                r = skills.add_draft(
+                    name=c["name"],
+                    description=c["description"],
+                    content=c["content"],
+                    example=c["example"],
+                    tags=c["tags"],
+                    source="mental",  # mental(心智联动) 或 signal(信号驱动) 统一落草稿
+                )
+                if r:
+                    added += 1
+            if added:
+                logger.info("skill 草稿提炼: +%d 条（待确认）", added)
+        except Exception as exc:
+            logger.warning("skill 草稿提炼失败(不影响主链路): %s", exc)
+
+    def _summarize_conversation(conv_id: str) -> None:
+        """S53c ② 归档后分析：会话结束后台把对话摘要成场景记忆（双轨提炼之摘要器轨）。
+
+        承担跨会话延续性（进行到哪/做过哪些决定），供下轮会话开头展示（④）。
+        仅对"有实质内容的会话"归档（用户消息累计 ≥40 字），避免短测试/琐碎对话
+        烧 token；失败不阻塞主链路。
+        """
+        try:
+            msgs = store.messages(conv_id)
+            user_chars = sum(len(m.content or "") for m in msgs if m.role == "user")
+            if len(msgs) < 3 or user_chars < 40:  # 空会话/琐碎对话不归档
+                return
+            summarizer.summarize(msgs, book_id="main")
+            logger.info("会话归档摘要: conv=%s 消息%d 条", conv_id, len(msgs))
+        except Exception as exc:
+            logger.warning("会话归档摘要失败(不影响主链路): %s", exc)
+
     mind_planner = MindPlanner(manual)  # S50 心智模型=会话规划器（不从写作循环注入）
     signal_collector = SignalCollector(signals)
+    negative_capture = NegativeCapture(manual)  # S53c ⑤ 实时负例→雷区条目
+    memory_store = MemoryStore(real_db)  # S53c ② 场景记忆（项目档案延续性层）
+    summarizer = SessionSummarizer(model, memory_store)  # ② 归档摘要器（真实 LLM）
     # S47 运行时模型：注册表（持久化多配置）+ 动态 Provider——
     # 默认装配 RetryingModel(ModelProvider(registry))，所有组件跟随当前激活配置；
     # 测试可注入 fake model（实现 core Model 协议），走共享分支不受影响。
@@ -681,6 +766,7 @@ def build_app(
     plot_generator = PlotGenerator(model)  # 依赖 model，须在其初始化之后
     plot_resolver = PlotResolver(model)  # 伏笔自动回收（S17：章节落盘后台识别揭开）
     preference_extractor = PreferenceExtractor(model)  # S28：信号→说明书提炼（后台）
+    skill_generator = SkillGenerator(model)  # S54：文风提炼→skill 候选（人工确认生效）
     # 知识图谱（S7：AI 事实源）
     graph = GraphStore(real_db)
     graph_extractor = GraphExtractor(model, types=graph.types_for("main"))  # S50：类型集内容化
@@ -743,6 +829,7 @@ def build_app(
             settings=settings,
             materials=materials,
             ext_tools=ext_tools,
+            manual=manual,
             enable_domain=enable_domain,
             enable_codex=enable_codex,
             enable_extras=enable_extras,
@@ -829,6 +916,11 @@ def build_app(
         mind_block = session_plan.mind_block()
         if "manual" not in skip and mind_block:
             full_prompt = full_prompt + "\n\n" + mind_block
+        # S53c ④ 下轮展示学到：上次会话的场景记忆（发生了什么/进行到哪/做过哪些决定）
+        # ——承担跨会话延续性；只有归档过才注入，失败静默。
+        last_memory = memory_store.latest(book_id)
+        if "memory" not in skip and last_memory is not None:
+            full_prompt = full_prompt + "\n\n# 上次会话的延续（场景记忆）\n" + last_memory.content
         # 叙事技巧注入（S50：skill 重构——名+技法+情形案例；索引常驻+内容按需）
         skill_list = skills.list_skills()
         skill_block = render_skill_index(skill_list)
@@ -1061,6 +1153,8 @@ def build_app(
         logger.info(
             "chat 完成: conv=%s 输出%d字 工具%d次", conv_id, len(turn.text), len(turn.tool_calls)
         )
+        # S53c ② 归档后分析：会话结束后台摘要成场景记忆（不阻塞响应）
+        _bg_queue.put(("summarize", conv_id))
         # 图谱抽取：写入章节后自动抽取入库（后台任务，不阻塞响应；失败不影响写作）
         # extract_graph 开关（S15）：默认开保持现状，可关省 token（手动 /api/graph/extract 兜底）
         if req.extract_graph:
@@ -1106,6 +1200,8 @@ def build_app(
                     _active_tokens.pop(conv_id, None)
                     with _active_lock:
                         _active_agents.pop(conv_id, None)
+                # S53c ② 归档后分析：会话结束后台摘要成场景记忆（不阻塞 SSE done 帧）
+                _bg_queue.put(("summarize", conv_id))
                 # 图谱抽取：与 /api/chat 行为一致（write_chapter 落盘后自动抽取）
                 # extract_graph 开关（S15）：默认开保持现状，可关省 token
                 if req.extract_graph:
@@ -1237,6 +1333,9 @@ def build_app(
             ),
         )
         manual.add(entry)
+        # S54-B：新增 style 偏好 → 后台生成对应 skill 候选草稿（人工确认生效）
+        if entry.category == "style":
+            _bg_queue.put(("skill_drafts",))
         return entry.to_dict()
 
     @app.patch("/api/manual/{entry_id}", response_model=dict[str, Any])
@@ -1266,13 +1365,39 @@ def build_app(
         elif req.kind == "rejected":
             sig = signal_collector.rejected(req.content, req.context)
             agency.adjust(-1)  # 拒绝=降级
+        elif req.kind == "negative":
+            # S53c ⑤ 实时负例：用户明确否定 → 即时落雷区条目（不等轮末提炼）
+            sig = signal_collector.negative(req.content, req.context)
+            negative_capture.capture(req.content, req.context)
         elif req.kind == "custom":
             sig = signal_collector.custom(req.content, req.context)
+            # S53c ⑦ 弱信号快照：试探/微调类语句留快照（供轮末提炼参考）
+            weak = weak_signal_from_text(req.content, req.context)
+            if weak is not None:
+                signal_collector.custom(weak.content, weak.context)
         else:  # modified
             sig = signal_collector.modified(req.content, req.new_content or "", req.context)
         # S28：信号 → 后台提炼 → 说明书（异步，不阻塞操作；修复对齐闭环缺口）
         _bg_queue.put(("refine",))
+        # S54-C：信号驱动 → skill 候选草稿（后台，人工确认生效）
+        _bg_queue.put(("skill_drafts",))
         return sig.to_dict()
+
+    @app.post("/api/mind/reconcile", response_model=dict[str, Any])
+    def mind_reconcile(req: ReconcileIn) -> dict[str, Any]:
+        """S53c ⑥ 跨会话对账：已沉淀条目 vs 最近行为信号 → 冲突/需更新提示（真实 LLM）。"""
+        entries = manual.list("project", req.book_id)
+        recent_signals = signals.recent(limit=30, book_id=req.book_id)
+        if not entries:
+            return {"results": [], "note": "无条目可对账"}
+        prompt = build_reconcile_prompt(entries, recent_signals)
+        try:
+            output = model.respond([Message(role="system", content=prompt)], [])
+            results = parse_reconcile_result(output.text)
+            return {"results": results, "note": ""}
+        except Exception as exc:  # 对账失败不影响主链路
+            logger.warning("心智对账失败: %s", exc)
+            return {"results": [], "note": f"对账失败: {exc}"}
 
     @app.post("/api/explore/intent", response_model=dict[str, object])
     def explore_intent(req: ExploreIntentIn) -> dict[str, object]:
@@ -1704,6 +1829,23 @@ def build_app(
     # ------------------------------------------------------------------
     # S50 叙事技巧（skill 式内容载体：镜头感/对白机锋/节奏控制等，可增删改/开关）
     # ------------------------------------------------------------------
+    @app.post("/api/skills/generate", response_model=dict[str, object])
+    def generate_skill(req: SkillGenerateIn) -> dict[str, object]:
+        """S54：从原文提炼叙事技巧候选（人工确认后走 /api/skills 入库）。
+
+        场景：作者喜欢某小说文风 → 传导入原文 → 产出可执行 skill 候选
+        （负面约束+真实案例，描述性语言被 prompt 硬禁）。
+        """
+        if not req.source_text.strip():
+            raise HTTPException(status_code=400, detail="source_text 不能为空")
+        candidates = skill_generator.generate(req.source_text, req.hint, req.max_items)
+        if not candidates:
+            raise HTTPException(status_code=502, detail="提炼失败（无有效候选）")
+        # 去重：与现有 skill 名比对（避免重复生成）
+        existing_names = {s.name for s in skills.list_skills()}
+        fresh = [c for c in candidates if c["name"] not in existing_names]
+        return {"candidates": fresh, "existing_skills": sorted(existing_names)}
+
     @app.get("/api/skills", response_model=list[dict[str, Any]])
     def list_skills() -> list[dict[str, Any]]:
         """全部写作技巧。"""
@@ -1713,6 +1855,27 @@ def build_app(
     def add_skill(req: WritingSkillIn) -> dict[str, Any]:
         s = skills.add(req.name, req.description, req.content, req.example, req.tags)
         return s.to_dict()
+
+    # -- S54 候选草稿（后台自动生成 → 人工确认转正/拒绝）——须在 {skill_id} 路由前 --
+    @app.get("/api/skills/drafts", response_model=list[dict[str, Any]])
+    def list_skill_drafts() -> list[dict[str, Any]]:
+        """skill 候选草稿（B 心智联动/C 信号驱动自动生成，未生效）。"""
+        return skills.list_drafts()
+
+    @app.post("/api/skills/drafts/{draft_id}/promote", response_model=dict[str, Any])
+    def promote_skill_draft(draft_id: str) -> dict[str, Any]:
+        """人工确认：草稿转正进 writing_skills（生效）。"""
+        s = skills.promote_draft(draft_id)
+        if s is None:
+            raise HTTPException(status_code=404, detail="草稿不存在")
+        return s.to_dict()
+
+    @app.delete("/api/skills/drafts/{draft_id}", response_model=dict[str, bool])
+    def delete_skill_draft(draft_id: str) -> dict[str, bool]:
+        ok = skills.delete_draft_by_id(draft_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="草稿不存在")
+        return {"ok": True}
 
     @app.patch("/api/skills/{skill_id}", response_model=dict[str, Any])
     def patch_skill(skill_id: str, req: WritingSkillPatch) -> dict[str, Any]:

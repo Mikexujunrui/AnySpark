@@ -1,0 +1,131 @@
+"""
+anyspark.align.skillgen — 叙事技巧生成器（S54：文风提炼 → skill 候选）。
+
+主人设计（DESIGN §12.17 延续 + 实测经验）：
+- 场景：作者喜欢某篇小说的文风 → 导入原文（斗破苍穹等）→ 提炼成可执行的
+  叙事技巧 skill（name/description/content/example/tags 五段式）
+- 坑（主人实测）：LLM 生成 skill 时天然倾向**描述性语言**（"文风大气磅礴"
+  "节奏明快"）——这类抽象评价对模型写作零指导价值（怎么写出"大气磅礴"？
+  模型不知道）。
+- 对策（主人拍板）：**最好用的是 ① 负面性 ② 直接案例**：
+  - 负面约束："不要铺垫环境再推进"（负面清单最好执行）
+  - 直接案例：必须**摘录自输入原文**（真实文本），不是 LLM 编造
+- prompt 里硬性禁止抽象描述（"文风XX""描写细腻"类词），强制可执行形式
+
+机制硬编码（提炼流程/输出 schema/解析），内容自然语言（技法文本/案例）。
+"""
+
+from __future__ import annotations
+
+import json
+import re
+
+from anyspark.core.types import Message
+
+# 提炼提示（S54b：引导而非禁止——不强制负面，不硬禁抽象；强调可执行性）
+GENERATE_PROMPT = """你是小说文风提炼器。给定一部小说的正文片段，提炼出**可执行**的写作技法（skill）。
+
+【什么对写作最有指导价值】
+- 对写作者（和写作模型）来说，最能直接照着做的是：
+  ① 负面约束：「不要XXX」（明确禁止什么写法，比如不要铺垫环境再推进）
+  ② 直接案例：摘录原文的一句话/一个片段 + 一句"为什么这样写有效"
+- 概括性认知（如"文风简洁直接"）可以作为背景理解，但如果只有这种抽象概括，
+  写作者仍然不知道具体怎么做——所以每条技法都要尽量落到可执行的层面。
+
+【案例要求】
+- example 尽量逐字摘录自给定正文（真实原文）——真实样例比抽象描述有用得多；
+  若确实找不到合适摘录，可以用"类似："自拟一句示范。
+
+【覆盖维度】（尽量覆盖以下 4 类，共 3-5 条）
+1. 句式/节奏（短句还是长句、铺陈还是直给、句间关系）
+2. 用词（口语还是书面、形容词密度、动词选择）
+3. 对白（直给信息还是潜台词、人物说话方式）
+4. 描写取舍（环境/动作/心理各占多少、详略）
+
+【输出格式】（严格 JSON 数组，不要其它文字）：
+[{"name": "技法名（具体可执行，如'短句直给式推进'）", "description": "一句话索引", "content": "技法说明（负面约束/正面做法，尽量落到句式/用词/节奏），2-3 句", "example": "原文摘录或自拟示范 + 一句为何有效", "tags": "适用场景，逗号分隔，如'打斗,高潮'"}]
+
+给定正文：
+"""
+
+
+def _parse_skills(raw: str) -> list[dict[str, str]]:
+    """宽容解析模型输出的 skill JSON 数组（去围栏/取数组/过滤空）。"""
+    cleaned = raw.strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1)
+    start, end = cleaned.find("["), cleaned.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    try:
+        data = json.loads(cleaned[start : end + 1])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    out: list[dict[str, str]] = []
+    for d in data:
+        if not isinstance(d, dict):
+            continue
+        name = str(d.get("name", "")).strip()
+        content = str(d.get("content", "")).strip()
+        if not name or not content:
+            continue
+        out.append(
+            {
+                "name": name,
+                "description": str(d.get("description", "")).strip(),
+                "content": content,
+                "example": str(d.get("example", "")).strip(),
+                "tags": str(d.get("tags", "")).strip(),
+            }
+        )
+    return out
+
+
+class SkillGenerator:
+    """叙事技巧生成器：原文 → 可执行 skill 候选（真实 LLM，无工具单次调用）。"""
+
+    def __init__(self, model: object) -> None:
+        self._model = model
+
+    def generate(
+        self,
+        source_text: str,
+        hint: str = "",
+        max_items: int = 5,
+    ) -> list[dict[str, str]]:
+        """从原文提炼 skill 候选。
+
+        source_text：待提炼的正文（导入的小说章节/片段，真实原文）。
+        hint：可选指引（如"侧重打斗文风"），追加到提示。
+        """
+        if not source_text.strip():
+            return []
+        prompt = GENERATE_PROMPT + f"\n{source_text[:6000]}\n"
+        if hint.strip():
+            prompt += f"\n额外指引：{hint.strip()}\n"
+        prompt += f"\n提炼最多 {max_items} 条，输出 JSON 数组。"
+        output = self._model.respond(  # type: ignore[attr-defined]
+            [Message(role="system", content=prompt)],
+            [],
+        )
+        return _parse_skills(output.text)[:max_items]
+
+
+def render_skill_candidates(candidates: list[dict[str, str]]) -> str:
+    """把候选渲染成可读文本（供确认/展示）。"""
+    if not candidates:
+        return "（无有效候选）"
+    lines: list[str] = []
+    for i, c in enumerate(candidates, 1):
+        lines.append(f"{i}. 【{c['name']}】")
+        if c.get("description"):
+            lines.append(f"   索引：{c['description']}")
+        lines.append(f"   技法：{c['content']}")
+        if c.get("example"):
+            lines.append(f"   案例：{c['example']}")
+        if c.get("tags"):
+            lines.append(f"   标签：{c['tags']}")
+    return "\n".join(lines)

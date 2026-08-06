@@ -134,6 +134,21 @@ class WritingSkillStore:
                 )
                 """
             )
+            # S54：skill 候选草稿（人工确认后转正进 writing_skills）
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS skill_drafts (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    description TEXT NOT NULL DEFAULT '',
+                    content TEXT NOT NULL,
+                    example TEXT NOT NULL DEFAULT '',
+                    tags TEXT NOT NULL DEFAULT '',
+                    source TEXT NOT NULL DEFAULT 'manual',  -- manual|mental|signal
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
             # S50 ALTER 兼容：旧库无 example/tags 列则补
             cols = {r[1] for r in self._conn.execute("PRAGMA table_info(writing_skills)")}
             if "example" not in cols:
@@ -283,6 +298,83 @@ class WritingSkillStore:
 
     def close(self) -> None:
         self._conn.close()
+
+    # -- S54 候选草稿（后台自动生成 → 人工确认转正） --
+    def add_draft(
+        self,
+        name: str,
+        description: str,
+        content: str,
+        example: str = "",
+        tags: str = "",
+        source: str = "manual",
+    ) -> dict[str, Any] | None:
+        """存一条 skill 候选草稿（未生效；人工确认后转正进 writing_skills）。"""
+        with self._lock:
+            # 草稿或正式技能已有同名 → 跳过（防重复堆叠）
+            dup = self._conn.execute("SELECT 1 FROM skill_drafts WHERE name=?", (name,)).fetchone()
+            if dup:
+                return None
+            dup2 = self._conn.execute(
+                "SELECT 1 FROM writing_skills WHERE name=?", (name,)
+            ).fetchone()
+            if dup2:
+                return None
+            did = uuid.uuid4().hex
+            self._conn.execute(
+                "INSERT INTO skill_drafts "
+                "(id, name, description, content, example, tags, source, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (did, name, description, content, example, tags, source, _now()),
+            )
+            self._conn.commit()
+            return {"id": did, "name": name, "source": source}
+
+    def list_drafts(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM skill_drafts ORDER BY rowid DESC").fetchall()
+        return [dict(r) for r in rows]
+
+    def promote_draft(self, draft_id: str) -> WritingSkill | None:
+        """人工确认：草稿转正进 writing_skills（并删除草稿）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM skill_drafts WHERE id=?", (draft_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            max_order = self._conn.execute(
+                "SELECT COALESCE(MAX(order_index), -1) AS m FROM writing_skills"
+            ).fetchone()["m"]
+            s = WritingSkill(
+                name=row["name"],
+                description=row["description"],
+                content=row["content"],
+                example=row["example"],
+                tags=row["tags"],
+                order=int(max_order) + 1,
+            )
+            self._conn.execute(
+                "INSERT INTO writing_skills "
+                "(id, name, description, content, example, tags, enabled, "
+                "order_index, created_at) "
+                "VALUES (?,?,?,?,?,?,1,?,?)",
+                (s.id, s.name, s.description, s.content, s.example, s.tags, s.order, s.created_at),
+            )
+            self._conn.execute("DELETE FROM skill_drafts WHERE id=?", (draft_id,))
+            self._conn.commit()
+        return s
+
+    def delete_draft(self, draft_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM skill_drafts WHERE id=?", (draft_id,)).fetchone()
+            return bool(cur)
+
+    def delete_draft_by_id(self, draft_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM skill_drafts WHERE id=?", (draft_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
 
 
 def _from_row(row: sqlite3.Row) -> WritingSkill:

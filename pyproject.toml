@@ -71,6 +71,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "packages/core/src/anyspark/__init__.py" = ["F401"]  # 纯 API 再导出 shim
+# S54：生成 prompt/测试样例是长中文行（JSON 格式说明），断行破坏内容
+"packages/align/src/anyspark/align/skillgen.py" = ["E501"]
+"packages/align/tests/test_skillgen.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["anyspark"]
