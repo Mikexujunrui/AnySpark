@@ -26,6 +26,9 @@ class Conversation:
     id: str
     created_at: str
     messages: list[Message] = field(default_factory=list)
+    # S58c 继承链条：parent_id=源会话（继承自谁）；fork_point=继承来源描述
+    parent_id: str | None = None
+    fork_point: str = ""
 
 
 def _now() -> str:
@@ -60,6 +63,18 @@ class ConversationStore(ABC):
     @abstractmethod
     def messages(self, conversation_id: str) -> list[Message]:
         """按会话取全部消息（保序）。不存在会话返回空列表。"""
+
+    @abstractmethod
+    def fork(
+        self, conversation_id: str, fork_point: str = "", inherit_messages: bool = True
+    ) -> Conversation | None:
+        """S58c 继承派生：从源会话创建一个继承它的新会话（链条 parent_id 可追溯）。
+
+        fork_point：继承来源描述（自然语言，如"第3轮对话后"），供链条展示。
+        inherit_messages：True=把源会话全部消息复制为新会话起始上下文
+        （新会话"接着上次聊"）；False=只建空会话但保留链条关系。
+        返回新会话；源不存在返回 None。
+        """
 
 
 class InMemoryConversationStore(ConversationStore):
@@ -98,3 +113,24 @@ class InMemoryConversationStore(ConversationStore):
     def messages(self, conversation_id: str) -> list[Message]:
         conv = self._conversations.get(conversation_id)
         return list(conv.messages) if conv else []
+
+    def fork(
+        self, conversation_id: str, fork_point: str = "", inherit_messages: bool = True
+    ) -> Conversation | None:
+        """S58c 继承派生（内存版，参考 pi forkFrom）。"""
+        src = self._conversations.get(conversation_id)
+        if src is None:
+            return None
+        conv = Conversation(
+            id=uuid.uuid4().hex,
+            created_at=_now(),
+            parent_id=conversation_id,
+            fork_point=fork_point,
+        )
+        if inherit_messages:
+            conv.messages = [
+                Message(role=m.role, content=m.content, metadata=dict(m.metadata))
+                for m in src.messages
+            ]
+        self._conversations[conv.id] = conv
+        return conv

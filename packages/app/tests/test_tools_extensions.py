@@ -416,4 +416,34 @@ class ProbeModel2:
             if m.role == "system":
                 self.prompts.append(m.content)
                 break
-        return __import__("anyspark.core.types", fromlist=["ModelOutput"]).ModelOutput(text="好的。")
+        return __import__("anyspark.core.types", fromlist=["ModelOutput"]).ModelOutput(
+            text="好的。"
+        )
+
+
+def test_conversation_fork_api() -> None:
+    """S58c 会话继承 API：fork 创建新会话，链条 parent_id 可追溯。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(model=ProbeModel2(), db_path=str(_db())))
+    # 建一个会话并聊几句
+    r = client.post("/api/chat", json={"message": "写第一章：雾城"})
+    conv_id = r.json()["conversation_id"]
+    # 列表应含该会话
+    convs = client.get("/api/conversations").json()
+    assert any(c["id"] == conv_id for c in convs)
+    # fork
+    r2 = client.post(f"/api/conversations/{conv_id}/fork")
+    assert r2.status_code == 200
+    data = r2.json()
+    child_id = data["conversation_id"]
+    assert data["parent_id"] == conv_id  # 链条指针
+    assert data["chain"][0] == child_id and data["chain"][1] == conv_id
+    # 子会话继承消息
+    child_convs = [c for c in client.get("/api/conversations").json() if c["id"] == child_id]
+    assert child_convs and child_convs[0]["parent_id"] == conv_id
+    assert child_convs[0]["message_count"] >= 2  # 继承了 user+assistant
+    # 源不存在 → 404
+    assert client.post("/api/conversations/nonexistent/fork").status_code == 404

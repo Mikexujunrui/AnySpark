@@ -59,6 +59,7 @@ from anyspark.core import (
     RetryingModel,
     ToolRegistry,
 )
+from anyspark.core.storage import Conversation
 from anyspark.explore import (
     DimensionStore,
     DirectionCard,
@@ -159,8 +160,8 @@ class ChatRequest(BaseModel):
     enable_codex: bool = False  # S48-P5 代码扩展 run_code（沙箱，默认关：安全按需点亮）
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood/plot 子集
-    # S58 上下文模式：auto(默认,有会话延续)/continue(显式延续)/fresh(干净,独立任务/探索)
-    # fresh = 不注入场景记忆/剧情计划（不受上次对话干扰），保留世界事实+心智习惯
+    # S58b 上下文模式：auto(默认=干净,不继承场景记忆)/continue(显式继承场景记忆+计划)/fresh(同auto)
+    # 主人偏好：默认不继承——新任务/探索不受上次对话干扰；跨会话续写时显式 continue
     context_mode: str = "auto"  # auto | continue | fresh
     # S47 运行时模型选择：缺省用注册表当前激活模型；thinking 覆盖该模型默认思考强度
     model_id: str | None = None  # 指定用哪个已配置模型（未配置/不存在 → 400）
@@ -857,9 +858,23 @@ def build_app(
     workflow_generator = WorkflowGenerator(model)
 
     def _wf_run_agent(ctx: RunContext, node: Any) -> NodeResult:
-        """agent 节点：干净单次 LLM 调用（无对话历史/工具记录——对齐 S56 干净写作）。"""
-        instruction = str(node.params.get("instruction") or "")
-        system = str(node.params.get("system_prompt") or "")
+        """agent 节点：干净单次 LLM 调用（无对话历史/工具记录——对齐 S56 干净写作）。
+
+        变量插值：instruction/system_prompt 中的 {{var}} 从上游节点输出解析
+        （如 {{chapter_text}} = 前序 read_chapter 脚本的产出）——真实链路暴露的
+        接缝：AI 生成的流程若不插值，agent 拿不到章节内容。
+        """
+        instruction = _wf_resolve(str(node.params.get("instruction") or ""), ctx)
+        system = _wf_resolve(str(node.params.get("system_prompt") or ""), ctx)
+        # 便捷注入：params.chapter_title 指定章节时自动附带正文
+        chapter_title = str(node.params.get("chapter_title") or "")
+        if chapter_title:
+            ch = next(
+                (c for c in chapters.list_by_book(ctx.book_id) if c.title == chapter_title),
+                None,
+            )
+            if ch is not None:
+                instruction = f"【章节正文】\n{ch.content[:8000]}\n\n{instruction}"
         messages: list[Any] = []
         if system:
             messages.append(Message(role="system", content=system))
@@ -872,14 +887,50 @@ def build_app(
         tokens = int(getattr(usage, "total_tokens", 0) or 0)
         return NodeResult(output=text, token_usage=tokens)
 
+    def _wf_resolve(text: str, ctx: RunContext) -> str:
+        """把 {{var}} 占位符替换为上游节点输出（缺失保留原样）。"""
+        import re
+
+        def _repl(m: re.Match[str]) -> str:
+            key = m.group(1)
+            val = ctx.results.get(key, "")
+            return str(val) if val else f"{{{{{key}}}}}"
+
+        return re.sub(r"\{\{\s*([A-Za-z0-9_.\-]+)\s*\}\}", _repl, text)
+
     def _wf_run_script(ctx: RunContext, node: Any) -> NodeResult:
         """script 节点：确定性函数（内置白名单）。"""
         fn = str(node.params.get("function") or "")
+        if fn == "noop":
+            # 无操作（AI 生成流程常用来做循环体出口占位）
+            return NodeResult(output=str(node.params.get("output_key") or "done"))
         if fn == "read_chapter":
             title = str(node.params.get("chapter_title") or "")
-            ch = next((c for c in chapters.list_by_book(ctx.book_id) if c.title == title), None)
+            chs = chapters.list_by_book(ctx.book_id)
+            ch = next((c for c in chs if c.title == title), None)
             if ch is None:
-                return NodeResult(error=f"章节不存在: {title}")
+                # 模糊匹配（AI 生成标题可能不精确——真实链路暴露）：
+                # ① 双向包含 ② 提取双方"第X章"片段做章号匹配
+                def _chapter_no(t: str) -> str:
+                    import re as _re
+
+                    m = _re.search(r"第\s*([0-9一二三四五六七八九十百]+)\s*章", t)
+                    return m.group(1) if m else ""
+
+                t_no = _chapter_no(title)
+                for c in chs:
+                    if title and (title in c.title or c.title in title):
+                        ch = c
+                        break
+                    if t_no and _chapter_no(c.title) == t_no:
+                        ch = c
+                        break
+            if ch is None:
+                return NodeResult(
+                    error=f"章节不存在: {title}（可用章节: "
+                    + ", ".join(c.title for c in chs[:8])
+                    + "）"
+                )
             return NodeResult(output=ch.content)
         if fn == "review_chapter":
             title = str(node.params.get("chapter_title") or "")
@@ -887,9 +938,7 @@ def build_app(
             if ch is None:
                 return NodeResult(error=f"章节不存在: {title}")
             report = run_review(model, ch.title, ch.content[:20000])
-            return NodeResult(
-                output=f"硬伤数: {report.hard_count}\n" + report.render()
-            )
+            return NodeResult(output=f"硬伤数: {report.hard_count}\n" + report.render())
         return NodeResult(error=f"未注册的 script 函数: {fn}")
 
     def _wf_run_approval(ctx: RunContext, node: Any) -> NodeResult:
@@ -912,9 +961,7 @@ def build_app(
         text = (out.text or "").strip().lower()
         return text.startswith("y") or "是" in text[:4] or "通过" in text[:4]
 
-    workflow_engine = WorkflowEngine(
-        workflow_store, _wf_runner, model_judge=_wf_judge
-    )
+    workflow_engine = WorkflowEngine(workflow_store, _wf_runner, model_judge=_wf_judge)
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
@@ -1021,9 +1068,11 @@ def build_app(
             m = model  # 共享 model（测试注入或默认真实）；温度由构造决定
         # 注入块装配：核心注入默认全开，skip_inject 可细粒度关闭（S15 增强按需）
         skip = skip_inject or set()
-        # S58 context_mode：fresh = 干净上下文（独立任务/探索）——
-        # 不注入场景记忆/剧情计划（不受上次对话干扰）；心智习惯/世界事实保留。
-        if context_mode == "fresh":
+        # S58b context_mode（主人偏好：默认不继承场景记忆）：
+        # - auto/fresh（默认干净）：不注入场景记忆/剧情计划——新任务/探索不被上次对话绑架
+        # - continue（显式继承）：注入场景记忆 + 剧情计划——跨会话续写时显式打开
+        # 心智习惯/世界事实（简介/设定档）始终保留（行为底线，非进程状态）。
+        if context_mode != "continue":
             skip = skip | {"memory", "plan"}
         full_prompt = system_prompt
         # S58 项目智能体简介：给 AI 和用户看的项目总览（世界观/主线/主角/基调/已固化设定/进展）
@@ -1172,6 +1221,46 @@ def build_app(
     def health() -> dict[str, str]:
         name = getattr(model, "model_name", "unknown")
         return {"status": "ok", "model": str(name), "log": log_path()}
+
+    # -----------------------------------------------------------------------
+    # S58c 会话继承（参考 pi forkFrom：链条 parent 指针 + 复制源消息）
+    # -----------------------------------------------------------------------
+    @app.get("/api/conversations", response_model=list[dict[str, Any]])
+    def list_conversations() -> list[dict[str, Any]]:
+        """会话列表（含继承链条：parent_id/fork_point，可追溯）。"""
+        convs = store.list_conversations()
+        return [
+            {
+                "id": c.id,
+                "created_at": c.created_at,
+                "parent_id": c.parent_id,
+                "fork_point": c.fork_point,
+                "message_count": len(store.messages(c.id)),
+            }
+            for c in reversed(convs)  # 新的在前
+        ]
+
+    @app.post("/api/conversations/{conv_id}/fork", response_model=dict[str, Any])
+    def fork_conversation(conv_id: str, fork_point: str = "") -> dict[str, Any]:
+        """S58c 继承派生：从当前会话创建继承它的新会话（链条可追溯）。
+
+        新会话复制源会话消息（接着上次聊）+ parent_id 指向源会话；
+        前端/agent 用它实现"继承并新开会话"。源不存在 → 404。
+        """
+        child = store.fork(conv_id, fork_point=fork_point or "从会话末尾继承")
+        if child is None:
+            raise HTTPException(status_code=404, detail=f"源会话不存在: {conv_id}")
+        chain: list[str] = []
+        cur: Conversation | None = child
+        while cur is not None:
+            chain.append(cur.id)
+            cur = store.get(cur.parent_id) if cur.parent_id else None
+        return {
+            "conversation_id": child.id,
+            "parent_id": child.parent_id,
+            "fork_point": child.fork_point,
+            "chain": chain,  # [新会话, 源, 源的源...] 继承链条
+        }
 
     # -----------------------------------------------------------------------
     # S47 运行时模型配置：注册表 CRUD + 激活切换（换供应商/换模型/选思考强度）
@@ -1602,12 +1691,9 @@ def build_app(
                 "（给 AI 和用户看的协作总览，不是读者简介）。\n"
                 "包含：一句话世界观 / 主线方向 / 主要角色 / 叙事基调 / "
                 "已固化设定 / 当前进展 / 写作注意事项。\n"
-                "用明确无歧义的自然语言，总长 300 字以内。\n\n素材：\n"
-                + "\n".join(parts)
+                "用明确无歧义的自然语言，总长 300 字以内。\n\n素材：\n" + "\n".join(parts)
             )
-            output = model.respond(
-                [Message(role="system", content=prompt)], []
-            )
+            output = model.respond([Message(role="system", content=prompt)], [])
             draft = (output.text or "").strip()
             if not draft:
                 return {"draft": "", "note": "生成失败（空输出）"}

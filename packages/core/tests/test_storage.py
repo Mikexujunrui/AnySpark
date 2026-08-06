@@ -39,3 +39,25 @@ def test_missing_conversation_returns_empty() -> None:
     store = InMemoryConversationStore()
     assert store.messages("nonexistent") == []
     assert store.get("nonexistent") is None
+
+
+def test_fork_inherits_chain_and_messages() -> None:
+    """S58c 继承派生：新会话 parent_id 指向源 + 复制消息（参考 pi forkFrom）。"""
+    store = InMemoryConversationStore()
+    src = store.create()
+    store.append(src.id, Message(role="user", content="第一轮"))
+    store.append(src.id, Message(role="assistant", content="好的"))
+    # fork
+    child = store.fork(src.id, fork_point="第1轮对话后")
+    assert child is not None
+    assert child.parent_id == src.id  # 链条指针
+    assert child.fork_point == "第1轮对话后"
+    assert len(child.messages) == 2  # 继承全部消息
+    assert child.messages[0].content == "第一轮"
+    # 源会话不受影响
+    assert len(store.messages(src.id)) == 2
+    # fork 不继承消息的变体
+    empty = store.fork(src.id, inherit_messages=False)
+    assert empty is not None and empty.messages == []
+    # 源不存在
+    assert store.fork("nonexistent") is None

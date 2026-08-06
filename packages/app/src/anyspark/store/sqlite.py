@@ -25,8 +25,13 @@ def _now() -> str:
 
 
 def _conversation_from_row(row: tuple[Any, ...]) -> Conversation:
-    cid, created_at = row
-    return Conversation(id=cid, created_at=created_at)
+    # 兼容旧库：可能只有 (id, created_at)，也可能是 (id, created_at, parent_id, fork_point)
+    cid, created_at = row[0], row[1]
+    parent_id = row[2] if len(row) > 2 else None
+    fork_point = row[3] if len(row) > 3 else ""
+    return Conversation(
+        id=cid, created_at=created_at, parent_id=parent_id, fork_point=fork_point
+    )
 
 
 class SqliteConversationStore(ConversationStore):
@@ -47,7 +52,9 @@ class SqliteConversationStore(ConversationStore):
             """
             CREATE TABLE IF NOT EXISTS conversations (
                 id TEXT PRIMARY KEY,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                parent_id TEXT,  -- S58c 继承链条：源会话 id（继承自谁）
+                fork_point TEXT NOT NULL DEFAULT ''  -- S58c 继承来源描述（自然语言）
             );
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -61,6 +68,14 @@ class SqliteConversationStore(ConversationStore):
             CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id, seq);
             """
         )
+        # 旧库兼容（S58c）：补 parent_id / fork_point 列
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(conversations)")}
+        if "parent_id" not in cols:
+            self._conn.execute("ALTER TABLE conversations ADD COLUMN parent_id TEXT")
+        if "fork_point" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN fork_point TEXT NOT NULL DEFAULT ''"
+            )
         self._conn.commit()
 
     def close(self) -> None:
@@ -74,17 +89,18 @@ class SqliteConversationStore(ConversationStore):
                 "INSERT OR IGNORE INTO conversations (id, created_at) VALUES (?, ?)",
                 (cid, now),
             )
-        return Conversation(id=cid, created_at=now)
+        return self.get(cid) or Conversation(id=cid, created_at=now)
 
     def get(self, conversation_id: str) -> Conversation | None:
         row = self._conn.execute(
-            "SELECT id, created_at FROM conversations WHERE id = ?", (conversation_id,)
+            "SELECT id, created_at, parent_id, fork_point FROM conversations WHERE id = ?",
+            (conversation_id,),
         ).fetchone()
         return _conversation_from_row(row) if row else None
 
     def list_conversations(self) -> list[Conversation]:
         rows = self._conn.execute(
-            "SELECT id, created_at FROM conversations ORDER BY created_at"
+            "SELECT id, created_at, parent_id, fork_point FROM conversations ORDER BY created_at"
         ).fetchall()
         return [_conversation_from_row(row) for row in rows]
 
@@ -122,6 +138,29 @@ class SqliteConversationStore(ConversationStore):
             )
             for row in rows
         ]
+
+    def fork(
+        self, conversation_id: str, fork_point: str = "", inherit_messages: bool = True
+    ) -> Conversation | None:
+        """S58c 继承派生（参考 pi forkFrom：新会话记 parent + 复制源内容）。
+
+        创建新会话，parent_id=源会话（链条可追溯），fork_point=继承来源描述；
+        inherit_messages=True 时把源会话全部消息复制为新会话起始上下文
+        （新会话"接着上次聊"，参考 pi 全量复制语义）。源不存在返回 None。
+        """
+        src = self.get(conversation_id)
+        if src is None:
+            return None
+        new_conv = self.create()
+        with self._conn:
+            self._conn.execute(
+                "UPDATE conversations SET parent_id=?, fork_point=? WHERE id=?",
+                (conversation_id, fork_point, new_conv.id),
+            )
+        if inherit_messages:
+            for m in self.messages(conversation_id):
+                self.append(new_conv.id, m)
+        return self.get(new_conv.id)
 
     def replace_messages(self, conversation_id: str, messages: list[Message]) -> None:
         """S26：整体替换该会话消息（压缩回写，事务内删旧插新，seq 从 0 重排）。
