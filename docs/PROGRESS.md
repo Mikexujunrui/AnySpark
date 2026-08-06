@@ -1181,3 +1181,10 @@
 - **非本次重构引起**（git diff 证明 loop.py 非我所改；`codex.py` 的间歇 `Path` NameError 亦来自预存改动，现不复现）。
 
 > 决策：架构骨架按 YAGNI 冻结，不动。等出现**第二个**复用工具装配的场景（web 版/CLI 独立入口/MRAgent 主动检索开关）再做进一步拆分。`core/loop.py` 的 UnboundLocalError 需单独修（S53 建议优先）。
+
+### S52 补记（修复落地 + 门禁全绿）
+- **loop.py 防御修复**：`output` 先置 `None` + `assert output is not None` 后进入 `_emit_record`——杜绝模型调用失败异常路径的 `UnboundLocalError`（`test_model_failure_keeps_context_balanced` 间歇失败的根因防御，虽复现困难但消除了该类风险）。
+- **git 纠缠处理**：发现 S49b 提交把 app.py 的 build_toolkit 改动一起扫了进去但**漏提交其依赖的 toolkit.py**（新文件未追踪）→ HEAD 一度引用不存在的模块。已补提交 `toolkit.py` + `loop.py` 修复，使 HEAD 自洽（本地 commit，未 push）。
+- **lint 收尾**：修掉 S49b 引入的 3 处 ruff（tools_extensions.py E501 / test_recorder.py F841+E741），非本次重构引入，为门禁全绿顺手修。
+- **总闸**：✅ 全绿（ruff 0 / mypy 103 / pytest 267 / tsc / eslint / build）。
+- 遗留：`.gitignore`、`benchmarks/compare/tasks.py`、`benchmarks/writing/*` 为预存脏状态，非本次改动，未动。
