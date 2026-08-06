@@ -1231,3 +1231,19 @@
 - 真实链路：mind_planner collab 条目 → 档位推断生效；style 条目确认不再进写作上下文（test_mind 断言）
 
 **遗留**：`test_complete.py::test_search_web_returns_or_empty` 单条真实网络调用（360/Bing，设计上失败返回空不挂）；`.gitignore`/benchmarks 预存脏状态未动。
+
+### S53b 修正：心智指导性保留 + 与 skill 解耦联动（主人纠偏）
+
+**主人纠偏**：S53 把 style/habit 条目"全退场"是过度——"文风不写入，**文风偏好要写入**，习惯也是，具体功能解耦，**指导性的不能去掉**"。
+- 例：作者喜欢白话文风 → 写进心智（style 条目）→ 系统有"白话文"skill → 模型判断本篇适合 + 知道用户偏好 → 导入该 skill
+
+**修正落地**：
+- `MindPlanner` 读**全部类别**（collab/style/habit）→ SessionPlan{档位, 协作约定, 文风偏好, 习惯}：
+  - collab → 档位推断 + 协作约定（顶部）
+  - style → `mind_block`（用户文风偏好块）+ **驱动 skill 匹配**
+  - habit → `mind_block`（用户写作习惯块）
+- `select_skills_for(skills, context, prefs)`：**prefs 优先匹配** skill 的 name/description/tags（心智联动），其次 context 匹配 tags，都不中保底前 limit
+- 注入：心智块 + skill 内容块进写作上下文（渐进式披露：只取锁定/高置信前 5 条，不堆砌全量说明书）
+- 端到端验证：manual style="喜欢白话文风" + skill"白话叙事"(tags=白话) → chat 注入含【用户文风偏好】+【白话叙事】技能 ✓
+
+**哲学**：心智=偏好（作者喜欢什么），skill=能力（怎么做到）——两系统解耦，装配时联动。

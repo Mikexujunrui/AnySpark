@@ -311,30 +311,51 @@ def render_skill_index(skills: list[WritingSkill]) -> str:
 
 
 def select_skills_for(
-    skills: list[WritingSkill], context: str, limit: int = 3
+    skills: list[WritingSkill], context: str = "", prefs: list[str] | None = None, limit: int = 3
 ) -> list[WritingSkill]:
-    """按会话意图/关键词匹配 tags 选取相关技巧（渐进式披露：多后不全量注入）。
+    """按会话意图/用户文风偏好匹配选取相关技巧（渐进式披露：多后不全量注入）。
 
-    无 context 或匹配不到 → 按顺序取前 limit 条启用技巧（保底）。
+    S53 心智联动：prefs（用户文风偏好，如'喜欢白话文风'）优先匹配 skill
+    的 name/description/tags——作者喜欢白话 → 白话文相关 skill 进上下文。
+    其次按 context（会话意图）匹配 tags。都不匹配 → 按顺序取前 limit 条保底。
     """
     enabled = [s for s in skills if s.enabled]
     if not enabled:
         return []
     if len(enabled) <= 5:  # 技巧少 → 全量（现状保持）
         return enabled
-    if context:
-        matched = [s for s in enabled if any(t in context for t in s.tag_list())]
-        if matched:
-            return matched[:limit]
+    matched: list[WritingSkill] = []
+    seen: set[str] = set()
+    # 1) 用户文风偏好匹配（心智驱动，最高优先）
+    for p in prefs or []:
+        for s in enabled:
+            if s.id in seen:
+                continue
+            haystack = f"{s.name} {s.description} {s.tags} {s.content}"
+            if p in haystack:
+                matched.append(s)
+                seen.add(s.id)
+    # 2) 会话意图匹配 tags
+    if len(matched) < limit and context:
+        for s in enabled:
+            if s.id in seen:
+                continue
+            if any(t in context for t in s.tag_list()):
+                matched.append(s)
+                seen.add(s.id)
+    if matched:
+        return matched[:limit]
     return enabled[:limit]
 
 
-def render_skills_content(skills: list[WritingSkill], context: str = "", limit: int = 3) -> str:
+def render_skills_content(
+    skills: list[WritingSkill], context: str = "", prefs: list[str] | None = None, limit: int = 3
+) -> str:
     """渲染启用的技巧完整内容（技法 + 情形案例，注入写作上下文）。
 
-    context：会话意图（选取相关技巧用，缺省全量/前 limit）。
+    context：会话意图；prefs：S53 用户文风偏好（心智联动，优先匹配 skill）。
     """
-    selected = select_skills_for(skills, context, limit)
+    selected = select_skills_for(skills, context, prefs, limit)
     if not selected:
         return ""
     lines = ["# 叙事技巧（内容）"]

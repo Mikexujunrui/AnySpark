@@ -63,15 +63,15 @@ def test_planner_agency_up_hint() -> None:
     assert plan.agency_level is not None and plan.agency_level >= 3
 
 
-def test_style_entries_not_injected_into_writing() -> None:
-    """S50 核心：文风/习惯条目不再进写作上下文；仅协作约定注入。"""
+def test_style_entries_injected_as_guidance() -> None:
+    """S53：文风偏好保留指导性——以心智指导块注入（渐进式披露，非全量堆砌）。"""
     m = ProbeModel()
     db = Path(tempfile.mkdtemp()) / "t.db"
     client = TestClient(build_app(model=m, db_path=db))
     # 文风条目 + 协作条目
     client.post(
         "/api/manual",
-        json={"content": "不喜欢形容词堆砌，语言要克制", "category": "style"},
+        json={"content": "喜欢白话文风，语言要克制", "category": "style"},
     )
     client.post(
         "/api/manual",
@@ -82,9 +82,55 @@ def test_style_entries_not_injected_into_writing() -> None:
     last = m.prompts[-1]
     # 协作约定注入（心智=会话规划器）
     assert "会话协作约定" in last and "先给方案再动笔" in last
-    # 文风偏好不再注入写作工具（S50 核心断言）
-    assert "不喜欢形容词堆砌" not in last
-    assert "写作说明书" not in last and "本书写作偏好" not in last
+    # 文风偏好注入（S53：指导性保留，心智指导块）
+    assert "用户文风偏好" in last and "喜欢白话文风" in last
+    assert "写作说明书" not in last and "本书写作偏好" not in last  # 仍是模块化块，非全量说明书
+
+
+def test_style_pref_matches_skill() -> None:
+    """S53 心智与能力联动：用户文风偏好 → 匹配对应叙事技巧注入。
+
+    作者偏好白话 → 白话相关 skill（tags 含'白话'）被选中注入。
+    """
+    from anyspark.align import (
+        WritingSkillStore,
+        render_skills_content,
+        select_skills_for,
+    )
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk.db")
+    # 补到 6 条以上（触发按需选取），其中一条 tags 含'白话'
+    store.add(
+        name="白话叙事",
+        description="白话文风：口语化、平实、不文绉绉",
+        content="用口语化短句与平实词汇，避免文言腔；句子结构简单直接。",
+        example="'他愣了一下'而非'他怔忡半晌'。",
+        tags="白话",
+    )
+    skills = store.list_skills()
+    # 用户偏好'白话' → 优先选中白话 skill
+    sel = select_skills_for(skills, context="", prefs=["白话"], limit=3)
+    assert any(s.name == "白话叙事" for s in sel), "白话偏好应命中白话 skill"
+    content = render_skills_content(skills, prefs=["白话"])
+    assert "白话叙事" in content and "口语化" in content
+    # 无偏好 → 保底前 limit（不含白话 skill，若排序不在前）
+    sel2 = select_skills_for(skills, context="", prefs=None, limit=3)
+    assert sel2
+
+
+def test_habit_entries_injected() -> None:
+    """S53：习惯条目保留指导性（心智指导块注入）。"""
+    m = ProbeModel()
+    db = Path(tempfile.mkdtemp()) / "t3.db"
+    client = TestClient(build_app(model=m, db_path=db))
+    client.post(
+        "/api/manual",
+        json={"content": "每章两千字左右", "category": "habit"},
+    )
+    client.post("/api/chat", json={"message": "写"})
+    assert m.prompts
+    last = m.prompts[-1]
+    assert "用户写作习惯" in last and "每章两千字左右" in last
 
 
 def test_manual_category_api() -> None:

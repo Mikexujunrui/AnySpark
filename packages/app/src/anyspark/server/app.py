@@ -800,8 +800,7 @@ def build_app(
         # 注入块装配：核心注入默认全开，skip_inject 可细粒度关闭（S15 增强按需）
         skip = skip_inject or set()
         full_prompt = system_prompt
-        # S50 心智模型=会话规划器：协作约定注入系统提示顶部（怎么配合我），
-        # 不再是文风/喜好类偏好的全量注入（那些不再进写作工具）
+        # S53 心智模型=会话规划器：协作约定注入系统提示顶部（怎么配合我）
         collab_block = session_plan.collab_block()
         if "manual" not in skip and collab_block:
             full_prompt = collab_block + "\n\n" + full_prompt
@@ -826,13 +825,17 @@ def build_app(
         settings_block = render_settings(settings.list())
         if "settings" not in skip and settings_block:
             full_prompt = full_prompt + "\n\n" + settings_block
+        # S53 心智指导块：文风偏好 + 习惯（渐进式披露：只列关键条目，指导性保留）
+        mind_block = session_plan.mind_block()
+        if "manual" not in skip and mind_block:
+            full_prompt = full_prompt + "\n\n" + mind_block
         # 叙事技巧注入（S50：skill 重构——名+技法+情形案例；索引常驻+内容按需）
         skill_list = skills.list_skills()
         skill_block = render_skill_index(skill_list)
         if "skills" not in skip and skill_block:
             full_prompt = full_prompt + "\n\n" + skill_block
-        # 内容按需：技巧少全量；多后按会话意图（user 消息）匹配 tags 选 2-3 条
-        skill_content = render_skills_content(skill_list)
+        # 内容按需：S53 心智联动——用户文风偏好优先匹配 skill，其次会话意图 tags
+        skill_content = render_skills_content(skill_list, prefs=session_plan.style_prefs)
         if "skills" not in skip and skill_content:
             full_prompt = full_prompt + "\n\n" + skill_content
         # 剧情计划注入（S46：当前章+后续计划——AI 知道接下来写什么）

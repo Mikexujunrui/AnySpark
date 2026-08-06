@@ -36,6 +36,7 @@ from .skills import (
     WritingSkillStore,
     render_skill_index,
     render_skills_content,
+    select_skills_for,
 )
 from .summarize import MemoryStore, SceneMemory, SessionSummarizer
 from .worldsettings import WorldSetting, WorldSettingStore, render_settings
@@ -77,5 +78,6 @@ __all__ = [
     "render_settings",
     "render_skill_index",
     "render_skills_content",
+    "select_skills_for",
     "temperature_for",
 ]
