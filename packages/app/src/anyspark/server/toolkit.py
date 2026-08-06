@@ -38,6 +38,11 @@ def build_toolkit(
     enable_codex: bool = False,
     enable_extras: bool = False,
     enable_search: bool = False,
+    # S59 工作流 agent 工具（默认关：可选增强，需要时点亮）
+    workflow_store: Any = None,
+    workflow_engine: Any = None,
+    workflow_generator: Any = None,
+    enable_workflow: bool = False,
 ) -> ToolRegistry:
     """把全部工具装配进 registry（按 enable_* 开关分组点亮），返回同一注册表。
 
@@ -146,5 +151,14 @@ def build_toolkit(
 
         search_spec, search_impl = make_search_implementer()
         registry.register(search_spec, search_impl)
+
+    # S59 工作流 agent 工具：默认关，enable_workflow 点亮（Agent 可列/生成/运行/查进度）
+    if enable_workflow and workflow_store is not None:
+        from anyspark.server.tools_workflow import make_workflow_tools
+
+        for _spec, _impl in make_workflow_tools(
+            workflow_store, workflow_engine, workflow_generator
+        ):
+            registry.register(_spec, _impl)
 
     return registry

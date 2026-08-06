@@ -158,6 +158,7 @@ class ChatRequest(BaseModel):
     enable_extras: bool = False  # S32 扩展工具（read_material/check_text）按需点亮
     enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认开
     enable_codex: bool = False  # S48-P5 代码扩展 run_code（沙箱，默认关：安全按需点亮）
+    enable_workflow: bool = False  # S59 工作流 agent 工具（list/run/status/generate）默认关
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood/plot 子集
     # S58b 上下文模式：auto(默认=干净,不继承场景记忆)/continue(显式继承场景记忆+计划)/fresh(同auto)
@@ -939,6 +940,43 @@ def build_app(
                 return NodeResult(error=f"章节不存在: {title}")
             report = run_review(model, ch.title, ch.content[:20000])
             return NodeResult(output=f"硬伤数: {report.hard_count}\n" + report.render())
+        if fn == "list_chapters":
+            chs = chapters.list_by_book(ctx.book_id)
+            if not chs:
+                return NodeResult(output="（无章节）")
+            return NodeResult(output="\n".join(f"{c.order_index}. {c.title}" for c in chs))
+        if fn == "write_chapter":
+            """写回章节：参数 chapter_title + content（或 {{var}} 引用上游改写结果）。
+
+            content 缺失时取 params.text_key（缺省 'rewritten'）对应的上游输出——
+            AI 生成的流程常用：改写 agent 输出 rewritten → write_chapter 脚本落盘。
+            """
+            title = str(node.params.get("chapter_title") or "")
+            content = str(node.params.get("content") or "")
+            if not content:
+                text_key = str(node.params.get("text_key") or "rewritten")
+                content = str(ctx.results.get(text_key, ""))
+            if not title:
+                return NodeResult(error="write_chapter 缺 chapter_title")
+            if not content.strip():
+                return NodeResult(error="write_chapter 无内容（检查 text_key 上游输出）")
+            try:
+                chs = chapters.list_by_book(ctx.book_id)
+                ch = next((c for c in chs if c.title == title), None)
+                if ch is None:
+                    order = len(chs) + 1
+                    chapters.upsert(ctx.book_id, title, content, order)
+                else:
+                    chapters.upsert(ctx.book_id, title, content, ch.order_index)
+                # 双写落盘（工作区 md 权威，与 write_chapter 工具一致）
+                try:
+                    order = ch.order_index if ch else (len(chs) + 1)
+                    workspace.write_chapter(ctx.book_id, order, title, content)
+                except Exception:
+                    pass  # 库镜像已更新，落盘失败不阻断
+                return NodeResult(output=f"已写回章节: {title}")
+            except Exception as exc:
+                return NodeResult(error=f"写回失败: {exc}")
         return NodeResult(error=f"未注册的 script 函数: {fn}")
 
     def _wf_run_approval(ctx: RunContext, node: Any) -> NodeResult:
@@ -956,10 +994,35 @@ def build_app(
         return NodeResult(error=f"未知节点类型: {node.kind}")
 
     def _wf_judge(prompt: str, ctx: RunContext) -> bool:
-        """model 型条件：自然语言问题 → 模型判断 yes/no。"""
-        out = model.respond([Message(role="user", content=prompt)], [])
-        text = (out.text or "").strip().lower()
-        return text.startswith("y") or "是" in text[:4] or "通过" in text[:4]
+        """model 型条件：自然语言问题 → 模型判断 yes/no。
+
+        真实链路暴露：模型答"否/不通过"时旧逻辑误判。强制输出 是/否 首字判定，
+        明确否定词优先级（避免"没有硬伤"被"有"字误判）。
+        """
+        out = model.respond(
+            [
+                Message(
+                    role="system",
+                    content="你只判断一个条件是否成立。必须严格以单个字'是'或'否'开头回答，不要解释。",
+                ),
+                Message(role="user", content=prompt),
+            ],
+            [],
+        )
+        text = (out.text or "").strip()
+        if not text:
+            return False
+        first = text[0]
+        # 否定词优先（'不'/'没'/'无'/'否' 开头 → False；'是'/'通' 开头 → True）
+        if first in ("不", "没", "无", "否", "非"):
+            return False
+        if first in ("是", "通", "可", "同", "y", "Y", "t", "T"):
+            return True
+        # 兜底：整句包含强肯定词且无否定词
+        lower = text.lower()
+        has_pos = any(w in lower for w in ("yes", "true", "通过", "可以", "同意"))
+        has_neg = any(w in lower for w in ("no", "false", "不是", "不通过", "没有", "无法"))
+        return has_pos and not has_neg
 
     workflow_engine = WorkflowEngine(workflow_store, _wf_runner, model_judge=_wf_judge)
 
@@ -988,6 +1051,7 @@ def build_app(
         enable_extras: bool = False,
         enable_domain: bool = True,
         enable_codex: bool = False,
+        enable_workflow: bool = False,
         skip_inject: set[str] | None = None,
         context_mode: str = "auto",
         model_id: str | None = None,
@@ -1018,6 +1082,11 @@ def build_app(
             enable_codex=enable_codex,
             enable_extras=enable_extras,
             enable_search=enable_search,
+            # S59：工作流 agent 工具（默认关，enable_workflow 点亮）
+            workflow_store=workflow_store,
+            workflow_engine=workflow_engine,
+            workflow_generator=workflow_generator,
+            enable_workflow=enable_workflow,
         )
         # 能动级别：显式传入 > 心智规划建议 > 已存档位（S35：档位记录，温度入档）
         # S50：心智模型=会话规划器——未显式指定时，MindPlanner 按 collab 条目建议档位
@@ -1377,6 +1446,7 @@ def build_app(
             enable_extras=req.enable_extras,
             enable_domain=req.enable_domain,
             enable_codex=req.enable_codex,
+            enable_workflow=req.enable_workflow,
             skip_inject=set(req.skip_inject),
             context_mode=req.context_mode,
             model_id=req.model_id,
@@ -1414,6 +1484,7 @@ def build_app(
                 "mood": req.mood,
                 "enable_domain": req.enable_domain,
                 "enable_codex": req.enable_codex,
+                "enable_workflow": req.enable_workflow,
                 "thinking": req.thinking,
                 "model_id": req.model_id,
             },
@@ -1526,6 +1597,7 @@ def build_app(
                 enable_extras=req.enable_extras,
                 enable_domain=req.enable_domain,
                 enable_codex=req.enable_codex,
+                enable_workflow=req.enable_workflow,
                 skip_inject=set(req.skip_inject),
                 context_mode=req.context_mode,
                 model_id=req.model_id,
@@ -1549,6 +1621,7 @@ def build_app(
                     "mood": req.mood,
                     "enable_domain": req.enable_domain,
                     "enable_codex": req.enable_codex,
+                    "enable_workflow": req.enable_workflow,
                     "thinking": req.thinking,
                     "model_id": req.model_id,
                 },

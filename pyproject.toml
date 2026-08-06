@@ -81,6 +81,8 @@ ignore = [
 "packages/workflow/src/anyspark/workflow/generator.py" = ["E501"]
 "packages/workflow/tests/test_workflow.py" = ["E501"]
 "packages/app/tests/test_workflow_api.py" = ["E501"]
+# S59 补充：workflow model 条件冒烟脚本是长中文 JSON 行
+"scripts/workflow_model_cond_smoke.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["anyspark"]

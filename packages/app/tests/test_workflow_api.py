@@ -84,3 +84,112 @@ def test_workflow_drafts_gate() -> None:
     assert client.get("/api/workflows/drafts").json() == []
     assert client.post("/api/workflows/drafts/nonexist/promote").status_code == 404
     assert client.delete("/api/workflows/drafts/nonexist").status_code == 404
+
+
+def test_workflow_script_write_chapter() -> None:
+    """S59 补充：script write_chapter 节点——改写结果写回章节（库+盘双写）。"""
+    from anyspark.core import Message, ModelOutput
+
+    class FakeWriteModel:
+        model_name = "fake-write"
+
+        def respond(self, messages: list[Message], tools: object) -> ModelOutput:
+            return ModelOutput(text="改写后的第一章内容（已修复设定冲突）", tool_calls=[])
+
+    db = Path(tempfile.mkdtemp()) / "wf.db"
+    client = TestClient(build_app(model=FakeWriteModel(), db_path=db))
+
+    # 先建一章作为处理对象（章节仅能经 write_chapter 工具创建，这里直接写 store）
+    from anyspark.store.sqlite import ChapterStore
+
+    ChapterStore(str(db)).upsert("main", "第一章", "原文内容", 1)
+
+    # 建流程：agent 改写 → script write_chapter 落盘（text_key 引用改写输出）
+    r = client.post(
+        "/api/workflows",
+        json={
+            "name": "改写落盘",
+            "nodes": [
+                {
+                    "id": "n1",
+                    "kind": "agent",
+                    "params": {"instruction": "改写章节", "output_key": "rewritten"},
+                },
+                {
+                    "id": "n2",
+                    "kind": "script",
+                    "params": {
+                        "function": "write_chapter",
+                        "chapter_title": "第一章",
+                        "text_key": "rewritten",
+                    },
+                },
+            ],
+            "edges": [{"source": "n1", "target": "n2"}],
+        },
+    )
+    assert r.status_code == 200, r.text
+    wf = r.json()
+    task_id = client.post(f"/api/workflows/{wf['id']}/run", json={"book_id": "main"}).json()[
+        "task_id"
+    ]
+
+    # 等待完成
+    import time
+
+    for _ in range(30):
+        t = client.get(f"/api/workflows/tasks/{task_id}").json()
+        if t["status"] in ("done", "failed"):
+            break
+        time.sleep(0.5)
+    assert t["status"] == "done", t["error"]
+    # 章节被覆盖为新内容
+    chs = client.get("/api/chapters").json()
+    target = next(c for c in chs if c["title"] == "第一章")
+    assert "改写后的第一章内容" in target["content"]
+
+
+def test_workflow_agent_tools_registered() -> None:
+    """S59 补充：enable_workflow 点亮时 agent 工具注册进工具集。"""
+    from anyspark.core import Message, ModelOutput
+
+    class FakeToolModel:
+        model_name = "fake-tool"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def respond(self, messages: list[Message], tools: object) -> ModelOutput:
+            from anyspark.core import ToolCall
+
+            self.calls += 1
+            if self.calls == 1:
+                # 第一轮：触发 workflow_list 工具调用
+                return ModelOutput(
+                    text="先看下有哪些工作流",
+                    tool_calls=[ToolCall(id="c1", name="workflow_list", arguments={})],
+                )
+            # 第二轮（工具结果回填后）：终答
+            return ModelOutput(text="工作流列表已看完", tool_calls=[])
+
+    db = Path(tempfile.mkdtemp()) / "wf.db"
+    client = TestClient(build_app(model=FakeToolModel(), db_path=db))
+    # 建一个模板供 list 返回
+    client.post(
+        "/api/workflows",
+        json={
+            "name": "模板A",
+            "nodes": [{"id": "n1", "kind": "agent", "params": {"instruction": "x"}}],
+            "edges": [],
+        },
+    )
+    # enable_workflow=True 的 chat 应能调 workflow_list（工具执行后模型回终答）
+    r = client.post(
+        "/api/chat",
+        json={"message": "列一下工作流", "enable_workflow": True},
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    # 工具调用被记录（执行结果回填后模型再次响应）；name 是列表（整批工具名）
+    tool_events = [e for e in data.get("events", []) if e["type"] == "tool_call"]
+    assert any("workflow_list" in (e["payload"].get("name") or []) for e in tool_events)

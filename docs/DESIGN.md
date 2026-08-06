@@ -781,3 +781,11 @@ nodes + edges = 画布天然数据模型——现在先 JSON + API，未来前�
 import 复用**：耦合面问题（拖入 49K 行运行时 vs 我们只要 ~2K 行骨架）与架构铁律
 （core 零依赖/单向依赖/模型无关）。只借鉴算法结构（DAG/拓扑/条件语法/失败状态机/
 CAS 恢复），这些是通用计算机科学概念，重写后是自有代码。
+
+> **S59 补充（三项）**：① script 函数白名单扩展——`read_chapter`（模糊匹配章节标题）/
+> `review_chapter`（检测网审读）/ `write_chapter`（改写结果写回，库+盘双写，text_key
+> 引用上游输出）/ `list_chapters` / `noop`；② workflow agent 工具（`enable_workflow`
+> 点亮，默认关）——workflow_list / workflow_run / workflow_status / workflow_generate，
+> 写作 Agent 可自主使用工作流（对齐 tools_domain 哲学：只读/启动，无删除权限）；
+> ③ model 型条件（gate 自然语言判断）真实链路——`_wf_judge` 首字 是/否 + 否定词
+> 优先 + 强肯定词兜底（真实链路暴露旧判定粗糙已修），互斥条件全 False 走 default 边。

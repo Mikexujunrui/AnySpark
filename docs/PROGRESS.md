@@ -1501,7 +1501,14 @@ align 60 + app 20 全过；ruff 全绿；真实链路 3 项全过。
   2. 生成器 prompt 不引导读章节 → 加规则 7/8（先 read_chapter 再 agent，output_key 命名约定）
   3. AI 幻觉章节标题 → read_chapter 模糊匹配（精确→双向包含→第X章号提取）
 
-**遗留（按需后补）**：前端画布（nodes+edges 格式已预留）；script 函数白名单扩展（如写回章节/批量审读）；model 型条件真实链路未测（judge 已接，YAGNI）；workflow 的 agent 工具（Agent 自主调 workflow_run）未做（API 已够）
+**遗留（按需后补）**：前端画布（nodes+edges 格式已预留）。
+
+### S59 补充（三项补齐，已完成 ✅）
+1. **script 函数扩展**：`write_chapter`（改写结果写回章节，库+盘双写，text_key 引用上游输出）/ `list_chapters`（列章）/ `review_chapter` / `noop` / `read_chapter`（含模糊匹配）白名单
+2. **workflow agent 工具**（`tools_workflow.py`，`enable_workflow` 默认关点亮）：`workflow_list` / `workflow_run`（后台执行）/ `workflow_status`（节点级进度）/ `workflow_generate`（AI 生成草稿，人工确认后生效）——写作 Agent 可自主使用工作流
+3. **model 型条件真实链路**（`scripts/workflow_model_cond_smoke.py`）：gate 自然语言条件 → `_wf_judge` 真实 DeepSeek 判断生效
+   - **真实链路暴露修复**：旧 `_wf_judge` 判定粗糙（模型答"否/不通过"误判）→ 强制首字 是/否 + 否定词优先 + 强肯定词兜底；互斥 model 条件都 False 时走 default 边（无则 (end)）
+- 门禁：pytest **338**（+4：script write_chapter 落盘 / agent 工具注册调用 / model 条件冒烟）+ 总闸全绿
 
 ## S58c 会话继承 fork（参考 pi forkFrom，已完成 ✅）
 
