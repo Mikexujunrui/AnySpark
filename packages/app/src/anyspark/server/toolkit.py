@@ -32,6 +32,8 @@ def build_toolkit(
     materials: Any,
     ext_tools: Any,
     manual: Any = None,
+    skills_store: Any = None,
+    style_prefs: list[str] | None = None,
     enable_domain: bool = True,
     enable_codex: bool = False,
     enable_extras: bool = False,
@@ -41,9 +43,19 @@ def build_toolkit(
 
     依赖全部作为命名参数闭包注入（不在此处创建任何 store/model）——保持单向依赖，
     工具不"认识"装配逻辑，装配逻辑只认识工具工厂。模型无关（全部自然语言承载）。
+
+    S56（C 架构）：skills_store + style_prefs 传给写作工具——write_chapter 意图模式
+    的干净写作调用用文笔 skill 素材（按文风偏好匹配），与主循环解耦。
     """
     # 写作核心工具：无条件常驻（主链路必需）
-    register_writing_tools(registry, chapters, workspace=workspace)
+    register_writing_tools(
+        registry,
+        chapters,
+        workspace=workspace,
+        model=model,
+        skills_store=skills_store,
+        style_prefs=style_prefs,
+    )
 
     # S32：探索工具无条件注册（修复核心——方向模糊时 Agent 可自觉探索；
     # 仅此工具常驻，其余扩展按 enable_extras 点亮，防无关调用干扰主链路）。

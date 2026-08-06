@@ -97,6 +97,10 @@ class WritingTools:
 
     S48 工作区化：注入 Workspace 后 write/patch 双写（md 文件权威 + SQLite 镜像），
     未注入（测试）时纯库行为不变。list/read 读库镜像（既有管线零改动）。
+
+    S56（C 架构）：注入 model + 文笔 skill 素材——write_chapter 支持「意图模式」：
+    主循环传 intent + references（精选参考），工具内部用**干净上下文**调写作模型
+    生成正文（无历史/无工具记录，治多次写作累积毒化），再落盘。
     """
 
     def __init__(
@@ -104,12 +108,53 @@ class WritingTools:
         chapters: ChapterStore,
         book_id: str = DEFAULT_BOOK_ID,
         workspace: Workspace | None = None,
+        model: Any = None,
+        skills_store: Any = None,
+        style_prefs: list[str] | None = None,
     ) -> None:
         self._chapters = chapters
         self._book_id = book_id
         self._workspace = workspace
+        self._model = model  # S56：干净写作调用用的模型（缺省 None=测试/降级走主循环）
+        self._skills_store = skills_store  # S56：文笔 skill 素材（写作调用注入）
+        self._style_prefs = style_prefs or []  # S56：文风偏好（选文笔 skill）
         # 已读缓存（S21）：一次请求内同一章节只查一次，抑制 AI 过度 read（日志实证 4-8 次）
         self._read_cache: dict[str, str] = {}
+
+    # -- S56 干净写作调用（C 架构核心） --
+    def _clean_write(self, title: str, intent: str, references: str) -> str:
+        """用干净上下文调写作模型生成正文（无历史/无工具记录）。
+
+        上下文 = 写作意图 + 主循环精选参考（原样引用）+ 文笔 skill（按文风偏好匹配）。
+        返回正文文本；失败抛异常（调用方降级）。
+        """
+        if self._model is None:
+            raise RuntimeError("写作模型未注入（测试环境不走干净写作）")
+        from anyspark.align import render_skills_content
+
+        # 干净上下文：意图 + 参考 + 文笔 skill（不带对话历史/工具记录/旧章节全文）
+        parts = [
+            "你是 AnySpark 小说写作引擎。严格根据【写作意图】与【写作参考】撰写正文。",
+            "要求：具体、有画面感、杜绝空泛总结；直接输出正文，不要解释。",
+        ]
+        skill_list = self._skills_store.list_skills() if self._skills_store else []
+        skill_block = render_skills_content(skill_list, prefs=self._style_prefs)
+        if skill_block:
+            parts.append(skill_block)
+        parts.append(f"【写作意图】\n{intent}")
+        if references.strip():
+            parts.append(f"【写作参考】（主循环精选，原样引用）\n{references}")
+        system = "\n\n".join(parts)
+        from anyspark.core.types import Message
+
+        output = self._model.respond(
+            [Message(role="system", content=system)],
+            [],
+        )
+        text = (output.text or "").strip()
+        if not text:
+            raise RuntimeError("写作调用返回空正文")
+        return text
 
     # -- S48 双写辅助（md 文件权威 + SQLite 镜像） --
     def _write_dual(self, title: str, content: str, order: int, line: str) -> str | None:
@@ -154,9 +199,31 @@ class WritingTools:
     def write_chapter(self, spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec.name, arguments=arguments)
         title = str(arguments.get("title", "")).strip()
-        content = str(arguments.get("content", ""))
-        if not title or not content:
-            return ToolResult(call=call, ok=False, content="缺少 title 或 content 参数。")
+        content = str(arguments.get("content", "")).strip()
+        # S56（C 架构）：意图模式——主循环传 intent（写作意图）+ references（精选参考），
+        # 工具内部用干净上下文调写作模型生成正文（无历史/无工具记录，治累积毒化）。
+        intent = str(arguments.get("intent", "")).strip()
+        references = str(arguments.get("references", "")).strip()
+        if not title:
+            return ToolResult(call=call, ok=False, content="缺少 title 参数。")
+        if not content and not intent:
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=(
+                    "缺少 content 或 intent（主循环可传 intent + references 由写作引擎生成正文）。"
+                ),
+            )
+        # 意图模式：干净写作调用生成正文（降级：写作模型缺失/失败 → 报错让主循环重试或直接写）
+        if not content and intent:
+            try:
+                content = self._clean_write(title, intent, references)
+            except Exception as exc:
+                return ToolResult(
+                    call=call,
+                    ok=False,
+                    content=f"写作引擎生成失败（可重试或改传 content 直接写）：{exc}",
+                )
         # S29 多线叙事：可选 line 参数（默认 main）——声明本章属于哪条叙事线，
         # 图谱时序校验按线比较，跨线首现不误报"时空倒置"。
         line = str(arguments.get("line", "main")).strip() or "main"
@@ -182,10 +249,12 @@ class WritingTools:
                 call=call, ok=False, content=f"落盘校验失败：章节《{title}》未能读回。"
             )
         note = "覆盖了旧版" if existing else "新建"
+        used_intent = bool(intent) and not bool(str(arguments.get("content", "")).strip())
+        mode = "意图模式（干净写作）" if used_intent else "直写"
         return ToolResult(
             call=call,
             ok=True,
-            content=f"已{note}章节《{title}》({cid})。",
+            content=f"已{note}章节《{title}》({cid})（{mode}）。",
             data={"chapter_id": cid, "title": title},
         )
 
@@ -286,10 +355,33 @@ _WRITING_SPECS: list[ToolSpec] = [
     ),
     ToolSpec(
         name="write_chapter",
-        description="把写作正文保存为某章（新建或覆盖；覆盖前旧版进版本历史）。",
+        description=(
+            "把写作正文保存为某章（新建或覆盖）。两种模式：\n"
+            "① 直写：传 content 直接落盘；\n"
+            "② 意图模式（S56 C 架构）：传 intent（写作意图）+ references（主循环精选的参考事实，"
+            "原样引用）→ 由干净的写作引擎生成正文落盘——正文由专用写作调用产生，"
+            "不背对话历史，适合长会话防累积毒化。"
+        ),
         params=[
             ParamSpec(name="title", type="string", required=True, description="章节标题"),
-            ParamSpec(name="content", type="string", required=True, description="章节正文全文"),
+            ParamSpec(
+                name="content",
+                type="string",
+                required=False,
+                description="章节正文全文（直写模式用；与 intent 二选一）",
+            ),
+            ParamSpec(
+                name="intent",
+                type="string",
+                required=False,
+                description="写作意图（意图模式用）：场景/人物状态/氛围/要推进的情节，明确无歧义",
+            ),
+            ParamSpec(
+                name="references",
+                type="string",
+                required=False,
+                description="写作参考（意图模式用）：主循环从图谱/设定/章节摘录的事实与原文片段，原样引用",
+            ),
             ParamSpec(
                 name="line",
                 type="string",
@@ -350,8 +442,22 @@ def register_writing_tools(
     chapters: ChapterStore,
     book_id: str = DEFAULT_BOOK_ID,
     workspace: Workspace | None = None,
+    model: Any = None,
+    skills_store: Any = None,
+    style_prefs: list[str] | None = None,
 ) -> None:
-    """把写作工具集注册进注册表。S48：注入 workspace 后 write/patch 双写文件权威。"""
-    tools = WritingTools(chapters, book_id, workspace)
+    """把写作工具集注册进注册表。S48：注入 workspace 后 write/patch 双写文件权威。
+
+    S56（C 架构）：注入 model + skills_store + style_prefs 后，write_chapter 支持
+    「意图模式」——干净写作调用生成正文（无历史/无工具记录）。缺省（测试）直写不变。
+    """
+    tools = WritingTools(
+        chapters,
+        book_id,
+        workspace,
+        model=model,
+        skills_store=skills_store,
+        style_prefs=style_prefs,
+    )
     for spec in _WRITING_SPECS:
         registry.register(spec, getattr(tools, spec.name))

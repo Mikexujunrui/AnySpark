@@ -114,6 +114,10 @@ DEFAULT_SYSTEM = (
     "若章节内容已在本轮对话历史或【已固化事实】注入中，直接基于它们，不要重复读取。"
     "写正文可用 write_chapter 保存。"
     "正文要具体、有画面感，杜绝空泛总结。"
+    # S56（C 架构）：意图模式——主循环决策+精选参考，正文由干净写作调用生成（防累积毒化）
+    "长会话/连续写作时优先用意图模式：先确认本章要写什么（场景/人物状态/氛围/推进点），"
+    "把需要的设定事实或原文片段摘录进 references（原样引用，不要概括），"
+    "然后调 write_chapter(title, intent=…, references=…)，正文由写作引擎生成。"
     # S43：DEFAULT_SYSTEM 回归极简（只留行为底线）——写作技巧类规则已抽为内容载体
     # （WritingSkill：镜头感/对白机锋/节奏控制等叙事技巧，见【叙事技巧】注入块），不再堆行为守则
     "首要目标是把正文写出来并落盘，不要为了准备而反复调用与当前任务无关的工具。"
@@ -825,6 +829,11 @@ def build_app(
         model_id: str | None = None,
         thinking: str | None = None,
     ) -> Agent:
+        # 心智规划提前（S56 C 架构）：style_prefs 供写作工具意图模式选文笔 skill
+        if agency_level is None:
+            session_plan = mind_planner.plan(book_id, base_agency=agency.get_current(book_id).order)
+        else:
+            session_plan = mind_planner.plan(book_id)
         # 工具装配（S52 抽出为独立模块 toolkit.build_toolkit——组合根接口化，
         # 与 HTTP 编排解耦；写作/探索常驻 + domain/codex/extras/search 按开关点亮）
         registry = build_toolkit(
@@ -839,6 +848,8 @@ def build_app(
             materials=materials,
             ext_tools=ext_tools,
             manual=manual,
+            skills_store=skills,
+            style_prefs=session_plan.style_prefs,
             enable_domain=enable_domain,
             enable_codex=enable_codex,
             enable_extras=enable_extras,
@@ -847,7 +858,6 @@ def build_app(
         # 能动级别：显式传入 > 心智规划建议 > 已存档位（S35：档位记录，温度入档）
         # S50：心智模型=会话规划器——未显式指定时，MindPlanner 按 collab 条目建议档位
         if agency_level is None:
-            session_plan = mind_planner.plan(book_id, base_agency=agency.get_current(book_id).order)
             if session_plan.agency_level is not None:
                 agency_level = session_plan.agency_level
             current = agency.get_current(book_id)
@@ -858,7 +868,6 @@ def build_app(
                     agency.get_level(f"default-{agency_level}") or current,
                 )
         else:
-            session_plan = mind_planner.plan(book_id)  # 仍取协作约定（档位用显式）
             levels = agency.list_levels()
             current = next(
                 (lv for lv in levels if lv.order == int(agency_level)),
@@ -939,9 +948,7 @@ def build_app(
         else:
             skill_list = skills.list_skills()
             skill_block = render_skill_index(skill_list)
-            skill_content = render_skills_content(
-                skill_list, prefs=session_plan.style_prefs
-            )
+            skill_content = render_skills_content(skill_list, prefs=session_plan.style_prefs)
             _skill_cache[skill_sig] = (skill_block, skill_content)
             # 缓存防膨胀：超过 16 个签名清理最旧（长会话/多书场景安全阀）
             if len(_skill_cache) > 16:
@@ -1008,9 +1015,7 @@ def build_app(
         try:
             entries = manual.list("project", book_id)
             prompt = build_learning_review_prompt(entries, f"章节：{title}\n\n{content[:1200]}")
-            output = model.respond(
-                [Message(role="system", content=prompt)], []
-            )
+            output = model.respond([Message(role="system", content=prompt)], [])
             found = parse_learning_review_result(output.text)
             added = 0
             for item in found:

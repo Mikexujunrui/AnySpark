@@ -65,7 +65,7 @@ def test_merge_add_same_theme_merges() -> None:
     store = ManualStore(_db())
     try:
         store.add(ManualEntry(content="叙事克制，少用感叹号", category="style"))
-        merged, did_merge = store.merge_add(
+        _, did_merge = store.merge_add(
             ManualEntry(content="对话要克制，也少用感叹号", category="style")
         )
         assert did_merge is True
@@ -82,9 +82,7 @@ def test_merge_add_disjoint_adds_new() -> None:
     store = ManualStore(_db())
     try:
         store.add(ManualEntry(content="对话要克制", category="style"))
-        _, did_merge = store.merge_add(
-            ManualEntry(content="我习惯晚上写作", category="habit")
-        )
+        _, did_merge = store.merge_add(ManualEntry(content="我习惯晚上写作", category="habit"))
         assert did_merge is False
         assert len(store.list("project")) == 2  # 不同类别不同主题 → 两条
     finally:
@@ -110,9 +108,7 @@ def test_merge_add_different_category_no_merge() -> None:
     store = ManualStore(_db())
     try:
         store.add(ManualEntry(content="对话要克制", category="style"))
-        _, did_merge = store.merge_add(
-            ManualEntry(content="对话要克制", category="habit")
-        )
+        _, did_merge = store.merge_add(ManualEntry(content="对话要克制", category="habit"))
         assert did_merge is False
         assert len(store.list("project")) == 2
     finally:

@@ -89,7 +89,10 @@ def test_learning_review_parse() -> None:
         parse_learning_review_result,
     )
 
-    sample = '```json\n[{"content": "喜欢用短句", "category": "style", "reason": "本章对白全是短句"}]\n```'
+    sample = (
+        '```json\n[{"content": "喜欢用短句", "category": "style", '
+        '"reason": "本章对白全是短句"}]\n```'
+    )
     parsed = parse_learning_review_result(sample)
     assert parsed and parsed[0]["content"] == "喜欢用短句"
     assert parsed[0]["category"] == "style"
