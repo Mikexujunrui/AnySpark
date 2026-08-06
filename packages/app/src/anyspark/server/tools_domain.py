@@ -15,6 +15,7 @@ anyspark.server.tools_domain — 写作领域工具集（S48-P2：小说特化�
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from anyspark.align import ManualEntry
@@ -537,8 +538,19 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
             ParamSpec(
                 name="keyword",
                 type="string",
-                required=True,
-                description="要检索的关键词/短语（如'红绳'、'怀表背面'）",
+                required=False,
+                description="要检索的关键词/短语（如'红绳'、'怀表背面'）——与 keywords 二选一"
+            ),
+            ParamSpec(
+                name="keywords",
+                type="string",
+                required=False,
+                description=(
+                    "词表批量：逗号/顿号分隔的多个关键词（如'拳,刀,撞,踢'）。"
+                    "逐词统计每章命中数，返回各词分布 + 聚合。"
+                    "用于定位'某类描写'（先字面召回多词 → 再 read_context 精读）。"
+                    "与 keyword 二选一；都传时以 keywords 为准。"
+                ),
             ),
             ParamSpec(
                 name="exclude",
@@ -548,7 +560,7 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
             ),
             ParamSpec(
                 name="fragment",
-                type="string",
+                type="number",
                 required=False,
                 description=(
                     "上下文宽度（命中位置前后各多少字；默认 20——定位够用；"
@@ -567,11 +579,19 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
     def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec_.name, arguments=arguments)
         kw = str(arguments.get("keyword", "")).strip()
-        if not kw:
-            return ToolResult(call=call, ok=False, content="缺少参数 keyword。")
+        kw_list = str(arguments.get("keywords", "")).strip()
+        # S56 词表批量：keywords 优先（与 keyword 二选一；都传时以 keywords 为准）
+        if kw_list:
+            terms = [t.strip() for t in re.split(r"[,，、\s]+", kw_list) if t.strip()]
+            if not terms:
+                return ToolResult(call=call, ok=False, content="keywords 为空。")
+        elif kw:
+            terms = [kw]
+        else:
+            return ToolResult(
+                call=call, ok=False, content="缺少参数 keyword（或 keywords 词表）。"
+            )
         try:
-            import re as _re
-
             exclude = str(arguments.get("exclude", "")).strip() or None
             try:
                 frag = max(0, min(int(str(arguments.get("fragment", "20")) or "20"), 500))
@@ -581,66 +601,116 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
             items = chapters.list_by_book("main")
             if not items:
                 return ToolResult(call=call, ok=True, content="暂无章节。")
-            hits: list[dict[str, Any]] = []
-            total = 0
+            # 逐章逐词统计：{chapter: {term: count, _first_ctx: ...}}
+            chapter_stats: list[dict[str, Any]] = []
+            grand_total = 0
+            grand_chapters = 0
             for c in items:
-                n = 0
+                per_term: dict[str, int] = {}
                 first_ctx = ""
-                if use_regex:
-                    try:
-                        matches = list(_re.finditer(kw, c.content))
-                    except _re.error as exc:
-                        return ToolResult(call=call, ok=False, content=f"正则表达式错误：{exc}")
-                    for m in matches:
-                        if not m:
-                            continue
-                        if frag > 0:
-                            ctx = c.content[max(0, m.start() - frag) : m.end() + frag]
-                            if exclude is not None and _sent_has(
-                                c.content, m.start(), m.end() - m.start(), exclude
-                            ):
+                chapter_total = 0
+                for term in terms:
+                    if use_regex:
+                        try:
+                            matches = list(re.finditer(term, c.content))
+                        except re.error as exc:
+                            return ToolResult(
+                                call=call, ok=False, content=f"正则表达式错误：{exc}"
+                            )
+                        n = 0
+                        for m in matches:
+                            if not m:
                                 continue
-                            n += 1
-                            if not first_ctx:
-                                first_ctx = "…" + ctx + "…"
-                        else:
-                            n += 1
-                else:
-                    start = 0
-                    while True:
-                        idx = c.content.find(kw, start)
-                        if idx == -1:
-                            break
-                        if frag > 0:
-                            ctx = c.content[max(0, idx - frag) : idx + len(kw) + frag]
-                            if exclude is not None and _sent_has(c.content, idx, len(kw), exclude):
-                                start = idx + len(kw)
-                                continue
-                            n += 1
-                            if not first_ctx:
-                                first_ctx = "…" + ctx + "…"
-                        else:
-                            n += 1
-                        start = idx + len(kw)
-                if n > 0:
-                    total += n
-                    hits.append({"title": c.title, "count": n, "context": first_ctx})
-            if not hits:
+                            if frag > 0:
+                                ctx = c.content[max(0, m.start() - frag) : m.end() + frag]
+                                if exclude is not None and _sent_has(
+                                    c.content, m.start(), m.end() - m.start(), exclude
+                                ):
+                                    continue
+                                n += 1
+                                if not first_ctx:
+                                    first_ctx = "…" + ctx + "…"
+                            else:
+                                n += 1
+                        per_term[term] = n
+                        chapter_total += n
+                    else:
+                        n = 0
+                        start = 0
+                        while True:
+                            idx = c.content.find(term, start)
+                            if idx == -1:
+                                break
+                            if frag > 0:
+                                ctx = c.content[max(0, idx - frag) : idx + len(term) + frag]
+                                if exclude is not None and _sent_has(
+                                    c.content, idx, len(term), exclude
+                                ):
+                                    start = idx + len(term)
+                                    continue
+                                n += 1
+                                if not first_ctx:
+                                    first_ctx = "…" + ctx + "…"
+                            else:
+                                n += 1
+                            start = idx + len(term)
+                        per_term[term] = n
+                        chapter_total += n
+                if chapter_total > 0:
+                    grand_total += chapter_total
+                    grand_chapters += 1
+                    chapter_stats.append(
+                        {
+                            "title": c.title,
+                            "total": chapter_total,
+                            "per_term": per_term,
+                            "context": first_ctx,
+                        }
+                    )
+            if not chapter_stats:
+                shown = ",".join(terms)
                 return ToolResult(
-                    call=call, ok=True, content=f"全书未找到「{kw}」（共检索 {len(items)} 章）。"
+                    call=call,
+                    ok=True,
+                    content=f"全书未找到「{shown}」（共检索 {len(items)} 章）。",
+                    data={"query": shown, "hits": [], "chapters": 0, "total": 0},
                 )
-            lines = [f"「{kw}」命中 {len(hits)} 章共 {total} 次："]
-            for h in hits:
-                if h["context"]:
-                    lines.append(f"- 《{h['title']}》×{h['count']}：{h['context']}")
-                else:
-                    lines.append(f"- 《{h['title']}》×{h['count']}")
-            lines.append("（字面命中，需读上下文判断相关性；看命中处完整段落用 read_context）")
+            # 渲染：批量模式显示各词分布；单关键词模式保持原格式
+            if len(terms) == 1:
+                label = terms[0]
+                lines = [f"「{label}」命中 {grand_chapters} 章共 {grand_total} 次："]
+                for cs in chapter_stats:
+                    if cs["context"]:
+                        lines.append(f"- 《{cs['title']}》×{cs['total']}：{cs['context']}")
+                    else:
+                        lines.append(f"- 《{cs['title']}》×{cs['total']}")
+                lines.append(
+                    "（字面命中，需读上下文判断相关性；看命中处完整段落用 read_context）"
+                )
+            else:
+                label = ",".join(terms)
+                lines = [
+                    f"词表 [{label}] 命中 {grand_chapters} 章共 {grand_total} 次："
+                ]
+                for cs in chapter_stats:
+                    dist = " ｜ ".join(f"{t}×{n}" for t, n in cs["per_term"].items() if n)
+                    lines.append(f"- 《{cs['title']}》共{cs['total']}次（{dist}）")
+                    if cs["context"]:
+                        lines.append(f"    {cs['context']}")
+                lines.append(
+                    "（字面召回；确认某处是否真相关 → read_context(title, anchor=上下文片段)。"
+                    "词表可再扩：定位'某类描写'用多词召回 + 精读）"
+                )
             return ToolResult(
                 call=call,
                 ok=True,
                 content="\n".join(lines),
-                data={"hits": hits, "chapters": len(hits), "total": total},
+                data={
+                    "query": label,
+                    "hits": chapter_stats,
+                    "chapters": grand_chapters,
+                    "total": grand_total,
+                },
             )
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"检索失败：{exc}")
@@ -757,13 +827,13 @@ def make_read_context_implementer(chapters: Any) -> tuple[Any, Any]:
             ),
             ParamSpec(
                 name="before",
-                type="string",
+                type="number",
                 required=False,
                 description="锚点前读几段（默认 2，上限 5）",
             ),
             ParamSpec(
                 name="after",
-                type="string",
+                type="number",
                 required=False,
                 description="锚点后读几段（默认 2，上限 5）",
             ),

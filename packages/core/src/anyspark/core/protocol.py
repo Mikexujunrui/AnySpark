@@ -53,7 +53,9 @@ class ToolSpec:
             elif p.type == "integer" and not isinstance(v, int):
                 errors.append(f"参数 {p.name} 应为 integer，得到 {type(v).__name__}")
             elif p.type == "number" and not isinstance(v, (int, float)):
-                errors.append(f"参数 {p.name} 应为 number，得到 {type(v).__name__}")
+                # S56 宽松：数字字符串（如 "30"）也接受——模型常把数字参数当字符串传
+                if not (isinstance(v, str) and v.strip().lstrip("-").isdigit()):
+                    errors.append(f"参数 {p.name} 应为 number，得到 {type(v).__name__}")
             elif p.type == "boolean" and not isinstance(v, bool):
                 errors.append(f"参数 {p.name} 应为 boolean，得到 {type(v).__name__}")
         return errors

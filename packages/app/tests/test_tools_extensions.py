@@ -301,3 +301,56 @@ def test_src_read_inside_sandbox() -> None:
     # 越界
     r2 = run_code("print(src_read('../../etc/passwd'))", data_env=env)
     assert r2["ok"] is False and "越界" in r2["error"]
+
+
+def test_search_chapters_batch_keywords() -> None:
+    """S56 词表批量：多关键词召回 → 每章各词分布 + 聚合。"""
+    store = _seed_chapters()
+    _, impl = make_search_chapters_implementer(store)
+    r = _call(impl, keywords="陈渡,雾城,钟楼")
+    assert r.ok is True
+    # 词表命中 2 章（第一章有陈渡/雾城，第二章有钟楼）
+    assert r.data and r.data["chapters"] == 2
+    assert r.data["total"] == 4  # 陈渡×2 + 雾城×1 + 钟楼×1
+    # 批量渲染含各词分布
+    assert "陈渡×2" in r.content
+    assert "钟楼×1" in r.content
+
+
+def test_search_chapters_batch_no_hit() -> None:
+    """S56 词表全未命中 → 未找到。"""
+    store = _seed_chapters()
+    _, impl = make_search_chapters_implementer(store)
+    r = _call(impl, keywords="红绳,玉佩,金钗")
+    assert r.ok is True and "未找到" in r.content
+    assert r.data and r.data["total"] == 0
+
+
+def test_search_chapters_keyword_still_works() -> None:
+    """S56 向后兼容：单关键词用法不变（无 keywords 时）。"""
+    store = _seed_chapters()
+    _, impl = make_search_chapters_implementer(store)
+    r = _call(impl, keyword="陈渡")
+    assert r.ok is True and "命中 1 章共 2 次" in r.content
+    assert r.data and r.data["total"] == 2
+
+
+def test_search_chapters_keywords_priority() -> None:
+    """S56 keywords 优先于 keyword（都传时）。"""
+    store = _seed_chapters()
+    _, impl = make_search_chapters_implementer(store)
+    r = _call(impl, keyword="陈渡", keywords="钟楼")
+    assert r.ok is True
+    assert r.data and r.data["total"] == 1  # 只用钟楼
+
+
+def test_search_chapters_fragment_number_accepts() -> None:
+    """S56 参数宽松：fragment 传数字(int)或数字字符串都接受（agent 常传 int）。"""
+    store = _seed_chapters()
+    _, impl = make_search_chapters_implementer(store)
+    # int 形式
+    r_int = _call(impl, keyword="陈渡", fragment=30)
+    assert r_int.ok is True
+    # 数字字符串形式（向后兼容）
+    r_str = _call(impl, keyword="陈渡", fragment="30")
+    assert r_str.ok is True
