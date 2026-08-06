@@ -206,6 +206,9 @@ class Agent:
             # S22（D1）：模型调用包异常——调用失败（网络/API 错误，重试耗尽后）时
             # **不冒泡不毒化上下文**：append assistant 失败消息保持 user/assistant 配对，
             # 结束本轮并把错误说明带给 API 层（转 5xx / SSE error 帧）。
+            # 防御：output 先置 None——异常路径绝不读它（except 已 return）；
+            # 成功路径才在 None 校验后进入 _emit_record，杜绝任何 UnboundLocalError 可能。
+            output: ModelOutput | None = None
             try:
                 if hasattr(self.model, "respond_stream"):
                     output = self.model.respond_stream(
@@ -229,6 +232,7 @@ class Agent:
                     error=err_text,
                 )
 
+            assert output is not None  # 走到此必然成功赋值（异常已 return）
             self._emit_record(conversation_id, turn_index, prompt_messages, output, results)
             if not output.tool_calls:
                 # 终答前统一检查插话/追问（对齐 pi：内层循环末尾检查 steering、
