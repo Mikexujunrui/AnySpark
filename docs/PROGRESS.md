@@ -237,6 +237,37 @@
 
 ---
 
+## S49 对话 CLI（独立入口，已完成 ✅）
+
+**背景（主人问 TUI 价值 → 判断）**：pi TUI 是编码场景壳（文件树/diff），写作要稿纸+对话，抄它=抄错壳；主人用 agent 对话驱动不需要界面。若需独立入口，轻量 CLI 比 TUI 便宜 10 倍且贴"写作即对话"。主人拍板：做 CLI。
+
+**实现**（`server/cli_chat.py` + `anyspark-chat` console script）：流式 SSE 打字机 + 工具执行状态 ✓/✗ + Ctrl+C 取消当前轮（可续"继续"）+ conversation_id 多轮延续（~/.anyspark_cli.json）+ /quit /reset /tools；-m 单条消息模式；--base 覆盖；默认 enable_domain。
+
+**门禁**：pytest 264；总闸 ✅。**真实链路**：写《CLI测试章》→ 流式 + write_chapter ✓。
+
+**意义**：独立入口 = 真实使用场景放大器——撞出的 bug 是修复闭环素材（回归测试锁死防再犯）。
+
+---
+
+## S49b 运行记录 + 修复链（思维链保留/update/src_read，已完成 ✅）
+
+**背景（主人两个指示）**：① 扩展工具 update + codex 只读源码；② 审计日志——完整运行日志（上下文/工具调用/思维链）是否保留，辅助修 bug + 未来训练心智模型。主人判断：思维链保留但**不注入上下文**（推理过程不是输出，注入会污染）。
+
+**实现**：
+- **思维链进 ModelOutput**（core `reasoning` 字段）+ deepseek.py 非流式/流式收 reasoning_content
+- **运行记录器**（`server/recorder.py`）：core loop 发 `record` 事件（每轮完整快照：prompt 上下文 + output 含 reasoning + tool_calls + 工具结果），app 订阅落 `data/records/<conv>/`（meta.json + events.jsonl）——修 bug 完整可回放、训练心智模型素材；**reasoning 不注入**（不进 store）
+- **扩展工具 update**：`PATCH /api/tools/{id}`——改后自动回 draft 重新批准
+- **codex src_read**：沙箱只读 packages/（限大小防越界）——修 bug 定位/验证
+- **隔离**：recorder 与 db 配对（同 workspace 逻辑）防测试污染全局
+
+**门禁**：pytest **267**（+3：记录器含思维链不注入/update 回 draft/src_read 越界）；总闸 ✅
+
+**真实链路**：data/records/<conv>/——meta ✓ events.jsonl：turn1 思维链完整（"我直接写30字左右的正文，然后保存为一章即可"）+ write_chapter ✓ turn2 终答 + 结果回填 ✓
+
+**踩坑**：`_emit_record` 放异常路径引用未定义 output → UnboundLocalError；uv run 装 console script 时 exe 被旧进程占用（taskkill //F //T）
+
+---
+
 ## S48g 正文检索 + 扩展工具注册表（人工批准，已完成 ✅）
 
 **背景（主人两个问题）**：① 编码系统能否给自己写扩展/修 bug/加工具——诚实答：S48d 只是执行器不能；正确形态是"工具=数据"注册表。② 长书正文定位——图谱是结构化事实检索，正文定位（意象/短语/一致性）需要新工具。
