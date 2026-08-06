@@ -170,8 +170,12 @@ class ExtensionToolStore:
         new_params = params if params is not None else existing.params
         new_code = code if code is not None else existing.code
         with self._lock:
+            sql = (
+                "UPDATE tools_extensions SET name=?, description=?, params_json=?, "
+                "code=?, status='draft', updated_at=? WHERE id=?"
+            )
             self._conn.execute(
-                "UPDATE tools_extensions SET name=?, description=?, params_json=?, code=?, status='draft', updated_at=? WHERE id=?",
+                sql,
                 (
                     new_name,
                     new_desc,

@@ -57,12 +57,12 @@ def test_recorder_captures_full_turn_with_reasoning() -> None:
     )
     conv = agent.store.create()
     rec.attach(agent, conv.id, {"ts": "t0", "model": "probe"})
-    turn = agent.run("写一章", conv.id)
+    agent.run("写一章", conv.id)
 
     meta = json.loads((root / conv.id / "meta.json").read_text(encoding="utf-8"))
     assert meta["model"] == "probe"
     lines = (root / conv.id / "events.jsonl").read_text(encoding="utf-8").strip().split("\n")
-    events = [json.loads(l) for l in lines]
+    events = [json.loads(ln) for ln in lines]
     # 至少两轮（工具轮 + 终答轮）
     assert len(events) >= 2
     first = events[0]
