@@ -112,6 +112,40 @@ def test_generate_api_and_confirm() -> None:
     assert any(s["name"] == first["name"] for s in after)
 
 
+def test_generate_main_mode_forces_target_main() -> None:
+    """S58：main 模式用结构指导 prompt，候选 target 强制 main。"""
+    model = FakeSkillModel(GOOD_OUTPUT)  # 输出不含 target → 应强制 main
+    gen = SkillGenerator(model)
+    cands = gen.generate_main("废柴流开局：主角受辱三年，偶得金手指。")
+    assert cands, "应产出候选"
+    assert all(c["target"] == "main" for c in cands)
+    # prompt 用主循环结构指导（区别于文风 prompt）
+    assert "叙事组织指导" in model.prompts[0]
+    assert "结构/类型/节奏" in model.prompts[0]
+
+
+def test_generate_mode_writing_keeps_target() -> None:
+    """S58：writing 模式保持模型标的 target（缺省 writing）。"""
+    model = FakeSkillModel(GOOD_OUTPUT)
+    cands = SkillGenerator(model).generate("萧炎，三年之约已到。")
+    assert cands
+    assert all(c.get("target", "writing") in ("writing", "main", "both") for c in cands)
+
+
+def test_generate_api_main_mode() -> None:
+    """S58：API 传 mode=main 产出 target=main 候选。"""
+    model = FakeSkillModel(GOOD_OUTPUT)
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=model, db_path=db))
+    r = client.post(
+        "/api/skills/generate",
+        json={"source_text": "废柴流开局", "mode": "main"},
+    )
+    assert r.status_code == 200
+    assert r.json()["candidates"], "应产出候选"
+    assert all(c["target"] == "main" for c in r.json()["candidates"])
+
+
 def test_draft_promote_flow() -> None:
     """S54：后台草稿 → 查看 → 人工确认转正 / 拒绝删除。"""
     from anyspark.align import WritingSkillStore

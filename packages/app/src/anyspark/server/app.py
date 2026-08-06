@@ -407,11 +407,12 @@ class WritingSkillPatch(BaseModel):
 
 
 class SkillGenerateIn(BaseModel):
-    """S54：文风提炼生成 skill 候选（人工确认后入库）。"""
+    """S54/S58：生成 skill 候选（人工确认后入库）。"""
 
     source_text: str  # 待提炼正文（导入的小说/片段，真实原文）
-    hint: str = ""  # 可选指引（如"侧重打斗文风"）
+    hint: str = ""  # 可选指引（如"侧重打斗文风"/"侧重爽文节奏"）
     max_items: int = 5
+    mode: str = "writing"  # S58：writing（文风/叙事技法）/ main（类型/结构组织指导）
 
 
 class MoodDimIn(BaseModel):
@@ -1905,14 +1906,15 @@ def build_app(
     # ------------------------------------------------------------------
     @app.post("/api/skills/generate", response_model=dict[str, object])
     def generate_skill(req: SkillGenerateIn) -> dict[str, object]:
-        """S54：从原文提炼叙事技巧候选（人工确认后走 /api/skills 入库）。
+        """S54/S58：从原文提炼 skill 候选（人工确认后走 /api/skills 入库）。
 
-        场景：作者喜欢某小说文风 → 传导入原文 → 产出可执行 skill 候选
-        （负面约束+真实案例，描述性语言被 prompt 硬禁）。
+        mode=writing：文风/叙事技法（target=writing，写作调用用）；
+        mode=main：类型/结构组织指导（target=main，主循环用）。
         """
         if not req.source_text.strip():
             raise HTTPException(status_code=400, detail="source_text 不能为空")
-        candidates = skill_generator.generate(req.source_text, req.hint, req.max_items)
+        mode = req.mode if req.mode in ("writing", "main") else "writing"
+        candidates = skill_generator.generate(req.source_text, req.hint, req.max_items, mode=mode)
         if not candidates:
             raise HTTPException(status_code=502, detail="提炼失败（无有效候选）")
         # 去重：与现有 skill 名比对（避免重复生成）

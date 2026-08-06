@@ -717,3 +717,10 @@ v4 从空库起步，数据在 v4 内自然生长
 - **target 分流**：skills 统一表 + target（writing/main/both）——文风 skill 注入写作调用，
   类型 skill 注入主循环，both 两者；生成器/draft/转正全链路带 target
 - **哲学**：机制（target 分流/笔记约定/语义命名）硬编码；内容（skill 本体）自然语言
+
+### 12.21 类型 skill 生成器 + 多章毒化实证（S58）
+- **类型 skill**（target=main，主循环看）：结构/类型/节奏/组织指导——区别于文风 skill
+  （target=writing，写作调用看）。`generate_main()` + API mode=main，候选强制 target=main
+- **多章毒化实验实证**（multi_chapter）：同会话写 3 章——A 累积 3 幻觉（定位漂移+
+  设定矛盾）vs C 干净 0 幻觉——**C 架构（每章干净写作调用）免疫累积毒化**，S56 定案被验证
+- **哲学**：机制（mode 分流/retry 兜底/实验判分）硬编码；内容（指导文本/意图）模型生成

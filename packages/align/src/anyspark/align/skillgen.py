@@ -48,6 +48,29 @@ GENERATE_PROMPT = """你是小说文风提炼器。给定一部小说的正文�
 给定正文：
 """
 
+# 主循环视角的类型/结构指导生成提示（S58：target=main 的类型 skill）
+# 用途：给主循环看的叙事组织指导——不是句子技法（那是写作调用看的），
+# 而是结构/类型/节奏/组织层面的决策指导。
+GENERATE_PROMPT_MAIN = """你是小说结构分析器。给定一部小说的正文片段，提炼出**给主循环看的叙事组织指导**（skill）。
+
+【什么对规划最有指导价值】
+- 这是给"写作主循环"（负责决策：这本/这章怎么组织、何时推进、何时探索）看的，
+  不是给"写句子"看的。所以提炼的是**结构/类型/节奏/组织**层面的决策指导：
+  ① 类型惯例：「这类小说通常如何组织」（如"爽文：先压制再爆发，每3-5章一个小高潮"）
+  ② 节奏节拍：「本片段体现的节拍结构」（如"铺垫→冲突→余波，情绪起伏点在哪"）
+  ③ 组织规则：「主循环规划时该遵守什么」（如"开篇先立金手指再展开主线"）
+  ④ 探索信号：「何时该跳出模板探索」（如"当读者熟悉该套路时，用反套路制造新意"）
+- 不要提炼句子/用词技法（那是写作调用的事）——聚焦"怎么写这一段的结构"。
+
+【案例要求】
+- example 尽量引用给定正文的实际结构（如"第X段先压制，第Y段爆发"），或自拟结构示范。
+
+【输出格式】（严格 JSON 数组，不要其它文字）：
+[{"name": "指导名（如'爽文先压制再爆发'）", "description": "一句话索引", "content": "结构/类型/节奏/组织的可执行指导，2-3 句", "example": "原文结构示例或自拟示范 + 一句为何有效", "tags": "适用场景，逗号分隔，如'爽文,节奏'", "target": "main（主循环指导）"}]
+
+给定正文：
+"""
+
 
 def _parse_skills(raw: str) -> list[dict[str, str]]:
     """宽容解析模型输出的 skill JSON 数组（去围栏/取数组/过滤空）。"""
@@ -90,7 +113,11 @@ def _parse_skills(raw: str) -> list[dict[str, str]]:
 
 
 class SkillGenerator:
-    """叙事技巧生成器：原文 → 可执行 skill 候选（真实 LLM，无工具单次调用）。"""
+    """skill 生成器：原文 → 可执行 skill 候选（真实 LLM，无工具单次调用）。
+
+    S58：mode 区分——writing（文风/叙事技巧，target=writing）/
+    main（类型/结构指导，target=main，给主循环看）。
+    """
 
     def __init__(self, model: object) -> None:
         self._model = model
@@ -100,15 +127,18 @@ class SkillGenerator:
         source_text: str,
         hint: str = "",
         max_items: int = 5,
+        mode: str = "writing",
     ) -> list[dict[str, str]]:
         """从原文提炼 skill 候选。
 
         source_text：待提炼的正文（导入的小说章节/片段，真实原文）。
-        hint：可选指引（如"侧重打斗文风"），追加到提示。
+        hint：可选指引（如"侧重打斗文风"/"侧重爽文节奏"），追加到提示。
+        mode：S58——writing（文风/叙事技法）/ main（类型/结构组织指导，主循环看）。
         """
         if not source_text.strip():
             return []
-        prompt = GENERATE_PROMPT + f"\n{source_text[:6000]}\n"
+        prompt = GENERATE_PROMPT_MAIN if mode == "main" else GENERATE_PROMPT
+        prompt += f"\n{source_text[:6000]}\n"
         if hint.strip():
             prompt += f"\n额外指引：{hint.strip()}\n"
         prompt += f"\n提炼最多 {max_items} 条，输出 JSON 数组。"
@@ -116,7 +146,21 @@ class SkillGenerator:
             [Message(role="system", content=prompt)],
             [],
         )
-        return _parse_skills(output.text)[:max_items]
+        cands = _parse_skills(output.text)[:max_items]
+        # 模式一致性：main 模式的候选强制 target=main（防模型漏标）
+        if mode == "main":
+            for c in cands:
+                c["target"] = "main"
+        return cands
+
+    def generate_main(
+        self,
+        source_text: str,
+        hint: str = "",
+        max_items: int = 5,
+    ) -> list[dict[str, str]]:
+        """S58：类型/结构指导生成（target=main，给主循环看）。"""
+        return self.generate(source_text, hint, max_items, mode="main")
 
 
 def render_skill_candidates(candidates: list[dict[str, str]]) -> str:
