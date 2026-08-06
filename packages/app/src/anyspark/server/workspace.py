@@ -81,6 +81,29 @@ class Workspace:
     def manual_file(self, book_id: str = "main") -> Path:
         return self.project_dir(book_id) / "说明书.md"
 
+    # S58 项目智能体简介：给 AI 和用户看的项目总览（不是读者简介）
+    def brief_file(self, book_id: str = "main") -> Path:
+        return self.project_dir(book_id) / "简介.md"
+
+    def read_brief(self, book_id: str = "main") -> str:
+        """读项目简介（md 权威；不存在返回空串——未建档）。"""
+        f = self.brief_file(book_id)
+        if not f.exists():
+            return ""
+        try:
+            return f.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
+    def write_brief(self, book_id: str = "main", content: str = "") -> Path:
+        """写项目简介（覆盖；权威在文件）。"""
+        f = self.brief_file(book_id)
+        text = content.strip()
+        if not text.endswith("\n"):
+            text += "\n"
+        f.write_text(text, encoding="utf-8")
+        return f
+
     # -- 章节文件操作（权威存储） --
     def list_chapter_files(self, book_id: str = "main") -> list[dict[str, Any]]:
         """扫描章节目录，返回 [{order, title, filename, path}]（按 order 排序）。"""

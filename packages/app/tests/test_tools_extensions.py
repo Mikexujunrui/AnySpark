@@ -354,3 +354,66 @@ def test_search_chapters_fragment_number_accepts() -> None:
     # 数字字符串形式（向后兼容）
     r_str = _call(impl, keyword="陈渡", fragment="30")
     assert r_str.ok is True
+
+
+# ---------------------------------------------------------------------------
+# S58 项目智能体简介 + context_mode
+# ---------------------------------------------------------------------------
+
+
+def test_brief_crud_and_injection() -> None:
+    """S58 简介：API 读写 + 注入系统提示。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    model = ProbeModel2()
+    client = TestClient(build_app(model=model, db_path=str(_db())))
+    # 未建档 → 空
+    r0 = client.get("/api/brief")
+    assert r0.json()["exists"] is False
+    # 写入
+    brief = "世界观：雾城悬疑。主线：陈渡追查父亲之死。基调：克制冷峻。"
+    r1 = client.post("/api/brief", json={"content": brief})
+    assert r1.status_code == 200 and r1.json()["exists"] is True
+    # 读取
+    r2 = client.get("/api/brief")
+    assert r2.json()["content"] == brief
+    # 注入：chat 后系统提示含简介
+    client.post("/api/chat", json={"message": "写一段"})
+    assert any("项目简介" in p and "雾城悬疑" in p for p in model.prompts)
+
+
+def test_context_mode_fresh_skips_memory_plan() -> None:
+    """S58 context_mode=fresh：不注入场景记忆/剧情计划，保留心智/简介。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    model = ProbeModel2()
+    client = TestClient(build_app(model=model, db_path=str(_db())))
+    # 先建一条场景记忆 + 简介，再 fresh 会话
+    client.post("/api/brief", json={"content": "世界观：雾城。"})
+    client.post(
+        "/api/chat",
+        json={"message": "帮我写第一章开头：陈渡在雾城码头等船，雨很大。", "context_mode": "fresh"},
+    )
+    joined = "\n".join(model.prompts)
+    assert "项目简介" in joined and "雾城" in joined  # 简介保留
+    # fresh 不注入场景记忆/plan 标题（无归档时本就无，这里验证注入链不含它们）
+    assert "上次会话的延续" not in joined
+    assert "剧情计划" not in joined
+
+
+class ProbeModel2:
+    """记录 system prompt 的假模型（供注入断言）。"""
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+        for m in messages:
+            if m.role == "system":
+                self.prompts.append(m.content)
+                break
+        return __import__("anyspark.core.types", fromlist=["ModelOutput"]).ModelOutput(text="好的。")

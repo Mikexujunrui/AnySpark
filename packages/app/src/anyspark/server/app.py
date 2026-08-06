@@ -95,6 +95,14 @@ from anyspark.template import (
     PlotResolver,
     PlotStore,
 )
+from anyspark.workflow import (
+    WorkflowDef,
+    WorkflowEngine,
+    WorkflowGenerator,
+    WorkflowStore,
+    wait_approval,
+)
+from anyspark.workflow.engine import NodeResult, RunContext
 
 # 数据根：项目 data/（gitignored，绝不入库）
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
@@ -151,6 +159,9 @@ class ChatRequest(BaseModel):
     enable_codex: bool = False  # S48-P5 代码扩展 run_code（沙箱，默认关：安全按需点亮）
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood/plot 子集
+    # S58 上下文模式：auto(默认,有会话延续)/continue(显式延续)/fresh(干净,独立任务/探索)
+    # fresh = 不注入场景记忆/剧情计划（不受上次对话干扰），保留世界事实+心智习惯
+    context_mode: str = "auto"  # auto | continue | fresh
     # S47 运行时模型选择：缺省用注册表当前激活模型；thinking 覆盖该模型默认思考强度
     model_id: str | None = None  # 指定用哪个已配置模型（未配置/不存在 → 400）
     thinking: str | None = None  # 思考强度覆盖：off/low/medium/high/xhigh/max（None=用模型配置）
@@ -257,6 +268,19 @@ class ManualEntryPatch(BaseModel):
     content: str | None = None
     locked: bool | None = None
     category: str | None = None
+
+
+class BriefIn(BaseModel):
+    """S58 项目智能体简介（给 AI 和用户看的项目总览，非读者简介）。"""
+
+    content: str
+    book_id: str = "main"
+
+
+class BriefGenerateIn(BaseModel):
+    """S58 从现有项目数据自动生成简介草案（人工确认后生效）。"""
+
+    book_id: str = "main"
 
 
 class SignalIn(BaseModel):
@@ -442,6 +466,27 @@ class ImpactIn(BaseModel):
 
     chapter_order: int
     entities: list[str] | None = None
+
+
+class WorkflowIn(BaseModel):
+    """S59：工作流定义写入（模板入库）。模块级（S13 坑：函数内定义 ForwardRef 失败）。"""
+
+    name: str
+    description: str = ""
+    nodes: list[dict[str, Any]]
+    edges: list[dict[str, Any]] = []
+
+
+class WorkflowGenerateIn(BaseModel):
+    """S59：AI 生成工作流（描述目标 → 草稿，人工确认转正）。"""
+
+    goal: str
+
+
+class WorkflowRunIn(BaseModel):
+    """S59：运行工作流（绑定书，快照冻结）。"""
+
+    book_id: str = "main"
 
 
 class ChapterPlanIn(BaseModel):
@@ -804,6 +849,73 @@ def build_app(
     mood_dims = MoodDimStore(real_db)  # S50 氛围维度内容化（滑块形状硬编码，维度可增删改）
     plans = StoryPlanStore(real_db)  # S46 剧情计划（计划→执行）
 
+    # S59 工作流扩展包（可选增强，默认关）：结构化流程（顺序/分支/循环）+
+    # 断点恢复 + AI 生成（草稿→人工确认转正）。runner 由组合根注入：
+    # agent 节点=干净单次 LLM 调用；script 节点=确定性函数（read/review）；
+    # approval=等待人工。
+    workflow_store = WorkflowStore(real_db)
+    workflow_generator = WorkflowGenerator(model)
+
+    def _wf_run_agent(ctx: RunContext, node: Any) -> NodeResult:
+        """agent 节点：干净单次 LLM 调用（无对话历史/工具记录——对齐 S56 干净写作）。"""
+        instruction = str(node.params.get("instruction") or "")
+        system = str(node.params.get("system_prompt") or "")
+        messages: list[Any] = []
+        if system:
+            messages.append(Message(role="system", content=system))
+        messages.append(Message(role="user", content=instruction))
+        out = model.respond(messages, [])
+        text = (out.text or "").strip()
+        if not text:
+            return NodeResult(error="agent 节点空输出")
+        usage = getattr(out, "usage", None)
+        tokens = int(getattr(usage, "total_tokens", 0) or 0)
+        return NodeResult(output=text, token_usage=tokens)
+
+    def _wf_run_script(ctx: RunContext, node: Any) -> NodeResult:
+        """script 节点：确定性函数（内置白名单）。"""
+        fn = str(node.params.get("function") or "")
+        if fn == "read_chapter":
+            title = str(node.params.get("chapter_title") or "")
+            ch = next((c for c in chapters.list_by_book(ctx.book_id) if c.title == title), None)
+            if ch is None:
+                return NodeResult(error=f"章节不存在: {title}")
+            return NodeResult(output=ch.content)
+        if fn == "review_chapter":
+            title = str(node.params.get("chapter_title") or "")
+            ch = next((c for c in chapters.list_by_book(ctx.book_id) if c.title == title), None)
+            if ch is None:
+                return NodeResult(error=f"章节不存在: {title}")
+            report = run_review(model, ch.title, ch.content[:20000])
+            return NodeResult(
+                output=f"硬伤数: {report.hard_count}\n" + report.render()
+            )
+        return NodeResult(error=f"未注册的 script 函数: {fn}")
+
+    def _wf_run_approval(ctx: RunContext, node: Any) -> NodeResult:
+        """approval 节点：抛等待信号（任务置 waiting_approval，人工 approve 后续跑）。"""
+        wait_approval()
+        return NodeResult(output="approved")
+
+    def _wf_runner(ctx: RunContext, node: Any) -> NodeResult:
+        if node.kind == "agent":
+            return _wf_run_agent(ctx, node)
+        if node.kind == "script":
+            return _wf_run_script(ctx, node)
+        if node.kind == "approval":
+            return _wf_run_approval(ctx, node)
+        return NodeResult(error=f"未知节点类型: {node.kind}")
+
+    def _wf_judge(prompt: str, ctx: RunContext) -> bool:
+        """model 型条件：自然语言问题 → 模型判断 yes/no。"""
+        out = model.respond([Message(role="user", content=prompt)], [])
+        text = (out.text or "").strip().lower()
+        return text.startswith("y") or "是" in text[:4] or "通过" in text[:4]
+
+    workflow_engine = WorkflowEngine(
+        workflow_store, _wf_runner, model_judge=_wf_judge
+    )
+
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
         CORSMiddleware,
@@ -830,6 +942,7 @@ def build_app(
         enable_domain: bool = True,
         enable_codex: bool = False,
         skip_inject: set[str] | None = None,
+        context_mode: str = "auto",
         model_id: str | None = None,
         thinking: str | None = None,
     ) -> Agent:
@@ -908,15 +1021,23 @@ def build_app(
             m = model  # 共享 model（测试注入或默认真实）；温度由构造决定
         # 注入块装配：核心注入默认全开，skip_inject 可细粒度关闭（S15 增强按需）
         skip = skip_inject or set()
+        # S58 context_mode：fresh = 干净上下文（独立任务/探索）——
+        # 不注入场景记忆/剧情计划（不受上次对话干扰）；心智习惯/世界事实保留。
+        if context_mode == "fresh":
+            skip = skip | {"memory", "plan"}
         full_prompt = system_prompt
+        # S58 项目智能体简介：给 AI 和用户看的项目总览（世界观/主线/主角/基调/已固化设定/进展）
+        # ——常驻注入（小、高价值、定调），用户可直接编辑 data/<book>/简介.md
+        brief_block = workspace.read_brief(book_id)
+        if "brief" not in skip and brief_block:
+            full_prompt = f"# 项目简介\n{brief_block}\n\n" + full_prompt
         # S53 心智模型=会话规划器：协作约定注入系统提示顶部（怎么配合我）
         collab_block = session_plan.collab_block()
         if "manual" not in skip and collab_block:
             full_prompt = collab_block + "\n\n" + full_prompt
-        # 图谱注入：当前时空点已知事实（AI 事实源，模型局限弥补）
-        graph_block = graph_injector.build_block(book_id)
-        if "graph" not in skip and graph_block:
-            full_prompt = full_prompt + "\n\n" + graph_block
+        # S58 图谱不再常驻注入：改由 graph_query 工具按需查询（网络小说上下文贵，
+        # 全量注入占 token；AI 需要世界事实时自己查）。skip_inject 保留 'graph' 兼容。
+        # 此问题封入 PROGRESS（图谱注入瘦身 vs 工具查询 待后续解决）
         # 能动性注入：当前档位（机制 2；职责边界：档位只管能动性，心智模型独立系统）
         agency_block = build_agency_block(current)
         if "agency" not in skip and agency_block:
@@ -1168,6 +1289,7 @@ def build_app(
             enable_domain=req.enable_domain,
             enable_codex=req.enable_codex,
             skip_inject=set(req.skip_inject),
+            context_mode=req.context_mode,
             model_id=req.model_id,
             thinking=req.thinking,
         )
@@ -1316,6 +1438,7 @@ def build_app(
                 enable_domain=req.enable_domain,
                 enable_codex=req.enable_codex,
                 skip_inject=set(req.skip_inject),
+                context_mode=req.context_mode,
                 model_id=req.model_id,
                 thinking=req.thinking,
             )
@@ -1427,6 +1550,70 @@ def build_app(
     def delete_manual(entry_id: str) -> dict[str, bool]:
         manual.delete(entry_id)
         return {"ok": True}
+
+    # S58 项目智能体简介（给 AI 和用户看的项目总览，非读者简介）
+    @app.get("/api/brief", response_model=dict[str, Any])
+    def get_brief(book_id: str = "main") -> dict[str, Any]:
+        """读项目简介（md 权威；未建档返回空 + 提示）。"""
+        content = workspace.read_brief(book_id)
+        return {"book_id": book_id, "content": content, "exists": bool(content)}
+
+    @app.post("/api/brief", response_model=dict[str, Any])
+    def save_brief(req: BriefIn) -> dict[str, Any]:
+        """写项目简介（用户/前端可编辑，权威在 md 文件）。"""
+        workspace.write_brief(req.book_id, req.content)
+        return {"book_id": req.book_id, "content": req.content.strip(), "exists": True}
+
+    @app.post("/api/brief/generate", response_model=dict[str, Any])
+    def generate_brief(req: BriefGenerateIn) -> dict[str, Any]:
+        """从现有项目数据自动生成简介草案（人工确认后写回）。
+
+        素材：已固化设定约束 + 已选方向 + 设定档 + 当前进展（章节数/场景记忆）。
+        真实 LLM 提炼成总览；失败返回空提示。
+        """
+        try:
+            archive = ProjectArchive(real_db)
+            constraints = archive.constraints(req.book_id)
+            directions = archive.directions(req.book_id)[:5]
+            settings_items = settings.list(req.book_id)
+            ch_count = len(chapters.list_by_book(req.book_id))
+            last_scene = memory_store.latest(req.book_id)
+            parts = [
+                "已固化设定约束：" + ("；".join(constraints) if constraints else "（无）"),
+                "已选方向："
+                + (
+                    "; ".join(
+                        f"{d.get('title', '')}: {d.get('summary', '')[:80]}" for d in directions
+                    )
+                    if directions
+                    else "（无）"
+                ),
+                "设定档条目："
+                + (
+                    "; ".join(f"{s.name}" for s in settings_items[:10])
+                    if settings_items
+                    else "（无）"
+                ),
+                f"当前进展：已写 {ch_count} 章"
+                + (f"；最近：{last_scene.content[:120]}" if last_scene else ""),
+            ]
+            prompt = (
+                "你是小说项目简介生成器。根据下面的项目现状素材，生成一份『项目智能体简介』\n"
+                "（给 AI 和用户看的协作总览，不是读者简介）。\n"
+                "包含：一句话世界观 / 主线方向 / 主要角色 / 叙事基调 / "
+                "已固化设定 / 当前进展 / 写作注意事项。\n"
+                "用明确无歧义的自然语言，总长 300 字以内。\n\n素材：\n"
+                + "\n".join(parts)
+            )
+            output = model.respond(
+                [Message(role="system", content=prompt)], []
+            )
+            draft = (output.text or "").strip()
+            if not draft:
+                return {"draft": "", "note": "生成失败（空输出）"}
+            return {"draft": draft, "note": ""}
+        except Exception as exc:
+            return {"draft": "", "note": f"生成失败: {exc}"}
 
     @app.post("/api/signals")
     def record_signal(req: SignalIn) -> dict[str, Any]:
@@ -2594,6 +2781,105 @@ def build_app(
             "relations": len(ext.relations),
             "events": len(ext.events),
         }
+
+    # ------------------------------------------------------------------
+    # S59 工作流 API（可选增强，默认关；模板与书解耦可迁移）
+    # ------------------------------------------------------------------
+    @app.get("/api/workflows", response_model=list[dict[str, Any]])
+    def list_workflows() -> list[dict[str, Any]]:
+        return workflow_store.list_templates()
+
+    @app.post("/api/workflows", response_model=dict[str, Any])
+    def create_workflow(req: WorkflowIn) -> dict[str, Any]:
+        wf = WorkflowDef.from_dict(
+            {
+                "name": req.name,
+                "description": req.description,
+                "nodes": req.nodes,
+                "edges": req.edges,
+            }
+        )
+        errors = wf.validate()
+        if errors:
+            raise HTTPException(status_code=422, detail={"errors": errors})
+        workflow_store.add_template(wf)
+        return wf.to_dict()
+
+    @app.post("/api/workflows/generate", response_model=dict[str, Any])
+    def generate_workflow(req: WorkflowGenerateIn) -> dict[str, Any]:
+        """AI 生成工作流候选 → 草稿表（未生效，人工确认 promote 转正）。"""
+        try:
+            wf = workflow_generator.generate(req.goal)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        workflow_store.add_draft(wf, hint=req.goal)
+        return wf.to_dict()
+
+    @app.get("/api/workflows/drafts", response_model=list[dict[str, Any]])
+    def list_workflow_drafts() -> list[dict[str, Any]]:
+        return workflow_store.list_drafts()
+
+    @app.post("/api/workflows/drafts/{draft_id}/promote", response_model=dict[str, Any])
+    def promote_workflow_draft(draft_id: str) -> dict[str, Any]:
+        wf = workflow_store.promote_draft(draft_id)
+        if wf is None:
+            raise HTTPException(status_code=404, detail="草稿不存在")
+        return wf.to_dict()
+
+    @app.delete("/api/workflows/drafts/{draft_id}", response_model=dict[str, bool])
+    def delete_workflow_draft(draft_id: str) -> dict[str, bool]:
+        if not workflow_store.delete_draft(draft_id):
+            raise HTTPException(status_code=404, detail="草稿不存在")
+        return {"ok": True}
+
+    @app.get("/api/workflows/tasks", response_model=list[dict[str, Any]])
+    def list_workflow_tasks() -> list[dict[str, Any]]:
+        return workflow_store.list_tasks()
+
+    @app.get("/api/workflows/tasks/{task_id}", response_model=dict[str, Any])
+    def get_workflow_task(task_id: str) -> dict[str, Any]:
+        task = workflow_store.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        return task
+
+    @app.post("/api/workflows/tasks/{task_id}/approve", response_model=dict[str, Any])
+    def approve_workflow_task(task_id: str, req: dict[str, str]) -> dict[str, Any]:
+        """approval 节点人工确认：{"decision": "ok"|"reject"}。"""
+        try:
+            return workflow_engine.approve(task_id, decision=req.get("decision", "ok"))
+        except (KeyError, ValueError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/workflows/{workflow_id}", response_model=dict[str, Any])
+    def get_workflow(workflow_id: str) -> dict[str, Any]:
+        wf = workflow_store.get_template(workflow_id)
+        if wf is None:
+            raise HTTPException(status_code=404, detail="工作流不存在")
+        return wf.to_dict()
+
+    @app.delete("/api/workflows/{workflow_id}", response_model=dict[str, bool])
+    def delete_workflow(workflow_id: str) -> dict[str, bool]:
+        if not workflow_store.delete_template(workflow_id):
+            raise HTTPException(status_code=404, detail="工作流不存在")
+        return {"ok": True}
+
+    @app.post("/api/workflows/{workflow_id}/run", response_model=dict[str, Any])
+    def run_workflow(workflow_id: str, req: WorkflowRunIn) -> dict[str, Any]:
+        """运行工作流：冻结定义快照 → 后台线程执行（不阻塞请求）。"""
+        wf = workflow_store.get_template(workflow_id)
+        if wf is None:
+            raise HTTPException(status_code=404, detail="工作流不存在")
+        task_id = workflow_store.create_task(wf, book_id=req.book_id, template_id=workflow_id)
+
+        def _run() -> None:
+            try:
+                workflow_engine.run_task(task_id)
+            except Exception as exc:
+                logger.warning("工作流后台执行异常 %s: %s", task_id, exc)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return {"task_id": task_id, "status": "queued"}
 
     return app
 
