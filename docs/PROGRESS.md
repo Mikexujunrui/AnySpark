@@ -23,8 +23,8 @@
 ## 现状快照（接手 AI 必读）
 
 - **设计实现审计报告**：见 `docs/AUDIT-V1.md`（基准 `a08894d`：S32-S46 实测演进复核）
-- **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯）
-- **当前状态**：S0-S46 全部完成，pytest 207 全绿，单元层 benchmark 17/17（S32-S46 回归）
+- **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22 为 S59 工作流）
+- **当前状态**：S0-S58 全部完成 + **S59 工作流扩展包**（新增 packages/workflow），pytest 334 全绿，总闸全绿
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）
   2. **对比层回归**：S18 三任务（设定忠实/长书一致/偏好记忆）在 S32-S46 后重跑（成本 ~20min）
@@ -1471,3 +1471,64 @@ align 60 + app 20 全过；ruff/mypy 全绿。
 align 60 + app 20 全过；ruff 全绿；真实链路 3 项全过。
 
 ### 注：并行智能体 S57 workflow 包未提交（其 mypy 有错，非本次范围）
+
+---
+
+## S59 工作流扩展包（已完成 ✅）
+
+**背景（主人需求）**：① 固定分析流程（如章节质量分析）② 可迁移改书标准（某作者一套改书打法换书复用）。DESIGN 去留清单原将"工作流"列为降权可选增强包——本次落地。主人拍板：**开源路线**（AGPL 约束解除，但仍不直接搬 DeterminFlow 代码——耦合面问题：拖入 49K 行运行时 vs 只要 ~2K 行骨架）；分支/循环要做（条形分支+嵌套循环常见）；AI 生成优先；前端画布暂不做但定义格式为其预留。
+
+**设计（DESIGN §12.22 已定稿）**：
+- **结构化三结构**：顺序 + gate 分支 + loop 循环（非通用 DAG 业务引擎——写作场景用不到任意图/子流程/并发汇聚）
+- **节点**：agent（干净单次 LLM 调用）/ script（确定性函数白名单）/ approval（人工确认）/ gate（条件分支）/ loop（循环）
+- **条件两种**：硬规则（{{var}} 比较 + AND/OR/NOT + contains，自研解析器）/ 模型判断（自然语言）
+- **断点恢复**：任务冻结定义快照；每节点状态落盘 SQLite；done 跳过续跑；loop 记录迭代数
+- **失败策略**：auto_retry_count / interval / fail_auto_skip（借鉴 DeterminFlow 设计，重写实现）
+- **AI 生成**：workflow_drafts 草稿表 + 人工确认 promote（skillgen 同款闸门）
+- **记账**：每节点 token_usage
+
+**实现（packages/workflow，依赖 core 单向）**：
+- `definition.py`（WorkflowDef/Node/Edge/FailPolicy + validate）/ `condition.py`（表达式解析）/ `store.py`（SQLite 模板/草稿/任务/节点状态）/ `engine.py`（WorkflowEngine 三结构 + 断点恢复 + 失败策略 + 记账）/ `generator.py`（WorkflowGenerator + NODE_CATALOG）
+- 后端接线：`/api/workflows` CRUD + `/generate`（AI 生成→草稿）+ `/drafts/{id}/promote` + `/tasks/{id}` + `/approve`；app.py 组合根装配 engine（runner 闭包注入：agent=干净 LLM 调用 + {{var}} 插值，script=read_chapter/review_chapter/noop 白名单，approval=wait_approval）
+
+**门禁**：ruff 0 + mypy 0 + pytest **334**（workflow 15 + app API 2，全量回归）总闸全绿；前端未动（tsc/eslint/build 保持绿）
+
+**真实链路验证（哈利波特原著第一部，隔离库 data/dev/runs/s59_wf.db）**：
+- AI 生成"哈利波特第一章质量把关"——**AI 自主设计**：script读章节→loop(审读→gate→改写→复检)→approval，变量插值（{{chapter_text}}/{{review}}）全部正确
+- 真实执行：读章→审读发现**真实设定冲突**（"猫看地图"时间线混淆，硬伤数1）→gate 走改写→改写修复→循环 3 轮（max_iterations 防死循环）→approval 作者确认→approve 后 done
+- **真实链路暴露并修复 3 个接缝缺陷**（验证的价值）：
+  1. agent 节点拿不到章节内容 → 加 {{var}} 变量插值（_wf_resolve）+ chapter_title 自动附正文
+  2. 生成器 prompt 不引导读章节 → 加规则 7/8（先 read_chapter 再 agent，output_key 命名约定）
+  3. AI 幻觉章节标题 → read_chapter 模糊匹配（精确→双向包含→第X章号提取）
+
+**遗留（按需后补）**：前端画布（nodes+edges 格式已预留）；script 函数白名单扩展（如写回章节/批量审读）；model 型条件真实链路未测（judge 已接，YAGNI）；workflow 的 agent 工具（Agent 自主调 workflow_run）未做（API 已够）
+
+## S58c 会话继承 fork（参考 pi forkFrom，已完成 ✅）
+
+### 背景（主人需求）
+"默认不继承场景记忆；会话内增加一个'继承'功能——出现一个继承该会话的新会话，且继承链条要清晰。"参考 pi 的 /fork（从历史消息派生新会话，parent 指针链）。
+
+### 实现（复用 pi 逻辑）
+| pi 机制 | 我们落地 |
+|--------|---------|
+| forkFrom: 新 header 记 parentSession + 复制源条目 | `store.fork()`: 新会话 parent_id=源 + 复制源消息（SQLite/InMemory）|
+| 会话树 id/parentId 链条 | conversations 表加 parent_id/fork_point |
+| /fork 独立新会话 | POST /api/conversations/{id}/fork → 返回 chain=[新,源,源的源...] |
+| GET 会话列表 | /api/conversations 返回含 parent_id/fork_point/message_count |
+
+### 与 S58b 配合（默认不继承）
+- 普通新会话默认干净（不注入场景记忆/plan）
+- fork 出的新会话**需要 context_mode=continue** 才注入场景记忆/计划（用户显式继承时才有）
+- 即：fork = 建"带着上下文的新会话"的容器；continue = 注入"进程状态"（记忆/计划）的开关
+
+### 真实链路验证（deepseek-v4-pro）
+源会话写《第七章 石墙》→ fork（继承 9 条消息，parent 链条清晰）→ continue 续写第七章后半：
+**完美衔接源上下文**（石墙刻字/字在变化/怀表停走伏笔——"怀表开始走针=承接前文停走伏笔"）✓
+——这就是"从上次会话接着聊"：fork 提供链条，continue 提供进程记忆，两者合起来 = 继承闭环。
+
+### 待办
+- 前端：会话内"继承并新开会话"按钮 + 会话列表链条显示（UI 层，后端 API 已就绪）
+- fork 点选择器（参考 pi /fork 从任意历史消息分叉）——当前只支持从末尾 fork，后续可扩展
+
+### 验证
+230 测试全过（含 fork 存储/API/链条）；ruff/mypy 全绿（本次 3 文件）。
