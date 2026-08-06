@@ -68,13 +68,12 @@ from anyspark.models.registry import (
 )
 from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
+from anyspark.server.recorder import RunRecorder
 from anyspark.server.stats import compute_stats
+from anyspark.server.toolkit import build_toolkit
 from anyspark.server.tools_extensions import (
     ExtensionToolStore,
-    execute_extension,
-    tool_spec_from_ext,
 )
-from anyspark.server.tools_writing import register_writing_tools
 from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import (
@@ -157,6 +156,15 @@ class RoleCardIn(BaseModel):
 
     name: str
     content: str
+
+
+class ToolUpdateIn(BaseModel):
+    """S49 扩展工具更新（改后自动回 draft 重新批准）。"""
+
+    name: str | None = None
+    description: str | None = None
+    params_json: str | None = None
+    code: str | None = None
 
 
 class ToolRegisterIn(BaseModel):
@@ -429,6 +437,12 @@ class SteerIn(BaseModel):
 # ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
+def _now_iso_rec() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(UTC).isoformat()
+
+
 def build_app(
     model: Model | None = None,
     db_path: str | Path | None = None,
@@ -459,6 +473,15 @@ def build_app(
             workspace = Workspace(root=Path(real_db).parent / "workspace")
     chapters = ChapterStore(real_db)
     ext_tools = ExtensionToolStore(real_db)  # S48-P4/B：扩展工具注册表（人工批准生效）
+    # S49 会话运行记录：与 db 配对隔离（同 workspace 逻辑——防测试污染全局 records）
+    if real_db == ":memory:":
+        import tempfile as _tf
+
+        recorder = RunRecorder(root=Path(_tf.mkdtemp()))
+    elif db_path is None:
+        recorder = RunRecorder()
+    else:
+        recorder = RunRecorder(root=Path(real_db).parent / "records")
     manual = ManualStore(real_db)
     signals = SignalStore(real_db)
     archive = ProjectArchive(real_db)
@@ -651,83 +674,24 @@ def build_app(
         model_id: str | None = None,
         thinking: str | None = None,
     ) -> Agent:
-        registry = ToolRegistry()
-        register_writing_tools(registry, chapters, workspace=workspace)
-        # S32：探索工具无条件注册（修复核心——方向模糊时 Agent 可自觉探索；仅此工具常驻，
-        # 其余扩展（查资料/自查）按 enable_extras 点亮，防无关调用干扰主链路（本次实测踩坑））
-        from anyspark.server.tools_extras import (
-            make_check_implementer,
-            make_explore_implementer,
-            make_read_material_implementer,
+        # 工具装配（S52 抽出为独立模块 toolkit.build_toolkit——组合根接口化，
+        # 与 HTTP 编排解耦；写作/探索常驻 + domain/codex/extras/search 按开关点亮）
+        registry = build_toolkit(
+            ToolRegistry(),
+            chapters=chapters,
+            workspace=workspace,
+            model=model,
+            graph=graph,
+            plots=plots,
+            plans=plans,
+            settings=settings,
+            materials=materials,
+            ext_tools=ext_tools,
+            enable_domain=enable_domain,
+            enable_codex=enable_codex,
+            enable_extras=enable_extras,
+            enable_search=enable_search,
         )
-
-        explore_spec, explore_impl = make_explore_implementer(model)
-        registry.register(explore_spec, explore_impl)
-        # S48-P2 领域工具：图谱查证/伏笔登记/伏笔列表/计划列表/计划推进/设定查证
-        # 默认开（小说写作必需能力）；skip_inject 无关（工具注册非注入）
-        if enable_domain:
-            from anyspark.server.tools_domain import (
-                make_graph_query_implementer,
-                make_ingest_implementer,
-                make_plan_implementer,
-                make_plot_implementer,
-                make_read_context_implementer,
-                make_register_tool_implementer,
-                make_roleplay_implementer,
-                make_search_chapters_implementer,
-                make_setting_implementer,
-            )
-
-            gq_spec, gq_impl = make_graph_query_implementer(graph)
-            registry.register(gq_spec, gq_impl)
-            ig_spec, ig_impl = make_ingest_implementer(workspace, chapters, materials, model)
-            registry.register(ig_spec, ig_impl)
-            plot_specs, plot_impls = make_plot_implementer(plots)
-            for s, i in zip(plot_specs, plot_impls, strict=True):
-                registry.register(s, i)
-            plan_specs, plan_impls = make_plan_implementer(plans)
-            for s, i in zip(plan_specs, plan_impls, strict=True):
-                registry.register(s, i)
-            st_spec, st_impl = make_setting_implementer(settings)
-            registry.register(st_spec, st_impl)
-            rp_spec, rp_impl = make_roleplay_implementer(workspace, graph, model)
-            registry.register(rp_spec, rp_impl)
-            sc_spec, sc_impl = make_search_chapters_implementer(chapters)
-            registry.register(sc_spec, sc_impl)
-            rc_spec, rc_impl = make_read_context_implementer(chapters)
-            registry.register(rc_spec, rc_impl)
-            rt_spec, rt_impl = make_register_tool_implementer(ext_tools)
-            registry.register(rt_spec, rt_impl)
-        # S48-P4/B 扩展工具注册表：已批准（active）的扩展注入工具集（无需重启生效）
-        from anyspark.server.codex import make_data_env
-
-        _ext_data_env = make_data_env(workspace, chapters, graph)
-
-        def _make_ext_impl(e: Any, env: dict[str, Any]) -> Any:
-            def impl(spec_: Any, arguments: dict[str, Any]) -> Any:
-                return execute_extension(e, arguments, env)
-
-            return impl
-
-        for _ext in ext_tools.active_tools():
-            registry.register(tool_spec_from_ext(_ext), _make_ext_impl(_ext, _ext_data_env))
-        # S48-P5 代码扩展（沙箱 run_code）：默认关，按需点亮（固定工具做不了的自定义处理）
-        if enable_codex:
-            from anyspark.server.tools_domain import make_codex_implementer
-
-            cx_spec, cx_impl = make_codex_implementer(workspace, chapters, graph)
-            registry.register(cx_spec, cx_impl)
-        if enable_extras:
-            material_spec, material_impl = make_read_material_implementer(materials)
-            registry.register(material_spec, material_impl)
-            check_spec, check_impl = make_check_implementer(model)
-            registry.register(check_spec, check_impl)
-        # 网络搜索工具：按需注册（S15 起默认关——写作主链路不背考据能力，需要时点亮）
-        if enable_search:
-            from anyspark.server.tools_web import make_search_implementer
-
-            search_spec, search_impl = make_search_implementer()
-            registry.register(search_spec, search_impl)
         # 能动级别：显式传入 > 已存档位（S35：档位记录，温度入档；兼容旧数字=排序位）
         if agency_level is None:
             current = agency.get_current(book_id)
@@ -987,6 +951,23 @@ def build_app(
             conv = agent.store.create()
             conv_id = conv.id
 
+        # S49 运行记录：完整上下文+思维链落 data/records/<conv>/（修 bug/训练素材）
+        recorder.attach(
+            agent,
+            conv_id,
+            {
+                "ts": _now_iso_rec(),
+                "endpoint": "chat",
+                "model": getattr(model, "model_name", "?"),
+                "temperature": req.temperature,
+                "agency_level": req.agency_level,
+                "mood": req.mood,
+                "enable_domain": req.enable_domain,
+                "enable_codex": req.enable_codex,
+                "thinking": req.thinking,
+                "model_id": req.model_id,
+            },
+        )
         # 协作式取消（S21 移植 pi 的 AbortSignal）：注册 token，/api/chat/cancel 可中断
         token = CancellationToken()
         _active_tokens[conv_id] = token
@@ -1099,6 +1080,24 @@ def build_app(
             if not conv_id:
                 conv = agent.store.create()
                 conv_id = conv.id
+
+            # S49 运行记录（流式）
+            recorder.attach(
+                agent,
+                conv_id,
+                {
+                    "ts": _now_iso_rec(),
+                    "endpoint": "chat_stream",
+                    "model": getattr(model, "model_name", "?"),
+                    "temperature": req.temperature,
+                    "agency_level": req.agency_level,
+                    "mood": req.mood,
+                    "enable_domain": req.enable_domain,
+                    "enable_codex": req.enable_codex,
+                    "thinking": req.thinking,
+                    "model_id": req.model_id,
+                },
+            )
 
             def on_event(e: Any) -> None:
                 payload = e.payload
@@ -1879,6 +1878,33 @@ def build_app(
             raise HTTPException(status_code=404, detail="扩展工具不存在")
         logger.info("扩展工具已批准生效: %s", t.name)
         return {"ok": True, "id": t.id, "name": t.name, "status": "active"}
+
+    @app.patch("/api/tools/{tool_id}", response_model=dict[str, Any])
+    def update_ext_tool(tool_id: str, req: ToolUpdateIn) -> dict[str, Any]:
+        """更新扩展工具（S49：改代码/描述/参数）。安全：改后自动回 draft 重新批准。"""
+        if req.params_json is not None:
+            try:
+                params = json.loads(req.params_json)
+                if not isinstance(params, list):
+                    raise ValueError("params 必须是 JSON 数组")
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"params 解析失败：{exc}") from exc
+        else:
+            params = None
+        if req.code is not None and ("def run(" not in req.code):
+            raise HTTPException(
+                status_code=400, detail="工具代码必须定义 def run(args: dict) -> str 函数"
+            )
+        t = ext_tools.update(tool_id, req.name, req.description, params, req.code)
+        if t is None:
+            raise HTTPException(status_code=404, detail="扩展工具不存在")
+        return {
+            "ok": True,
+            "id": t.id,
+            "name": t.name,
+            "status": t.status,
+            "note": "已更新，需重新人工批准后才生效",
+        }
 
     @app.post("/api/tools/{tool_id}/disable", response_model=dict[str, Any])
     def disable_ext_tool(tool_id: str) -> dict[str, Any]:

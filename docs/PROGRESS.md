@@ -1125,3 +1125,28 @@
 **修复后**：**17/17 全过**（T1 F1 0.714/T5 时序 3/3/T13 档位 1.0 vs 0.078/T15 记忆 1.0 等全部保持）——S32-S46 未破坏任何单元层机制。
 
 **教训**：benchmark 断言与 API 契约耦合——API 演进（S35）需同步回归 benchmark（本次暴露，已修）。
+
+---
+
+## S52 架构评估：工具装配接口化（已完成 ✅）
+
+### 背景（评估结论）
+主人问"当前工具存储模式 + 架构要不要改"，基于实测代码（非猜测）评估：
+- **不拆分包骨架**：core/explore/align/graph/template/app 包边界干净（唯一问题 app 最重 6301 行），符合 DESIGN §4 YAGNI——不做 pi 式"挂载包"（已有等效机制：ToolRegistry + enable_* 开关 + ExtensionTool 运行时表）。
+- **唯一该做的**：把工具装配从 `app.py` 的 `_make_agent` 内联块抽出为独立模块（组合根接口化，解耦 HTTP 编排）。让任何入口（HTTP/CLI/桌面）+ 将来新增工具分组（如 MRAgent 主动检索独立 group）能复用同一套装配。
+
+### 实现（纯搬移，零行为变更）
+- 新增 `packages/app/src/anyspark/server/toolkit.py`：`build_toolkit(registry, *, chapters/workspace/model/graph/plots/plans/settings/materials/ext_tools, enable_domain/codex/extras/search)`——注册顺序与开关语义与原先内联块**逐字对应**。
+- `app.py::_make_agent`：内联 ~74 行工具装配 → `registry = build_toolkit(ToolRegistry(), ...)`。
+- 清理 app.py 中随搬移变为未使用的导入（`execute_extension`/`tool_spec_from_ext`；`register_writing_tools`）。
+
+### 验证
+- ruff ✅ / mypy ✅（toolkit.py & app.py 均通过）
+- pytest：除 2 个**预存失败**外全绿（见下）。
+
+### ⚠️ 注意（与本次无关的预存脏状态）
+本次改动只触 app.py + 新增 toolkit.py。但工作树有**大量未提交的预存改动**（`core/loop.py` 969 行改、`codex.py`/`tools_extensions.py`/`deepseek.py`/`types.py` 等），其中 `core/loop.py` 存在**预存 bug**：
+- `_loop` 的 except 分支（line ~219）引用 `output`，但模型首轮调用失败时 `output` 未赋值 → `UnboundLocalError`，导致 `test_loop.py::test_model_failure_keeps_context_balanced` 与 `test_chat_stream_error_frame` 失败。
+- **非本次重构引起**（git diff 证明 loop.py 非我所改；`codex.py` 的间歇 `Path` NameError 亦来自预存改动，现不复现）。
+
+> 决策：架构骨架按 YAGNI 冻结，不动。等出现**第二个**复用工具装配的场景（web 版/CLI 独立入口/MRAgent 主动检索开关）再做进一步拆分。`core/loop.py` 的 UnboundLocalError 需单独修（S53 建议优先）。

@@ -209,6 +209,8 @@ class DeepSeekModel:
             truncated = bool(response.choices and response.choices[0].finish_reason == "length")
 
             text = message.content or ""
+            # S49：思维链（reasoning_content）保留进 ModelOutput（只进运行记录，不注入上下文）
+            reasoning = getattr(message, "reasoning_content", None) or ""
             tool_calls: list[ToolCall] = []
             if message.tool_calls:
                 for tc in message.tool_calls:
@@ -220,7 +222,9 @@ class DeepSeekModel:
                         args = {"_raw": fn.arguments, "_malformed": True}
                     tool_calls.append(ToolCall(name=fn.name, arguments=args, id=tc.id or ""))
 
-            return ModelOutput(text=text, tool_calls=tool_calls, truncated=truncated)
+            return ModelOutput(
+                text=text, tool_calls=tool_calls, truncated=truncated, reasoning=reasoning
+            )
 
         return _call()
 
@@ -257,6 +261,7 @@ class DeepSeekModel:
         kwargs["stream"] = True
         stream = self._client.chat.completions.create(**kwargs)
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []  # S49：思维链（流式 delta.reasoning_content）
         tool_acc: dict[int, dict[str, str]] = {}  # index -> {name, arguments}
         # S22（D3）：流式路径跟踪 finish_reason——"length" = 输出被截断
         truncated = False
@@ -273,6 +278,9 @@ class DeepSeekModel:
                     on_event(Event(type="text_delta", payload={"content": delta.content}))
                 if self._on_delta:
                     self._on_delta(delta.content)
+            rc = getattr(delta, "reasoning_content", None)
+            if rc:
+                reasoning_parts.append(str(rc))
             for tc in delta.tool_calls or []:
                 acc = tool_acc.setdefault(tc.index, {"name": "", "arguments": "", "id": ""})
                 if tc.function and tc.function.name:
@@ -289,6 +297,7 @@ class DeepSeekModel:
                 if tc.id and not acc["id"]:
                     acc["id"] = tc.id
         text = "".join(text_parts)
+        reasoning = "".join(reasoning_parts)
         tool_calls: list[ToolCall] = []
         for idx in sorted(tool_acc):
             acc = tool_acc[idx]
@@ -301,4 +310,6 @@ class DeepSeekModel:
         # 注意：这里**不发 done 事件**——done 由 Agent 循环在轮次语义完成后 emit
         # （无工具终答/取消/错误）。若模型层发 done，SSE 端会收到"假 done"提前断开，
         # 后续 tool_call/tool_result/text 事件全丢（S25 修复：工具场景 SSE 提前断）。
-        return ModelOutput(text=text, tool_calls=tool_calls, truncated=truncated)
+        return ModelOutput(
+            text=text, tool_calls=tool_calls, truncated=truncated, reasoning=reasoning
+        )

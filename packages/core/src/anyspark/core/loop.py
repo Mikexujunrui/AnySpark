@@ -166,7 +166,9 @@ class Agent:
         # S22：重试睡眠可中断——把取消回调注入模型包装（RetryingModel 支持）
         self._set_cancelled_hook(model=self.model, token=token)
 
+        turn_index = 0
         for _ in range(self.max_tool_iterations):
+            turn_index += 1
             # 协作式取消检查（S21）：用户中断则提前终止。
             # S22（D5）：终止前 append assistant 消息——上下文永远平衡（user, assistant 成对），
             # 用户随后发"继续"时不会出现 user 接 user 的失衡上下文。
@@ -227,21 +229,18 @@ class Agent:
                     error=err_text,
                 )
 
+            self._emit_record(conversation_id, turn_index, prompt_messages, output, results)
             if not output.tool_calls:
                 # 终答前统一检查插话/追问（对齐 pi：内层循环末尾检查 steering、
                 # 外层检查 followUp）——用户在模型生成期间插话时，即使本轮恰好是
                 # 终答，插话也不丢失：先把本轮终答落上下文，再注入队列消息续跑。
                 queued = self._drain(self.steer_queue) + self._drain(self.followup_queue)
                 if queued:
-                    store.append(
-                        conversation_id, Message(role="assistant", content=output.text)
-                    )
+                    store.append(conversation_id, Message(role="assistant", content=output.text))
                     self.events.emit(Event(type="text", payload={"content": output.text}))
                     for m in queued:
                         store.append(conversation_id, m)
-                        self.events.emit(
-                            Event(type="user_text", payload={"content": m.content})
-                        )
+                        self.events.emit(Event(type="user_text", payload={"content": m.content}))
                     continue
                 # 真终答
                 store.append(conversation_id, Message(role="assistant", content=output.text))
@@ -425,6 +424,45 @@ class Agent:
             except queue.Empty:
                 break
         return out
+
+    def _emit_record(
+        self,
+        conversation_id: str,
+        turn_index: int,
+        prompt_messages: list[Message],
+        output: ModelOutput,
+        results: list[ToolResult],
+    ) -> None:
+        """S49 运行记录事件：完整轮次快照（上下文 + 输出含思维链 + 工具结果）。
+
+        只发事件不落盘——存储由 app 层订阅（写 data/records/*.jsonl）；
+        思维链 reasoning **不注入上下文**（只进记录，训练/复盘用）。
+        """
+        self.events.emit(
+            Event(
+                type="record",
+                payload={
+                    "turn_index": turn_index,
+                    "prompt": [{"role": m.role, "content": m.content} for m in prompt_messages],
+                    "output": {
+                        "text": output.text,
+                        "reasoning": output.reasoning,
+                        "tool_calls": [
+                            {"name": c.name, "arguments": c.arguments} for c in output.tool_calls
+                        ],
+                        "truncated": output.truncated,
+                    },
+                    "tool_results": [
+                        {
+                            "name": r.call.name,
+                            "ok": r.ok,
+                            "content": r.content,
+                        }
+                        for r in results
+                    ],
+                },
+            )
+        )
 
     def _finish_aborted(
         self,

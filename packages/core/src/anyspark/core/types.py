@@ -82,8 +82,13 @@ class ModelOutput:
     truncated（S22 移植 pi 的 stopReason=length 判定）：输出被 token 上限截断。
     适配器在 finish_reason=="length" 时置 True；Agent 循环据此**批量拒绝**工具调用
     （截断的参数可能 JSON 合法但语义残缺，执行会写坏数据），让模型重发。
+
+    reasoning（S49）：思维链（推理过程文本，如 DeepSeek 的 reasoning_content）。
+    **只进运行记录（训练/复盘用），不注入上下文**——推理过程不是输出，
+    回填/注入会污染上下文、改变模型行为（主人拍板：保留但看情况才注入）。
     """
 
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     truncated: bool = False
+    reasoning: str = ""

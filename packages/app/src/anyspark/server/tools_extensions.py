@@ -149,6 +149,41 @@ class ExtensionToolStore:
             self._conn.commit()
         return self.get(tool_id)
 
+    def update(
+        self,
+        tool_id: str,
+        name: str | None = None,
+        description: str | None = None,
+        params: list[dict[str, Any]] | None = None,
+        code: str | None = None,
+    ) -> ExtensionTool | None:
+        """更新扩展工具（S49：工具迭代日常路径）。
+
+        安全：改内容后 **自动回 draft 重新人工批准**（改了就要再审）。
+        """
+        existing = self.get(tool_id)
+        if existing is None:
+            return None
+        now = _now()
+        new_name = name if name is not None else existing.name
+        new_desc = description if description is not None else existing.description
+        new_params = params if params is not None else existing.params
+        new_code = code if code is not None else existing.code
+        with self._lock:
+            self._conn.execute(
+                "UPDATE tools_extensions SET name=?, description=?, params_json=?, code=?, status='draft', updated_at=? WHERE id=?",
+                (
+                    new_name,
+                    new_desc,
+                    json.dumps(new_params, ensure_ascii=False),
+                    new_code,
+                    now,
+                    tool_id,
+                ),
+            )
+            self._conn.commit()
+        return self.get(tool_id)
+
     def delete(self, tool_id: str) -> bool:
         with self._lock:
             cur = self._conn.execute("DELETE FROM tools_extensions WHERE id=?", (tool_id,))

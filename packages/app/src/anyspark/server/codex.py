@@ -26,6 +26,7 @@ import re
 import string
 import threading
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 # 安全内置白名单（机制硬编码：只放无副作用的函数/类型）
@@ -111,6 +112,9 @@ class _SafeImporter:
 
 # 文件读取上限（ws_read：防沙箱代码读超大文件拖垮线程）
 _WS_READ_MAX = 200_000
+# 源码只读根（S49：修 bug 辅助——沙箱可只读 packages/ 源码定位问题）
+SRC_ROOT = Path(__file__).resolve().parents[5] / "packages"
+_SRC_READ_MAX = 100_000
 
 
 def make_data_env(workspace: Any, chapters: Any, graph: Any) -> dict[str, Any]:
@@ -152,6 +156,21 @@ def make_data_env(workspace: Any, chapters: Any, graph: Any) -> dict[str, Any]:
     def ws_uploads() -> list[dict[str, Any]]:
         return [{"name": u["name"], "size": u["size"]} for u in workspace.list_uploads("main")]
 
+    def src_read(rel_path: str) -> str:
+        """只读 packages/ 源码（修 bug 辅助：定位问题/验证修复逻辑）。
+
+        安全：只读、限项目源码目录、限大小——不能写（修复由开发 agent 应用）。
+        """
+        base = SRC_ROOT.resolve()
+        p = (base / rel_path).resolve()
+        if not str(p).startswith(str(base)):
+            raise ValueError(f"越界：{rel_path}")
+        if not p.exists() or not p.is_file():
+            raise FileNotFoundError(rel_path)
+        if p.stat().st_size > _SRC_READ_MAX:
+            raise ValueError(f"文件过大（>{_SRC_READ_MAX} 字节）")
+        return str(p.read_text(encoding="utf-8", errors="ignore"))
+
     return {
         "ws_chapters": ws_chapters,
         "ws_entities": ws_entities,
@@ -159,6 +178,7 @@ def make_data_env(workspace: Any, chapters: Any, graph: Any) -> dict[str, Any]:
         "ws_events": ws_events,
         "ws_read": ws_read,
         "ws_uploads": ws_uploads,
+        "src_read": src_read,
     }
 
 

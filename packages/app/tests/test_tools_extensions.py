@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from anyspark.core.protocol import ToolSpec
 from anyspark.core.types import Message, ModelOutput, ToolResult
 from anyspark.server.app import build_app
+from anyspark.server.codex import run_code
 from anyspark.server.tools_domain import (
     make_search_chapters_implementer,
 )
@@ -246,3 +247,57 @@ def test_read_context_paragraphs() -> None:
     # 锚点未命中 → 返回开头提示
     r2 = _call(impl, title="第三章", anchor="不存在的锚点")
     assert r2.ok is False and "未找到锚点" in r2.content
+
+
+def test_extension_update_goes_back_to_draft() -> None:
+    """S49：更新扩展工具 → 自动回 draft 重新批准。"""
+    db = _db()
+    model = _ProbeModel()
+    client = TestClient(build_app(model=model, db_path=db))
+    r = client.post(
+        "/api/tools/register",
+        json={
+            "name": "ver_tool",
+            "description": "v1",
+            "params_json": "[]",
+            "code": "def run(args):\n    return 'v1'",
+        },
+    ).json()
+    tid = r["id"]
+    client.post(f"/api/tools/{tid}/approve")
+    client.post("/api/chat", json={"message": "写《第1章》20字：雨。"})
+    assert "ver_tool" in model.last_tools
+
+    # 更新代码 → 回 draft，不再注入
+    r2 = client.patch(
+        f"/api/tools/{tid}",
+        json={"code": "def run(args):\n    return 'v2'", "description": "v2"},
+    ).json()
+    assert r2["status"] == "draft"
+    client.post("/api/chat", json={"message": "写《第2章》20字：灯。"})
+    assert "ver_tool" not in model.last_tools
+    # 重新批准生效（执行新代码）
+    client.post(f"/api/tools/{tid}/approve")
+    # 404 处理
+    assert (
+        client.patch("/api/tools/nonexist", json={"code": "def run(args): return 'x'"}).status_code
+        == 404
+    )
+
+
+def test_src_read_inside_sandbox() -> None:
+    """S49：沙箱只读源码（修 bug 辅助）；越界拒绝。"""
+    from anyspark.graph import GraphStore
+    from anyspark.server.codex import make_data_env
+    from anyspark.server.workspace import Workspace
+    from anyspark.store import ChapterStore
+
+    db = _db()
+    env = make_data_env(
+        Workspace(root=Path(tempfile.mkdtemp()) / "ws"), ChapterStore(db), GraphStore(db)
+    )
+    r = run_code("print(src_read('core/src/anyspark/core/types.py')[:30])", data_env=env)
+    assert r["ok"] is True, r["error"]
+    # 越界
+    r2 = run_code("print(src_read('../../etc/passwd'))", data_env=env)
+    assert r2["ok"] is False and "越界" in r2["error"]
