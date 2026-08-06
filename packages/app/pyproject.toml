@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 anyspark-server = "anyspark.server.cli:main"
+anyspark-chat = "anyspark.server.cli_chat:main"
 
 [build-system]
 requires = ["hatchling"]

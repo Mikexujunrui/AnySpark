@@ -21,6 +21,8 @@ cd frontend && npm ci && npm run dev # 前端
 
 打开 http://localhost:5173 进入创作台。
 
+**对话 CLI（S49）**：`uv run anyspark-chat`——不经过前端/pi，终端里直接对话驱动（流式/工具状态/Ctrl+C 取消/多轮延续）。
+
 ## 总闸（全门禁）
 
 ```bash

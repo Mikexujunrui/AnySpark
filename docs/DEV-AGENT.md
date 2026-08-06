@@ -93,7 +93,20 @@ ChatRequest 其他字段：`model_id`/`thinking`（S47 模型选择）、`mood`�
 - 端口被占时：`anyspark_server stop` 按端口 netstat+taskkill /F /T 清理
 - 数据在 `data/anyspark.db`（SQLite 单文件），测试可另传 `db_path`；测试用临时库更干净
 
-## 8. 边界
+## 8. 对话 CLI（S49）
+
+```bash
+uv run anyspark-chat                 # 交互式 REPL（连 127.0.0.1:8000）
+uv run anyspark-chat -m "写第一章"   # 单条消息（非交互）
+uv run anyspark-chat --reset         # 清会话
+```
+
+- 流式输出（SSE 打字机）+ 工具执行状态（✓/✗）+ Ctrl+C 取消当前轮（可续"继续"）
+- conversation_id 延续多轮（存 ~/.anyspark_cli.json）；/quit /reset /tools 命令
+- 默认 enable_domain=True（领域工具全开）；--base 覆盖后端地址
+- 独立入口（不经过 pi/前端）——真实使用会撞出真实 bug，是修复闭环的最佳素材
+
+## 9. 边界
 
 - 前端（创作台）不在本通道覆盖范围；前端回归走 `anyspark_gate`（tsc/eslint/build）
 - 冒烟脚本 `scripts/*_smoke.py` 仍可用（直连包级，不走 HTTP）
