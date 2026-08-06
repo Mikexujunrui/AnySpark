@@ -218,14 +218,18 @@ class WritingSkillStore:
         return [_from_row(r) for r in rows]
 
     def revision(self) -> str:
-        """S55 #3 注入缓存签名：内容变化 → 签名变化（增删改任一操作即失效）。"""
+        """S55 #3 注入缓存签名：内容变化 → 签名变化（增删改任一操作即失效）。
+
+        签名覆盖全部可变列（name/description/content/example/enabled/order），
+        任何字段变化都会使缓存失效。
+        """
         with self._lock:
             rows = self._conn.execute(
                 "SELECT name, description, content, example, enabled, order_index "
                 "FROM writing_skills"
             ).fetchall()
         sig = "".join(
-            f"{r[0]}|{r[1]}|{r[5]}|{int(r[4])}" for r in rows
+            f"{r[0]}|{r[1]}|{r[2]}|{r[3]}|{r[5]}|{int(r[4])}" for r in rows
         )
         return sig
 

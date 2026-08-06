@@ -207,7 +207,11 @@ class ManualStore:
                         else:
                             keep, drop = primary, dup
                         merged = _merge_contents(keep.content, drop.content)
-                        self.update(keep.id, content=merged, confidence=max(keep.confidence, drop.confidence))
+                        self.update(
+                            keep.id,
+                            content=merged,
+                            confidence=max(keep.confidence, drop.confidence),
+                        )
                         self.delete(drop.id)
                         # 更新循环内引用：primary 若被删，换成 keep
                         if primary.id == drop.id:
