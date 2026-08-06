@@ -14,7 +14,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
 
-# 模板四要素
+# 模板四要素默认分类集（S50：内容化——默认建议集；外部模板导入不强制校验，
+# 分类是元数据建议非硬约束，内容扩展通道在 ExternalLibrary.import_template）
+GRANULARITY_DEFAULT: tuple[str, ...] = ("全书", "卷", "章", "场景", "段落")
+POSITION_DEFAULT: tuple[str, ...] = ("开局", "发展", "高潮", "结局")
+FUNCTION_DEFAULT: tuple[str, ...] = ("铺垫", "主线", "悬念", "爽点", "情感")
+# 类型注解（默认建议集，供 IDE/类型检查；运行时接受任意内容）
 Granularity = Literal["全书", "卷", "章", "场景", "段落"]
 Position = Literal["开局", "发展", "高潮", "结局"]
 Function = Literal["铺垫", "主线", "悬念", "爽点", "情感"]

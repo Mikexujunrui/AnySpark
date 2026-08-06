@@ -81,7 +81,9 @@ def test_mood_inject_default_on_and_skippable() -> None:
     client = _client(m)
     resp = client.post("/api/chat", json={"message": "写", "mood": {"tension": 80}})
     assert resp.status_code == 200
-    assert "氛围要求" in m.prompts[-1] and "紧张感 80/100" in m.prompts[-1]
+    # S50：数值语义化——注入块是程度词+描述，不是 80/100
+    assert "氛围要求" in m.prompts[-1] and "紧张感：较强" in m.prompts[-1]
+    assert "80/100" not in m.prompts[-1]
 
     m2 = ProbeModel()
     client2 = _client(m2)

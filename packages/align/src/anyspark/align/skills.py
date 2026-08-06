@@ -1,16 +1,22 @@
 """
-anyspark.align.skills — 写作技巧（S43：写作纪律内容化，参考 pi skills 形态）。
+anyspark.align.skills — 叙事技巧内容载体（S50：skill 重构为名实相符的叙事技巧）。
 
-背景（主人"智能体驱动哲学"审计）：S33 粒度感知、S42 认知边界等"写作技巧"被
-硬塞进 DEFAULT_SYSTEM（行为规则堆叠 → 规则驱动的倾向，违背"相信模型/少加规则"）。
+背景（主人拍板，DESIGN §12.17）：原 S43 把粒度感知/角色认知边界/氛围克制三条
+不同源的内容（能动性机制 / 一致性硬约束 / 文风偏好）塞进"写作技巧"容器——
+概念混杂、全放错筐。S50 重构：
+- 旧三条按真实职责归位（粒度感知→agency 机制化 / 认知边界→check 基线 /
+  氛围克制→manual 文风），从 skills 移除
+- skills 只装真正的**叙事技巧**：用 名 + 一句话索引 + 完整技法 + 具体情形案例
+  提升文笔文风（名实相符）
+- 每条技巧 = { name, description（索引）, content（技法）, example（情形案例）,
+  tags（场景标签）, enabled, order }
 
-修正：写作技巧从系统提示抽出，做成 **skill 式内容载体**（参考 pi 的 skills）：
-- 每条技巧 = { name, description（一行，索引用）, content（完整指令）, enabled }
-- DEFAULT_SYSTEM 回归极简（只留"智能体行为底线"：写出来并落盘/别乱调工具）
-- 技巧作为**内容**注入（可增删改/开关/按需），不是"守则"
-- 渐进式披露（对齐 pi）：技巧多了之后索引常驻、完整正文按需注入；当前技巧少（<5 条）先全量注入内容
+注入（渐进式披露，对齐 pi skills）：
+- 索引常驻（description 一行）
+- 内容按需：<5 条全量注入；多了之后按会话意图匹配 tags 选 2-3 条
+- example 案例随 content 注入（提升文笔的关键：具体样例比抽象指令有效）
 
-哲学边界：DEFAULT_SYSTEM = A 类过程控制底线（硬编码）；写作技巧 = 内容（自然语言，可编辑）。
+哲学边界：DEFAULT_SYSTEM = A 类过程控制底线（硬编码）；叙事技巧 = 内容（自然语言，可编辑）。
 """
 
 from __future__ import annotations
@@ -23,34 +29,43 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-# 默认写作技巧（种子；内容自然语言，可增删改）
+# 默认叙事技巧（种子；内容自然语言，可增删改——名+技法+情形案例三段式）
 DEFAULT_SKILLS: list[dict[str, str]] = [
     {
-        "name": "粒度感知",
-        "description": "脉络越细越严格遵循；脉络越粗=需要自主设计场景/细节/节奏。",
+        "name": "镜头感与视角",
+        "description": "动作/情感用镜头语言呈现：近景给细节、远景给氛围；谁在看决定写到多细。",
         "content": (
-            "剧情脉络按颗粒度处理：脉络越细（逐场景/要点全），越要严格遵循、不得遗漏；"
-            "脉络越粗（只有主干或种子），意味着场景推进、细节、节奏需要你自主设计——"
-            "动笔前先在心中构思本章场景序列与要点（不必输出），正文要体现自主设计的层次"
-            "（原创细节、节奏变化、氛围经营），不要只把主干复述一遍。"
+            "把叙事当作镜头：情绪爆点给近景特写（具体的动作、物件、身体的细微反应），"
+            "场景转换给远景/环境氛围；每段明确'此刻镜头对着谁'，视角不漂移。"
+            "用细节代替情绪直述——读者从动作里读到感受，而不是被告诉感受。"
         ),
+        "example": ("她想逃却迈不动脚——写特写'鞋尖碾着地板，磨出吱呀声'，比写'她很害怕'有效。"),
+        "tags": "开篇,心理,动作",
     },
     {
-        "name": "角色认知边界",
-        "description": "角色只知道亲历/亲见/合理推断的信息——叙事可全知，角色不可。",
+        "name": "对白机锋",
+        "description": "对白不直给信息，让每句话负载潜台词与立场冲突。",
         "content": (
-            "角色的认知受限于其经历：每个角色只知道他们亲眼所见、亲身经历、"
-            "或能合理推断的信息。叙事者可以全知，但角色不知道的信息不能让角色说出来"
-            "（防止全知全能越界）。"
+            "对话不是信息问答：每句对白都应携带说话人的立场、情绪、隐瞒或试探。"
+            "避免'你叫什么''我叫张三'式的问答流水账；用答非所问、重复、停顿"
+            "制造张力。人物说的话要符合其身份与说话方式（不千人一面）。"
         ),
+        "example": ("他问'你确定？'她答'我确定过。'——一个词之差透出过往，比直白解释有力。"),
+        "tags": "对白,冲突",
     },
     {
-        "name": "氛围克制",
-        "description": "恐惧/情绪通过感官细节与动作呈现，不直说感受、不形容词堆砌。",
+        "name": "节奏控制",
+        "description": "紧张处用短句+省略连接词，舒缓处用长句铺陈；节奏服务情绪。",
         "content": (
-            "氛围通过感官细节（视觉/听觉/嗅觉/触觉）与动作呈现，避免直接概括情绪"
-            "（如'他很恐惧'）与形容词堆砌；让读者从细节中感受，而非被告知。"
+            "句子长度即情绪刻度：激烈/紧迫段落用短句、碎片、省略连接词（'跑。撞。"
+            "转身。'）；舒缓/沉思段落用长句、意象铺陈。整章要有节奏起伏，"
+            "不能通篇同一密度——高密度动作之后给低密度喘息。"
         ),
+        "example": (
+            "追逃段落'跑。撞。转身。'对'晚风从梧桐叶间漏下，一寸一寸凉'——"
+            "一快一慢，读者情绪跟着呼吸。"
+        ),
+        "tags": "打斗,高潮,过渡",
     },
 ]
 
@@ -61,11 +76,13 @@ def _now() -> str:
 
 @dataclass
 class WritingSkill:
-    """一条写作技巧（skill 式：描述常驻索引、正文按需注入）。"""
+    """一条叙事技巧（skill 式：描述常驻索引、正文+案例按需注入）。"""
 
     name: str
     description: str
     content: str
+    example: str = ""
+    tags: str = ""
     enabled: bool = True
     order: int = 0
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -77,14 +94,19 @@ class WritingSkill:
             "name": self.name,
             "description": self.description,
             "content": self.content,
+            "example": self.example,
+            "tags": self.tags,
             "enabled": self.enabled,
             "order": self.order,
             "created_at": self.created_at,
         }
 
+    def tag_list(self) -> list[str]:
+        return [t.strip() for t in self.tags.split(",") if t.strip()]
+
 
 class WritingSkillStore:
-    """写作技巧存储（SQLite）。"""
+    """叙事技巧存储（SQLite）。"""
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
@@ -104,27 +126,63 @@ class WritingSkillStore:
                     name TEXT NOT NULL,
                     description TEXT NOT NULL DEFAULT '',
                     content TEXT NOT NULL,
+                    example TEXT NOT NULL DEFAULT '',
+                    tags TEXT NOT NULL DEFAULT '',
                     enabled INTEGER NOT NULL DEFAULT 1,
                     order_index INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            # S50 ALTER 兼容：旧库无 example/tags 列则补
+            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(writing_skills)")}
+            if "example" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE writing_skills ADD COLUMN example TEXT NOT NULL DEFAULT ''"
+                )
+            if "tags" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE writing_skills ADD COLUMN tags TEXT NOT NULL DEFAULT ''"
+                )
             self._conn.commit()
 
     def _seed(self) -> None:
         with self._lock:
-            n = self._conn.execute("SELECT COUNT(*) AS c FROM writing_skills").fetchone()["c"]
-            if n == 0:
-                now = _now()
-                for i, s in enumerate(DEFAULT_SKILLS):
-                    self._conn.execute(
-                        "INSERT INTO writing_skills "
-                        "(id, name, description, content, enabled, order_index, created_at) "
-                        "VALUES (?,?,?,?,1,?,?)",
-                        (uuid.uuid4().hex, s["name"], s["description"], s["content"], i, now),
-                    )
+            # 循环替代递归：旧库重播时避免锁重入（threading.Lock 不可重入）
+            while True:
+                n = self._conn.execute("SELECT COUNT(*) AS c FROM writing_skills").fetchone()["c"]
+                if n == 0:
+                    now = _now()
+                    for i, s in enumerate(DEFAULT_SKILLS):
+                        self._conn.execute(
+                            "INSERT INTO writing_skills "
+                            "(id, name, description, content, example, tags, enabled, "
+                            "order_index, created_at) "
+                            "VALUES (?,?,?,?,?,?,1,?,?)",
+                            (
+                                uuid.uuid4().hex,
+                                s["name"],
+                                s["description"],
+                                s["content"],
+                                s.get("example", ""),
+                                s.get("tags", ""),
+                                i,
+                                now,
+                            ),
+                        )
+                    self._conn.commit()
+                    break
+                # 旧库种子（粒度感知/角色认知边界/氛围克制）→ 清除重播新种子
+                names = {
+                    r["name"]
+                    for r in self._conn.execute("SELECT name FROM writing_skills").fetchall()
+                }
+                if "粒度感知" in names or "角色认知边界" in names:
+                    self._conn.execute("DELETE FROM writing_skills")
+                    self._conn.commit()
+                    continue  # 循环回到 n==0 分支重播
                 self._conn.commit()
+                break
 
     def list_skills(self) -> list[WritingSkill]:
         with self._lock:
@@ -136,19 +194,32 @@ class WritingSkillStore:
     def enabled(self) -> list[WritingSkill]:
         return [s for s in self.list_skills() if s.enabled]
 
-    def add(self, name: str, description: str, content: str) -> WritingSkill:
+    def add(
+        self,
+        name: str,
+        description: str,
+        content: str,
+        example: str = "",
+        tags: str = "",
+    ) -> WritingSkill:
         with self._lock:
             max_order = self._conn.execute(
                 "SELECT COALESCE(MAX(order_index), -1) AS m FROM writing_skills"
             ).fetchone()["m"]
             s = WritingSkill(
-                name=name, description=description, content=content, order=int(max_order) + 1
+                name=name,
+                description=description,
+                content=content,
+                example=example,
+                tags=tags,
+                order=int(max_order) + 1,
             )
             self._conn.execute(
                 "INSERT INTO writing_skills "
-                "(id, name, description, content, enabled, order_index, created_at) "
-                "VALUES (?,?,?,?,1,?,?)",
-                (s.id, s.name, s.description, s.content, s.order, s.created_at),
+                "(id, name, description, content, example, tags, enabled, "
+                "order_index, created_at) "
+                "VALUES (?,?,?,?,?,?,1,?,?)",
+                (s.id, s.name, s.description, s.content, s.example, s.tags, s.order, s.created_at),
             )
             self._conn.commit()
         return s
@@ -159,6 +230,8 @@ class WritingSkillStore:
         name: str | None = None,
         description: str | None = None,
         content: str | None = None,
+        example: str | None = None,
+        tags: str | None = None,
         enabled: bool | None = None,
     ) -> WritingSkill | None:
         with self._lock:
@@ -178,6 +251,12 @@ class WritingSkillStore:
             if content is not None:
                 sets.append("content=?")
                 params.append(content)
+            if example is not None:
+                sets.append("example=?")
+                params.append(example)
+            if tags is not None:
+                sets.append("tags=?")
+                params.append(tags)
             if enabled is not None:
                 sets.append("enabled=?")
                 params.append(1 if enabled else 0)
@@ -212,6 +291,8 @@ def _from_row(row: sqlite3.Row) -> WritingSkill:
         name=row["name"],
         description=row["description"],
         content=row["content"],
+        example=row["example"],
+        tags=row["tags"],
         enabled=bool(row["enabled"]),
         order=int(row["order_index"]),
         created_at=row["created_at"],
@@ -220,20 +301,46 @@ def _from_row(row: sqlite3.Row) -> WritingSkill:
 
 def render_skill_index(skills: list[WritingSkill]) -> str:
     """渲染技巧索引（对齐 pi skills：描述常驻，正文按需）。"""
-    if not skills:
+    enabled = [s for s in skills if s.enabled]
+    if not enabled:
         return ""
-    lines = ["# 写作技巧（可用：按需选用）"]
-    for s in skills:
+    lines = ["# 叙事技巧（可用：按需选用）"]
+    for s in enabled:
         lines.append(f"- {s.name}：{s.description}")
     return "\n".join(lines)
 
 
-def render_skills_content(skills: list[WritingSkill]) -> str:
-    """渲染启用的技巧完整内容（注入写作上下文）。"""
+def select_skills_for(
+    skills: list[WritingSkill], context: str, limit: int = 3
+) -> list[WritingSkill]:
+    """按会话意图/关键词匹配 tags 选取相关技巧（渐进式披露：多后不全量注入）。
+
+    无 context 或匹配不到 → 按顺序取前 limit 条启用技巧（保底）。
+    """
     enabled = [s for s in skills if s.enabled]
     if not enabled:
+        return []
+    if len(enabled) <= 5:  # 技巧少 → 全量（现状保持）
+        return enabled
+    if context:
+        matched = [s for s in enabled if any(t in context for t in s.tag_list())]
+        if matched:
+            return matched[:limit]
+    return enabled[:limit]
+
+
+def render_skills_content(skills: list[WritingSkill], context: str = "", limit: int = 3) -> str:
+    """渲染启用的技巧完整内容（技法 + 情形案例，注入写作上下文）。
+
+    context：会话意图（选取相关技巧用，缺省全量/前 limit）。
+    """
+    selected = select_skills_for(skills, context, limit)
+    if not selected:
         return ""
-    lines = ["# 写作技巧（内容）"]
-    for s in enabled:
-        lines.append(f"【{s.name}】{s.content}")
+    lines = ["# 叙事技巧（内容）"]
+    for s in selected:
+        block = f"【{s.name}】{s.content}"
+        if s.example:
+            block += f"\n  例：{s.example}"
+        lines.append(block)
     return "\n".join(lines)

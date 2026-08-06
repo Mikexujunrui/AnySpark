@@ -8,14 +8,22 @@ anyspark.explore — 探索引擎包。
 - 轻量优先：探索者多数是单次 LLM 调用
 """
 
-from .direction import DIMENSIONS, DirectionCard, ProjectArchive
+from .direction import (
+    DEFAULT_DIMENSIONS,
+    DIMENSIONS,
+    DimensionStore,
+    DirectionCard,
+    ProjectArchive,
+)
 from .explorers import ExplorationEngine, run_exploration
 from .intent import IntentUnderstander
 from .roleplay import RolePlayEngine, RolePlayResult, run_roleplay
 from .strategy import ExplorationStrategy, extract_json_dict
 
 __all__ = [
+    "DEFAULT_DIMENSIONS",
     "DIMENSIONS",
+    "DimensionStore",
     "DirectionCard",
     "ExplorationEngine",
     "ExplorationStrategy",

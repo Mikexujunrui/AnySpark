@@ -158,6 +158,15 @@ class GraphStore:
     def _init_schema(self) -> None:
         self._conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS graph_entity_types (
+                id TEXT PRIMARY KEY,
+                book_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                order_index INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(book_id, name)
+            );
             CREATE TABLE IF NOT EXISTS graph_entities (
                 id TEXT PRIMARY KEY,
                 book_id TEXT NOT NULL,
@@ -235,7 +244,99 @@ class GraphStore:
                 "ALTER TABLE graph_entities ADD COLUMN weight INTEGER NOT NULL DEFAULT 0"
             )
             self._conn.execute("UPDATE graph_entities SET weight = 1 WHERE weight = 0")
+        # S50：实体类型集内容化——默认种子（角色/地点/事件/物件/设定），可增删改
+        n_types = self._conn.execute("SELECT COUNT(*) AS c FROM graph_entity_types").fetchone()["c"]
+        if n_types == 0:
+            now = _now()
+            for i, t in enumerate(ENTITY_TYPES):
+                self._conn.execute(
+                    "INSERT INTO graph_entity_types "
+                    "(id, book_id, name, enabled, order_index, created_at) "
+                    "VALUES (?,?,?,1,?,?)",
+                    (uuid.uuid4().hex, "main", t, i, now),
+                )
         self._conn.commit()
+
+    # -- S50 实体类型集（内容化：项目级可增删改；存储结构保留） --
+    def types_for(self, book_id: str = "main") -> list[str]:
+        """该书启用的实体类型（缺省回退默认 ENTITY_TYPES）。
+
+        只读查询不加锁（upsert_entity 锁内会调用；SQLite 读线程安全）。
+        """
+        rows = self._conn.execute(
+            "SELECT name FROM graph_entity_types "
+            "WHERE book_id=? AND enabled=1 ORDER BY order_index, rowid",
+            (book_id,),
+        ).fetchall()
+        types = [r["name"] for r in rows]
+        return types if types else list(ENTITY_TYPES)
+
+    def list_types(self, book_id: str = "main") -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM graph_entity_types WHERE book_id=? ORDER BY order_index, rowid",
+                (book_id,),
+            ).fetchall()
+        out = [dict(r) for r in rows]
+        if not out:
+            for i, t in enumerate(ENTITY_TYPES):
+                out.append(
+                    {
+                        "id": f"default-{t}",
+                        "book_id": book_id,
+                        "name": t,
+                        "enabled": 1,
+                        "order_index": i,
+                    }
+                )
+        return out
+
+    def add_type(self, name: str, book_id: str = "main") -> dict[str, Any] | None:
+        name = name.strip()
+        if not name:
+            return None
+        with self._lock:
+            exists = self._conn.execute(
+                "SELECT 1 FROM graph_entity_types WHERE book_id=? AND name=?",
+                (book_id, name),
+            ).fetchone()
+            if exists:
+                return None
+            max_order = self._conn.execute(
+                "SELECT COALESCE(MAX(order_index), -1) AS m FROM graph_entity_types "
+                "WHERE book_id=?",
+                (book_id,),
+            ).fetchone()["m"]
+            tid = uuid.uuid4().hex
+            now = _now()
+            self._conn.execute(
+                "INSERT INTO graph_entity_types "
+                "(id, book_id, name, enabled, order_index, created_at) "
+                "VALUES (?,?,?,1,?,?)",
+                (tid, book_id, name, int(max_order) + 1, now),
+            )
+            self._conn.commit()
+            return {"id": tid, "book_id": book_id, "name": name, "enabled": 1}
+
+    def set_type_enabled(self, type_id: str, enabled: bool) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM graph_entity_types WHERE id=?", (type_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                "UPDATE graph_entity_types SET enabled=? WHERE id=?",
+                (1 if enabled else 0, type_id),
+            )
+            self._conn.commit()
+        return dict(row) | {"enabled": 1 if enabled else 0}
+
+    def delete_type(self, type_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM graph_entity_types WHERE id=?", (type_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
 
     def close(self) -> None:
         self._conn.close()
@@ -272,7 +373,9 @@ class GraphStore:
             if row:
                 eid = row["id"]
                 # 类型：空串=保留原类型（S20 states 只更新状态时用）
-                etype = entity_type if entity_type in ENTITY_TYPES else row["entity_type"]
+                etype = (
+                    entity_type if entity_type in self.types_for(book_id) else row["entity_type"]
+                )
                 merged = list(dict.fromkeys(json.loads(row["aliases"]) + aliases))
                 first_ch = row["first_chapter"] or chapter_ref
                 first_ord = row["first_order"] or chapter_order
@@ -308,7 +411,7 @@ class GraphStore:
                     ),
                 )
             else:
-                etype = entity_type if entity_type in ENTITY_TYPES else "设定"
+                etype = entity_type if entity_type in self.types_for(book_id) else "设定"
                 new_state = state_delta
                 new_weight = 1  # S37：新实体首章出现，出场章节数=1
                 self._conn.execute(

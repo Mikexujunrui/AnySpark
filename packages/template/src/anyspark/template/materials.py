@@ -19,6 +19,8 @@ from typing import Any, Literal
 
 from anyspark.core.types import Message
 
+# 资料用途（S50：默认建议集 style/fact/both；纯类型注解无运行时校验，
+# 内容层可自由扩展——用户可写任意用途标签，不强制枚举）
 Purpose = Literal["style", "fact", "both"]
 
 

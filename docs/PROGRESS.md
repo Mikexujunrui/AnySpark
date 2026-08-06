@@ -1188,3 +1188,46 @@
 - **lint 收尾**：修掉 S49b 引入的 3 处 ruff（tools_extensions.py E501 / test_recorder.py F841+E741），非本次重构引入，为门禁全绿顺手修。
 - **总闸**：✅ 全绿（ruff 0 / mypy 103 / pytest 267 / tsc / eslint / build）。
 - 遗留：`.gitignore`、`benchmarks/compare/tasks.py`、`benchmarks/writing/*` 为预存脏状态，非本次改动，未动。
+
+## S53 架构错位修复：叙事技巧重构 + 心智模型=会话规划器 + 全项目内容化（已完成 ✅）
+
+**背景（主人 S50 讨论三连批评 + 审查）**：
+1. mood 滑块数值 `80/100` 裸传模型（工程量纲不该进语义层）
+2. 预设 4 维度 `{tension,warmth,calm,dread}` 锁死内容、限定模型发挥（违背"内容模型生成"）
+3. 心智模型是复杂系统，应**指导主循环规划会话**而非**注给写作工具**（心智记录多是习惯，直接注入正文无意义）
+- 三连批评全部成立，设计判断记入 DESIGN §12.17
+
+**修复 1：skills → 叙事技巧重构（名实相符）**
+- 旧 3 条种子（粒度感知/角色认知边界/氛围克制）概念不同源、全放错筐 → 移除：
+  - 粒度感知 = 能动性按实例自适应机制 / 认知边界 = 一致性硬约束 / 氛围克制 = 文风偏好（归属记录 DESIGN §12.17）
+- 新 `WritingSkill` = { name/description/content/**example**（情形案例）/tags/enabled/order }——用描述+具体案例提升文笔
+- 新种子 3 条：镜头感与视角 / 对白机锋 / 节奏控制（名+技法+情形案例三段式）
+- 注入：索引常驻 + 内容按需（<5 全量；多后按 tags 匹配会话意图选 2-3 条）
+- 旧库自动迁移：检测到"粒度感知"等旧种子名 → 重建为新种子
+
+**修复 2：mood 数值语义化 + 维度内容化**
+- `build_mood_block`：0-100 → 程度语义词（无/极轻微/轻微/中等/较强/强烈），**裸数值不再进模型**（照抄 chat_rewrite 的 subtle→"尽量保留原文"成功模式）
+- 4 维预设 → `MoodDimStore`（SQLite 内容载体，可增删改/开关；默认种子保留）
+- 每维度带语义描述（怎么写）+ 情景样例（什么时候用）；前端滑块从 `/api/mood/dims` 动态渲染
+- 新增 `/api/mood/dims` CRUD
+
+**修复 3：心智模型 = 会话规划器（从写作循环移除）**
+- **manual 不再作为注入块进写作 system_prompt**（文风/喜好/习惯条目全退场）
+- manual 加 `category` 分类：collab（协作）/style（文风）/habit（习惯），旧库默认 style
+- 新增 `MindPlanner`：读 collab 条目 → 产出 SessionPlan（建议档位 + 协作约定）
+- 主循环装配：未显式指定档位时按 collab 条目推断（"直接写别啰嗦"→档位升 / "先给方案再动笔"→档位降）；协作约定注入系统提示**顶部**（怎么配合，非写作内容）
+- style/habit 条目不再注入（渐进式披露第一步：全退场，心智系统完整化后按需引入）
+
+**修复 4：全项目同类错位内容化（审查扫描）**
+- explore DIMENSIONS（6 维）→ `DimensionStore` 内容载体 + `/api/explore/dims` CRUD
+- graph ENTITY_TYPES（5 类）→ `graph_entity_types` 表（项目级可配置）+ `/api/graph/types` CRUD；提取提示词动态拼类型（不再"五选一"写死）
+- worldsettings 类别（8 类）→ `setting_categories` 表 + CRUD；add() 不再强制降级白名单
+- template 四要素 / materials Purpose：确认内容扩展通道已开（外部导入不校验），默认集提升为可读常量 + 注释
+- bias：**反向心智模型**（AI 自述→用户可预测），与 manual 方向相反，**不合并**（主人纠正）
+
+**验证**：
+- pytest：align（含新增 test_mood/test_mind）+ app + explore + graph + template + check + core 全绿（排除 test_complete 单条真实网络调用）
+- ruff 0 / ruff format 0 / mypy 0（107 文件）/ tsc / eslint / vite build ✅
+- 真实链路：mind_planner collab 条目 → 档位推断生效；style 条目确认不再进写作上下文（test_mind 断言）
+
+**遗留**：`test_complete.py::test_search_web_returns_or_empty` 单条真实网络调用（360/Bing，设计上失败返回空不挂）；`.gitignore`/benchmarks 预存脏状态未动。

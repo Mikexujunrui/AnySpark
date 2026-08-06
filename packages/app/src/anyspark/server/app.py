@@ -24,8 +24,9 @@ from anyspark.align import (
     AgencyStore,
     BiasStore,
     ManualEntry,
-    ManualInjector,
     ManualStore,
+    MindPlanner,
+    MoodDimStore,
     PreferenceExtractor,
     SignalCollector,
     SignalStore,
@@ -50,6 +51,7 @@ from anyspark.core import (
     ToolRegistry,
 )
 from anyspark.explore import (
+    DimensionStore,
     DirectionCard,
     IntentUnderstander,
     ProjectArchive,
@@ -100,7 +102,7 @@ DEFAULT_SYSTEM = (
     "写正文可用 write_chapter 保存。"
     "正文要具体、有画面感，杜绝空泛总结。"
     # S43：DEFAULT_SYSTEM 回归极简（只留行为底线）——写作技巧类规则已抽为内容载体
-    # （WritingSkill：粒度感知/认知边界等，见【写作技巧】注入块），不再堆行为守则
+    # （WritingSkill：镜头感/对白机锋/节奏控制等叙事技巧，见【叙事技巧】注入块），不再堆行为守则
     "首要目标是把正文写出来并落盘，不要为了准备而反复调用与当前任务无关的工具。"
     "仅当用户给的任务方向不明确（种子含糊、无明确脉络、不知往哪个方向写）时，"
     "先调用 explore_direction 生成方向建议并在回复中列出询问用户选择；方向明确时直接写。"
@@ -231,11 +233,13 @@ class ManualEntryIn(BaseModel):
     content: str
     confidence: float = 0.5
     scope: str = "project"
+    category: str = "style"  # S50：collab(协作)/style(文风)/habit(习惯)
 
 
 class ManualEntryPatch(BaseModel):
     content: str | None = None
     locked: bool | None = None
+    category: str | None = None
 
 
 class SignalIn(BaseModel):
@@ -258,6 +262,16 @@ class ExploreArchiveIn(BaseModel):
     card: dict[str, object]
 
 
+class ExploreDimIn(BaseModel):
+    """S50：探索维度（内容化，可增删改）。"""
+
+    name: str
+
+
+class ExploreDimPatch(BaseModel):
+    enabled: bool
+
+
 class CheckRequest(BaseModel):
     text: str
     target: str = "当前章节"
@@ -268,6 +282,16 @@ class CheckRequest(BaseModel):
 class RuleRequest(BaseModel):
     rule: str
     text: str
+
+
+class GraphTypeIn(BaseModel):
+    """S50：实体类型（内容化，可增删改）。"""
+
+    name: str
+
+
+class GraphTypePatch(BaseModel):
+    enabled: bool
 
 
 class MaterialIn(BaseModel):
@@ -327,12 +351,24 @@ class WorldSettingExtractIn(BaseModel):
     book_id: str = "main"
 
 
+class SettingCategoryIn(BaseModel):
+    """S50：设定档类别（内容化，可增删改）。"""
+
+    name: str
+
+
+class SettingCategoryPatch(BaseModel):
+    enabled: bool
+
+
 class WritingSkillIn(BaseModel):
-    """S43：写作技巧（skill 式）。"""
+    """S50：叙事技巧（skill 式内容载体）。"""
 
     name: str
     description: str = ""
     content: str
+    example: str = ""  # 具体情形案例（提升文笔：样例比抽象指令有效）
+    tags: str = ""  # 场景标签（逗号分隔，支撑按需选取）
     enabled: bool = True
 
 
@@ -340,6 +376,24 @@ class WritingSkillPatch(BaseModel):
     name: str | None = None
     description: str | None = None
     content: str | None = None
+    example: str | None = None
+    tags: str | None = None
+    enabled: bool | None = None
+
+
+class MoodDimIn(BaseModel):
+    """S50：氛围维度（内容化，可增删改）。"""
+
+    key: str
+    label: str
+    description: str = ""
+    example: str = ""
+
+
+class MoodDimPatch(BaseModel):
+    label: str | None = None
+    description: str | None = None
+    example: str | None = None
     enabled: bool | None = None
 
 
@@ -485,6 +539,7 @@ def build_app(
     manual = ManualStore(real_db)
     signals = SignalStore(real_db)
     archive = ProjectArchive(real_db)
+    dim_store = DimensionStore(real_db)  # S50 探索维度内容化（可增删改）
     materials = MaterialStore(real_db)
     templates_external = ExternalLibrary(real_db)
     plots = PlotStore(real_db)
@@ -615,7 +670,7 @@ def build_app(
         except Exception as exc:
             logger.warning("信号提炼失败(不影响主链路): %s", exc)
 
-    manual_injector = ManualInjector(manual)
+    mind_planner = MindPlanner(manual)  # S50 心智模型=会话规划器（不从写作循环注入）
     signal_collector = SignalCollector(signals)
     # S47 运行时模型：注册表（持久化多配置）+ 动态 Provider——
     # 默认装配 RetryingModel(ModelProvider(registry))，所有组件跟随当前激活配置；
@@ -628,7 +683,7 @@ def build_app(
     preference_extractor = PreferenceExtractor(model)  # S28：信号→说明书提炼（后台）
     # 知识图谱（S7：AI 事实源）
     graph = GraphStore(real_db)
-    graph_extractor = GraphExtractor(model)
+    graph_extractor = GraphExtractor(model, types=graph.types_for("main"))  # S50：类型集内容化
     graph_injector = GraphInjector(graph)
     graph_verifier = GraphVerifier(graph)
     # token 预算 + 两阶段压缩（S8：长书上下文刚需；S26：预算按模型窗口配置——
@@ -642,7 +697,8 @@ def build_app(
     agency = AgencyStore(real_db)
     bias = BiasStore(real_db)
     settings = WorldSettingStore(real_db)  # S41 设定档（作者正典）
-    skills = WritingSkillStore(real_db)  # S43 写作技巧（skill 式内容载体）
+    skills = WritingSkillStore(real_db)  # S50 叙事技巧（skill 式内容载体）
+    mood_dims = MoodDimStore(real_db)  # S50 氛围维度内容化（滑块形状硬编码，维度可增删改）
     plans = StoryPlanStore(real_db)  # S46 剧情计划（计划→执行）
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
@@ -692,10 +748,21 @@ def build_app(
             enable_extras=enable_extras,
             enable_search=enable_search,
         )
-        # 能动级别：显式传入 > 已存档位（S35：档位记录，温度入档；兼容旧数字=排序位）
+        # 能动级别：显式传入 > 心智规划建议 > 已存档位（S35：档位记录，温度入档）
+        # S50：心智模型=会话规划器——未显式指定时，MindPlanner 按 collab 条目建议档位
         if agency_level is None:
+            session_plan = mind_planner.plan(book_id, base_agency=agency.get_current(book_id).order)
+            if session_plan.agency_level is not None:
+                agency_level = session_plan.agency_level
             current = agency.get_current(book_id)
+            if agency_level is not None:
+                levels = agency.list_levels()
+                current = next(
+                    (lv for lv in levels if lv.order == agency_level),
+                    agency.get_level(f"default-{agency_level}") or current,
+                )
         else:
+            session_plan = mind_planner.plan(book_id)  # 仍取协作约定（档位用显式）
             levels = agency.list_levels()
             current = next(
                 (lv for lv in levels if lv.order == int(agency_level)),
@@ -733,10 +800,11 @@ def build_app(
         # 注入块装配：核心注入默认全开，skip_inject 可细粒度关闭（S15 增强按需）
         skip = skip_inject or set()
         full_prompt = system_prompt
-        # 对齐注入：说明书（项目级>全局级）追加进系统提示
-        align_block = manual_injector.build_system_block(book_id)
-        if "manual" not in skip and align_block:
-            full_prompt = full_prompt + "\n\n" + align_block
+        # S50 心智模型=会话规划器：协作约定注入系统提示顶部（怎么配合我），
+        # 不再是文风/喜好类偏好的全量注入（那些不再进写作工具）
+        collab_block = session_plan.collab_block()
+        if "manual" not in skip and collab_block:
+            full_prompt = collab_block + "\n\n" + full_prompt
         # 图谱注入：当前时空点已知事实（AI 事实源，模型局限弥补）
         graph_block = graph_injector.build_block(book_id)
         if "graph" not in skip and graph_block:
@@ -758,11 +826,12 @@ def build_app(
         settings_block = render_settings(settings.list())
         if "settings" not in skip and settings_block:
             full_prompt = full_prompt + "\n\n" + settings_block
-        # 写作技巧注入（S43：skill 式内容载体——粒度感知/认知边界等；索引+内容渐进式披露）
+        # 叙事技巧注入（S50：skill 重构——名+技法+情形案例；索引常驻+内容按需）
         skill_list = skills.list_skills()
         skill_block = render_skill_index(skill_list)
         if "skills" not in skip and skill_block:
             full_prompt = full_prompt + "\n\n" + skill_block
+        # 内容按需：技巧少全量；多后按会话意图（user 消息）匹配 tags 选 2-3 条
         skill_content = render_skills_content(skill_list)
         if "skills" not in skip and skill_content:
             full_prompt = full_prompt + "\n\n" + skill_content
@@ -771,7 +840,7 @@ def build_app(
         if "plan" not in skip and plan_block:
             full_prompt = full_prompt + "\n\n" + plan_block
         # 氛围滑块注入（机制 4：本段氛围要求）
-        mood_block = build_mood_block(mood)
+        mood_block = build_mood_block(mood, mood_dims.list_dims())
         if "mood" not in skip and mood_block:
             full_prompt = full_prompt + "\n\n" + mood_block
         return Agent(
@@ -1159,6 +1228,10 @@ def build_app(
             confidence=req.confidence,
             scope=scope,
             book_id="main",
+            category=cast(
+                Literal["collab", "style", "habit"],
+                req.category if req.category in ("collab", "style", "habit") else "style",
+            ),
         )
         manual.add(entry)
         return entry.to_dict()
@@ -1166,7 +1239,7 @@ def build_app(
     @app.patch("/api/manual/{entry_id}", response_model=dict[str, Any])
     def update_manual(entry_id: str, req: ManualEntryPatch) -> dict[str, Any]:
         """修改条目内容（锁定条目拒绝，用户主权）。"""
-        entry = manual.update(entry_id, content=req.content)
+        entry = manual.update(entry_id, content=req.content, category=req.category)
         if entry is None:
             raise HTTPException(status_code=404, detail="条目不存在")
         if req.locked is not None:
@@ -1214,8 +1287,35 @@ def build_app(
             req.intent_confirmed,
             constraints,
             n_explorers=4,
+            dimensions=dim_store.list_names(),  # S50：维度来自内容载体（可增删改）
         )
         return [c.to_dict() for c in cards]
+
+    @app.get("/api/explore/dims", response_model=list[dict[str, object]])
+    def list_explore_dims() -> list[dict[str, object]]:
+        """探索维度（内容化：可增删改/开关）。"""
+        return dim_store.list_all()
+
+    @app.post("/api/explore/dims", response_model=dict[str, object])
+    def add_explore_dim(req: ExploreDimIn) -> dict[str, object]:
+        d = dim_store.add(req.name)
+        if d is None:
+            raise HTTPException(status_code=409, detail=f"维度已存在: {req.name}")
+        return d
+
+    @app.patch("/api/explore/dims/{dim_id}", response_model=dict[str, object])
+    def patch_explore_dim(dim_id: str, req: ExploreDimPatch) -> dict[str, object]:
+        d = dim_store.set_enabled(dim_id, req.enabled)
+        if d is None:
+            raise HTTPException(status_code=404, detail="维度不存在")
+        return d
+
+    @app.delete("/api/explore/dims/{dim_id}", response_model=dict[str, bool])
+    def delete_explore_dim(dim_id: str) -> dict[str, bool]:
+        ok = dim_store.delete(dim_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="维度不存在")
+        return {"ok": True}
 
     @app.post("/api/explore/archive", response_model=dict[str, object])
     def explore_archive(req: ExploreArchiveIn) -> dict[str, object]:
@@ -1492,6 +1592,32 @@ def build_app(
     # ------------------------------------------------------------------
     # S41 设定档（作者正典：人物卡/能力体系/世界观规则）
     # ------------------------------------------------------------------
+    @app.get("/api/settings/categories", response_model=list[dict[str, Any]])
+    def list_setting_categories() -> list[dict[str, Any]]:
+        """设定档类别（S50 内容化：可增删改/开关）。"""
+        return settings.list_categories()
+
+    @app.post("/api/settings/categories", response_model=dict[str, Any])
+    def add_setting_category(req: SettingCategoryIn) -> dict[str, Any]:
+        c = settings.add_category(req.name)
+        if c is None:
+            raise HTTPException(status_code=409, detail=f"类别已存在: {req.name}")
+        return c
+
+    @app.patch("/api/settings/categories/{cat_id}", response_model=dict[str, Any])
+    def patch_setting_category(cat_id: str, req: SettingCategoryPatch) -> dict[str, Any]:
+        c = settings.set_category_enabled(cat_id, req.enabled)
+        if c is None:
+            raise HTTPException(status_code=404, detail="类别不存在")
+        return c
+
+    @app.delete("/api/settings/categories/{cat_id}", response_model=dict[str, bool])
+    def delete_setting_category(cat_id: str) -> dict[str, bool]:
+        ok = settings.delete_category(cat_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="类别不存在")
+        return {"ok": True}
+
     @app.get("/api/settings", response_model=list[dict[str, Any]])
     def list_settings() -> list[dict[str, Any]]:
         """设定档全部条目。"""
@@ -1573,7 +1699,7 @@ def build_app(
         return {"draft": draft, "raw": ""}
 
     # ------------------------------------------------------------------
-    # S43 写作技巧（skill 式内容载体：粒度感知/认知边界等，可增删改/开关）
+    # S50 叙事技巧（skill 式内容载体：镜头感/对白机锋/节奏控制等，可增删改/开关）
     # ------------------------------------------------------------------
     @app.get("/api/skills", response_model=list[dict[str, Any]])
     def list_skills() -> list[dict[str, Any]]:
@@ -1582,12 +1708,14 @@ def build_app(
 
     @app.post("/api/skills", response_model=dict[str, Any])
     def add_skill(req: WritingSkillIn) -> dict[str, Any]:
-        s = skills.add(req.name, req.description, req.content)
+        s = skills.add(req.name, req.description, req.content, req.example, req.tags)
         return s.to_dict()
 
     @app.patch("/api/skills/{skill_id}", response_model=dict[str, Any])
     def patch_skill(skill_id: str, req: WritingSkillPatch) -> dict[str, Any]:
-        s = skills.update(skill_id, req.name, req.description, req.content, req.enabled)
+        s = skills.update(
+            skill_id, req.name, req.description, req.content, req.example, req.tags, req.enabled
+        )
         if s is None:
             raise HTTPException(status_code=404, detail="技巧不存在")
         return s.to_dict()
@@ -1597,6 +1725,35 @@ def build_app(
         ok = skills.delete(skill_id)
         if not ok:
             raise HTTPException(status_code=404, detail="技巧不存在")
+        return {"ok": True}
+
+    # ------------------------------------------------------------------
+    # S50 氛围维度（内容化：滑块形状硬编码，维度定义可增删改/开关）
+    # ------------------------------------------------------------------
+    @app.get("/api/mood/dims", response_model=list[dict[str, Any]])
+    def list_mood_dims() -> list[dict[str, Any]]:
+        """全部氛围维度（前端滑块据此渲染）。"""
+        return [d.to_dict() for d in mood_dims.list_dims()]
+
+    @app.post("/api/mood/dims", response_model=dict[str, Any])
+    def add_mood_dim(req: MoodDimIn) -> dict[str, Any]:
+        d = mood_dims.add(req.key, req.label, req.description, req.example)
+        if d is None:
+            raise HTTPException(status_code=409, detail=f"维度已存在: {req.key}")
+        return d.to_dict()
+
+    @app.patch("/api/mood/dims/{dim_id}", response_model=dict[str, Any])
+    def patch_mood_dim(dim_id: str, req: MoodDimPatch) -> dict[str, Any]:
+        d = mood_dims.update(dim_id, req.label, req.description, req.example, req.enabled)
+        if d is None:
+            raise HTTPException(status_code=404, detail="维度不存在")
+        return d.to_dict()
+
+    @app.delete("/api/mood/dims/{dim_id}", response_model=dict[str, bool])
+    def delete_mood_dim(dim_id: str) -> dict[str, bool]:
+        ok = mood_dims.delete(dim_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="维度不存在")
         return {"ok": True}
 
     @app.get("/api/bias", response_model=list[dict[str, Any]])
@@ -2097,6 +2254,32 @@ def build_app(
     # ------------------------------------------------------------------
     # 知识图谱（S7：AI 事实源，后台自动维护）
     # ------------------------------------------------------------------
+    @app.get("/api/graph/types", response_model=list[dict[str, Any]])
+    def list_graph_types() -> list[dict[str, Any]]:
+        """实体类型集（S50 内容化：可增删改/开关）。"""
+        return graph.list_types("main")
+
+    @app.post("/api/graph/types", response_model=dict[str, Any])
+    def add_graph_type(req: GraphTypeIn) -> dict[str, Any]:
+        t = graph.add_type(req.name)
+        if t is None:
+            raise HTTPException(status_code=409, detail=f"类型已存在: {req.name}")
+        return t
+
+    @app.patch("/api/graph/types/{type_id}", response_model=dict[str, Any])
+    def patch_graph_type(type_id: str, req: GraphTypePatch) -> dict[str, Any]:
+        t = graph.set_type_enabled(type_id, req.enabled)
+        if t is None:
+            raise HTTPException(status_code=404, detail="类型不存在")
+        return t
+
+    @app.delete("/api/graph/types/{type_id}", response_model=dict[str, bool])
+    def delete_graph_type(type_id: str) -> dict[str, bool]:
+        ok = graph.delete_type(type_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="类型不存在")
+        return {"ok": True}
+
     @app.get("/api/graph/entities", response_model=list[dict[str, Any]])
     def list_graph_entities(q: str = "", entity_type: str = "") -> list[dict[str, Any]]:
         """图谱实体（可 q 模糊 / entity_type 过滤）。"""

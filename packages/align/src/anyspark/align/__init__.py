@@ -21,7 +21,13 @@ from .bias import BiasStore
 from .extract import PreferenceExtractor
 from .inject import ManualInjector, MemoryInjector
 from .manual import ManualEntry, ManualStore, render_manual
-from .mood import MOOD_DIMS, build_mood_block
+from .mind import MindPlanner, SessionPlan
+from .mood import (
+    DEFAULT_MOOD_DIMS,
+    MoodDim,
+    MoodDimStore,
+    build_mood_block,
+)
 from .plan import ChapterPlan, StoryPlanStore, render_plan
 from .signals import Signal, SignalCollector, SignalStore
 from .skills import (
@@ -37,8 +43,8 @@ from .worldsettings import WorldSetting, WorldSettingStore, render_settings
 __all__ = [
     "DEFAULT_ID",
     "DEFAULT_LEVELS",
+    "DEFAULT_MOOD_DIMS",
     "DEFAULT_SKILLS",
-    "MOOD_DIMS",
     "AgencyLevel",
     "AgencyStore",
     "BiasStore",
@@ -48,8 +54,12 @@ __all__ = [
     "ManualStore",
     "MemoryInjector",
     "MemoryStore",
+    "MindPlanner",
+    "MoodDim",
+    "MoodDimStore",
     "PreferenceExtractor",
     "SceneMemory",
+    "SessionPlan",
     "SessionSummarizer",
     "Signal",
     "SignalCollector",

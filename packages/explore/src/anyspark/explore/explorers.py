@@ -14,7 +14,7 @@ from typing import Any
 
 from anyspark.core.types import Message
 
-from .direction import DirectionCard
+from .direction import DEFAULT_DIMENSIONS, DirectionCard
 from .strategy import ExplorationStrategy
 
 
@@ -50,11 +50,13 @@ def run_exploration(
     intent_confirmed: dict[str, Any],
     constraints: list[str] | None = None,
     n_explorers: int = 4,
+    dimensions: list[str] | None = None,
 ) -> list[DirectionCard]:
-    """便捷入口：一次完整探索。"""
+    """便捷入口：一次完整探索（dimensions：S50 内容化维度集，缺省默认种子）。"""
     strategy = ExplorationStrategy(
         seed=seed,
         intent_confirmed=intent_confirmed,
         constraints=constraints or [],
+        dimensions=dimensions or list(DEFAULT_DIMENSIONS),
     )
     return ExplorationEngine(model, n_explorers).explore(strategy)

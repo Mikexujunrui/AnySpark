@@ -15,13 +15,22 @@ from typing import Any
 
 from anyspark.core.types import Message
 
+# 默认实体类型（S50 内容化：GraphExtractor 可注入自定义类型集，提示词动态拼）
 VALID_TYPES = ("角色", "地点", "事件", "物件", "设定")
+
+
+def _types_line(types: list[str]) -> str:
+    """类型清单 → 提示词里的约束行（N 选一，随内容集变化）。"""
+    if not types:
+        types = list(VALID_TYPES)
+    return "实体类型只能从以下选一：" + "/".join(types) + "。"
+
 
 EXTRACT_PROMPT = (
     "你是小说知识图谱抽取器。从给定的章节正文中抽取**新出现或本章关键**的实体、关系和事件。\n"
     "规则：\n"
     "1. 只抽取正文明确提及的，不要臆测、不要推断未写的背景。\n"
-    "2. 实体类型只能是：角色/地点/事件/物件/设定（五选一）。\n"
+    "2. {types_line}\n"
     "3. 关系：两个实体之间明确的关系（如 认识/兄妹/师徒/居住/敌视），类型用自然语言。\n"
     "4. 事件：本章发生的具体事件（time_point=章节号，如'第3章'），involved 列出涉及实体名。\n"
     "5. 已在'已有实体'清单里的不要重复抽取（不出现在 entities），"
@@ -92,9 +101,11 @@ class StateUpdate:
 class GraphExtractor:
     """真实 LLM 抽取器（模型无关，适配器注入）。"""
 
-    def __init__(self, model: object) -> None:
+    def __init__(self, model: object, types: list[str] | None = None) -> None:
         # model 实现 core.Model 协议（respond(messages, tools) -> ModelOutput）
         self._model = model
+        # S50：类型集内容化——项目级可配置（缺省默认 5 类），提示词动态拼
+        self._types = list(types) if types else list(VALID_TYPES)
 
     def extract(
         self,
@@ -104,14 +115,16 @@ class GraphExtractor:
     ) -> Extraction:
         """抽取一章：新实体 + 关系 + 事件（已有实体不重复）。
 
-        宽容解析的补强（benchmark 发现）：模型输出偶发截断/非法 JSON，
+        >>> 宽容解析的补强（benchmark 发现）：模型输出偶发截断/非法 JSON，
         解析结果全空时重试一次（不同采样）；仍空则返回空（不阻塞调用方）。
         """
         existing_text = ""
         if existing:
             names = "\n".join(f"- {e['name']}（{e['entity_type']}）" for e in existing[:50])
             existing_text = f"\n{names}\n"
-        prompt = EXTRACT_PROMPT + existing_text + f"\n章节《{chapter_ref}》正文：\n{text[:6000]}"
+        prompt = EXTRACT_PROMPT.replace("{types_line}", _types_line(self._types)) + (
+            existing_text + f"\n章节《{chapter_ref}》正文：\n{text[:6000]}"
+        )
         parsed = Extraction()
         for _attempt in range(2):
             output = self._model.respond(  # type: ignore[attr-defined]
@@ -136,7 +149,7 @@ class GraphExtractor:
             if not name:
                 continue
             etype = str(item.get("type", "设定")).strip()
-            if etype not in VALID_TYPES:
+            if etype not in self._types:
                 etype = "设定"
             aliases = [str(a).strip() for a in _as_list(item.get("aliases")) if str(a).strip()]
             extraction.entities.append(

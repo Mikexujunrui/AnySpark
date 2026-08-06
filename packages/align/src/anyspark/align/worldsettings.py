@@ -90,7 +90,80 @@ class WorldSettingStore:
                 )
                 """
             )
+            # S50：设定档类别内容化（默认种子建议，可增删改——不再写死锁死）
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS setting_categories (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL UNIQUE,
+                    enabled INTEGER NOT NULL DEFAULT 1,
+                    order_index INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            n_cat = self._conn.execute("SELECT COUNT(*) AS c FROM setting_categories").fetchone()[
+                "c"
+            ]
+            if n_cat == 0:
+                now = _now()
+                for i, c in enumerate(SETTING_CATEGORIES):
+                    self._conn.execute(
+                        "INSERT INTO setting_categories "
+                        "(id, name, enabled, order_index, created_at) VALUES (?,?,1,?,?)",
+                        (uuid.uuid4().hex, c, i, now),
+                    )
             self._conn.commit()
+
+    # -- S50 类别内容化（可增删改；类别=内容自然语言） --
+    def list_categories(self) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM setting_categories ORDER BY order_index, rowid"
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def add_category(self, name: str) -> dict[str, Any] | None:
+        name = name.strip()
+        if not name:
+            return None
+        with self._lock:
+            exists = self._conn.execute(
+                "SELECT 1 FROM setting_categories WHERE name=?", (name,)
+            ).fetchone()
+            if exists:
+                return None
+            max_order = self._conn.execute(
+                "SELECT COALESCE(MAX(order_index), -1) AS m FROM setting_categories"
+            ).fetchone()["m"]
+            cid = uuid.uuid4().hex
+            self._conn.execute(
+                "INSERT INTO setting_categories (id, name, enabled, order_index, created_at) "
+                "VALUES (?,?,1,?,?)",
+                (cid, name, int(max_order) + 1, _now()),
+            )
+            self._conn.commit()
+            return {"id": cid, "name": name, "enabled": 1}
+
+    def set_category_enabled(self, cat_id: str, enabled: bool) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM setting_categories WHERE id=?", (cat_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                "UPDATE setting_categories SET enabled=? WHERE id=?",
+                (1 if enabled else 0, cat_id),
+            )
+            self._conn.commit()
+        return dict(row) | {"enabled": 1 if enabled else 0}
+
+    def delete_category(self, cat_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM setting_categories WHERE id=?", (cat_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
 
     def list(self, book_id: str = "main") -> list[WorldSetting]:
         with self._lock:
@@ -119,7 +192,7 @@ class WorldSettingStore:
             ).fetchone()["m"]
             s = WorldSetting(
                 content=content,
-                category=category if category in SETTING_CATEGORIES else "世界观",
+                category=category or "世界观",  # S50：类别=内容，不再强制降级到白名单
                 name=name,
                 source=source,
                 order=int(max_order) + 1,

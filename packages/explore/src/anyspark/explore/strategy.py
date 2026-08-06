@@ -12,10 +12,10 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from .direction import DIMENSIONS, DirectionCard, Source
+from .direction import DEFAULT_DIMENSIONS, DirectionCard, Source
 
 # 探索者固定分派映射（供 card 标注维度/来源；探索者不知道自己维度，避免自证偏见）
-EXPLORER_DIMS: list[str] = list(DIMENSIONS)
+EXPLORER_DIMS: list[str] = list(DEFAULT_DIMENSIONS)
 _EXPLORER_MIX: list[Source] = ["template", "grow", "user", "template"]
 
 
@@ -47,7 +47,7 @@ class ExplorationStrategy:
     seed: str
     intent_confirmed: dict[str, Any]  # 意图理解者的对齐确认
     constraints: list[str] = field(default_factory=list)  # 已固化设定约束（不得撞墙）
-    dimensions: list[str] = field(default_factory=lambda: list(DIMENSIONS))
+    dimensions: list[str] = field(default_factory=lambda: list(DEFAULT_DIMENSIONS))
     mix: list[Source] = field(default_factory=lambda: list(_EXPLORER_MIX))
 
     def assign(self, index: int) -> tuple[str, Source]:
