@@ -1278,3 +1278,31 @@
 - pytest：test_skillgen（7）+ drafts 转正 + API 全绿
 - 端到端：A 导入原文→候选（负面约束✓真实案例✓）；B style 偏好→后台草稿→确认转正✓
 - ruff 0 / format 0 / mypy 0（111 文件）
+
+## S53c 心智模型更新端补完 + 真实链路验证（已完成 ✅）
+
+### 补齐（DESIGN §12.18 更新方式全景的缺口）
+| # | 组件 | 实现 |
+|---|------|------|
+| ⑤ | NegativeCapture（实时负例捕获）| signals kind=negative → 即时落 habit 雷区条目（conf 0.45，幂等）|
+| ② | 归档后分析 | SessionSummarizer 接线 chat 结束 → 后台场景记忆（阈值：用户≥40字防烧 token）|
+| ④ | 下轮展示学到 | `_make_agent` 注入上次会话场景记忆（memory_store.latest）|
+| ⑦ | 弱信号快照 | weak_signal_from_text：试探/微调语句留 custom 快照 |
+| ⑥ | 跨会话对账 | `/api/mind/reconcile` 真实 LLM 比对条目 vs 行为（冲突/需更新）|
+| ① | 用户主动登记 | `mind_register` 领域工具（对话"记一下"→ user 来源 conf 0.9）|
+
+### 真实链路验证（deepseek-v4-pro，全部 ✓）
+1. **⑤ 负例**：POST signals negative"不要用破折号" → manual 落"雷区（标点）：不要用破折号"（habit, conf0.45, 幂等防重复）✓
+2. **② 归档**：12 条消息真实会话 → 场景记忆落库（含"克制冷静不堆砌形容词"偏好 + 进度 + 决定）✓
+3. **④ 跨会话**：新会话续写第三章，延续"克制、氛围先行、白描"风格 ✓
+4. **① mind_register**：agent 自主识别"记一下" → 调工具登记"对话短句≤10字" → style 条目 conf0.9 ✓
+5. **⑥ 对账**：真实 LLM 调用 11.7s，当前无冲突返回空 ✓
+
+### 真实测试暴露的问题
+- **预存重复数据**：manual 里"叙事克制少用感叹号"3 条重复（用户反复手写）→ 印证 §12.18"自然语言条目膨胀需元数据收敛"——后续可做重复合并（S55 backlog）。
+- **并行智能体协作**：另一智能体并行做 S54 skillgen，其提交 78021f0 把我改的 app.py 一起提交但漏了 mindup.py（半坏）→ 我补提交 d50ef9f 修复，HEAD 自洽。
+- **测试隔离**：归档摘要后台线程会抢测试假模型的调用 → 阈值过滤短对话（≥3 消息且用户≥40字）解决。
+
+### 验证
+- align 测试（排除另一智能体半成品的 test_skillgen）46 个全过；app 147 个全过；ruff/mypy 全绿。
+- 注：test_skillgen.py 是另一智能体 S54 的半成品（502），非本次范围。
