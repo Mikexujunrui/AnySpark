@@ -16,6 +16,7 @@ dependencies = [
     "anyspark-check",    # 工作区成员：检测网
     "anyspark-template", # 工作区成员：模式库+资料
     "anyspark-graph",    # 工作区成员：知识图谱（AI 事实源）
+    "anyspark-workflow", # 工作区成员：工作流（S59 可选增强：顺序/分支/循环 + 断点恢复）
     "anyspark-desktop",  # 工作区成员：桌面壳
 ]
 
@@ -32,6 +33,7 @@ anyspark-explore = { workspace = true }
 anyspark-check = { workspace = true }
 anyspark-template = { workspace = true }
 anyspark-graph = { workspace = true }
+anyspark-workflow = { workspace = true }
 anyspark-desktop = { workspace = true }
 
 
@@ -57,6 +59,7 @@ src = [
     "packages/check",
     "packages/template",
     "packages/graph",
+    "packages/workflow",
     "scripts",
 ]
 
@@ -74,6 +77,10 @@ ignore = [
 # S54：生成 prompt/测试样例是长中文行（JSON 格式说明），断行破坏内容
 "packages/align/src/anyspark/align/skillgen.py" = ["E501"]
 "packages/align/tests/test_skillgen.py" = ["E501"]
+# S59：工作流生成目录/测试样例是长中文行（JSON 定义），断行破坏内容
+"packages/workflow/src/anyspark/workflow/generator.py" = ["E501"]
+"packages/workflow/tests/test_workflow.py" = ["E501"]
+"packages/app/tests/test_workflow_api.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["anyspark"]
@@ -90,6 +97,7 @@ files = [
     "packages/check",
     "packages/template",
     "packages/graph",
+    "packages/workflow",
 ]
 mypy_path = [
     "packages/core/src",
@@ -99,6 +107,7 @@ mypy_path = [
     "packages/check/src",
     "packages/template/src",
     "packages/graph/src",
+    "packages/workflow/src",
 ]
 explicit_package_bases = true
 
@@ -111,5 +120,6 @@ testpaths = [
     "packages/check/tests",
     "packages/template/tests",
     "packages/graph/tests",
+    "packages/workflow/tests",
 ]
 addopts = "-q"

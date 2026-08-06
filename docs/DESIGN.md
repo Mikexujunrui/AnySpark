@@ -725,3 +725,59 @@ v4 从空库起步，数据在 v4 内自然生长
 - **多章毒化实验实证**（multi_chapter）：同会话写 3 章——A 累积 3 幻觉（定位漂移+
   设定矛盾）vs C 干净 0 幻觉——**C 架构（每章干净写作调用）免疫累积毒化**，S56 定案被验证
 - **哲学**：机制（mode 分流/retry 兜底/实验判分）硬编码；内容（指导文本/意图）模型生成
+
+### 12.22 工作流扩展包（S59，主人拍板：开源路线 + 借鉴 DeterminFlow 思想）
+
+> 背景：主人要求把"固定分析流程"（如章节质量分析）与"可迁移改书标准"（某作者
+> 一套改书打法换书复用）做成 AnySpark 的**可选增强包**。DESIGN 去留清单原已将
+> "工作流"列为降权可选增强包（默认关闭）——本节约定其落地形态。
+
+#### 定位
+- **不是通用 DAG 业务引擎**（那是 DeterminFlow 的路），是**结构化流程三结构**：
+  顺序（Sequence）+ 分支（Branch）+ 循环（Loop）——覆盖写作领域真实需求
+  （"检查→返工→复检"循环、"硬伤多→重写否则→润色"分支），执行语义可证明终止。
+- **与 skill 不重叠**：skill=一条知识（怎么写更好，被动注入）；workflow=多步执行
+  计划（先做什么后做什么，系统主动执行、每步有输入输出、可断点恢复）。
+  两者互补：流程步骤可引用 skill 作该步知识输入（骨架 do what，知识 how）。
+- **与 plan/batch 的关系**：plan=章节级"接下来写什么"（推进式）；batch=流程的特例
+  （单步流程）；workflow=上层编排壳（调 check/graph/plot/batch 等现有执行单元）。
+- **模板与书解耦**：流程定义存模板表（与具体书无关）→ 运行任务时绑定 book_id →
+  同一套"改书标准"应用到任何一本新书=迁移。
+
+#### 引擎（机制硬编码）
+- 节点类型：`agent`（调模型：写作/审读/查证指令，可带工具）/ `script`（确定性函数，
+  复用 codex 沙箱）/ `approval`（人工确认点）/ `gate`（条件分支）/ `loop`（循环）。
+- 边：`{source, target, condition?}`——condition 挂在边上表达分支
+  （gate 出边多条件取第一个为真；loop 用 continue_condition + 最大迭代次数防死循环）。
+- 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
+  ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
+- 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/
+  failed/skipped）；进程重启后从第一个非 done 节点续跑（借鉴 DeterminFlow CAS 防并发）。
+- 失败策略：每节点 `auto_retry_count` + `auto_retry_interval_seconds` +
+  `fail_auto_skip`（借鉴 DeterminFlow failure_policy，默认全关）。
+- 记账：每节点 token/耗时记录（借鉴 DeterminFlow token_usage 思想）。
+- 引擎算法结构借鉴 DeterminFlow（definition/condition_parser/failure_policy 的
+  数据模型与状态机设计），**重写实现不搬代码**——其核心模块深度耦合它的运行时
+  （NodeRegistry/SessionManager/Extension Host），直接复用会击穿 core 零依赖铁律；
+  只留骨架（~2000 行 vs 其 12K 行），执行语义写作化。
+
+#### AI 生成（对齐 skillgen 模式）
+- `POST /api/workflows/generate`（描述目标 → LLM 产出流程定义候选）→ 进
+  `workflow_drafts` 草稿表（未生效）→ 人工确认 promote 转正 / delete 拒绝。
+- 生成时注入"节点类型目录"（各节点 schema + 用法示例 + 现有可复用能力清单），
+  校验器检查节点引用完整性/类型合法/无环/条件语法，非法重试或拒收。
+
+#### 定义格式（为画布预留）
+```json
+{ "id", "name", "description",
+  "nodes": [{id, type: agent|script|approval|gate|loop, label, params, fail_policy}],
+  "edges": [{source, target, condition?}] }
+```
+nodes + edges = 画布天然数据模型——现在先 JSON + API，未来前端加流程图组件
+即可拖拽渲染，后端零改动（前端本期不做，主人已确认）。
+
+#### 与 DeterminFlow 的边界（许可证已无碍）
+主人确认**开源路线**（商业化与开源不冲突）→ AGPL-3.0 复用约束解除。但仍**不直接
+import 复用**：耦合面问题（拖入 49K 行运行时 vs 我们只要 ~2K 行骨架）与架构铁律
+（core 零依赖/单向依赖/模型无关）。只借鉴算法结构（DAG/拓扑/条件语法/失败状态机/
+CAS 恢复），这些是通用计算机科学概念，重写后是自有代码。

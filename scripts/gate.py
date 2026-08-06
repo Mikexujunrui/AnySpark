@@ -41,6 +41,7 @@ def main() -> int:
         "packages/check",
         "packages/template",
         "packages/graph",
+        "packages/workflow",
         "scripts",
     ]
     failed = False
