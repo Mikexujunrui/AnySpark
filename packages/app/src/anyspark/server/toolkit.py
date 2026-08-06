@@ -31,6 +31,7 @@ def build_toolkit(
     settings: Any,
     materials: Any,
     ext_tools: Any,
+    manual: Any = None,
     enable_domain: bool = True,
     enable_codex: bool = False,
     enable_extras: bool = False,
@@ -57,6 +58,7 @@ def build_toolkit(
         from anyspark.server.tools_domain import (
             make_graph_query_implementer,
             make_ingest_implementer,
+            make_mind_register_implementer,
             make_plan_implementer,
             make_plot_implementer,
             make_read_context_implementer,
@@ -86,6 +88,10 @@ def build_toolkit(
         registry.register(rc_spec, rc_impl)
         rt_spec, rt_impl = make_register_tool_implementer(ext_tools)
         registry.register(rt_spec, rt_impl)
+        # S53c ① 心智登记工具：对话中"记一下"→ 即时落心智条目（user 来源高置信度）
+        if manual is not None:
+            md_spec, md_impl = make_mind_register_implementer(manual)
+            registry.register(md_spec, md_impl)
 
     # S48-P4/B 扩展工具注册表：已批准（active）的扩展注入工具集（无需重启生效）
     from anyspark.server.codex import make_data_env

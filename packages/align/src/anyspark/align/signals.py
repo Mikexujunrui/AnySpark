@@ -23,6 +23,7 @@ SignalKind = Literal[
     "rejected",  # 明确拒绝（"再来一批" / 否定）
     "custom",  # 用户自定规则/偏好陈述
     "locked",  # 用户锁定条目
+    "negative",  # S53c 实时负例：用户明确否定/撤回（"不要破折号"）——即时捕获防稀释
 ]
 
 
@@ -157,6 +158,16 @@ class SignalCollector:
     def custom(self, statement: str, context: str = "") -> Signal:
         return self._store.record(
             Signal(kind="custom", content=statement, context=context, book_id=self._book_id)
+        )
+
+    def negative(self, statement: str, context: str = "") -> Signal:
+        """S53c 实时负例：用户明确否定/撤回（如"不要破折号""我说了不用这个词"）。
+
+        即时捕获（不等轮末提炼），防隐式否定被上下文稀释丢失。
+        内容 = 用户原话（自然语言），后续由 NegativeCapture 落雷区条目。
+        """
+        return self._store.record(
+            Signal(kind="negative", content=statement[:200], context=context, book_id=self._book_id)
         )
 
 

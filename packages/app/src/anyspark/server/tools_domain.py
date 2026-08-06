@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from anyspark.align import ManualEntry
 from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
 from anyspark.core.types import ToolCall
 
@@ -810,5 +811,69 @@ def make_read_context_implementer(chapters: Any) -> tuple[Any, Any]:
             return ToolResult(call=call, ok=True, content=f"《{title}》{marker}\n\n{body}")
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"读取失败：{exc}")
+
+    return spec, implementer
+
+
+def make_mind_register_implementer(manual: Any) -> tuple[Any, Any]:
+    """S53c ① 心智登记工具：用户对话中"记一下"→ 立即落心智条目（user 来源，高置信度）。
+
+    对应 DESIGN §12.18 更新方式 #1（用户主动登记）。让 agent 在对话中识别
+    用户的明确偏好陈述并即时登记——不用等轮末提炼，不用打开说明书面板。
+    category：collab(协作)/style(文风)/habit(习惯)。
+    """
+
+    spec = ToolSpec(
+        name="mind_register",
+        description=(
+            "把用户说出的明确写作偏好/习惯/雷区登记进心智模型（写作说明书）。"
+            "当用户在对话中明确表达偏好时使用，如'我写对话喜欢克制''不要用破折号'"
+            "'我一般晚上写作'。登记后后续写作自动遵循。"
+            "category=collab(协作方式)/style(文风)/habit(习惯，含雷区)。"
+        ),
+        params=[
+            ParamSpec(
+                name="content",
+                type="string",
+                required=True,
+                description="偏好内容（自然语言，如'对话要克制，少用感叹号'）",
+            ),
+            ParamSpec(
+                name="category",
+                type="string",
+                required=False,
+                description="collab/style/habit（缺省 style）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        content = str(arguments.get("content", "")).strip()
+        category = str(arguments.get("category", "style")).strip() or "style"
+        if not content:
+            return ToolResult(call=call, ok=False, content="缺少参数 content。")
+        if category not in ("collab", "style", "habit"):
+            category = "style"
+        try:
+            entry = manual.add(
+                ManualEntry(
+                    content=content,
+                    source="user",  # 用户亲口，高置信度
+                    confidence=0.9,
+                    activity="high",
+                    scope="project",
+                    book_id="main",
+                    category=category,  # type: ignore[arg-type]
+                )
+            )
+            return ToolResult(
+                call=call,
+                ok=True,
+                content=f"已登记心智条目#{entry.id[:8]}（{category}）：{content}",
+                data={"manual_id": entry.id, "category": category},
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"登记失败：{exc}")
 
     return spec, implementer
