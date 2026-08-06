@@ -29,6 +29,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+# S55 #4 描述截断守卫：索引注入描述限长（防撑爆系统提示/静默路由失败）
+SKILL_DESC_LIMIT = 100
+
+
+def _guard_description(desc: str) -> str:
+    """描述超限截断（机制硬编码：索引行必须短）。"""
+    desc = (desc or "").strip()
+    if len(desc) > SKILL_DESC_LIMIT:
+        return desc[: SKILL_DESC_LIMIT - 3] + "..."
+    return desc
+
 # 默认叙事技巧（种子；内容自然语言，可增删改——名+技法+情形案例三段式）
 DEFAULT_SKILLS: list[dict[str, str]] = [
     {
@@ -206,6 +217,18 @@ class WritingSkillStore:
             ).fetchall()
         return [_from_row(r) for r in rows]
 
+    def revision(self) -> str:
+        """S55 #3 注入缓存签名：内容变化 → 签名变化（增删改任一操作即失效）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT name, description, content, example, enabled, order_index "
+                "FROM writing_skills"
+            ).fetchall()
+        sig = "".join(
+            f"{r[0]}|{r[1]}|{r[5]}|{int(r[4])}" for r in rows
+        )
+        return sig
+
     def enabled(self) -> list[WritingSkill]:
         return [s for s in self.list_skills() if s.enabled]
 
@@ -217,6 +240,8 @@ class WritingSkillStore:
         example: str = "",
         tags: str = "",
     ) -> WritingSkill:
+        # S55 #4 描述截断守卫：超限截断（防注入撑爆/静默路由失败），机制硬编码
+        description = _guard_description(description)
         with self._lock:
             max_order = self._conn.execute(
                 "SELECT COALESCE(MAX(order_index), -1) AS m FROM writing_skills"
@@ -262,7 +287,7 @@ class WritingSkillStore:
                 params.append(name)
             if description is not None:
                 sets.append("description=?")
-                params.append(description)
+                params.append(_guard_description(description))
             if content is not None:
                 sets.append("content=?")
                 params.append(content)

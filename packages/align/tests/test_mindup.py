@@ -80,3 +80,27 @@ def test_reconcile_prompt_and_parse() -> None:
     parsed = parse_reconcile_result(sample)
     assert parsed and parsed[0]["verdict"] == "冲突"
     assert parse_reconcile_result("（无冲突）") == []
+
+
+def test_learning_review_parse() -> None:
+    """S55 #2 学习审查解析：宽容 JSON + 类别白名单。"""
+    from anyspark.align.mindup import (
+        build_learning_review_prompt,
+        parse_learning_review_result,
+    )
+
+    sample = '```json\n[{"content": "喜欢用短句", "category": "style", "reason": "本章对白全是短句"}]\n```'
+    parsed = parse_learning_review_result(sample)
+    assert parsed and parsed[0]["content"] == "喜欢用短句"
+    assert parsed[0]["category"] == "style"
+    # 非法类别 → 回退 style
+    bad = parse_learning_review_result('[{"content": "x", "category": "evil"}]')
+    assert bad and bad[0]["category"] == "style"
+    assert parse_learning_review_result("（无需更新）") == []
+    # 提示词含条目与内容
+    from anyspark.align import ManualEntry
+
+    m = _manual()
+    m.add(ManualEntry(content="对话要克制", category="style"))
+    prompt = build_learning_review_prompt(m.list("project"), "本章内容测试")
+    assert "对话要克制" in prompt and "本章内容测试" in prompt

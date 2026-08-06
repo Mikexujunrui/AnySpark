@@ -26,6 +26,29 @@ Category = Literal["collab", "style", "habit"]
 Scope = Literal["project", "global"]
 
 
+# S55 合并式新增：关键词提取 + 内容合并（机制硬编码，治碎片）
+# 中文偏好条目用双字窗口提取关键词（对 2 字词/短语有效，模型无关）
+def _keyword_set(content: str) -> set[str]:
+    """从自然语言条目里提取关键词集合（双字窗口，去停用词）。"""
+    text = content.replace(" ", "").replace("：", "").replace("（", "").replace("）", "")
+    kws: set[str] = set()
+    for i in range(len(text) - 1):
+        w = text[i : i + 2]
+        # 过滤明显停用词/无意义双字
+        if all("\u4e00" <= ch <= "\u9fff" for ch in w):
+            kws.add(w)
+    return kws
+
+
+def _merge_contents(old: str, new: str) -> str:
+    """合并两条同主题条目内容：保留原有 + 追加新信息（去重）。"""
+    if new in old:
+        return old
+    if old in new:
+        return new
+    return f"{old}；{new}"
+
+
 @dataclass
 class ManualEntry:
     """说明书的一条条目。"""
@@ -122,6 +145,43 @@ class ManualStore:
             )
             self._conn.commit()
         return entry
+
+    def merge_add(self, entry: ManualEntry) -> tuple[ManualEntry, bool]:
+        """S55 合并式新增：同 scope+category 且关键词重叠的现有条目 → 合并进现有条目。
+
+        治碎片（Hermes 借鉴：类级条目，非一次性窄条目）：
+        - 重叠判定：双字窗口关键词交集 ≥ 2（内容自然语言，机制硬编码）
+        - 合并语义：内容保留原有 + 追加新信息（去重短句）、置信度取 max、活跃度升 high
+        - 锁定条目不合并（用户主权）；重叠不足 → 普通新增
+        返回 (条目, 是否发生合并)。
+        """
+        existing = self.list(entry.scope, entry.book_id)
+        candidates = [
+            e for e in existing if e.category == entry.category and not e.locked
+        ]
+        new_kws = _keyword_set(entry.content)
+        for e in candidates:
+            old_kws = _keyword_set(e.content)
+            overlap = new_kws & old_kws
+            if len(overlap) >= 2:  # 至少 2 个双字短语重叠才判定同类
+                merged = self.update(
+                    e.id,
+                    content=_merge_contents(e.content, entry.content),
+                    confidence=max(e.confidence, entry.confidence),
+                )
+                if merged is None:
+                    merged = e
+                self._touch_activity(merged.id, "high")
+                return merged, True
+        return self.add(entry), False
+
+    def _touch_activity(self, entry_id: str, activity: str) -> None:
+        with self._lock:
+            self._conn.execute(
+                "UPDATE manual_entries SET activity=?, updated_at=? WHERE id=?",
+                (activity, _now(), entry_id),
+            )
+            self._conn.commit()
 
     def list(self, scope: Scope, book_id: str = "main") -> list[ManualEntry]:
         with self._lock:

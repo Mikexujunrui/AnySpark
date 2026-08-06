@@ -181,3 +181,69 @@ def parse_reconcile_result(raw: str) -> list[dict[str, str]]:
     except Exception:
         pass
     return []
+
+
+# ---------------------------------------------------------------------------
+# 后台学习审查（LearningReviewer，S55 #2，借鉴 Hermes background_review）
+# ---------------------------------------------------------------------------
+
+_LEARNING_REVIEW_PROMPT = """你是小说写作系统的学习审查器。审查最近的一次写作/对话，
+决定**该不该更新心智模型**。
+
+心智模型 = 用户的写作偏好/习惯/雷区（自然语言条目），指导未来协作。
+
+审查规则：
+1. 只在**有新信息**时更新——用户明确表达的新偏好、明显的写作习惯变化、新雷区。
+2. 不重复已有条目（内容已覆盖就不更新）。
+3. 每次最多输出 2 条。没有值得更新的就输出空数组。
+
+输出（严格 JSON 数组，不要其它文字）：
+[{"content": "偏好短句（一句明确无歧义自然语言）",
+"category": "collab|style|habit", "reason": "为什么值得记"}]
+
+已有条目：
+{entries}
+
+最近内容：
+{content}
+"""
+
+
+def build_learning_review_prompt(entries: list[ManualEntry], content: str) -> str:
+    """学习审查提示词（供 app 层真实 LLM 调用，模型无关）。"""
+    e = "\n".join(f"- [{s.category}] {s.content}" for s in entries[:20]) or "（无条目）"
+    return _LEARNING_REVIEW_PROMPT.replace("{entries}", e).replace("{content}", content[:2000])
+
+
+def parse_learning_review_result(raw: str) -> list[dict[str, str]]:
+    """宽容解析学习审查结果 JSON。"""
+    import json
+
+    cleaned = raw.strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1)
+    start, end = cleaned.find("["), cleaned.rfind("]")
+    if start != -1 and end != -1 and end > start:
+        cleaned = cleaned[start : end + 1]
+    try:
+        data = json.loads(cleaned)
+        if isinstance(data, list):
+            out = []
+            for x in data:
+                if not isinstance(x, dict):
+                    continue
+                category = str(x.get("category", "style"))
+                if category not in ("collab", "style", "habit"):
+                    category = "style"
+                out.append(
+                    {
+                        "content": str(x.get("content", "")),
+                        "category": category,
+                        "reason": str(x.get("reason", "")),
+                    }
+                )
+            return out
+    except Exception:
+        pass
+    return []

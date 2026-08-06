@@ -24,7 +24,9 @@ from .manual import ManualEntry, ManualStore, render_manual
 from .mind import MindPlanner, SessionPlan
 from .mindup import (
     NegativeCapture,
+    build_learning_review_prompt,
     build_reconcile_prompt,
+    parse_learning_review_result,
     parse_reconcile_result,
     weak_signal_from_text,
 )
@@ -80,9 +82,11 @@ __all__ = [
     "WritingSkill",
     "WritingSkillStore",
     "build_agency_block",
+    "build_learning_review_prompt",
     "build_mood_block",
     "build_reconcile_prompt",
     "parse_agency_declaration",
+    "parse_learning_review_result",
     "parse_reconcile_result",
     "render_manual",
     "render_plan",

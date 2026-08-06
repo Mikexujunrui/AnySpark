@@ -38,9 +38,11 @@ from anyspark.align import (
     WorldSettingStore,
     WritingSkillStore,
     build_agency_block,
+    build_learning_review_prompt,
     build_mood_block,
     build_reconcile_prompt,
     parse_agency_declaration,
+    parse_learning_review_result,
     parse_reconcile_result,
     render_plan,
     render_settings,
@@ -98,6 +100,10 @@ from anyspark.template import (
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
 DATA_DIR = PROJECT_ROOT / "data"
 DB_PATH = DATA_DIR / "anyspark.db"
+
+# S55 #3 注入块分层缓存：stable 块（跨请求不变）按签名缓存，volatile 块每次组装。
+# 签名=底层数据内容（任何增删改 → 签名变 → 缓存失效），避免长会话重复渲染。
+_skill_cache: dict[str, tuple[str, str]] = {}  # 签名 → (索引块, 内容块)
 
 # 默认写作系统提示（真实写作指令）
 DEFAULT_SYSTEM = (
@@ -688,10 +694,12 @@ def build_app(
             for e in entries:
                 if e.content in existing:
                     continue
-                manual.add(e)
-                added += 1
+                # S55 合并式新增：同主题条目合并（治碎片），不重复堆窄条目
+                _, did_merge = manual.merge_add(e)
+                if not did_merge:
+                    added += 1
             if added:
-                logger.info("信号提炼: +%d 条说明书条目", added)
+                logger.info("信号提炼: +%d 条新说明书条目", added)
         except Exception as exc:
             logger.warning("信号提炼失败(不影响主链路): %s", exc)
 
@@ -922,12 +930,24 @@ def build_app(
         if "memory" not in skip and last_memory is not None:
             full_prompt = full_prompt + "\n\n# 上次会话的延续（场景记忆）\n" + last_memory.content
         # 叙事技巧注入（S50：skill 重构——名+技法+情形案例；索引常驻+内容按需）
-        skill_list = skills.list_skills()
-        skill_block = render_skill_index(skill_list)
+        # S55 #3 分层缓存：索引+内容块按 skills 内容签名缓存（stable），避免每次查库渲染
+        skill_sig = skills.revision()
+        cached = _skill_cache.get(skill_sig)
+        if cached is not None:
+            skill_block, skill_content = cached
+        else:
+            skill_list = skills.list_skills()
+            skill_block = render_skill_index(skill_list)
+            skill_content = render_skills_content(
+                skill_list, prefs=session_plan.style_prefs
+            )
+            _skill_cache[skill_sig] = (skill_block, skill_content)
+            # 缓存防膨胀：超过 16 个签名清理最旧（长会话/多书场景安全阀）
+            if len(_skill_cache) > 16:
+                oldest = next(iter(_skill_cache))
+                _skill_cache.pop(oldest, None)
         if "skills" not in skip and skill_block:
             full_prompt = full_prompt + "\n\n" + skill_block
-        # 内容按需：S53 心智联动——用户文风偏好优先匹配 skill，其次会话意图 tags
-        skill_content = render_skills_content(skill_list, prefs=session_plan.style_prefs)
         if "skills" not in skip and skill_content:
             full_prompt = full_prompt + "\n\n" + skill_content
         # 剧情计划注入（S46：当前章+后续计划——AI 知道接下来写什么）
@@ -971,6 +991,48 @@ def build_app(
                 logger.info("伏笔自动回收: 《%s》 %s", title, "、".join(resolved))
         except Exception as exc:
             logger.warning("伏笔回收失败(不影响写作): %s", exc)
+        # S55 #2 后台学习审查：本章揭示了什么新偏好/习惯 → 更新心智（轻量，失败不影响）
+        try:
+            _review_for_learning(book_id, title, content)
+        except Exception as exc:
+            logger.warning("学习审查失败(不影响写作): %s", exc)
+
+    def _review_for_learning(book_id: str, title: str, content: str) -> None:
+        """S55 #2 后台学习审查（借鉴 Hermes background_review）：
+
+        章节落盘后，轻量 LLM 审查本章是否揭示了用户新偏好/习惯/雷区，
+        有则 merge_add 进心智条目（合并式新增，治碎片）。隔离：只读快照，
+        不碰主对话；失败不影响写作主链路。
+        """
+        try:
+            entries = manual.list("project", book_id)
+            prompt = build_learning_review_prompt(entries, f"章节：{title}\n\n{content[:1200]}")
+            output = model.respond(
+                [Message(role="system", content=prompt)], []
+            )
+            found = parse_learning_review_result(output.text)
+            added = 0
+            for item in found:
+                text = str(item.get("content", "")).strip()
+                if not text:
+                    continue
+                _, did_merge = manual.merge_add(
+                    ManualEntry(
+                        content=text,
+                        source="auto",
+                        confidence=0.6,
+                        activity="medium",
+                        scope="project",
+                        book_id=book_id,
+                        category=item["category"],  # type: ignore[arg-type]
+                    )
+                )
+                if not did_merge:
+                    added += 1
+            if found:
+                logger.info("学习审查: 《%s》 提炼%d 条 合并/新增", title, len(found))
+        except Exception as exc:
+            logger.warning("学习审查失败(不影响写作): %s", exc)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:

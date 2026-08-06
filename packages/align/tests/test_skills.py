@@ -134,3 +134,44 @@ def test_skills_legacy_seed_migration() -> None:
     names = [s.name for s in store2.list_skills()]
     assert "粒度感知" not in names
     assert "镜头感与视角" in names
+
+
+def test_skill_description_guard() -> None:
+    """S55 #4 描述截断守卫：超限入库被截断。"""
+    from anyspark.align import WritingSkillStore
+    from anyspark.align.skills import SKILL_DESC_LIMIT
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "s.db")
+    try:
+        long_desc = "这是一段非常长的描述" * 20
+        assert len(long_desc) > SKILL_DESC_LIMIT
+        s = store.add("test-skill", long_desc, "技法内容")
+        assert len(s.description) <= SKILL_DESC_LIMIT
+        assert s.description.endswith("...")
+        # update 同样守卫
+        s2 = store.update(s.id, description="短描述")
+        assert s2 is not None and s2.description == "短描述"
+        s3 = store.update(s.id, description=long_desc)
+        assert s3 is not None and len(s3.description) <= SKILL_DESC_LIMIT
+    finally:
+        store.close()
+
+
+def test_skill_revision_changes_on_mutation() -> None:
+    """S55 #3 注入缓存签名：内容增删改 → revision 变化（缓存失效）。"""
+    from anyspark.align import WritingSkillStore
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "s2.db")
+    try:
+        r0 = store.revision()
+        s = store.add("a", "描述A", "内容A")
+        r1 = store.revision()
+        assert r0 != r1
+        store.update(s.id, description="描述A2")
+        r2 = store.revision()
+        assert r1 != r2
+        store.delete(s.id)
+        r3 = store.revision()
+        assert r2 != r3
+    finally:
+        store.close()
