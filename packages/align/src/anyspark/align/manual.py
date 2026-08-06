@@ -163,7 +163,7 @@ class ManualStore:
         for e in candidates:
             old_kws = _keyword_set(e.content)
             overlap = new_kws & old_kws
-            if len(overlap) >= 2:  # 至少 2 个双字短语重叠才判定同类
+            if len(overlap) >= 3:  # 至少 3 个双字短语重叠才判定同类（区分同主题/仅共享通用词）
                 merged = self.update(
                     e.id,
                     content=_merge_contents(e.content, entry.content),
@@ -182,6 +182,42 @@ class ManualStore:
                 (activity, _now(), entry_id),
             )
             self._conn.commit()
+
+    def dedupe(self, scope: Scope = "project", book_id: str = "main") -> int:
+        """S55 清理历史重复：同 scope+category 且关键词重叠 ≥2 的条目两两合并。
+
+        保留锁定条目不合并（用户主权）；返回合并掉的条目数。
+        贪心两两合并：对每对同类条目，关键词交集 ≥2 即并入置信度更高者
+        （内容拼接去重，置信度取 max）。
+        """
+        entries = [e for e in self.list(scope, book_id) if not e.locked]
+        removed = 0
+        i = 0
+        while i < len(entries):
+            primary = entries[i]
+            j = i + 1
+            while j < len(entries):
+                dup = entries[j]
+                if dup.category == primary.category and dup.id != primary.id:
+                    overlap = _keyword_set(primary.content) & _keyword_set(dup.content)
+                    if len(overlap) >= 3:
+                        # 主条目取置信度高者；低者并入后删除
+                        if dup.confidence > primary.confidence:
+                            keep, drop = dup, primary
+                        else:
+                            keep, drop = primary, dup
+                        merged = _merge_contents(keep.content, drop.content)
+                        self.update(keep.id, content=merged, confidence=max(keep.confidence, drop.confidence))
+                        self.delete(drop.id)
+                        # 更新循环内引用：primary 若被删，换成 keep
+                        if primary.id == drop.id:
+                            primary = keep
+                        entries.pop(j)
+                        removed += 1
+                        continue
+                j += 1
+            i += 1
+        return removed
 
     def list(self, scope: Scope, book_id: str = "main") -> list[ManualEntry]:
         with self._lock:

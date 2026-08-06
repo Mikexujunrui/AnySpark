@@ -763,14 +763,15 @@ def build_app(
     mind_planner = MindPlanner(manual)  # S50 心智模型=会话规划器（不从写作循环注入）
     signal_collector = SignalCollector(signals)
     negative_capture = NegativeCapture(manual)  # S53c ⑤ 实时负例→雷区条目
-    memory_store = MemoryStore(real_db)  # S53c ② 场景记忆（项目档案延续性层）
-    summarizer = SessionSummarizer(model, memory_store)  # ② 归档摘要器（真实 LLM）
     # S47 运行时模型：注册表（持久化多配置）+ 动态 Provider——
     # 默认装配 RetryingModel(ModelProvider(registry))，所有组件跟随当前激活配置；
     # 测试可注入 fake model（实现 core Model 协议），走共享分支不受影响。
+    # 注意：必须在任何依赖 model 的组件（summarizer/plot/提炼器等）之前初始化。
     models = ModelRegistry(real_db)
     provider = ModelProvider(models)
     model = model or RetryingModel(provider)
+    memory_store = MemoryStore(real_db)  # S53c ② 场景记忆（项目档案延续性层）
+    summarizer = SessionSummarizer(model, memory_store)  # ② 归档摘要器（真实 LLM）
     plot_generator = PlotGenerator(model)  # 依赖 model，须在其初始化之后
     plot_resolver = PlotResolver(model)  # 伏笔自动回收（S17：章节落盘后台识别揭开）
     preference_extractor = PreferenceExtractor(model)  # S28：信号→说明书提炼（后台）
