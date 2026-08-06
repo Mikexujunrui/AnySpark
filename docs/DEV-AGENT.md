@@ -74,6 +74,11 @@ ChatRequest 其他字段：`model_id`/`thinking`（S47 模型选择）、`mood`�
 13. **codex（S48d/f）**：`POST /api/codex/run {code}`（沙箱 + ws_* 只读数据环境：ws_chapters/ws_entities/ws_read…）
 14. **扩展工具（S48g）**：`POST /api/tools/register {name, code}`（draft）→ `POST /api/tools/{id}/approve`（人工批准）→ chat 验证注入 → disable/delete
 15. `anyspark_state` 核对产物 → 改动后 `anyspark_gate` 回归
+16. **心智=会话规划器（S53b）**：`POST /api/manual {content:"喜欢白话文风", category:"style"}` + `{content:"先给方案再动笔", category:"collab"}` → chat 验证：心智指导块（文风偏好/习惯）+ 协作约定注入，档位随 collab 推断
+17. **skill 生成（S54）**：`POST /api/skills/generate {source_text:"…原文…"}`（mode 默认 writing）→ 候选（负面约束+真实案例）→ `POST /api/skills` 人工确认入库 → chat 写作验证注入；`mode:"main"` 产类型/结构指导（S58）
+18. **意图模式写作（S56 C 架构）**：chat 让 agent 用 `write_chapter {title, intent, references}` → 验证干净写作调用（正文生成+落盘）；直写=轻量写作（兜底）
+19. **内容化 API（S53/S57）**：`GET /api/mood/dims`（维度可增删改，数值语义化）→ `GET /api/explore/dims` → `GET /api/graph/types` → `GET /api/settings/categories` → `GET /api/skills/drafts`（草稿闸门）→ `POST /api/skills/drafts/{id}/promote`
+20. **笔记约定（S57）**：chat 让 agent `write_file {path:"笔记/灵感.md", content}` → 验证落 `data/sandbox/笔记/` 且不触发图谱/学习审查
 
 ## 6. 扩展工具注册表（S48g，人工批准）
 

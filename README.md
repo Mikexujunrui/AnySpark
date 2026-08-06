@@ -41,12 +41,12 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 
 ## 当前状态
 
-- **S0~S48h 全部完成**（264 tests 全绿，总闸通过）：第一版七阶段 + 全部补缺 + 实测驱动演进 + 特化路线 P1-P5
+- **S0~S58 全部完成**（pytest 全绿，总闸通过）：第一版七阶段 + 全部补缺 + 实测驱动演进 + 特化路线 P1-P5 + 架构深化（S53-S58）
   - 智能体闭环：探索工具化（S32）/粒度感知（S33）/写作技巧内容化（S43，参考 pi skills）
   - 档位记录集（S35：可增删改/恢复默认/温度入档，与心智模型正交）
   - 超长书五场景（S37-S42）：图谱高频保底注入/批量灌入/理解/续写/批量任务/设定档（正典+提炼）
   - 编辑与连锁（S44-S46）：定点编辑/影响分析/剧情计划（计划→执行）
-  - **运行时模型**（S47）：多模型配置注册表 + 思考强度（reasoning_effort）
+  - **运行时模型**（S47）：多模型配置注册表 + 思考强度（reasoning_effort）；**V4 系列 1M 上下文**
   - **特化路线 P1-P5（S48 系，主人拍板：小说特化版 pi）**：
     - P1 工作区化：每项目一路径（上传存档/章节 md 权威/卡片）+ 双写 + import 同步
     - P2 领域工具化：图谱/伏笔/计划/设定查证全 agent 可自主调用（写作闭环实证）
@@ -54,9 +54,16 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
     - P4 角色推演：低成本多探索 + 判别选优（复用 pi-multi-agent room_compare 模式）；codex 只读数据环境（真实统计）
     - P5 代码扩展：沙箱 run_code + 扩展工具注册表（工具=数据，人工批准生效）
     - 正文检索实用化：search_chapters（exclude 句级排除/regex/fragment 可调）+ read_context（锚点读段落）
-- **实测验证**：pi 循环行为对照 7/7；长书压力有界；哈利波特/猎手准则颗粒度矩阵（12 版）；猎手准则第一卷 164 章灌入+理解+续写；单元层 benchmark 17/17（S32-S46 回归）
-- **知识分层**：图谱（自动事实+weight）/设定档（作者正典）/说明书（偏好）/写作技巧（skill 式）/剧情计划（执行蓝图）
-- **剩余**：P6 前端壳（主人说后做）；多模态（图片理解/OCR，未来计划）；B 真自我修复（补丁应用，按需）；心智模型系统（包罗万象+渐进式披露）；httpx2 迁移（等 starlette 原生支持）
+  - **架构深化（S53-S58，主人讨论驱动）**：
+    - **心智模型=会话规划器**（S50/S53b）：manual 分类 collab/style/habit——collab→档位+协作约定，style→文风偏好+驱动 skill，habit→习惯块；**不再全量注入写作**
+    - **全项目内容化**（S53）：explore 维度 / graph 实体类型 / worldsettings 类别 / mood 维度全部内容载体化+CRUD（数值语义化进模型）
+    - **叙事技巧生成器**（S54）：原文提炼 skill 五段式（负面约束+真实案例），A 手动/B 心智联动/C 信号驱动 + 人工确认闸门
+    - **C 架构**（S56）：write_chapter 意图模式（intent+references）→ 干净写作调用生成正文（无历史/无工具记录，治累积毒化）；多章实验实证 0 幻觉 vs 累积 3 幻觉
+    - **skill 三改进**（S57）：轻量写作标记（与 patch 正交）/ write_file 笔记/ 前缀约定（纯文档）/ target 分流（writing→写作调用，main→主循环，both→两者）
+    - **类型 skill 生成器**（S58）：mode=main 生成结构/类型/节奏/组织指导（主循环看）
+- **实测验证**：pi 循环行为对照 7/7；长书压力有界；哈利波特/猎手准则颗粒度矩阵（12 版）；猎手准则第一卷 164 章灌入+理解+续写；单元层 benchmark 17/17（S32-S46 回归）；**上下文形态对比（S55）+ 多章毒化实证（S58）**
+- **知识分层**：图谱（自动事实+weight）/设定档（作者正典）/说明书（偏好）/写作技巧（skill 式，target 分流）/剧情计划（执行蓝图）
+- **剩余**：P6 前端壳（主人说后做）；多模态（图片理解/OCR，未来计划）；B 真自我修复（补丁应用，按需）；心智模型完整化（L2/L3 档位指导、渐进式披露的按需引入）；httpx2 迁移（等 starlette 原生支持）
 
 ## 设计一句话
 
@@ -73,10 +80,13 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 ```
 ├── pyproject.toml        # uv workspace 根
 ├── packages/
-│   ├── core/             anyspark-core     内核包（不依赖任何包）
-│   ├── explore/          anyspark-explore  探索包
-│   ├── align/            anyspark-align    对齐包
-│   ├── template/         anyspark-template 模式库包
+│   ├── core/             anyspark-core     内核包（不依赖任何包：Agent 循环/工具协议/存储）
+│   ├── explore/          anyspark-explore  探索包（意图理解/并行探索/角色推演）
+│   ├── align/            anyspark-align    对齐包（说明书/心智规划器/技能/氛围/档位）
+│   ├── template/         anyspark-template 模式库包（模板/资料摘要卡/伏笔）
+│   ├── graph/            anyspark-graph    知识图谱包（实体/关系/事件存储+抽取+注入）
+│   ├── check/            anyspark-check    检测网包（骨架检测/规则编译）
+│   ├── app/              anyspark-app      组合根（FastAPI 服务/工具装配/模型适配）
 │   └── desktop/          anyspark-desktop  桌面包
 ├── frontend/             # React 创作台（npm 单应用）
 ├── data/                 # 运行时用户数据（.gitignore，不入库）

@@ -1307,7 +1307,7 @@
 - align 测试（排除另一智能体半成品的 test_skillgen）46 个全过；app 147 个全过；ruff/mypy 全绿。
 - 注：test_skillgen.py 是另一智能体 S54 的半成品（502），非本次范围。
 
-## S55 从 Hermes Agent 借鉴：差距分析 + 4 条行动（已定计划）
+## S55 从 Hermes Agent 借鉴：差距分析 + 4 条行动（已完成 ✅）
 
 ### 背景
 研究 Nous Research 的 Hermes Agent（自改进通用 agent）。它最独特的是"closed learning loop"（技能从经验创建、使用中自改进、跨会话回忆、用户建模）。与我们的心智模型对比，4 个机制值得借鉴（其余多后端/多平台/计费/多 provider 插件 = YAGNI 不做）：
