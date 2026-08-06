@@ -1322,3 +1322,25 @@
 
 ### 不该学（YAGNI）
 多记忆 provider 插件 / 多平台(Telegram等) / 多后端(Docker/SSH/Modal) / 计费账号 / skill bundles。
+
+### S55 完成记录（4 行动全部落地 + 真实链路验证）
+
+**行动 1 条目合并 + dedupe**：
+- `ManualStore.merge_add`：同 scope+category 且双字关键词重叠 ≥3 → 合并进现有条目（内容拼接去重+置信度 max+活跃度 high），锁定不合并
+- `ManualStore.dedupe`：贪心两两合并清理历史重复
+- **阈值调优（实测）**：重叠阈值 2→3——"感叹号 vs 破折号"共享"克制/少用"2 个通用词被误合并，提阈值后正确区分同主题/仅共享通用词
+- 真实数据：清理"叙事克制少用感叹号×3"脏数据，修复被激进合并污染的条目
+
+**行动 2 后台学习审查**：
+- `_review_for_learning`（章节落盘后）：轻量 LLM 审查本章揭示的新偏好 → merge_add 进心智
+- 真实链路：学习审查提炼偏好 ✓ / 归档摘要 19 条消息落库 ✓
+- **修复 bug**：`summarizer=SessionSummarizer(model)` 在 `model=model or RetryingModel()` **之前**实例化 → 真实运行时 model=None 致归档失败（测试注入 fake model 掩盖）。model 初始化移到依赖组件前。
+
+**行动 3 注入分层缓存**：
+- skill 索引+内容块按 `skills.revision()` 签名缓存（增删改自动失效，上限 16 防膨胀）
+- **修复 bug**：revision 签名漏 content/example 列 → 改内容缓存不失效。补全 6 列。
+
+**行动 4 描述截断守卫**：
+- skill 描述超 100 字入库截断（防索引撑爆/静默路由失败），add/update 双守卫
+
+**验证**：align 60 + app 149 全过；ruff/mypy 全绿；真实链路（归档摘要/学习审查/合并/dedupe）全部实测通过。
