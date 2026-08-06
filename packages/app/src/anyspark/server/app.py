@@ -392,6 +392,7 @@ class WritingSkillIn(BaseModel):
     content: str
     example: str = ""  # 具体情形案例（提升文笔：样例比抽象指令有效）
     tags: str = ""  # 场景标签（逗号分隔，支撑按需选取）
+    target: str = "writing"  # S57：writing(写作调用)/main(主循环)/both
     enabled: bool = True
 
 
@@ -401,6 +402,7 @@ class WritingSkillPatch(BaseModel):
     content: str | None = None
     example: str | None = None
     tags: str | None = None
+    target: str | None = None
     enabled: bool | None = None
 
 
@@ -738,6 +740,7 @@ def build_app(
                     content=c["content"],
                     example=c["example"],
                     tags=c["tags"],
+                    target=c.get("target", "writing"),  # S57
                     source="mental",  # mental(心智联动) 或 signal(信号驱动) 统一落草稿
                 )
                 if r:
@@ -947,8 +950,11 @@ def build_app(
             skill_block, skill_content = cached
         else:
             skill_list = skills.list_skills()
-            skill_block = render_skill_index(skill_list)
-            skill_content = render_skills_content(skill_list, prefs=session_plan.style_prefs)
+            # S57：主循环注入 target=main 的类型/结构指导（写作调用由 clean_write 注入 writing）
+            skill_block = render_skill_index(skill_list, target="main")
+            skill_content = render_skills_content(
+                skill_list, prefs=session_plan.style_prefs, target="main"
+            )
             _skill_cache[skill_sig] = (skill_block, skill_content)
             # 缓存防膨胀：超过 16 个签名清理最旧（长会话/多书场景安全阀）
             if len(_skill_cache) > 16:
@@ -1921,7 +1927,7 @@ def build_app(
 
     @app.post("/api/skills", response_model=dict[str, Any])
     def add_skill(req: WritingSkillIn) -> dict[str, Any]:
-        s = skills.add(req.name, req.description, req.content, req.example, req.tags)
+        s = skills.add(req.name, req.description, req.content, req.example, req.tags, req.target)
         return s.to_dict()
 
     # -- S54 候选草稿（后台自动生成 → 人工确认转正/拒绝）——须在 {skill_id} 路由前 --
@@ -1948,7 +1954,14 @@ def build_app(
     @app.patch("/api/skills/{skill_id}", response_model=dict[str, Any])
     def patch_skill(skill_id: str, req: WritingSkillPatch) -> dict[str, Any]:
         s = skills.update(
-            skill_id, req.name, req.description, req.content, req.example, req.tags, req.enabled
+            skill_id,
+            req.name,
+            req.description,
+            req.content,
+            req.example,
+            req.tags,
+            req.target,
+            req.enabled,
         )
         if s is None:
             raise HTTPException(status_code=404, detail="技巧不存在")

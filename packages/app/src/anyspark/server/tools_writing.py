@@ -138,7 +138,7 @@ class WritingTools:
             "要求：具体、有画面感、杜绝空泛总结；直接输出正文，不要解释。",
         ]
         skill_list = self._skills_store.list_skills() if self._skills_store else []
-        skill_block = render_skills_content(skill_list, prefs=self._style_prefs)
+        skill_block = render_skills_content(skill_list, prefs=self._style_prefs, target="writing")
         if skill_block:
             parts.append(skill_block)
         parts.append(f"【写作意图】\n{intent}")
@@ -250,7 +250,7 @@ class WritingTools:
             )
         note = "覆盖了旧版" if existing else "新建"
         used_intent = bool(intent) and not bool(str(arguments.get("content", "")).strip())
-        mode = "意图模式（干净写作）" if used_intent else "直写"
+        mode = "意图模式（干净写作）" if used_intent else "轻量写作（直写）"
         return ToolResult(
             call=call,
             ok=True,
@@ -357,10 +357,11 @@ _WRITING_SPECS: list[ToolSpec] = [
         name="write_chapter",
         description=(
             "把写作正文保存为某章（新建或覆盖）。两种模式：\n"
-            "① 直写：传 content 直接落盘；\n"
+            "① 轻量写作（直写）：传 content 直接落盘——用于短段落/快速产出/"
+            "写作引擎不可用时的兜底；\n"
             "② 意图模式（S56 C 架构）：传 intent（写作意图）+ references（主循环精选的参考事实，"
             "原样引用）→ 由干净的写作引擎生成正文落盘——正文由专用写作调用产生，"
-            "不背对话历史，适合长会话防累积毒化。"
+            "不背对话历史，适合长会话防累积毒化。长章/正式写作优先意图模式。"
         ),
         params=[
             ParamSpec(name="title", type="string", required=True, description="章节标题"),
@@ -425,11 +426,15 @@ _WRITING_SPECS: list[ToolSpec] = [
     ToolSpec(
         name="write_file",
         description=(
-            "写入沙箱内文件（txt/md），用于保存参考资料/笔记。只允许 data/sandbox/ 内相对路径。"
+            "写入沙箱内文件（txt/md），用于保存参考资料/笔记/灵感/随笔。"
+            "只允许 data/sandbox/ 内相对路径。\n"
+            "约定：笔记/灵感/随笔请写到 `笔记/` 前缀路径（如 `笔记/灵感-设定.md`）——"
+            "纯文档存储，不触发图谱抽取/伏笔回收/学习审查等任何高级处理。\n"
+            "注意：写正式章节用 write_chapter（落书库+图谱），写笔记用 write_file（纯文档）。"
         ),
         params=[
             ParamSpec(
-                name="path", type="string", required=True, description="相对路径，如 notes/设定.md"
+                name="path", type="string", required=True, description="相对路径，如 笔记/灵感.md"
             ),
             ParamSpec(name="content", type="string", required=True, description="文件内容"),
         ],

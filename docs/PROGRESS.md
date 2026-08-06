@@ -1371,3 +1371,29 @@
 
 **架构意义**：主循环=决策+信息过滤（看过全部），写作调用=只写（干净上下文）。
 心智(collab/style/habit)→主循环；文笔 skill→写作调用；类型 skill→主循环（后续）。
+
+## S57 skill 三改进：轻量写作标记 / 笔记约定 / target 分流（已完成 ✅）
+
+**背景（主人讨论确认三项）**：
+1. "直写"模式与 patch_chapter（定点编辑）语义混淆 → 改"轻量写作"
+2. 沙箱笔记区：不新增第 3 个文件工具（复杂度/token 顾虑）→ write_file 加 `笔记/` 约定
+3. 类型 skill vs 文风 skill：统一表 + target 字段分流（不全集/子集，不分两集合）
+
+**落地**：
+1. **轻量写作**：write_chapter 直写模式返回/描述改"轻量写作（直写）"——语义=短段落/
+   快速产出/写作引擎不可用兜底，与 patch_chapter（改既有文本）正交
+2. **笔记约定**：write_file 描述加"`笔记/` 前缀路径=纯文档，不触发图谱/伏笔/学习审查"，
+   与 write_chapter 的"落书库+图谱"明确区分——零新增工具
+3. **target 分流**：writing_skills 加 target 列（writing/main/both，ALTER 兼容）：
+   - writing → 写作调用注入（文笔/叙事技巧）
+   - main → 主循环注入（类型/结构指导）
+   - both → 两者（节奏控制种子标 both）
+   - skillgen 候选带 target；draft 转正保留 target；select/render 按 target 过滤
+
+**验证**：
+- pytest：test_skill_target_routing（main/writing/both 分流）+ draft target 转正 + 全量绿
+- ruff/mypy/format 全绿（112 文件）
+- 真实链路：直写返回"轻量写作" ✓ / 意图降级 ✓ / write_file 笔记约定 ✓
+
+**架构意义**：skill 统一表（全集）按 target 分流——文风 skill（写作调用）+ 类型 skill
+（主循环）同载体管理，生成/合并/心智联动全复用；类型 skill 后续生成器扩展即可。

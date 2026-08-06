@@ -124,6 +124,7 @@ def test_draft_promote_flow() -> None:
         content="不要铺垫环境再推进",
         example="原文摘录",
         tags="高潮",
+        target="main",  # S57
         source="mental",
     )
     assert d is not None
@@ -132,9 +133,10 @@ def test_draft_promote_flow() -> None:
     # 列出
     drafts = store.list_drafts()
     assert any(x["name"] == "短句直给" for x in drafts)
-    # 转正：进 writing_skills + 草稿删除
+    # 转正：进 writing_skills + 草稿删除 + target 保留
     s = store.promote_draft(d["id"])
     assert s is not None and s.name == "短句直给"
+    assert s.target == "main"  # S57：转正保留 target
     assert all(x["name"] != "短句直给" for x in store.list_drafts())
     assert any(x.name == "短句直给" for x in store.list_skills())
 

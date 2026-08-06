@@ -43,7 +43,7 @@ GENERATE_PROMPT = """你是小说文风提炼器。给定一部小说的正文�
 4. 描写取舍（环境/动作/心理各占多少、详略）
 
 【输出格式】（严格 JSON 数组，不要其它文字）：
-[{"name": "技法名（具体可执行，如'短句直给式推进'）", "description": "一句话索引", "content": "技法说明（负面约束/正面做法，尽量落到句式/用词/节奏），2-3 句", "example": "原文摘录或自拟示范 + 一句为何有效", "tags": "适用场景，逗号分隔，如'打斗,高潮'"}]
+[{"name": "技法名（具体可执行，如'短句直给式推进'）", "description": "一句话索引", "content": "技法说明（负面约束/正面做法，尽量落到句式/用词/节奏），2-3 句", "example": "原文摘录或自拟示范 + 一句为何有效", "tags": "适用场景，逗号分隔，如'打斗,高潮'", "target": "writing或main（写作层技法用writing；章节结构/类型组织指导用main；两者都影响用both）"}]
 
 给定正文：
 """
@@ -79,6 +79,11 @@ def _parse_skills(raw: str) -> list[dict[str, str]]:
                 "content": content,
                 "example": str(d.get("example", "")).strip(),
                 "tags": str(d.get("tags", "")).strip(),
+                "target": (
+                    str(d.get("target", "writing")).strip()
+                    if str(d.get("target", "")).strip() in ("writing", "main", "both")
+                    else "writing"
+                ),
             }
         )
     return out

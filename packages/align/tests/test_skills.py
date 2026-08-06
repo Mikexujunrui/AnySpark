@@ -100,14 +100,41 @@ def test_skills_api_and_injection() -> None:
     # 开关
     rp = client.patch(f"/api/skills/{sid}", json={"enabled": False})
     assert rp.json()["enabled"] is False
-    # 注入：chat 时 system prompt 含叙事技巧索引+启用内容（镜头感等默认技巧）
+    # 注入：chat 时 system prompt 含叙事技巧索引+启用内容。S57：主循环注入 target=main/both
+    # 的（节奏控制是 both），writing 目标（镜头感）只进写作调用不进主循环。
     client.post("/api/chat", json={"message": "写一段"})
     assert m.prompts, "应捕获 system prompt"
     last = m.prompts[-1]
-    assert "叙事技巧" in last and "镜头感与视角" in last
+    assert "叙事技巧" in last and "节奏控制" in last  # both → 主循环可见
+    assert "镜头感与视角" not in last  # writing → 仅写作调用可见
     # 删除
     assert client.delete(f"/api/skills/{sid}").json()["ok"] is True
     assert len(client.get("/api/skills").json()) == len(DEFAULT_SKILLS)
+
+
+def test_skill_target_routing() -> None:
+    """S57：target 分流——main 目标只进主循环，writing 只进写作调用，both 都进。"""
+    from anyspark.align import render_skill_index, render_skills_content, select_skills_for
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk3.db")
+    # 三目标各造一条
+    store.add(name="类型指导A", description="主循环用", content="结构指导", target="main")
+    store.add(name="文笔技巧B", description="写作用", content="句子技法", target="writing")
+    store.add(name="通用技巧C", description="都可用", content="通用", target="both")
+    skills = store.list_skills()
+    # 主循环：main+both
+    main_sel = select_skills_for(skills, target="main")
+    main_names = {s.name for s in main_sel}
+    assert "类型指导A" in main_names and "通用技巧C" in main_names
+    assert "文笔技巧B" not in main_names
+    # 写作调用：writing+both
+    write_sel = select_skills_for(skills, target="writing")
+    write_names = {s.name for s in write_sel}
+    assert "文笔技巧B" in write_names and "通用技巧C" in write_names
+    assert "类型指导A" not in write_names
+    # 渲染分流一致
+    assert "类型指导A" in render_skill_index(skills, target="main")
+    assert "文笔技巧B" in render_skills_content(skills, target="writing")
 
 
 def test_skills_legacy_seed_migration() -> None:
