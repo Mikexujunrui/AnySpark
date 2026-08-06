@@ -38,6 +38,7 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 | [docs/PROGRESS.md](docs/PROGRESS.md) | 连续推进台账（各阶段完成情况 + 踩坑记录） |
 | [docs/UPGRADE-DISCUSSION.md](docs/UPGRADE-DISCUSSION.md) | 讨论纪要与推理过程（查证设计意图用） |
 | [docs/HANDOFF-L-SERIES.md](docs/HANDOFF-L-SERIES.md) | 与旧仓库 L 系列收尾的边界交接 |
+| [docs/FRONTEND-HANDOFF.md](docs/FRONTEND-HANDOFF.md) | **前端重开交接**（API 全契约/现状盘点/设计意图——前端开发智能体必读） |
 
 ## 当前状态
 
