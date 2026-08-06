@@ -1306,3 +1306,19 @@
 ### 验证
 - align 测试（排除另一智能体半成品的 test_skillgen）46 个全过；app 147 个全过；ruff/mypy 全绿。
 - 注：test_skillgen.py 是另一智能体 S54 的半成品（502），非本次范围。
+
+## S55 从 Hermes Agent 借鉴：差距分析 + 4 条行动（已定计划）
+
+### 背景
+研究 Nous Research 的 Hermes Agent（自改进通用 agent）。它最独特的是"closed learning loop"（技能从经验创建、使用中自改进、跨会话回忆、用户建模）。与我们的心智模型对比，4 个机制值得借鉴（其余多后端/多平台/计费/多 provider 插件 = YAGNI 不做）：
+
+### 差距分析与行动（按性价比排序）
+| # | 行动 | Hermes 来源 | 价值 |
+|---|------|------------|------|
+| 1 | **心智条目合并规则**：新增前查同类（同 category+关键词重叠）→ 合并进现有条目（内容拼接+置信度提升），不新增碎片 | 后台审查 prompt 的"类级 skill 形状，非一次性窄条目" | 治 S53c 实测发现的"叙事克制×3"重复 |
+| 2 | **后台学习审查**：章节落盘/轮末 fork 轻量审查"该更新心智条目/登记伏笔？"（隔离、不碰主对话）| background_review.py 每轮 fork 自问该不该存 | 补"主动学习"环节（现在是被动等信号）|
+| 3 | **注入块分层缓存**：stable（跨会话）/session（会话内）/volatile（每轮易变）分档组装，长会话省重复 token | system_prompt.py 三档缓存分层 | 50 万 token 一轮的现实 |
+| 4 | **skill 描述截断守卫**：入库时检测描述是否超注入截断限，超则截断/警告 | is_skill_description_truncated_for_prompt | 防静默路由失败 |
+
+### 不该学（YAGNI）
+多记忆 provider 插件 / 多平台(Telegram等) / 多后端(Docker/SSH/Modal) / 计费账号 / skill bundles。
