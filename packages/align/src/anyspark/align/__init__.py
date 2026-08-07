@@ -22,6 +22,12 @@ from .extract import PreferenceExtractor
 from .inject import ManualInjector, MemoryInjector
 from .manual import ManualEntry, ManualStore, render_manual
 from .mind import MindPlanner, SessionPlan
+from .mindgen import (
+    build_agency_gen_prompt,
+    build_agency_suggest_prompt,
+    parse_agency_gen_result,
+    parse_agency_suggest_result,
+)
 from .mindup import (
     NegativeCapture,
     build_learning_review_prompt,
@@ -29,12 +35,6 @@ from .mindup import (
     parse_learning_review_result,
     parse_reconcile_result,
     weak_signal_from_text,
-)
-from .mood import (
-    DEFAULT_MOOD_DIMS,
-    MoodDim,
-    MoodDimStore,
-    build_mood_block,
 )
 from .plan import ChapterPlan, StoryPlanStore, render_plan
 from .signals import Signal, SignalCollector, SignalStore
@@ -44,6 +44,7 @@ from .skills import (
     WritingSkill,
     WritingSkillStore,
     render_skill_index,
+    render_skills_by_name,
     render_skills_content,
     select_skills_for,
 )
@@ -71,8 +72,6 @@ __all__ = [
     "MemoryInjector",
     "MemoryStore",
     "MindPlanner",
-    "MoodDim",
-    "MoodDimStore",
     "NegativeCapture",
     "PreferenceExtractor",
     "SceneMemory",
@@ -92,10 +91,13 @@ __all__ = [
     "WritingSkill",
     "WritingSkillStore",
     "build_agency_block",
+    "build_agency_gen_prompt",
+    "build_agency_suggest_prompt",
     "build_learning_review_prompt",
-    "build_mood_block",
     "build_reconcile_prompt",
     "parse_agency_declaration",
+    "parse_agency_gen_result",
+    "parse_agency_suggest_result",
     "parse_learning_review_result",
     "parse_reconcile_result",
     "render_manual",
@@ -103,6 +105,7 @@ __all__ = [
     "render_settings",
     "render_skill_candidates",
     "render_skill_index",
+    "render_skills_by_name",
     "render_skills_content",
     "select_skills_for",
     "temperature_for",

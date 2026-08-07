@@ -147,3 +147,35 @@ def test_dedupe_keeps_locked() -> None:
         assert len(store.list("project")) == 2
     finally:
         store.close()
+
+
+def test_decay_stale_downgrades_unused_entries() -> None:
+    """S61 活跃度衰减：超过阈值未触达 → 降级（high→medium→low）。"""
+    from datetime import UTC, datetime, timedelta
+
+    store = ManualStore(_db())
+    try:
+        old = (datetime.now(UTC) - timedelta(days=120)).isoformat()
+        mid = (datetime.now(UTC) - timedelta(days=45)).isoformat()
+        fresh = datetime.now(UTC).isoformat()
+        # 直接改库里的时间戳模拟"长期未触达"
+        e1 = store.add(ManualEntry(content="很旧的条目", activity="high"))
+        e2 = store.add(ManualEntry(content="中等旧", activity="high"))
+        e3 = store.add(ManualEntry(content="刚更新的", activity="high"))
+        locked_old = store.add(ManualEntry(content="锁定旧条目", activity="high", locked=True))
+        store._conn.execute("UPDATE manual_entries SET updated_at=? WHERE id=?", (old, e1.id))
+        store._conn.execute("UPDATE manual_entries SET updated_at=? WHERE id=?", (mid, e2.id))
+        store._conn.execute("UPDATE manual_entries SET updated_at=? WHERE id=?", (fresh, e3.id))
+        store._conn.execute(
+            "UPDATE manual_entries SET updated_at=? WHERE id=?", (old, locked_old.id)
+        )
+        store._conn.commit()
+        n = store.decay_stale(days_high=30, days_medium=90)
+        assert n == 3  # e1 两级（high→medium→low），e2 一级（high→medium）；锁定条目不降
+        got = {e.id: e.activity for e in store.list("project")}
+        assert got[e1.id] == "low"
+        assert got[e2.id] == "medium"
+        assert got[e3.id] == "high"  # 新鲜条目不动
+        assert got[locked_old.id] == "high"  # 锁定条目不降（用户主权）
+    finally:
+        store.close()

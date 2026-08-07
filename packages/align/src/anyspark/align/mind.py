@@ -84,11 +84,42 @@ def _infer_agency(entries: list[ManualEntry], base: int) -> int:
     return max(0, min(4, base + delta))
 
 
-def _key_entries(entries: list[ManualEntry], limit: int = 5) -> list[ManualEntry]:
-    """取关键条目（锁定优先，按置信度排序，限量防堆砌）。"""
-    locked = [e for e in entries if e.locked]
-    by_conf = sorted(locked or entries, key=lambda e: e.confidence, reverse=True)
-    return by_conf[:limit]
+_ACTIVITY_ORDER = {"high": 0, "medium": 1, "low": 2}
+
+
+def _context_overlap(entry: ManualEntry, context: str) -> int:
+    """条目与本轮会话意图（context）的关键词重叠数（双字窗口，机制硬编码）。
+
+    S61：渐进式披露的"按本轮相关动态选取"（DESIGN §12.17）——心智块不再静态
+    取前 N 条，而是本轮相关条目优先；context 为空时退化为纯置信度排序。
+    """
+    if not context:
+        return 0
+    from .manual import _keyword_set
+
+    return len(_keyword_set(context) & _keyword_set(entry.content))
+
+
+def _key_entries(
+    entries: list[ManualEntry], limit: int = 5, context: str = ""
+) -> list[ManualEntry]:
+    """取关键条目（渐进式披露，限量防堆砌）：
+
+    锁定优先 → 活跃度（high>medium>low，冷条沉没）→ 本轮相关（context 重叠）
+    → 置信度。锁定的硬规则永远优先披露；低活跃冷条沉底不占名额。
+    """
+    if not entries:
+        return []
+
+    def score(e: ManualEntry) -> tuple[int, int, int, float]:
+        return (
+            1 if e.locked else 0,
+            -_ACTIVITY_ORDER.get(e.activity, 1),
+            _context_overlap(e, context),
+            e.confidence,
+        )
+
+    return sorted(entries, key=score, reverse=True)[:limit]
 
 
 class MindPlanner:
@@ -97,10 +128,17 @@ class MindPlanner:
     def __init__(self, manual: ManualStore) -> None:
         self._manual = manual
 
-    def plan(self, book_id: str = "main", base_agency: int | None = None) -> SessionPlan:
+    def plan(
+        self,
+        book_id: str = "main",
+        base_agency: int | None = None,
+        context: str = "",
+    ) -> SessionPlan:
         """产出会话规划（读全部心智类别）。
 
         base_agency：当前已存档位（未显式指定时）。
+        context：本轮会话意图（用户请求），用于渐进式披露按相关动态选取
+        （DESIGN §12.17：条目按'本轮相关'动态选取，不静态堆前 N 条）。
         """
         global_entries = self._manual.list("global")
         project_entries = self._manual.list("project", book_id)
@@ -111,17 +149,17 @@ class MindPlanner:
         plan = SessionPlan()
         # 档位推断（仅 collab）
         if collab:
-            key_collab = _key_entries(collab)
+            key_collab = _key_entries(collab, context=context)
             if base_agency is None:
                 base_agency = 2  # 默认中位档
             plan.agency_level = _infer_agency(key_collab, base_agency)
             plan.collab_notes = [e.content for e in key_collab]
         # 文风偏好（style，指导性保留，驱动 skill 匹配）
         if style:
-            plan.style_prefs = [e.content for e in _key_entries(style)]
+            plan.style_prefs = [e.content for e in _key_entries(style, context=context)]
         # 习惯（habit，指导性保留）
         if habit:
-            plan.habit_notes = [e.content for e in _key_entries(habit)]
+            plan.habit_notes = [e.content for e in _key_entries(habit, context=context)]
         parts = [f"collab {len(collab)}", f"style {len(style)}", f"habit {len(habit)}"]
         if plan.agency_level is not None:
             parts.append(f"档位 {plan.agency_level}")

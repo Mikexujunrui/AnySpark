@@ -1592,3 +1592,40 @@ align 60 + app 20 全过；ruff 全绿；真实链路 3 项全过。
 **验证**：tsc/eslint/build 全绿；真机链路（vite proxy→后端）：新建→列表→删除→md 双写删除 ✓；app 31 测试过。
 
 **待办（F2 起）**：F2 写作上下文（探索/候选裁决浮层/candidates-stream 后端/BubbleMenu）→ F3 世界房间（含叙事树可视化）→ F4 质量+协作（含审读内联标记 check-offsets 后端）→ F5 系统（含工作流面板）→ F6 打磨。候选裁决/内联审读/命令面板三升级点见 FRONTEND-SHELL.md §四。
+
+## S61 心智模型完善：档位 L2/L3 + 活跃度衰减 + context 动态选取（已完成 ✅）
+
+**背景（主人指示）**：检查心智模型实现 → 定取舍：做档位 L2（AI 建议档位）/L3（自然语言生成档位）、活跃度衰减、按本轮相关动态选取；不做会话级心智（主人：用处不大加复杂性）、不做跨会话对账自动周期化（无消费端时自动跑烧 token 没人看，保持手动 API 等前端按钮）、不做弱信号增强（链路已通）。
+
+**一、档位 L2：AI 看心智建议档位（`mindgen.py` + API）**
+- `POST /api/mind/agency-suggest`：LLM 读 collab 条目 + 可选档位列表 → 建议档位（level_id+理由；都不合适则给新建建议）；启发式对照（heuristic_agency）始终返回
+- `GET /api/mind/agency-suggest`：只读通道（不调 LLM，前端打开面板即可展示规则推断）
+- 哲学：建议不自动应用（用户主权），采纳走既有 POST /api/agency；LLM 失败静默降级启发式
+
+**二、档位 L3：自然语言生成档位（`mindgen.py` + API）**
+- `POST /api/agency/generate`：用户一句描述 → LLM 生成档位候选（名称/描述/温度钳制 0-1）→ **人工确认后** POST /api/agency/add 落库（对齐 S54 skillgen 候选→确认闸门）
+- 宽容 JSON 解析（去围栏/取括号/非法项丢弃）
+
+**三、活跃度衰减（DESIGN §12.18 元数据收敛，`manual.py`）**
+- `ManualStore.decay_stale(days_high=30, days_medium=90)`：未锁定条目按最后触达降级 high→medium→low；锁定不降（用户主权）；**不刷新时间戳**（降级不是触达，供下一级继续判定）；不自动删除（冷条沉没，用户手动清理）
+- `list()` 惰性执行（披露永远基于最新活跃度）+ `POST /api/manual/decay` 显式触发（返回 cold_entries 供前端展示）
+- 披露排序更新：`_key_entries` = 锁定优先 → 活跃度（冷条沉底不占名额）→ 置信度
+
+**四、按本轮相关动态选取（DESIGN §12.17，`mind.py`）**
+- `MindPlanner.plan(book_id, base_agency, context="")`：context=本轮用户意图，心智块不再静态取前 5——`_key_entries` 按双字窗口关键词重叠数动态选（复用 manual._keyword_set），context 为空退化为置信度排序
+- `_make_agent` 加 context 参数，chat/chat_stream 传 `req.message`
+
+**验证**：
+- pytest：align 85 + app 144（排除真实网络 test_complete/deepseek/codex）；新增 test_mindgen 8 + test_mind 增 4 + test_manual 增 1，全绿
+- 真实链路（deepseek-v4-pro）：
+  1. L2：collab"直接写别啰嗦，一口气给我全章，不要反复确认" → AI 建议 **default-4 自主发挥**（引用原话）；启发式对照 heuristic=2（"确认"命中降档 -1 抵消 +1）——**实证启发式不理解否定，L2 语义判断的价值**
+  2. L3："多给方案别直接写，每章两千字左右" → 3 候选（严格待命 0.2/多案供选 0.5/创意提案 0.8）区分明显 → 确认 add 落库 order=5 ✓
+  3. decay：days=0 强制 → 8 条降级 + cold_entries 返回 ✓
+  4. **chat context 动态披露**：请求"写一段打斗场景" → 心智块披露顺序"打斗场景要多用动词"（conf 0.5）**排在**"对话句子特别短促"（conf 1.0）**前**——context 相关性生效 ✓
+- 总闸 ✅（pytest 357 + tsc + eslint + build）
+
+**踩坑/观察**：
+- 启发式 `_infer_agency` 否定误判："不要反复确认"里的"确认"命中降档关键词（-1）抵消"直接写"（+1）→ 净 0。**不修**（启发式只是无 LLM 的 fallback；语义判断交给 L2；修补规则会引入新误判，违背"相信模型"哲学）。观察记入本台账。
+- SQLite 并发写锁：并行 DELETE + 后台任务竞争 → database is locked 500；串行重试/重启后恢复（既有行为，非本次引入）
+- 总闸失败项顺带修复：test_skills.py 预存 I001 import 排序 + test_switches.py 预存 format 差异（自动修复）
+- 验证污染已清理（测试 collab 条目/《巷战》章节/多案供选档位删除；误降级的 5 条真实条目活跃度恢复 high）

@@ -156,9 +156,7 @@ class ManualStore:
         返回 (条目, 是否发生合并)。
         """
         existing = self.list(entry.scope, entry.book_id)
-        candidates = [
-            e for e in existing if e.category == entry.category and not e.locked
-        ]
+        candidates = [e for e in existing if e.category == entry.category and not e.locked]
         new_kws = _keyword_set(entry.content)
         for e in candidates:
             old_kws = _keyword_set(e.content)
@@ -223,7 +221,42 @@ class ManualStore:
             i += 1
         return removed
 
+    def decay_stale(self, days_high: int = 30, days_medium: int = 90) -> int:
+        """活跃度衰减（DESIGN §12.18 元数据收敛："活跃度衰减沉没冷条"）。
+
+        未锁定条目按最后触达（updated_at）降级：high → medium（超过 days_high 天）
+        → low（超过 days_medium 天）；low 不再降；锁定条目不降（用户主权）。
+        衰减不刷新 updated_at（时间戳是"最后触达"，降级不是触达），且不自动删除
+        ——冷条沉没在披露排序之后（_key_entries 活跃度优先），用户可手动清理
+        （已有 DELETE）。机制硬编码；触发：list() 惰性执行 + 可显式调用。
+        返回降级条目数。
+        """
+        from datetime import UTC as _UTC
+        from datetime import datetime as _dt
+        from datetime import timedelta as _td
+
+        now = _dt.now(_UTC)
+        high_cutoff = (now - _td(days=days_high)).isoformat()
+        medium_cutoff = (now - _td(days=days_medium)).isoformat()
+        with self._lock:
+            # high → medium：超过 days_high 天未触达（不刷新时间戳，供下一级继续判定）
+            c1 = self._conn.execute(
+                "UPDATE manual_entries SET activity='medium' "
+                "WHERE locked=0 AND activity='high' AND updated_at < ?",
+                (high_cutoff,),
+            ).rowcount
+            # medium → low：超过 days_medium 天未触达（基于原始时间戳继续降）
+            c2 = self._conn.execute(
+                "UPDATE manual_entries SET activity='low' "
+                "WHERE locked=0 AND activity='medium' AND updated_at < ?",
+                (medium_cutoff,),
+            ).rowcount
+            self._conn.commit()
+        return int(c1) + int(c2)
+
     def list(self, scope: Scope, book_id: str = "main") -> list[ManualEntry]:
+        # 惰性活跃度衰减（S61：访问时收敛冷条——披露永远基于最新活跃度）
+        self.decay_stale()
         with self._lock:
             if scope == "project":
                 rows = self._conn.execute(

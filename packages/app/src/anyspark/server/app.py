@@ -27,7 +27,6 @@ from anyspark.align import (
     ManualStore,
     MemoryStore,
     MindPlanner,
-    MoodDimStore,
     NegativeCapture,
     PreferenceExtractor,
     SessionSummarizer,
@@ -40,16 +39,18 @@ from anyspark.align import (
     WorldSettingStore,
     WritingSkillStore,
     build_agency_block,
+    build_agency_gen_prompt,
+    build_agency_suggest_prompt,
     build_learning_review_prompt,
-    build_mood_block,
     build_reconcile_prompt,
     parse_agency_declaration,
+    parse_agency_gen_result,
+    parse_agency_suggest_result,
     parse_learning_review_result,
     parse_reconcile_result,
     render_plan,
     render_settings,
     render_skill_index,
-    render_skills_content,
     weak_signal_from_text,
 )
 from anyspark.check import compile_rule, run_review
@@ -114,7 +115,7 @@ DB_PATH = DATA_DIR / "anyspark.db"
 
 # S55 #3 注入块分层缓存：stable 块（跨请求不变）按签名缓存，volatile 块每次组装。
 # 签名=底层数据内容（任何增删改 → 签名变 → 缓存失效），避免长会话重复渲染。
-_skill_cache: dict[str, tuple[str, str]] = {}  # 签名 → (索引块, 内容块)
+_skill_cache: dict[str, str] = {}  # 签名 → 索引块（S60：只存索引，内容靠 skill_lookup 按需）
 
 # 默认写作系统提示（真实写作指令）
 DEFAULT_SYSTEM = (
@@ -142,9 +143,6 @@ def _sse_frame(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-# 氛围注入（机制 4）已由 align.mood 提供（S15 从组合根挪入 align，与 agency/bias 同归属）
-
-
 # ---------------------------------------------------------------------------
 # Pydantic 请求/响应模型
 # ---------------------------------------------------------------------------
@@ -155,7 +153,6 @@ class ChatRequest(BaseModel):
     system_prompt: str | None = None
     temperature: float = 0.7
     agency_level: int | None = None  # 能动级别 0-4（覆盖当前档位；缺省用已存档位）
-    mood: dict[str, float] | None = None  # 氛围滑块：维度→强度 0-100（如 tension: 80）
     # 增强按需装配（S15："你要什么再装什么"——默认关的增强，点亮才挂）
     enable_search: bool = False  # 网络搜索工具按需注册（默认关：写作主链路不背考据能力）
     enable_extras: bool = False  # S32 扩展工具（read_material/check_text）按需点亮
@@ -407,6 +404,20 @@ class AgencyLevelIn(BaseModel):
     temperature: float = 0.7
 
 
+class AgencyGenerateIn(BaseModel):
+    """S61 L3：自然语言描述 → 档位候选（人工确认后 /api/agency/add 生效）。"""
+
+    description: str
+    n: int = 3
+
+
+class ManualDecayIn(BaseModel):
+    """S61：活跃度衰减参数（DESIGN §12.18 元数据收敛）。"""
+
+    days_high: int = 30  # high → medium 阈值（天）
+    days_medium: int = 90  # medium → low 阈值（天）
+
+
 class BatchRewriteIn(BaseModel):
     """S40：批量改写（全书变换）——多章统一指令改写。"""
 
@@ -479,22 +490,6 @@ class SkillGenerateIn(BaseModel):
     hint: str = ""  # 可选指引（如"侧重打斗文风"/"侧重爽文节奏"）
     max_items: int = 5
     mode: str = "writing"  # S58：writing（文风/叙事技法）/ main（类型/结构组织指导）
-
-
-class MoodDimIn(BaseModel):
-    """S50：氛围维度（内容化，可增删改）。"""
-
-    key: str
-    label: str
-    description: str = ""
-    example: str = ""
-
-
-class MoodDimPatch(BaseModel):
-    label: str | None = None
-    description: str | None = None
-    example: str | None = None
-    enabled: bool | None = None
 
 
 class ChapterPatchIn(BaseModel):
@@ -890,7 +885,6 @@ def build_app(
     bias = BiasStore(real_db)
     settings = WorldSettingStore(real_db)  # S41 设定档（作者正典）
     skills = WritingSkillStore(real_db)  # S50 叙事技巧（skill 式内容载体）
-    mood_dims = MoodDimStore(real_db)  # S50 氛围维度内容化（滑块形状硬编码，维度可增删改）
     plans = StoryPlanStore(real_db)  # S46 剧情计划（计划→执行）
 
     # S59 工作流扩展包（可选增强，默认关）：结构化流程（顺序/分支/循环）+
@@ -1088,7 +1082,6 @@ def build_app(
         temperature: float,
         book_id: str = "main",
         agency_level: int | None = None,
-        mood: dict[str, float] | None = None,
         enable_search: bool = False,
         enable_extras: bool = False,
         enable_domain: bool = True,
@@ -1098,12 +1091,16 @@ def build_app(
         context_mode: str = "auto",
         model_id: str | None = None,
         thinking: str | None = None,
+        context: str = "",
     ) -> Agent:
         # 心智规划提前（S56 C 架构）：style_prefs 供写作工具意图模式选文笔 skill
+        # S61：context=本轮用户意图，心智块渐进式披露按相关动态选取
         if agency_level is None:
-            session_plan = mind_planner.plan(book_id, base_agency=agency.get_current(book_id).order)
+            session_plan = mind_planner.plan(
+                book_id, base_agency=agency.get_current(book_id).order, context=context
+            )
         else:
-            session_plan = mind_planner.plan(book_id)
+            session_plan = mind_planner.plan(book_id, context=context)
         # 工具装配（S52 抽出为独立模块 toolkit.build_toolkit——组合根接口化，
         # 与 HTTP 编排解耦；写作/探索常驻 + domain/codex/extras/search 按开关点亮）
         registry = build_toolkit(
@@ -1233,35 +1230,28 @@ def build_app(
         if "memory" not in skip and last_memory is not None:
             full_prompt = full_prompt + "\n\n# 上次会话的延续（场景记忆）\n" + last_memory.content
         # 叙事技巧注入（S50：skill 重构——名+技法+情形案例；索引常驻+内容按需）
-        # S55 #3 分层缓存：索引+内容块按 skills 内容签名缓存（stable），避免每次查库渲染
+        # S55 #3 分层缓存：索引块按 skills 内容签名缓存（stable），避免每次查库渲染
+        # S60：主循环只注入全部技巧索引（名字+描述，target 不限——决策者需要看到
+        # 全部可用技巧才能点名给写作调用）；完整内容不再常驻注入，靠 skill_lookup
+        # 工具按需细看 / write_chapter 的 skills 参数点名（对齐图谱：内容按需查）。
         skill_sig = skills.revision()
         cached = _skill_cache.get(skill_sig)
         if cached is not None:
-            skill_block, skill_content = cached
+            skill_block = cached
         else:
             skill_list = skills.list_skills()
-            # S57：主循环注入 target=main 的类型/结构指导（写作调用由 clean_write 注入 writing）
-            skill_block = render_skill_index(skill_list, target="main")
-            skill_content = render_skills_content(
-                skill_list, prefs=session_plan.style_prefs, target="main"
-            )
-            _skill_cache[skill_sig] = (skill_block, skill_content)
+            skill_block = render_skill_index(skill_list, target="")
+            _skill_cache[skill_sig] = skill_block
             # 缓存防膨胀：超过 16 个签名清理最旧（长会话/多书场景安全阀）
             if len(_skill_cache) > 16:
                 oldest = next(iter(_skill_cache))
                 _skill_cache.pop(oldest, None)
         if "skills" not in skip and skill_block:
             full_prompt = full_prompt + "\n\n" + skill_block
-        if "skills" not in skip and skill_content:
-            full_prompt = full_prompt + "\n\n" + skill_content
         # 剧情计划注入（S46：当前章+后续计划——AI 知道接下来写什么）
         plan_block = render_plan(plans.list())
         if "plan" not in skip and plan_block:
             full_prompt = full_prompt + "\n\n" + plan_block
-        # 氛围滑块注入（机制 4：本段氛围要求）
-        mood_block = build_mood_block(mood, mood_dims.list_dims())
-        if "mood" not in skip and mood_block:
-            full_prompt = full_prompt + "\n\n" + mood_block
         return Agent(
             model=m,
             registry=registry,
@@ -1492,7 +1482,6 @@ def build_app(
             req.temperature,
             book_id=req.book_id,
             agency_level=req.agency_level,
-            mood=req.mood,
             enable_search=req.enable_search,
             enable_extras=req.enable_extras,
             enable_domain=req.enable_domain,
@@ -1502,6 +1491,8 @@ def build_app(
             context_mode=req.context_mode,
             model_id=req.model_id,
             thinking=req.thinking,
+            # S61：本轮用户消息作为心智披露的上下文（按相关动态选取）
+            context=req.message,
         )
         agent.events.on(
             "tool_call", lambda e: events.append(ToolEvent(type=e.type, payload=e.payload))
@@ -1532,7 +1523,6 @@ def build_app(
                 "model": getattr(model, "model_name", "?"),
                 "temperature": req.temperature,
                 "agency_level": req.agency_level,
-                "mood": req.mood,
                 "enable_domain": req.enable_domain,
                 "enable_codex": req.enable_codex,
                 "enable_workflow": req.enable_workflow,
@@ -1644,7 +1634,6 @@ def build_app(
                 req.temperature,
                 book_id=req.book_id,
                 agency_level=req.agency_level,
-                mood=req.mood,
                 enable_search=req.enable_search,
                 enable_extras=req.enable_extras,
                 enable_domain=req.enable_domain,
@@ -1654,6 +1643,8 @@ def build_app(
                 context_mode=req.context_mode,
                 model_id=req.model_id,
                 thinking=req.thinking,
+                # S61：本轮用户消息作为心智披露的上下文
+                context=req.message,
             )
             conv_id = req.conversation_id
             if not conv_id:
@@ -1670,7 +1661,6 @@ def build_app(
                     "model": getattr(model, "model_name", "?"),
                     "temperature": req.temperature,
                     "agency_level": req.agency_level,
-                    "mood": req.mood,
                     "enable_domain": req.enable_domain,
                     "enable_codex": req.enable_codex,
                     "enable_workflow": req.enable_workflow,
@@ -1764,6 +1754,18 @@ def build_app(
     def delete_manual(entry_id: str) -> dict[str, bool]:
         manual.delete(entry_id)
         return {"ok": True}
+
+    @app.post("/api/manual/decay", response_model=dict[str, object])
+    def manual_decay(req: ManualDecayIn) -> dict[str, object]:
+        """S61：活跃度衰减（DESIGN §12.18 元数据收敛：冷条沉没）。
+
+        长时间未触达的未锁定条目自动降级（high→medium→low）；list() 已惰性执行，
+        本端点提供显式触发与阈值覆盖。只降活跃度、不删内容（用户主权）。
+        """
+        n = manual.decay_stale(req.days_high, req.days_medium)
+        entries = manual.list("project")
+        low = [e.to_dict() for e in entries if e.activity == "low" and not e.locked]
+        return {"decayed": n, "cold_entries": low, "note": "冷条目未自动删除，可手动删除"}
 
     # S58 项目智能体简介（给 AI 和用户看的项目总览，非读者简介）
     @app.get("/api/brief", response_model=dict[str, Any])
@@ -1871,6 +1873,63 @@ def build_app(
         except Exception as exc:  # 对账失败不影响主链路
             logger.warning("心智对账失败: %s", exc)
             return {"results": [], "note": f"对账失败: {exc}"}
+
+    @app.post("/api/mind/agency-suggest", response_model=dict[str, object])
+    def mind_agency_suggest(req: ReconcileIn) -> dict[str, object]:
+        """S61 L2：AI 看心智（collab 条目）后建议档位（真实 LLM，语义判断）。
+
+        与 MindPlanner 关键词启发式互补：启发式处理无 LLM/失败场景，L2 理解
+        复杂协作偏好（如"你看着办但大事先问我"）。建议不自动应用（用户主权），
+        采纳后走 POST /api/agency。
+        """
+        assert model is not None
+        entries = manual.list("project", req.book_id)
+        collab = [e for e in entries if e.category == "collab"]
+        levels = agency.list_levels()
+        # 启发式对照（始终返回，供前端展示规则推断）
+        plan = mind_planner.plan(req.book_id, base_agency=agency.get_current(req.book_id).order)
+        if not collab:
+            return {
+                "suggested_level": None,
+                "reason": "暂无协作偏好条目（collab），先用规则推断",
+                "note": "",
+                "heuristic_agency": plan.agency_level,
+                "heuristic_reason": plan.reason,
+                "levels": [x.to_dict() for x in levels],
+            }
+        prompt = build_agency_suggest_prompt(collab, levels)
+        try:
+            output = model.respond([Message(role="system", content=prompt)], [])
+            res = parse_agency_suggest_result(output.text)
+            valid = next((lv for lv in levels if lv.id == res.get("level_id", "")), None)
+            return {
+                "suggested_level": valid.to_dict() if valid else None,
+                "reason": res.get("reason", ""),
+                "note": res.get("note", ""),
+                "heuristic_agency": plan.agency_level,
+                "heuristic_reason": plan.reason,
+                "levels": [x.to_dict() for x in levels],
+            }
+        except Exception as exc:  # 建议失败不影响主链路
+            logger.warning("档位建议失败: %s", exc)
+            return {
+                "suggested_level": None,
+                "reason": f"建议失败: {exc}",
+                "note": "",
+                "heuristic_agency": plan.agency_level,
+                "heuristic_reason": plan.reason,
+                "levels": [x.to_dict() for x in levels],
+            }
+
+    @app.get("/api/mind/agency-suggest", response_model=dict[str, object])
+    def mind_agency_heuristic() -> dict[str, object]:
+        """S61 L2 只读通道：当前规则推断（不调 LLM，前端打开面板即可展示）。"""
+        plan = mind_planner.plan("main", base_agency=agency.get_current("main").order)
+        return {
+            "heuristic_agency": plan.agency_level,
+            "heuristic_reason": plan.reason,
+            "collab_notes": plan.collab_notes,
+        }
 
     @app.post("/api/explore/intent", response_model=dict[str, object])
     def explore_intent(req: ExploreIntentIn) -> dict[str, object]:
@@ -2123,6 +2182,30 @@ def build_app(
         """S35：新增自定义档位（全局，追加到末尾）。"""
         lv = agency.add_level(req.name, req.description, req.temperature)
         return {"level": lv.to_dict(), "levels": [x.to_dict() for x in agency.list_levels()]}
+
+    @app.post("/api/agency/generate", response_model=dict[str, object])
+    def generate_agency(req: AgencyGenerateIn) -> dict[str, object]:
+        """S61 L3：自然语言描述 → 档位候选（真实 LLM，人工确认后 add 生效）。
+
+        对齐 S54 skillgen"候选→确认闸门"哲学：候选不进表，返回给用户/前端确认。
+        """
+        assert model is not None
+        if not req.description.strip():
+            raise HTTPException(status_code=400, detail="description 不能为空")
+        if not 1 <= req.n <= 5:
+            raise HTTPException(status_code=400, detail="n 需在 1-5 之间")
+        prompt = build_agency_gen_prompt(req.description, req.n)
+        try:
+            out = model.respond([Message(role="system", content=prompt)], [])
+            candidates = parse_agency_gen_result(out.text)
+            return {
+                "candidates": candidates[: req.n],
+                "description": req.description,
+                "note": "确认后 POST /api/agency/add 生效（人工确认闸门）",
+            }
+        except Exception as exc:
+            logger.warning("档位生成失败: %s", exc)
+            return {"candidates": [], "description": req.description, "note": f"生成失败: {exc}"}
 
     @app.patch("/api/agency/{level_id}", response_model=dict[str, object])
     def patch_agency_level(level_id: str, req: AgencyLevelIn) -> dict[str, object]:
@@ -2387,35 +2470,6 @@ def build_app(
         ok = skills.delete(skill_id)
         if not ok:
             raise HTTPException(status_code=404, detail="技巧不存在")
-        return {"ok": True}
-
-    # ------------------------------------------------------------------
-    # S50 氛围维度（内容化：滑块形状硬编码，维度定义可增删改/开关）
-    # ------------------------------------------------------------------
-    @app.get("/api/mood/dims", response_model=list[dict[str, Any]])
-    def list_mood_dims() -> list[dict[str, Any]]:
-        """全部氛围维度（前端滑块据此渲染）。"""
-        return [d.to_dict() for d in mood_dims.list_dims()]
-
-    @app.post("/api/mood/dims", response_model=dict[str, Any])
-    def add_mood_dim(req: MoodDimIn) -> dict[str, Any]:
-        d = mood_dims.add(req.key, req.label, req.description, req.example)
-        if d is None:
-            raise HTTPException(status_code=409, detail=f"维度已存在: {req.key}")
-        return d.to_dict()
-
-    @app.patch("/api/mood/dims/{dim_id}", response_model=dict[str, Any])
-    def patch_mood_dim(dim_id: str, req: MoodDimPatch) -> dict[str, Any]:
-        d = mood_dims.update(dim_id, req.label, req.description, req.example, req.enabled)
-        if d is None:
-            raise HTTPException(status_code=404, detail="维度不存在")
-        return d.to_dict()
-
-    @app.delete("/api/mood/dims/{dim_id}", response_model=dict[str, bool])
-    def delete_mood_dim(dim_id: str) -> dict[str, bool]:
-        ok = mood_dims.delete(dim_id)
-        if not ok:
-            raise HTTPException(status_code=404, detail="维度不存在")
         return {"ok": True}
 
     @app.get("/api/bias", response_model=list[dict[str, Any]])
