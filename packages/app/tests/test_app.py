@@ -303,6 +303,21 @@ def test_wrapup_api() -> None:
     assert body["summary"] or body["next_hint"]  # 至少一项有内容
 
 
+def test_delete_chapter_api() -> None:
+    """F1：章节删除（库 + md 双写删除），删后 404、列表减少。"""
+    client = _make_client()  # FakeWritingModel 先写一章
+    client.post("/api/chat", json={"message": "写第一章"})
+    chapters = client.get("/api/chapters").json()
+    assert chapters
+    cid = chapters[0]["id"]
+    r = client.delete(f"/api/chapters/{cid}")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+    # 已删：列表少一章，再删 404
+    assert client.get("/api/chapters").json() == []
+    assert client.delete(f"/api/chapters/{cid}").status_code == 404
+
+
 def test_chat_uses_same_conversation_for_continuation() -> None:
     client = _make_client()
     first = client.post("/api/chat", json={"message": "写第一章"}).json()

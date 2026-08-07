@@ -29,9 +29,7 @@ def _conversation_from_row(row: tuple[Any, ...]) -> Conversation:
     cid, created_at = row[0], row[1]
     parent_id = row[2] if len(row) > 2 else None
     fork_point = row[3] if len(row) > 3 else ""
-    return Conversation(
-        id=cid, created_at=created_at, parent_id=parent_id, fork_point=fork_point
-    )
+    return Conversation(id=cid, created_at=created_at, parent_id=parent_id, fork_point=fork_point)
 
 
 class SqliteConversationStore(ConversationStore):
@@ -342,6 +340,13 @@ class ChapterStore:
             )
             for r in rows
         ]
+
+    def delete(self, chapter_id: str) -> bool:
+        """删除章节及其版本历史（前端章节树管理用；md 文件删除由调用方负责）。"""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM chapters WHERE id = ?", (chapter_id,))
+            self._conn.execute("DELETE FROM chapter_versions WHERE chapter_id = ?", (chapter_id,))
+        return cur.rowcount > 0
 
     def close(self) -> None:
         self._conn.close()

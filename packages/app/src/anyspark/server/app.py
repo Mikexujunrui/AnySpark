@@ -294,7 +294,7 @@ class StoryNodeIn(BaseModel):
     content: str
     book_id: str = "main"
     parent_id: str | None = None
-    kind: str = "candidate"  # root/main/anchor/candidate/subplot/loop
+    kind: Literal["root", "main", "anchor", "candidate", "subplot", "loop"] = "candidate"
     chosen: bool = False
 
 
@@ -2866,6 +2866,20 @@ def build_app(
             order_index=ch.order_index,
             updated_at=ch.updated_at,
         )
+
+    @app.delete("/api/chapters/{chapter_id}", response_model=dict[str, object])
+    def delete_chapter(chapter_id: str) -> dict[str, object]:
+        """F1：删除章节（库 + md 双写删除）。前端章节树管理需要，属章节 CRUD 补全。"""
+        ch = chapters.get(chapter_id)
+        if ch is None:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        # 双写：先删 md 权威文件，再删库镜像（幂等，文件不存在不影响）
+        workspace.delete_chapter_file(ch.book_id, ch.order_index, ch.title)
+        removed = chapters.delete(chapter_id)
+        if not removed:
+            raise HTTPException(status_code=500, detail="删除失败")
+        logger.info("章节删除: %s《%s》", ch.book_id, ch.title)
+        return {"ok": True, "id": chapter_id, "title": ch.title}
 
     @app.post("/api/chapters/{chapter_id}/patch", response_model=dict[str, object])
     def patch_chapter_route(chapter_id: str, req: ChapterPatchIn) -> dict[str, object]:
