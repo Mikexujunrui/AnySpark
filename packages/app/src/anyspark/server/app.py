@@ -136,6 +136,13 @@ DEFAULT_SYSTEM = (
     "首要目标是把正文写出来并落盘，不要为了准备而反复调用与当前任务无关的工具。"
     "仅当用户给的任务方向不明确（种子含糊、无明确脉络、不知往哪个方向写）时，"
     "先调用 explore_direction 生成方向建议并在回复中列出询问用户选择；方向明确时直接写。"
+    # S62b：一致性护栏（只防与已写内容的冲突，不限制叙事手法）——
+    # 切视角/跳场景/倒叙/留白是合法表达，自由发挥；只约束时间点与命名两件事
+    "【一致性】只约束与已写内容的冲突，不限制叙事手法（切视角/跳场景/倒叙自由）："
+    "时间：不虚构可能与全文冲突的具体日期；确需具体日期（倒计时/跨章线索）时"
+    "先 search_chapters 检索'几月/几日'类引用匹配，冲突则用模糊表达（'几天后'）。"
+    "命名：写到已出现的人物/地点时，用其既有名称（不确定时 graph_query 确认，"
+    "图谱为准）——同一地点不因视角/场合换名。场景切换/视角切换自由，无需交代。"
 )
 
 
@@ -156,12 +163,12 @@ class ChatRequest(BaseModel):
     agency_level: int | None = None  # 能动级别 0-4（覆盖当前档位；缺省用已存档位）
     # 增强按需装配（S15："你要什么再装什么"——默认关的增强，点亮才挂）
     enable_search: bool = False  # 网络搜索工具按需注册（默认关：写作主链路不背考据能力）
-    enable_extras: bool = False  # S32 扩展工具（read_material/check_text）按需点亮
+    enable_extras: bool = False  # S32 扩展工具（read_material）按需点亮；S63 check_text 退役
     enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认开
     enable_codex: bool = False  # S48-P5 代码扩展 run_code（沙箱，默认关：安全按需点亮）
     enable_workflow: bool = False  # S59 工作流 agent 工具（list/run/status/generate）默认关
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
-    skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/mood/plot 子集
+    skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/plot 子集
     # S58b 上下文模式：auto(默认=干净,不继承场景记忆)/continue(显式继承场景记忆+计划)/fresh(同auto)
     # 主人偏好：默认不继承——新任务/探索不受上次对话干扰；跨会话续写时显式 continue
     context_mode: str = "auto"  # auto | continue | fresh
@@ -2717,26 +2724,14 @@ def build_app(
     @app.post("/api/role/play", response_model=dict[str, Any])
     def role_play(req: RolePlayIn) -> dict[str, Any]:
         """角色推演：角色卡 + 当前状态 + 场景 → N 路隔离推演 → 判别选优（作为参考）。"""
+        from anyspark.explore import load_role_card
 
-        # 角色卡：文件优先，缺省从图谱实体描述兜底
-        card_path = workspace.cards_dir("main") / f"角色卡-{req.role}.md"
-        role_card = ""
-        if card_path.exists():
-            role_card = card_path.read_text(encoding="utf-8", errors="ignore")
-        if not role_card.strip():
-            ent = graph.get_entity("main", req.role)
-            if ent is not None:
-                desc = getattr(ent, "description", "") or ""
-                state = getattr(ent, "state", "") or ""
-                role_card = f"# {req.role}\n{desc}\n\n当前状态：{state}"
+        # 角色卡：文件优先，缺省从图谱实体描述兜底（S63 收敛到 load_role_card 共享）
+        role_card, state = load_role_card(workspace, graph, req.role)
         if not role_card.strip():
             raise HTTPException(
                 status_code=404, detail=f"角色卡不存在（可先 POST /api/role/card 创建）：{req.role}"
             )
-        state = ""
-        ent = graph.get_entity("main", req.role)
-        if ent is not None:
-            state = getattr(ent, "state", "") or ""
         result = run_roleplay(model, role_card, state=state, scenario=req.scenario, n=req.n)
         if not result.candidates:
             raise HTTPException(status_code=502, detail="推演失败（无有效候选）")
