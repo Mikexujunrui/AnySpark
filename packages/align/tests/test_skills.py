@@ -100,13 +100,15 @@ def test_skills_api_and_injection() -> None:
     # 开关
     rp = client.patch(f"/api/skills/{sid}", json={"enabled": False})
     assert rp.json()["enabled"] is False
-    # 注入：chat 时 system prompt 含叙事技巧索引+启用内容。S57：主循环注入 target=main/both
-    # 的（节奏控制是 both），writing 目标（镜头感）只进写作调用不进主循环。
+    # 注入：chat 时 system prompt 含叙事技巧索引。S60：主循环注入全部技巧索引
+    # （名字+描述，target 不限——决策者看到全部才能点名给写作调用）；完整内容不常驻，
+    # 靠 skill_lookup 细看 / write_chapter 的 skills 参数点名。
     client.post("/api/chat", json={"message": "写一段"})
     assert m.prompts, "应捕获 system prompt"
     last = m.prompts[-1]
-    assert "叙事技巧" in last and "节奏控制" in last  # both → 主循环可见
-    assert "镜头感与视角" not in last  # writing → 仅写作调用可见
+    assert "叙事技巧" in last and "节奏控制" in last  # both → 索引可见
+    assert "镜头感与视角" in last  # S60：writing 技巧名也在索引（决策者可见全部）
+    assert "把叙事当作镜头" not in last  # 内容不常驻注入（skill_lookup 按需）
     # 删除
     assert client.delete(f"/api/skills/{sid}").json()["ok"] is True
     assert len(client.get("/api/skills").json()) == len(DEFAULT_SKILLS)
@@ -202,3 +204,131 @@ def test_skill_revision_changes_on_mutation() -> None:
         assert r2 != r3
     finally:
         store.close()
+
+
+def test_skills_by_name_render() -> None:
+    """S60：点名渲染——按名字精确匹配注入完整内容（write_chapter skills 参数用）。"""
+    from anyspark.align import render_skills_by_name
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk4.db")
+    skills = store.list_skills()  # 种子：镜头感与视角/对白机锋/节奏控制
+    try:
+        # 点名一条 → 只渲染该条完整内容
+        block = render_skills_by_name(skills, ["节奏控制"])
+        assert "节奏控制" in block and "句子长度即情绪刻度" in block
+        assert "镜头感" not in block
+        # 点名多条 → 多条都渲染
+        block2 = render_skills_by_name(skills, ["节奏控制", "对白机锋"])
+        assert "节奏控制" in block2 and "对白机锋" in block2
+        # 未命中名字 → 忽略（不报错）
+        block3 = render_skills_by_name(skills, ["不存在的技巧"])
+        assert block3 == ""
+        # 空名单 → 空
+        assert render_skills_by_name(skills, []) == ""
+        assert render_skills_by_name(skills, [""]) == ""
+        # 禁用技巧不注入
+        store.update(skills[2].id, enabled=False)
+        skills2 = store.list_skills()
+        block4 = render_skills_by_name(skills2, ["节奏控制"])
+        assert block4 == ""  # 已禁用
+    finally:
+        store.close()
+
+
+def test_skill_lookup_tool() -> None:
+    """S60：skill_lookup 工具——按名细看完整内容（索引配套的按需查证）。"""
+    from anyspark.align import WritingSkillStore
+    from anyspark.core.protocol import ToolRegistry
+    from anyspark.server.toolkit import build_toolkit
+    from anyspark.server.tools_extensions import ExtensionToolStore
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk5.db")
+    try:
+        registry = build_toolkit(
+            ToolRegistry(),
+            chapters=None,
+            workspace=None,
+            model=None,
+            graph=None,
+            plots=None,
+            plans=None,
+            settings=None,
+            materials=None,
+            ext_tools=ExtensionToolStore(Path(tempfile.mkdtemp()) / "ext.db"),
+            manual=None,
+            skills_store=store,
+        )
+        spec, impl = registry.get("skill_lookup") or (None, None)
+        assert spec is not None, "skill_lookup 应注册"
+        assert impl is not None
+        # 精确命中
+        res = impl(spec, {"name": "节奏控制"})
+        assert res.ok and "句子长度即情绪刻度" in res.content
+        # 包含匹配兜底
+        res2 = impl(spec, {"name": "节奏"})
+        assert res2.ok and "节奏控制" in res2.content
+        # 未命中
+        res3 = impl(spec, {"name": "不存在的技巧"})
+        assert not res3.ok
+        # 缺参数
+        res4 = impl(spec, {})
+        assert not res4.ok
+    finally:
+        store.close()
+
+
+def test_write_chapter_skills_param() -> None:
+    """S60：write_chapter 的 skills 参数——主循环点名技巧进干净写作调用。"""
+    import tempfile
+    from pathlib import Path
+
+    from anyspark.align import WritingSkillStore
+    from anyspark.core.protocol import ToolRegistry
+    from anyspark.core.types import ModelOutput
+    from anyspark.server.tools_writing import register_writing_tools
+
+    class CaptureModel:
+        def __init__(self) -> None:
+            self.last_system = ""
+
+        def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+            for m in messages:
+                if m.role == "system":
+                    self.last_system = m.content
+            return ModelOutput(text="正文内容。")
+
+    model = CaptureModel()
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk6.db")
+    # 章节存储（用真实 ChapterStore 落临时库）
+    from anyspark.store import ChapterStore
+
+    db_path = Path(tempfile.mkdtemp()) / "ch.db"
+    ch = ChapterStore(db_path)
+    try:
+        reg = ToolRegistry()
+        register_writing_tools(
+            reg, ch, workspace=None, model=model, skills_store=store, style_prefs=[]
+        )
+        spec, impl = reg.get("write_chapter") or (None, None)
+        assert spec is not None and impl is not None
+        # 点名节奏控制 → 写作调用 system 含该技巧内容，且不含未点名的
+        res = impl(
+            spec,
+            {
+                "title": "第一章 启程",
+                "intent": "主角在雨夜启程",
+                "skills": "节奏控制",
+            },
+        )
+        assert res.ok
+        assert "节奏控制" in model.last_system
+        assert "句子长度即情绪刻度" in model.last_system
+        assert "镜头感" not in model.last_system  # 未点名不注入
+        # 未点名 → 自动匹配兜底（无 prefs 时保底前 limit 条，此处种子仅 3 条全量注入）
+        model.last_system = ""
+        res2 = impl(spec, {"title": "第二章 路上", "intent": "继续赶路"})
+        assert res2.ok
+        assert "叙事技巧" in model.last_system  # 兜底注入（选择策略不同，内容仍在）
+    finally:
+        store.close()
+        ch.close()

@@ -27,6 +27,58 @@ _QUERY_LIMIT = 10
 _RELATION_LIMIT = 15
 
 
+def make_skill_lookup_implementer(skills_store: Any) -> tuple[Any, Any]:
+    """技巧查证工具：按名查看某条叙事技巧的完整内容（技法+案例）。
+
+    S60：主循环只注入技巧索引（名字+描述，常驻轻量）；完整内容按需——
+    智能体看到索引后，决定要用哪条时用本工具细看全文（对齐 graph_query：
+    内容不常驻注入，需要时查）。与写作调用注入解耦：写作调用仍由主循环
+    write_chapter 的 skills 参数点名或 style_prefs 自动匹配。
+    """
+
+    spec = ToolSpec(
+        name="skill_lookup",
+        description=(
+            "查看某条叙事技巧的完整内容（技法正文 + 情形案例）。系统已注入全部技巧的"
+            "名字+一句话索引；当你决定运用某条技巧、需要它的具体做法与案例时，"
+            "用本工具细看。写作时可把点名技巧传给 write_chapter 的 skills 参数。"
+        ),
+        params=[
+            ParamSpec(
+                name="name",
+                type="string",
+                required=True,
+                description="技巧名（索引里的名字，如'节奏控制'）",
+            )
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        name = str(arguments.get("name", "")).strip()
+        if not name:
+            return ToolResult(call=call, ok=False, content="缺少参数 name。")
+        skills = skills_store.list_skills() if skills_store is not None else []
+        # 精确匹配优先，其次包含匹配（索引名字是权威，包含匹配兜底防笔误）
+        hit = next((s for s in skills if s.name == name), None)
+        if hit is None:
+            hit = next((s for s in skills if name in s.name), None)
+        if hit is None:
+            # 自纠引导：列出可用技巧名（agent 可能笔误/带引号/多字）
+            avail = "、".join(s.name for s in skills) or "（无）"
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=f"技巧库中没有「{name}」。可用技巧：{avail}。",
+            )
+        block = f"【{hit.name}】\n{hit.content}"
+        if hit.example:
+            block += f"\n例：{hit.example}"
+        return ToolResult(call=call, ok=True, content=block)
+
+    return spec, implementer
+
+
 def make_graph_query_implementer(graph: Any) -> tuple[Any, Any]:
     """图谱查询工具：查实体（含当前状态）/关系/事件，写作前查证用。"""
 
@@ -539,7 +591,7 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
                 name="keyword",
                 type="string",
                 required=False,
-                description="要检索的关键词/短语（如'红绳'、'怀表背面'）——与 keywords 二选一"
+                description="要检索的关键词/短语（如'红绳'、'怀表背面'）——与 keywords 二选一",
             ),
             ParamSpec(
                 name="keywords",
@@ -588,9 +640,7 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
         elif kw:
             terms = [kw]
         else:
-            return ToolResult(
-                call=call, ok=False, content="缺少参数 keyword（或 keywords 词表）。"
-            )
+            return ToolResult(call=call, ok=False, content="缺少参数 keyword（或 keywords 词表）。")
         try:
             exclude = str(arguments.get("exclude", "")).strip() or None
             try:
@@ -614,9 +664,7 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
                         try:
                             matches = list(re.finditer(term, c.content))
                         except re.error as exc:
-                            return ToolResult(
-                                call=call, ok=False, content=f"正则表达式错误：{exc}"
-                            )
+                            return ToolResult(call=call, ok=False, content=f"正则表达式错误：{exc}")
                         n = 0
                         for m in matches:
                             if not m:
@@ -684,14 +732,10 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
                         lines.append(f"- 《{cs['title']}》×{cs['total']}：{cs['context']}")
                     else:
                         lines.append(f"- 《{cs['title']}》×{cs['total']}")
-                lines.append(
-                    "（字面命中，需读上下文判断相关性；看命中处完整段落用 read_context）"
-                )
+                lines.append("（字面命中，需读上下文判断相关性；看命中处完整段落用 read_context）")
             else:
                 label = ",".join(terms)
-                lines = [
-                    f"词表 [{label}] 命中 {grand_chapters} 章共 {grand_total} 次："
-                ]
+                lines = [f"词表 [{label}] 命中 {grand_chapters} 章共 {grand_total} 次："]
                 for cs in chapter_stats:
                     dist = " ｜ ".join(f"{t}×{n}" for t, n in cs["per_term"].items() if n)
                     lines.append(f"- 《{cs['title']}》共{cs['total']}次（{dist}）")

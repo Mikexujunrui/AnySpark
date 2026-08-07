@@ -83,10 +83,15 @@ def build_toolkit(
             make_roleplay_implementer,
             make_search_chapters_implementer,
             make_setting_implementer,
+            make_skill_lookup_implementer,
         )
 
         gq_spec, gq_impl = make_graph_query_implementer(graph)
         registry.register(gq_spec, gq_impl)
+        # S60：技巧查证工具（与索引常驻配套：索引轻量注入，内容按需细看）
+        if skills_store is not None:
+            sl_spec, sl_impl = make_skill_lookup_implementer(skills_store)
+            registry.register(sl_spec, sl_impl)
         ig_spec, ig_impl = make_ingest_implementer(workspace, chapters, materials, model)
         registry.register(ig_spec, ig_impl)
         plot_specs, plot_impls = make_plot_implementer(plots)

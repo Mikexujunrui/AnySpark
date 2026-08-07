@@ -554,3 +554,26 @@ def render_skills_content(
             block += f"\n  例：{s.example}"
         lines.append(block)
     return "\n".join(lines)
+
+
+def render_skills_by_name(skills: list[WritingSkill], names: list[str]) -> str:
+    """按名字渲染点名技巧的完整内容（技法 + 情形案例）。
+
+    S60：主循环看到全部技巧索引（名字+描述）后，可在 write_chapter 的 skills 参数
+    显式点名本次写作要运用的技巧——点名时按名精确匹配，找不到的忽略。
+    与 render_skills_content 同构（技法正文 + 情形案例），仅选择策略不同：
+    前者按偏好/意图自动匹配，后者主循环显式点名。
+    """
+    want = {n.strip() for n in names if n.strip()}
+    if not want:
+        return ""
+    selected = [s for s in skills if s.enabled and s.name in want]
+    if not selected:
+        return ""
+    lines = ["# 叙事技巧（点名）"]
+    for s in selected:
+        block = f"【{s.name}】{s.content}"
+        if s.example:
+            block += f"\n  例：{s.example}"
+        lines.append(block)
+    return "\n".join(lines)

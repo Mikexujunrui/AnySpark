@@ -122,15 +122,18 @@ class WritingTools:
         self._read_cache: dict[str, str] = {}
 
     # -- S56 干净写作调用（C 架构核心） --
-    def _clean_write(self, title: str, intent: str, references: str) -> str:
+    def _clean_write(
+        self, title: str, intent: str, references: str, skill_names: list[str] | None = None
+    ) -> str:
         """用干净上下文调写作模型生成正文（无历史/无工具记录）。
 
-        上下文 = 写作意图 + 主循环精选参考（原样引用）+ 文笔 skill（按文风偏好匹配）。
-        返回正文文本；失败抛异常（调用方降级）。
+        上下文 = 写作意图 + 主循环精选参考（原样引用）+ 文笔 skill。
+        skill_names：主循环显式点名的技巧（S60，与索引配套）；未点名时按
+        style_prefs 文风偏好自动匹配（兜底）。返回正文文本；失败抛异常（调用方降级）。
         """
         if self._model is None:
             raise RuntimeError("写作模型未注入（测试环境不走干净写作）")
-        from anyspark.align import render_skills_content
+        from anyspark.align import render_skills_by_name, render_skills_content
 
         # 干净上下文：意图 + 参考 + 文笔 skill（不带对话历史/工具记录/旧章节全文）
         parts = [
@@ -138,7 +141,13 @@ class WritingTools:
             "要求：具体、有画面感、杜绝空泛总结；直接输出正文，不要解释。",
         ]
         skill_list = self._skills_store.list_skills() if self._skills_store else []
-        skill_block = render_skills_content(skill_list, prefs=self._style_prefs, target="writing")
+        if skill_names:
+            # S60：主循环显式点名 → 只注入点名的技巧（不再全量/自动匹配）
+            skill_block = render_skills_by_name(skill_list, skill_names)
+        else:
+            skill_block = render_skills_content(
+                skill_list, prefs=self._style_prefs, target="writing"
+            )
         if skill_block:
             parts.append(skill_block)
         parts.append(f"【写作意图】\n{intent}")
@@ -202,8 +211,11 @@ class WritingTools:
         content = str(arguments.get("content", "")).strip()
         # S56（C 架构）：意图模式——主循环传 intent（写作意图）+ references（精选参考），
         # 工具内部用干净上下文调写作模型生成正文（无历史/无工具记录，治累积毒化）。
+        # S60：skills 可选——主循环显式点名本次写作要运用的叙事技巧（索引配套）。
         intent = str(arguments.get("intent", "")).strip()
         references = str(arguments.get("references", "")).strip()
+        skills_arg = str(arguments.get("skills", "")).strip()
+        skill_names = [s.strip() for s in skills_arg.split(",") if s.strip()] or None
         if not title:
             return ToolResult(call=call, ok=False, content="缺少 title 参数。")
         if not content and not intent:
@@ -217,7 +229,7 @@ class WritingTools:
         # 意图模式：干净写作调用生成正文（降级：写作模型缺失/失败 → 报错让主循环重试或直接写）
         if not content and intent:
             try:
-                content = self._clean_write(title, intent, references)
+                content = self._clean_write(title, intent, references, skill_names)
             except Exception as exc:
                 return ToolResult(
                     call=call,
@@ -382,6 +394,12 @@ _WRITING_SPECS: list[ToolSpec] = [
                 type="string",
                 required=False,
                 description="写作参考（意图模式用）：主循环从图谱/设定/章节摘录的事实与原文片段，原样引用",
+            ),
+            ParamSpec(
+                name="skills",
+                type="string",
+                required=False,
+                description="（意图模式可选）本次写作要运用的叙事技巧名，逗号分隔（如'节奏控制,对白机锋'）——主循环从技巧索引点名；不传则按文风偏好自动匹配",
             ),
             ParamSpec(
                 name="line",
