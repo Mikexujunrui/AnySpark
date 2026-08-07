@@ -303,6 +303,22 @@ def test_wrapup_api() -> None:
     assert body["summary"] or body["next_hint"]  # 至少一项有内容
 
 
+def test_create_chapter_api() -> None:
+    """F1：手动新建空章节（order_index=末尾+1，库+md 双写）。"""
+    client = _make_client()
+    r = client.post("/api/chapters", json={"title": "手建章"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["title"] == "手建章"
+    assert body["content"] == ""
+    assert body["order_index"] == 0  # 空库第一章
+    # 再建一章 → order 递增
+    r2 = client.post("/api/chapters", json={"title": "手建章二"})
+    assert r2.json()["order_index"] == 1
+    # 空标题 422
+    assert client.post("/api/chapters", json={"title": "  "}).status_code == 422
+
+
 def test_delete_chapter_api() -> None:
     """F1：章节删除（库 + md 双写删除），删后 404、列表减少。"""
     client = _make_client()  # FakeWritingModel 先写一章

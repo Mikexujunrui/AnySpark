@@ -262,6 +262,14 @@ class ChapterOut(BaseModel):
     updated_at: str
 
 
+class ChapterCreate(BaseModel):
+    """F1：手动新建章节（空正文，order_index=末尾+1）。"""
+
+    title: str
+    book_id: str = "main"
+    content: str = ""
+
+
 class ManualEntryIn(BaseModel):
     content: str
     confidence: float = 0.5
@@ -2852,6 +2860,25 @@ def build_app(
             )
             for c in items
         ]
+
+    @app.post("/api/chapters", response_model=ChapterOut)
+    def create_chapter(req: ChapterCreate) -> ChapterOut:
+        """F1：手动新建章节（空正文，order_index=末尾+1；库+md 双写）。"""
+        title = req.title.strip()
+        if not title:
+            raise HTTPException(status_code=422, detail="标题不能为空")
+        chs = chapters.list_by_book(req.book_id)
+        order = max((c.order_index for c in chs), default=-1) + 1
+        ch = chapters.upsert(req.book_id, title, req.content, order)
+        workspace.write_chapter(req.book_id, order, ch.title, ch.content)
+        return ChapterOut(
+            id=ch.id,
+            book_id=ch.book_id,
+            title=ch.title,
+            content=ch.content,
+            order_index=ch.order_index,
+            updated_at=ch.updated_at,
+        )
 
     @app.get("/api/chapters/{chapter_id}", response_model=ChapterOut)
     def get_chapter(chapter_id: str) -> ChapterOut:
