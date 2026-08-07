@@ -15,8 +15,8 @@
 - 无图算法、无自动干预——判断权永远在人/AI
 
 注入形态（树的导航，极小）：
-  主线路径：... → 【当前】→ [锚点]... 
-  探索可能性（未选）：... 
+  主线路径：... → 【当前】→ [锚点]...
+  探索可能性（未选）：...
   支线（进行中）：...
 """
 
@@ -129,9 +129,7 @@ class StoryTreeStore:
         return node
 
     def get(self, node_id: str) -> StoryNode | None:
-        row = self._conn.execute(
-            "SELECT * FROM story_nodes WHERE id=?", (node_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM story_nodes WHERE id=?", (node_id,)).fetchone()
         return _node_from_row(row) if row else None
 
     def list_nodes(self, book_id: str = "main") -> list[StoryNode]:
@@ -168,9 +166,7 @@ class StoryTreeStore:
         if node is None:
             return None
         with self._lock:
-            self._conn.execute(
-                "UPDATE story_nodes SET kind='anchor' WHERE id=?", (node_id,)
-            )
+            self._conn.execute("UPDATE story_nodes SET kind='anchor' WHERE id=?", (node_id,))
             self._conn.commit()
         return self.get(node_id)
 
@@ -210,13 +206,9 @@ class StoryTreeStore:
             for a in anchors[:3]:
                 lines.append(f"  → {a.content}")
         if candidates:
-            lines.append(
-                "探索可能性（未选）：" + "；".join(c.content[:30] for c in candidates[:5])
-            )
+            lines.append("探索可能性（未选）：" + "；".join(c.content[:30] for c in candidates[:5]))
         if subplots:
-            lines.append(
-                "支线（进行中）：" + "；".join(s.content[:30] for s in subplots[:5])
-            )
+            lines.append("支线（进行中）：" + "；".join(s.content[:30] for s in subplots[:5]))
         return "\n".join(lines)
 
     def close(self) -> None:
@@ -345,9 +337,7 @@ class StoryThreadStore:
         return [_thread_from_row(r) for r in rows]
 
     def get(self, thread_id: str) -> StoryThread | None:
-        row = self._conn.execute(
-            "SELECT * FROM story_threads WHERE id=?", (thread_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM story_threads WHERE id=?", (thread_id,)).fetchone()
         return _thread_from_row(row) if row else None
 
     def update_progress(self, thread_id: str, progress: str) -> StoryThread | None:
@@ -362,17 +352,13 @@ class StoryThreadStore:
 
     def mark_done(self, thread_id: str) -> StoryThread | None:
         with self._lock:
-            self._conn.execute(
-                "UPDATE story_threads SET status='done' WHERE id=?", (thread_id,)
-            )
+            self._conn.execute("UPDATE story_threads SET status='done' WHERE id=?", (thread_id,))
             self._conn.commit()
         return self.get(thread_id)
 
     def delete(self, thread_id: str) -> bool:
         with self._lock:
-            cur = self._conn.execute(
-                "DELETE FROM story_threads WHERE id=?", (thread_id,)
-            )
+            cur = self._conn.execute("DELETE FROM story_threads WHERE id=?", (thread_id,))
             self._conn.commit()
         return cur.rowcount > 0
 

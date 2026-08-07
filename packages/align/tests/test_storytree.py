@@ -57,7 +57,7 @@ def test_thread_lifecycle() -> None:
         t.mark_done(th.id)
         assert t.get(th.id).status == "done"  # type: ignore[union-attr]
         # render 只含 active
-        t2 = t.add("主线", role="main", progress="陈渡在石墙")
+        t.add("主线", role="main", progress="陈渡在石墙")
         block = t.render_threads("main")
         assert "白泽" not in block and "陈渡在石墙" in block
     finally:
@@ -72,7 +72,7 @@ def test_render_tree_shows_candidates_and_threads() -> None:
         root = s.add_node("怀表初见", kind="root")
         main = s.add_node("雾中楼", parent_id=root.id, kind="candidate")
         s.choose(main.id)
-        cand = s.add_node("石墙背后是密道", parent_id=main.id, kind="candidate")
+        s.add_node("石墙背后是密道", parent_id=main.id, kind="candidate")
         anc = s.add_node("白泽登场", parent_id=main.id, kind="candidate")
         s.mark_anchor(anc.id)
         t.add("白泽线", role="subplot", progress="查到旧档案")
