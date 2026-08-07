@@ -35,6 +35,8 @@ from anyspark.align import (
     SignalStore,
     SkillGenerator,
     StoryPlanStore,
+    StoryThreadStore,
+    StoryTreeStore,
     WorldSettingStore,
     WritingSkillStore,
     build_agency_block,
@@ -149,6 +151,7 @@ def _sse_frame(event: str, data: dict[str, Any]) -> str:
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, description="用户输入")
     conversation_id: str | None = None
+    book_id: str = "main"  # 项目 id（叙事树/简介/设定档按项目隔离）
     system_prompt: str | None = None
     temperature: float = 0.7
     agency_level: int | None = None  # 能动级别 0-4（覆盖当前档位；缺省用已存档位）
@@ -285,6 +288,34 @@ class BriefGenerateIn(BaseModel):
     book_id: str = "main"
 
 
+class StoryNodeIn(BaseModel):
+    """S59 叙事树节点。"""
+
+    content: str
+    book_id: str = "main"
+    parent_id: str | None = None
+    kind: str = "candidate"  # root/main/anchor/candidate/subplot/loop
+    chosen: bool = False
+
+
+class StoryThreadIn(BaseModel):
+    """S59 线进度（声明/升级一条线）。"""
+
+    name: str
+    book_id: str = "main"
+    content: str = ""
+    progress: str = ""
+    role: str = "main"  # main/subplot/parallel
+    node_id: str | None = None
+
+
+class StoryThreadPatch(BaseModel):
+    """S59 更新线进度/完成。"""
+
+    progress: str | None = None
+    status: str | None = None  # active/done
+
+
 class SignalIn(BaseModel):
     kind: str  # accepted|modified|deleted|rejected|custom|negative
     content: str
@@ -309,6 +340,7 @@ class ExploreCardsIn(BaseModel):
 
 class ExploreArchiveIn(BaseModel):
     card: dict[str, object]
+    parent_node_id: str | None = None  # S59：叙事树父节点（探索分叉从哪长出）
 
 
 class ExploreDimIn(BaseModel):
@@ -826,6 +858,8 @@ def build_app(
     provider = ModelProvider(models)
     model = model or RetryingModel(provider)
     memory_store = MemoryStore(real_db)  # S53c ② 场景记忆（项目档案延续性层）
+    story_tree = StoryTreeStore(real_db)  # S59 叙事树（分叉路径模型）
+    story_threads = StoryThreadStore(real_db)  # S59 线进度（映射锚）
     summarizer = SessionSummarizer(model, memory_store)  # ② 归档摘要器（真实 LLM）
     plot_generator = PlotGenerator(model)  # 依赖 model，须在其初始化之后
     plot_resolver = PlotResolver(model)  # 伏笔自动回收（S17：章节落盘后台识别揭开）
@@ -1149,6 +1183,14 @@ def build_app(
         brief_block = workspace.read_brief(book_id)
         if "brief" not in skip and brief_block:
             full_prompt = f"# 项目简介\n{brief_block}\n\n" + full_prompt
+        # S59 叙事树 + 线进度：方向感（主线轨迹/锚点/探索可能性/各线进度）——
+        # 稀疏常驻（极小），AI 知道"往哪走"但锚点间自由写。
+        if "story" not in skip:
+            tree_block = story_tree.render_tree(book_id)
+            thread_block = story_threads.render_threads(book_id)
+            nav = "\n\n".join(x for x in (tree_block, thread_block) if x)
+            if nav:
+                full_prompt = full_prompt + "\n\n" + nav
         # S53 心智模型=会话规划器：协作约定注入系统提示顶部（怎么配合我）
         collab_block = session_plan.collab_block()
         if "manual" not in skip and collab_block:
@@ -1440,6 +1482,7 @@ def build_app(
         agent = _make_agent(
             req.system_prompt or DEFAULT_SYSTEM,
             req.temperature,
+            book_id=req.book_id,
             agency_level=req.agency_level,
             mood=req.mood,
             enable_search=req.enable_search,
@@ -1591,6 +1634,7 @@ def build_app(
             agent = _make_agent(
                 req.system_prompt or DEFAULT_SYSTEM,
                 req.temperature,
+                book_id=req.book_id,
                 agency_level=req.agency_level,
                 mood=req.mood,
                 enable_search=req.enable_search,
@@ -1868,7 +1912,11 @@ def build_app(
 
     @app.post("/api/explore/archive", response_model=dict[str, object])
     def explore_archive(req: ExploreArchiveIn) -> dict[str, object]:
-        """固化选中方向进项目档案。"""
+        """固化选中方向进项目档案 + 叙事树（S59：探索 = 树的生长器）。
+
+        选中方向卡 → 存档 + 写入叙事树为当前主线节点（chosen），
+        探索产生的分叉在树上留痕（其余候选由前端按需加为 candidate）。
+        """
         c = req.card
         src: Literal["template", "grow", "user"]
         if c.get("source") == "grow":
@@ -1884,7 +1932,18 @@ def build_app(
             source=src,
             term=str(c.get("term", "")),
         )
-        return archive.archive_direction(card)
+        archived = archive.archive_direction(card)
+        # S59：写入叙事树为主线节点（探索 = 树的生长）
+        parent_id = req.parent_node_id or None
+        node = story_tree.add_node(
+            content=f"{card.title}：{card.summary[:60]}",
+            book_id="main",
+            parent_id=parent_id,
+            kind="main",
+            chosen=True,
+        )
+        archived["story_node_id"] = node.id
+        return archived
 
     @app.get("/api/explore/archive", response_model=list[dict[str, object]])
     def explore_archive_list() -> list[dict[str, object]]:
@@ -2926,6 +2985,81 @@ def build_app(
         if not ok:
             raise HTTPException(status_code=404, detail="计划不存在")
         return {"ok": True}
+
+    # ------------------------------------------------------------------
+    # S59 叙事树（分叉路径模型）+ 线进度（映射锚）
+    # ------------------------------------------------------------------
+    @app.get("/api/story/nodes", response_model=list[dict[str, Any]])
+    def list_story_nodes(book_id: str = "main") -> list[dict[str, Any]]:
+        """全部叙事树节点。"""
+        return [n.to_dict() for n in story_tree.list_nodes(book_id)]
+
+    @app.post("/api/story/nodes", response_model=dict[str, Any])
+    def add_story_node(req: StoryNodeIn) -> dict[str, Any]:
+        """加叙事节点（默认=探索可能性 candidate；kind 可指定 root/main/anchor/subplot）。"""
+        n = story_tree.add_node(
+            content=req.content,
+            book_id=req.book_id,
+            parent_id=req.parent_id,
+            kind=req.kind,
+            chosen=req.chosen,
+        )
+        return n.to_dict()
+
+    @app.post("/api/story/nodes/{node_id}/choose", response_model=dict[str, Any])
+    def choose_story_node(node_id: str) -> dict[str, Any]:
+        """选为当前主线（chosen，其他让位）。"""
+        n = story_tree.choose(node_id)
+        if n is None:
+            raise HTTPException(status_code=404, detail="节点不存在")
+        return n.to_dict()
+
+    @app.post("/api/story/nodes/{node_id}/anchor", response_model=dict[str, Any])
+    def anchor_story_node(node_id: str) -> dict[str, Any]:
+        """标记为必经锚点。"""
+        n = story_tree.mark_anchor(node_id)
+        if n is None:
+            raise HTTPException(status_code=404, detail="节点不存在")
+        return n.to_dict()
+
+    @app.get("/api/story/tree", response_model=dict[str, Any])
+    def story_tree_view(book_id: str = "main") -> dict[str, Any]:
+        """树 + 线进度的注入视图（预览/调试）。"""
+        return {
+            "nodes": [n.to_dict() for n in story_tree.list_nodes(book_id)],
+            "threads": [t.to_dict() for t in story_threads.list_threads(book_id)],
+            "render": story_tree.render_tree(book_id),
+            "thread_render": story_threads.render_threads(book_id),
+        }
+
+    @app.post("/api/story/threads", response_model=dict[str, Any])
+    def add_story_thread(req: StoryThreadIn) -> dict[str, Any]:
+        """声明/升级一条线（预定义或涌现后手动确认）。"""
+        t = story_threads.add(
+            name=req.name,
+            book_id=req.book_id,
+            content=req.content,
+            progress=req.progress,
+            role=req.role,
+            node_id=req.node_id,
+        )
+        return t.to_dict()
+
+    @app.get("/api/story/threads", response_model=list[dict[str, Any]])
+    def list_story_threads(book_id: str = "main") -> list[dict[str, Any]]:
+        return [t.to_dict() for t in story_threads.list_threads(book_id)]
+
+    @app.patch("/api/story/threads/{thread_id}", response_model=dict[str, Any])
+    def patch_story_thread(thread_id: str, req: StoryThreadPatch) -> dict[str, Any]:
+        """更新线进度（映射锚）/ 完成。"""
+        t = story_threads.get(thread_id)
+        if t is None:
+            raise HTTPException(status_code=404, detail="线不存在")
+        if req.progress is not None:
+            t = story_threads.update_progress(thread_id, req.progress)
+        if req.status == "done":
+            t = story_threads.mark_done(thread_id)
+        return (t or story_threads.get(thread_id)).to_dict()  # type: ignore[union-attr]
 
     @app.post("/api/graph/extract", response_model=dict[str, int])
     def graph_extract_route(req: GraphExtractIn) -> dict[str, int]:
