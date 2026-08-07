@@ -1571,3 +1571,24 @@ align 60 + app 20 全过；ruff 全绿；真实链路 3 项全过。
 - 前端：叙事树可视化（节点/锚点/主线/支线展示 + 探索选卡入树）
 - explore 候选自动入树（未选分支存为 candidate——当前只存了选中的主线节点）
 - 多线/时间循环的真实场景测试（当前验证了单主线+锚点）
+
+## F1 前端外壳地基（已完成 ✅）
+
+**背景**：主人决定重开前端（2026-08-06），重要性不亚于后端。外壳设计先行——调研 2026 行业（Noren/Sudowrite/Scrivener/InkOS/Novilot/NovelFork 等）→ 定稿 `docs/FRONTEND-SHELL.md`（三锚点：稿纸主角/操作即表达/功能全退后台）。
+
+**后端小改动（为前端，主人认可"小改动+可解耦"）**：
+- `POST /api/chapters`：手动新建空章节（order_index=末尾+1，库+md 双写）
+- `DELETE /api/chapters/{id}`：删除章节（库+md 双写删除，幂等）
+- 顺手修 S59 预存 mypy 错误：`StoryNodeIn.kind` 收窄为 `Literal`（机制硬编码，非法值 422）
+- 测试：test_create_chapter_api / test_delete_chapter_api（app 31 全过）
+
+**前端落地（F1）**：
+- **视觉基座**：`index.css` 重写——纸与墨 tokens（暖纸 `#FAF6EF`/暖墨 `#2D2A26`/唯一主色黛青 `#3A5A58`/语义3色）+ 衬线正文（系统字体栈零网络依赖）+ 纸色滚动条
+- **壳布局**（`App.tsx` 重写）：顶栏 24px（书名/探索入口占位/四房间按钮/右侧栏开关）+ 章节树（可折叠 32px，新建/删除/双击重命名）+ 稿纸（主角，标题行+字数）+ 底部对话条（纸边批注）+ 右侧写作上下文（可折叠，布局记忆 localStorage）
+- **抽屉注册表**（`drawers/registry.ts` + `DrawerContainer.tsx`）：四房间（世界/质量/协作/系统）共用一容器覆盖滑出（180ms），tab 由注册表驱动——新增功能=注册表加行，壳零改动（可扩展性承诺落点）
+- **主流程**：对话流式（打字机+工具胶囊+插话/停止）→ 写后刷新章节 → 自动选中最新章；空态="这本书你想写什么？"种子入口（DESIGN 阶段 0）
+- **快捷键**：Ctrl+1..4 开四房间 / Ctrl+\ 章节树 / Ctrl+. 右侧栏 / Esc 关抽屉
+
+**验证**：tsc/eslint/build 全绿；真机链路（vite proxy→后端）：新建→列表→删除→md 双写删除 ✓；app 31 测试过。
+
+**待办（F2 起）**：F2 写作上下文（探索/候选裁决浮层/candidates-stream 后端/BubbleMenu）→ F3 世界房间（含叙事树可视化）→ F4 质量+协作（含审读内联标记 check-offsets 后端）→ F5 系统（含工作流面板）→ F6 打磨。候选裁决/内联审读/命令面板三升级点见 FRONTEND-SHELL.md §四。
