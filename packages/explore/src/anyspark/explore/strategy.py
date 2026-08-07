@@ -15,7 +15,6 @@ from typing import Any
 from .direction import DEFAULT_DIMENSIONS, DirectionCard, Source
 
 # 探索者固定分派映射（供 card 标注维度/来源；探索者不知道自己维度，避免自证偏见）
-EXPLORER_DIMS: list[str] = list(DEFAULT_DIMENSIONS)
 _EXPLORER_MIX: list[Source] = ["template", "grow", "user", "template"]
 
 

@@ -26,8 +26,6 @@ DEFAULT_DIMENSIONS: list[str] = [
     "文笔质感",
     "用户指导",
 ]
-# 兼容旧名（旧代码 import DIMENSIONS）
-DIMENSIONS: list[str] = list(DEFAULT_DIMENSIONS)
 
 
 class DimensionStore:

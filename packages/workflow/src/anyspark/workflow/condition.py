@@ -49,15 +49,10 @@ def _num_cmp(a: str, b: str, op: str) -> bool:
     if op == "!=":
         return na != nb if numeric else str(a).strip() != str(b).strip()
     if not numeric:
-        # 非数字字符串比较（仅 == / != 有意义，其余按长度回退）
-        left, right = str(a).strip(), str(b).strip()
-        if op == ">=":
-            return len(left) >= len(right)
-        if op == "<=":
-            return len(left) <= len(right)
-        if op == ">":
-            return len(left) > len(right)
-        return len(left) < len(right)
+        # 非数字字符串不支持关系比较（> >= < <=）——长度比较无语义（S62 修正：
+        # 原实现按字符串长度回退，'abc'>'d' 得 True 是拍脑袋伪结果，静默错误分支）
+        # 求值失败走 evaluate_rule 的异常路径（条件不满足 → 默认分支）
+        raise ValueError(f"非数字字符串不支持关系比较 {op!r}（仅支持 == / != / contains）")
     if op == ">=":
         return na >= nb
     if op == "<=":
@@ -233,8 +228,8 @@ def validate_rule_syntax(expression: str) -> list[str]:
                 return ["括号不配对"]
     if depth != 0:
         return ["括号不配对"]
-    # 运算符后必须跟值（粗略检查 contains / not contains 组合）
+    # 运算符后必须跟值（S62：_tokenize 已把 not 规范化为 NOT，检查规范化后的 token）
     for i, t in enumerate(toks):
-        if t == "not" and (i + 1 >= len(toks) or toks[i + 1] != "contains"):
+        if t == "NOT" and (i + 1 >= len(toks) or toks[i + 1] != "contains"):
             return [f"位置 {i}: 孤立 NOT（应为 'not contains' 或逻辑 NOT）"]
     return errors

@@ -39,7 +39,8 @@ def test_planner_empty_no_plan() -> None:
     assert plan.collab_block() == ""
 
 
-def test_planner_collab_infers_agency_and_notes() -> None:
+def test_planner_collab_notes_disclosed() -> None:
+    """S62：档位不再由关键词启发式推断（建议不自动应用）——collab 条目只做披露。"""
     store = _store_with_entries(
         [
             ManualEntry(content="先给方案再动笔，不要直接写", category="collab"),
@@ -47,20 +48,11 @@ def test_planner_collab_infers_agency_and_notes() -> None:
         ]
     )
     plan = MindPlanner(store).plan("main", base_agency=2)
-    # 两个"要确认"条目 → 档位降
-    assert plan.agency_level is not None and plan.agency_level <= 1
-    assert plan.collab_notes, "协作约定应提取"
+    # 不再推断档位（用户主权：建议走 L2 LLM，不自动应用）
+    assert plan.agency_level is None
+    assert plan.collab_notes, "协作约定仍披露"
     block = plan.collab_block()
     assert "会话协作约定" in block and "先给方案再动笔" in block
-
-
-def test_planner_agency_up_hint() -> None:
-    store = _store_with_entries(
-        [ManualEntry(content="直接写别啰嗦，一口气给我全章", category="collab")]
-    )
-    plan = MindPlanner(store).plan("main", base_agency=2)
-    # "直接写/别啰嗦" → 档位升
-    assert plan.agency_level is not None and plan.agency_level >= 3
 
 
 def test_style_entries_injected_as_guidance() -> None:
@@ -88,18 +80,17 @@ def test_style_entries_injected_as_guidance() -> None:
 
 
 def test_style_pref_matches_skill() -> None:
-    """S53 心智与能力联动：用户文风偏好 → 匹配对应叙事技巧注入。
+    """S61：心智偏好不再自动选技巧注入写作调用——写作调用只接收主循环点名。
 
-    作者偏好白话 → 白话相关 skill（tags 含'白话'）被选中注入。
+    （S53 原自动匹配已删：写作调用是被执行方，不自行按 prefs 选。心智偏好
+    由主循环吸收后，通过 write_chapter 的 skills 参数显式点名传达。）
     """
     from anyspark.align import (
         WritingSkillStore,
-        render_skills_content,
-        select_skills_for,
+        render_skills_by_name,
     )
 
     store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk.db")
-    # 补到 6 条以上（触发按需选取），其中一条 tags 含'白话'
     store.add(
         name="白话叙事",
         description="白话文风：口语化、平实、不文绉绉",
@@ -108,14 +99,13 @@ def test_style_pref_matches_skill() -> None:
         tags="白话",
     )
     skills = store.list_skills()
-    # 用户偏好'白话' → 优先选中白话 skill
-    sel = select_skills_for(skills, context="", prefs=["白话"], limit=3)
-    assert any(s.name == "白话叙事" for s in sel), "白话偏好应命中白话 skill"
-    content = render_skills_content(skills, prefs=["白话"])
+    # 未点名 → 不注入（即使 prefs 有白话——写作调用不自行选）
+    assert render_skills_by_name(skills, []) == ""
+    # 主循环点名白话叙事 → 注入完整内容
+    content = render_skills_by_name(skills, ["白话叙事"])
     assert "白话叙事" in content and "口语化" in content
-    # 无偏好 → 保底前 limit（不含白话 skill，若排序不在前）
-    sel2 = select_skills_for(skills, context="", prefs=None, limit=3)
-    assert sel2
+    # 点名不存在的 → 空
+    assert render_skills_by_name(skills, ["不存在的技巧"]) == ""
 
 
 def test_habit_entries_injected() -> None:
@@ -254,7 +244,8 @@ def test_mind_agency_suggest_api() -> None:
     data = r.json()
     assert data["suggested_level"]["id"] == "default-0"
     assert "先给方案" in data["reason"]
-    assert data["heuristic_agency"] is not None  # 启发式对照始终返回
+    assert data["heuristic_agency"] is None  # 档位推断已移除（S62：不自动应用，用户主权）
+    assert data["heuristic_reason"]  # 披露统计仍返回
     # 无 collab 条目 → 不调 LLM，返回规则推断
     m2 = ProbeModel()
     db2 = Path(tempfile.mkdtemp()) / "tsug2.db"

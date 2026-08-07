@@ -25,9 +25,8 @@ from typing import Any
 
 from openai import OpenAI
 
-from anyspark.core.events import Event
+from anyspark.core import Event, Message, ModelOutput, ToolCall
 from anyspark.core.protocol import ToolSpec
-from anyspark.core.types import Message, ModelOutput, ToolCall
 
 # 与 pi 同款默认：DashScope 兼容端点 + deepseek-v4-flash
 DEFAULT_BASE_URL = os.getenv(
@@ -40,7 +39,7 @@ DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 THINKING_VALUES: tuple[str, ...] = ("off", "low", "medium", "high", "xhigh", "max")
 
 
-def _validate_thinking(thinking: str | None) -> str | None:
+def validate_thinking(thinking: str | None) -> str | None:
     """校验思考强度取值；非法值抛 ValueError（配置错误应尽早暴露）。"""
     if thinking is None:
         return None
@@ -168,7 +167,7 @@ class DeepSeekModel:
         self._stream = stream
         self._on_delta = on_delta
         self._timeout = timeout
-        self._thinking = _validate_thinking(thinking)
+        self._thinking = validate_thinking(thinking)
         self._context_window = context_window or int(os.getenv("DEEPSEEK_CONTEXT_WINDOW", "65536"))
         self._client = OpenAI(
             base_url=self._base_url,

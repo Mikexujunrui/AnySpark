@@ -13,8 +13,8 @@ from anyspark import (
     ToolCall,
     ToolRegistry,
     ToolSpec,
-    register_builtins,
 )
+from anyspark.core.tools import register_builtins
 
 
 class ScriptedModel:

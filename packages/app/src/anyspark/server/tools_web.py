@@ -15,6 +15,9 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from anyspark.core import ToolCall
+from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
+
 CHROME_UA = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
     "(KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
@@ -171,9 +174,6 @@ def render_results(results: list[WebResult], query: str) -> str:
 # ToolSpec 实现（注册进写作 Agent）
 def make_search_implementer() -> Any:
     """返回 (ToolSpec, implementer)。"""
-
-    from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
-    from anyspark.core.types import ToolCall
 
     spec = ToolSpec(
         name="search_web",

@@ -63,27 +63,6 @@ class SessionPlan:
         return "\n\n".join(parts)
 
 
-# 协作关键词 → 档位偏移（机制：轻量启发式，硬编码；内容判定靠关键词自然语言）
-_AGENCY_HINTS: list[tuple[list[str], int]] = [
-    (["直接写", "别啰嗦", "别问", "少确认", "一口气", "放手"], 1),  # 用户要自主 → 档位升
-    (["先给方案", "先看", "确认", "问一下", "一步步", "别自己发挥", "保守"], -1),  # 要确认 → 档位降
-]
-
-
-def _infer_agency(entries: list[ManualEntry], base: int) -> int:
-    """从协作类条目推断档位（base 为已存档位，正负偏移累计后钳制 0-4）。
-
-    同一条目可含正负信号（如'先给方案但直接写'）——累计抵消取净。
-    """
-    delta = 0
-    for e in entries:
-        text = e.content
-        for kws, off in _AGENCY_HINTS:
-            if any(k in text for k in kws):
-                delta += off
-    return max(0, min(4, base + delta))
-
-
 _ACTIVITY_ORDER = {"high": 0, "medium": 1, "low": 2}
 
 
@@ -95,9 +74,9 @@ def _context_overlap(entry: ManualEntry, context: str) -> int:
     """
     if not context:
         return 0
-    from .manual import _keyword_set
+    from .manual import keyword_set
 
-    return len(_keyword_set(context) & _keyword_set(entry.content))
+    return len(keyword_set(context) & keyword_set(entry.content))
 
 
 def _key_entries(
@@ -136,7 +115,7 @@ class MindPlanner:
     ) -> SessionPlan:
         """产出会话规划（读全部心智类别）。
 
-        base_agency：当前已存档位（未显式指定时）。
+        base_agency：保留参数兼容（S62：档位推断已移除，不再使用）。
         context：本轮会话意图（用户请求），用于渐进式披露按相关动态选取
         （DESIGN §12.17：条目按'本轮相关'动态选取，不静态堆前 N 条）。
         """
@@ -147,12 +126,10 @@ class MindPlanner:
         style = [e for e in all_entries if e.category == "style"]
         habit = [e for e in all_entries if e.category == "habit"]
         plan = SessionPlan()
-        # 档位推断（仅 collab）
+        # 协作约定披露（S62：档位不再由关键词启发式推断——内容判断交给 L2 LLM
+        # 建议（/api/mind/agency-suggest），不自动应用，用户主权）
         if collab:
             key_collab = _key_entries(collab, context=context)
-            if base_agency is None:
-                base_agency = 2  # 默认中位档
-            plan.agency_level = _infer_agency(key_collab, base_agency)
             plan.collab_notes = [e.content for e in key_collab]
         # 文风偏好（style，指导性保留，驱动 skill 匹配）
         if style:
@@ -161,7 +138,5 @@ class MindPlanner:
         if habit:
             plan.habit_notes = [e.content for e in _key_entries(habit, context=context)]
         parts = [f"collab {len(collab)}", f"style {len(style)}", f"habit {len(habit)}"]
-        if plan.agency_level is not None:
-            parts.append(f"档位 {plan.agency_level}")
         plan.reason = "；".join(parts)
         return plan

@@ -10,7 +10,6 @@ anyspark.explore — 探索引擎包。
 
 from .direction import (
     DEFAULT_DIMENSIONS,
-    DIMENSIONS,
     DimensionStore,
     DirectionCard,
     ProjectArchive,
@@ -22,7 +21,6 @@ from .strategy import ExplorationStrategy, extract_json_dict
 
 __all__ = [
     "DEFAULT_DIMENSIONS",
-    "DIMENSIONS",
     "DimensionStore",
     "DirectionCard",
     "ExplorationEngine",

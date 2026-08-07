@@ -10,9 +10,12 @@ anyspark.core.protocol — 工具调用协议。
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
+from .events import Event
+from .types import Message, ModelOutput
 from .types import ToolCall as ToolCall
 from .types import ToolResult as ToolResult
 
@@ -153,3 +156,47 @@ def backfill_content_tool_result(result: ToolResult) -> str:
     """把工具结果格式化为回填上下文的自然语言文本（模型无关）。"""
     status = "成功" if result.ok else "失败"
     return f"[工具 {result.call.name} {status}] {result.content}"
+
+
+class Model(Protocol):
+    """模型协议：输入上下文消息 + 工具清单，返回结构化 ModelOutput。
+
+    适配器自行把真实 LLM（如 DeepSeek）的响应翻译成模型无关的 ModelOutput
+    （text + tool_calls）。这是"模型无关"的解耦点。
+    """
+
+    def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput: ...
+
+
+class StreamModel(Protocol):
+    """流式模型协议（可选）：实现后 Agent 循环以流式事件驱动。
+
+    移植自 pi 的 streamAssistantResponse 模式：模型边生成边通过 on_event
+    回调发出流式事件（text_delta / toolcall_delta / done），最后返回完整
+    ModelOutput。事件名与 pi 对齐。未实现此协议的模型走 respond 非流式路径。
+    """
+
+    def respond_stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        on_event: Callable[[Event], None],
+    ) -> ModelOutput: ...
+
+
+# 上下文压缩协议：输入完整 prompt 消息列表，输出压缩后的列表（token 预算）。
+# 核心只声明协议（零依赖铁律）；具体实现（tiktoken 计数 + prune/summarize）由
+# app 层注入（见 anyspark.server.context.TokenBudget）。模型无关。
+ContextCompressor = Callable[[list[Message]], list[Message]]
+
+
+@runtime_checkable
+class Cancellable(Protocol):
+    """可取消模型（可选）：接收取消回调（S62 显式协议——替代 loop 的 getattr 探测）。
+
+    RetryingModel 实现此协议：重试退避睡眠期间分段检查取消回调，可被 cancel 中断。
+    loop 只认协议不猜方法名（此前 getattr(model, "set_cancelled") duck-typing，
+    任何恰好同名方法都会被注入——语义不明确）。
+    """
+
+    def set_cancelled(self, check: Callable[[], bool]) -> None: ...

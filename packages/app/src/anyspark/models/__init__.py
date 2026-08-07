@@ -6,6 +6,7 @@ from .deepseek import (
     DeepSeekModel,
     to_openai_message,
     to_openai_tool,
+    validate_thinking,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "DeepSeekModel",
     "to_openai_message",
     "to_openai_tool",
+    "validate_thinking",
 ]

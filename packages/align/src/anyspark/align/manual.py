@@ -28,7 +28,7 @@ Scope = Literal["project", "global"]
 
 # S55 合并式新增：关键词提取 + 内容合并（机制硬编码，治碎片）
 # 中文偏好条目用双字窗口提取关键词（对 2 字词/短语有效，模型无关）
-def _keyword_set(content: str) -> set[str]:
+def keyword_set(content: str) -> set[str]:
     """从自然语言条目里提取关键词集合（双字窗口，去停用词）。"""
     text = content.replace(" ", "").replace("：", "").replace("（", "").replace("）", "")
     kws: set[str] = set()
@@ -150,16 +150,16 @@ class ManualStore:
         """S55 合并式新增：同 scope+category 且关键词重叠的现有条目 → 合并进现有条目。
 
         治碎片（Hermes 借鉴：类级条目，非一次性窄条目）：
-        - 重叠判定：双字窗口关键词交集 ≥ 2（内容自然语言，机制硬编码）
+        - 重叠判定：双字窗口关键词交集 ≥ 3（内容自然语言，机制硬编码）
         - 合并语义：内容保留原有 + 追加新信息（去重短句）、置信度取 max、活跃度升 high
         - 锁定条目不合并（用户主权）；重叠不足 → 普通新增
         返回 (条目, 是否发生合并)。
         """
         existing = self.list(entry.scope, entry.book_id)
         candidates = [e for e in existing if e.category == entry.category and not e.locked]
-        new_kws = _keyword_set(entry.content)
+        new_kws = keyword_set(entry.content)
         for e in candidates:
-            old_kws = _keyword_set(e.content)
+            old_kws = keyword_set(e.content)
             overlap = new_kws & old_kws
             if len(overlap) >= 3:  # 至少 3 个双字短语重叠才判定同类（区分同主题/仅共享通用词）
                 merged = self.update(
@@ -185,7 +185,7 @@ class ManualStore:
         """S55 清理历史重复：同 scope+category 且关键词重叠 ≥2 的条目两两合并。
 
         保留锁定条目不合并（用户主权）；返回合并掉的条目数。
-        贪心两两合并：对每对同类条目，关键词交集 ≥2 即并入置信度更高者
+        贪心两两合并：对每对同类条目，关键词交集 ≥3 即并入置信度更高者
         （内容拼接去重，置信度取 max）。
         """
         entries = [e for e in self.list(scope, book_id) if not e.locked]
@@ -197,7 +197,7 @@ class ManualStore:
             while j < len(entries):
                 dup = entries[j]
                 if dup.category == primary.category and dup.id != primary.id:
-                    overlap = _keyword_set(primary.content) & _keyword_set(dup.content)
+                    overlap = keyword_set(primary.content) & keyword_set(dup.content)
                     if len(overlap) >= 3:
                         # 主条目取置信度高者；低者并入后删除
                         if dup.confidence > primary.confidence:

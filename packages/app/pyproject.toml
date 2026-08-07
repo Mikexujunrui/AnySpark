@@ -11,6 +11,11 @@ requires-python = ">=3.11"
 dependencies = [
     "anyspark-core==0.0.1",  # workspace 成员
     "anyspark-graph==0.0.1",  # workspace 成员：知识图谱（AI 事实源）
+    "anyspark-align==0.0.1",  # workspace 成员：说明书/信号/提炼/心智
+    "anyspark-check==0.0.1",  # workspace 成员：检测网+规则
+    "anyspark-explore==0.0.1",  # workspace 成员：探索引擎
+    "anyspark-template==0.0.1",  # workspace 成员：模式库/资料/伏笔
+    "anyspark-workflow==0.0.1",  # workspace 成员：工作流扩展包
     "fastapi==0.141.1",
     "uvicorn==0.52.1",
     "pydantic==2.13.4",

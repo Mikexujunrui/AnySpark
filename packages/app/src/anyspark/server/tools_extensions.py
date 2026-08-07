@@ -24,8 +24,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from anyspark.core import ToolCall
 from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
-from anyspark.core.types import ToolCall
 
 _STATUSES = ("draft", "pending", "active")
 # 扩展工具默认超时（沙箱执行上限）

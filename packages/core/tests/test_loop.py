@@ -13,9 +13,9 @@ from anyspark.core import (
     ToolRegistry,
     ToolResult,
     ToolSpec,
-    register_builtins,
 )
 from anyspark.core.events import Event
+from anyspark.core.tools import register_builtins
 
 
 class ScriptedModel:

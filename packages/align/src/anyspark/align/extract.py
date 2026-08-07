@@ -12,7 +12,7 @@ import json
 import re
 from typing import Any
 
-from anyspark.core.types import Message
+from anyspark.core import Message
 
 from .manual import Activity, ManualEntry
 from .signals import Signal

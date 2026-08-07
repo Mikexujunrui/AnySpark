@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 import re
 
-from anyspark.core.types import Message
+from anyspark.core import Message
 
 # 提炼提示（S54b：引导而非禁止——不强制负面，不硬禁抽象；强调可执行性）
 GENERATE_PROMPT = """你是小说文风提炼器。给定一部小说的正文片段，提炼出**可执行**的写作技法（skill）。

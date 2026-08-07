@@ -1,21 +1,25 @@
 """
-anyspark.check.rules — 轻量规则编译器（机制 8 一级实现，默认极小）。
+anyspark.check.rules — 规则编译（机制 8：用户自然语言 → 检测函数）。
 
-用户自然语言规则 → 内置编译（规则模板 + 正则/简单逻辑）→ 检测函数。
+哲学（DESIGN §1 极简方法论）：**内容判断交给模型、执行机制硬编码**——
+- 用户规则"是什么意思"（禁什么/偏好什么/限几句）是内容判断 → LLM 编译
+  （compile_with_model：模型把自然语言解析成结构化指令）。
+- 检测"怎么做"（查词/统计句数）是过程 → 确定性执行器硬编码
+  （_make_forbidden / _make_term_preference / _make_max_sentences）。
+- 无 LLM 场景保留轻量模板 fallback（compile_rule）；模型/模板都识别不了时
+  **明确告知用户**（不再静默丢弃）。
 只读纯文本处理，无文件系统访问，安全风险极低。
-复杂规则（编码扩展包 anyspark-codex）按需后补（YAGNI）。
-
-支持的规则模板（当前极简集）：
-- 禁用词/表达："不要破折号" / "禁用「然而」"
-- 术语偏好："称呼要用「她」，不要用「那个女孩」"
-- 风格约束："每段不超过三句话"
 """
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
+
+from anyspark.core import Message, Model
 
 # 检测函数：输入正文 → 命中的片段列表
 RuleChecker = Callable[[str], list[str]]
@@ -31,7 +35,7 @@ class CompiledRule:
     pattern: str = ""  # 正则（若有）
 
 
-# 写作术语 → 实际字符/模式映射（轻量词典：用户说"不要破折号"→禁的是「——」）
+# 写作术语 → 实际字符/模式映射（机制：中文标点名 → 字符，非内容判断）
 _TERM_PATTERNS: dict[str, str] = {
     "破折号": "——|—",
     "感叹号": "！|!",
@@ -80,7 +84,113 @@ def _make_max_sentences_per_paragraph(n: int) -> RuleChecker:
     return check
 
 
-# 规则模板识别（轻量关键词匹配）
+# ---------------------------------------------------------------------------
+# LLM 编译（内容判断交给模型）：用户自然语言 → 结构化指令 → 确定性执行器
+# ---------------------------------------------------------------------------
+
+_RULE_COMPILE_PROMPT = """你是写作检测规则的编译器。用户用自然语言描述一条检测规则，
+你把它转成结构化指令。只做**字面/结构检测**（禁用词、术语偏好、段落句数），
+不做语义/情感判断（那是审读器的职责）。
+
+可选指令类型（输出严格 JSON 对象）：
+1. 禁用词/符号：{{"kind": "forbidden", "phrases": ["破折号", "然而"],
+"description": "禁用：破折号、然而"}}
+2. 术语偏好：{{"kind": "term", "preferred": "她", "forbidden": "那个女孩",
+"description": "称呼用「她」不用「那个女孩」"}}
+3. 段落句数上限：{{"kind": "sentences", "max": 3, "description": "每段不超过 3 句"}}
+4. 无法确定：{{"kind": "unknown", "description": "需要语义判断，超出字面检测能力"}}
+
+要求：phrases/max 尽量具体可执行；description 一句可读自然语言。
+
+用户规则：{rule}
+"""
+
+
+_RULE_COMPILE_EXAMPLES: list[tuple[str, dict[str, Any]]] = [
+    ("不要用破折号", {"kind": "forbidden", "phrases": ["破折号"], "description": "禁用：破折号"}),
+    ("每段不要超过三句话", {"kind": "sentences", "max": 3, "description": "每段不超过 3 句"}),
+    (
+        "称呼要用她，不要用那个女孩",
+        {
+            "kind": "term",
+            "preferred": "她",
+            "forbidden": "那个女孩",
+            "description": "称呼用「她」不用「那个女孩」",
+        },
+    ),
+]
+
+
+def _parse_compiled(raw: str) -> dict[str, Any] | None:
+    """宽容解析 LLM 编译结果 JSON。"""
+    cleaned = raw.strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1)
+    start, end = cleaned.find("{"), cleaned.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        cleaned = cleaned[start : end + 1]
+    try:
+        data = json.loads(cleaned)
+        return data if isinstance(data, dict) else None
+    except json.JSONDecodeError:
+        return None
+
+
+def compile_with_model(user_rule: str, model: Model) -> CompiledRule | None:
+    """LLM 编译：模型解析用户自然语言 → 结构化指令 → 确定性执行器。
+
+    模型/指令都无法落地时返回 None（调用方明确告知用户，不静默丢弃）。
+    """
+    rule = user_rule.strip()
+    if not rule:
+        return None
+    prompt = _RULE_COMPILE_PROMPT.replace("{rule}", rule)
+    try:
+        out = model.respond([Message(role="system", content=prompt)], [])
+        spec = _parse_compiled(out.text)
+    except Exception:
+        return None
+    if not spec:
+        return None
+    kind = str(spec.get("kind", ""))
+    description = str(spec.get("description", "")) or rule
+    if kind == "forbidden":
+        phrases = [str(p) for p in (spec.get("phrases") or []) if str(p).strip()]
+        if phrases:
+            return CompiledRule(
+                original=rule,
+                description=description,
+                checker=_make_forbidden(phrases),
+                pattern="|".join(re.escape(p) for p in phrases),
+            )
+    elif kind == "term":
+        forbidden = str(spec.get("forbidden", "")).strip()
+        preferred = str(spec.get("preferred", "")).strip()
+        if forbidden:
+            return CompiledRule(
+                original=rule,
+                description=description,
+                checker=_make_term_preference(forbidden, preferred),
+                pattern=re.escape(forbidden),
+            )
+    elif kind == "sentences":
+        try:
+            n = int(spec.get("max", 0))
+        except (TypeError, ValueError):
+            n = 0
+        if n > 0:
+            return CompiledRule(
+                original=rule,
+                description=description,
+                checker=_make_max_sentences_per_paragraph(n),
+            )
+    return None  # unknown 或字段缺失 → 调用方明确告知
+
+
+# ---------------------------------------------------------------------------
+# 无 LLM fallback：轻量模板编译（保留，极简）
+# ---------------------------------------------------------------------------
 _FORBIDDEN_RE = re.compile(
     r"(?:不要|禁用|禁止|避免|不许|别用|不用)(?:用|出现)?"
     r"[「\"']?([^「」\"'。；，,\n]{2,12})[」\"']?"

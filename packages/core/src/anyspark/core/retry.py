@@ -20,19 +20,21 @@ import time
 from collections.abc import Callable
 from typing import Any, TypeVar, cast
 
-from .loop import Model
-from .protocol import ToolSpec
+from .protocol import Model, ToolSpec
 from .types import Message, ModelOutput
 
 T = TypeVar("T")
 
 # 可重试的异常类型（网络/上游类；业务错误不重试）
 RETRYABLE_EXC_TYPES = (TimeoutError, ConnectionError, OSError)
-# 兼容别名（S15 旧名）：S22 起判定升级为 is_retryable()（类型+文本双通道），
-# 此常量保留给旧调用方（server/retry.py re-export 等）
-RETRYABLE = RETRYABLE_EXC_TYPES
 
 # ---- S22：错误消息文本分类（pi 模式）----
+# 边界说明（S62）：本表是**错误文本特征**（内容数据），不是机制——理想归属是
+# 模型适配器层（厂商错误消息各异）。core 默认内置一份通用判定（HTTP 状态码/
+# 限流/超时/连接），其中含从 pi（Node/undici 生态）移植的文本特征（getaddrinfo/
+# socket hang up/http2 等）——DeepSeek SDK 错误消息兼容这些特征，保留无害；
+# 未来接入新厂商时，厂商专属文本应由适配器层扩展（is_retryable 按类型判定 +
+# 文本双通道，适配器可自行补充），core 不背厂商表。
 # 瞬时/上游类错误（可重试）：HTTP 5xx、限流、过载、连接/超时、流提前终止
 _RETRYABLE_TEXT = re.compile(
     r"("

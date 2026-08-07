@@ -29,17 +29,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-# S55 #4 描述截断守卫：索引注入描述限长（防撑爆系统提示/静默路由失败）
-SKILL_DESC_LIMIT = 100
-
-
-def _guard_description(desc: str) -> str:
-    """描述超限截断（机制硬编码：索引行必须短）。"""
-    desc = (desc or "").strip()
-    if len(desc) > SKILL_DESC_LIMIT:
-        return desc[: SKILL_DESC_LIMIT - 3] + "..."
-    return desc
-
+# S62：不再在写入时截断 skill 描述（内容主权——用户/模型写的描述不损坏）；
+# 索引渲染层对超长描述做展示省略（render_skill_index），存储永远保全文。
 
 # 默认叙事技巧（种子；内容自然语言，可增删改——名+技法+情形案例三段式）
 DEFAULT_SKILLS: list[dict[str, str]] = [
@@ -242,15 +233,16 @@ class WritingSkillStore:
     def revision(self) -> str:
         """S55 #3 注入缓存签名：内容变化 → 签名变化（增删改任一操作即失效）。
 
-        签名覆盖全部可变列（name/description/content/example/enabled/order），
-        任何字段变化都会使缓存失效。
+        签名覆盖全部可变列（name/description/content/example/enabled/order/tags/target），
+        任何字段变化都会使缓存失效（S62 补：此前漏 tags/target，只改这两列时
+        索引缓存不失效）。
         """
         with self._lock:
             rows = self._conn.execute(
-                "SELECT name, description, content, example, enabled, order_index "
-                "FROM writing_skills"
+                "SELECT name, description, content, example, enabled, order_index, "
+                "tags, target FROM writing_skills"
             ).fetchall()
-        sig = "".join(f"{r[0]}|{r[1]}|{r[2]}|{r[3]}|{r[5]}|{int(r[4])}" for r in rows)
+        sig = "".join(f"{r[0]}|{r[1]}|{r[2]}|{r[3]}|{r[5]}|{int(r[4])}|{r[6]}|{r[7]}" for r in rows)
         return sig
 
     def enabled(self) -> list[WritingSkill]:
@@ -265,8 +257,6 @@ class WritingSkillStore:
         tags: str = "",
         target: str = "writing",
     ) -> WritingSkill:
-        # S55 #4 描述截断守卫：超限截断（防注入撑爆/静默路由失败），机制硬编码
-        description = _guard_description(description)
         target = target if target in ("writing", "main", "both") else "writing"
         with self._lock:
             max_order = self._conn.execute(
@@ -325,7 +315,7 @@ class WritingSkillStore:
                 params.append(name)
             if description is not None:
                 sets.append("description=?")
-                params.append(_guard_description(description))
+                params.append(description)
             if content is not None:
                 sets.append("content=?")
                 params.append(content)
@@ -444,11 +434,6 @@ class WritingSkillStore:
             self._conn.commit()
         return s
 
-    def delete_draft(self, draft_id: str) -> bool:
-        with self._lock:
-            cur = self._conn.execute("DELETE FROM skill_drafts WHERE id=?", (draft_id,)).fetchone()
-            return bool(cur)
-
     def delete_draft_by_id(self, draft_id: str) -> bool:
         with self._lock:
             cur = self._conn.execute("DELETE FROM skill_drafts WHERE id=?", (draft_id,))
@@ -471,58 +456,25 @@ def _from_row(row: sqlite3.Row) -> WritingSkill:
     )
 
 
+_INDEX_DESC_ELIDE = 100  # 索引展示行描述省略阈值（仅渲染层，存储保全文）
+
+
 def render_skill_index(skills: list[WritingSkill], target: str = "writing") -> str:
-    """渲染技巧索引（对齐 pi skills：描述常驻，正文按需）。S57：按 target 过滤。"""
+    """渲染技巧索引（对齐 pi skills：描述常驻，正文按需）。S57：按 target 过滤。
+
+    S62：展示层省略超长描述（防索引块撑爆系统提示），**存储内容永不截断**——
+    用户/模型写的 skill 描述是内容主权，全文保留，按需查询（skill_lookup）看全文。
+    """
     enabled = [s for s in skills if s.enabled and _target_matches(s.target, target)]
     if not enabled:
         return ""
     lines = ["# 叙事技巧（可用：按需选用）"]
     for s in enabled:
-        lines.append(f"- {s.name}：{s.description}")
+        desc = s.description
+        if len(desc) > _INDEX_DESC_ELIDE:
+            desc = desc[:_INDEX_DESC_ELIDE] + "…（全文见 skill_lookup）"
+        lines.append(f"- {s.name}：{desc}")
     return "\n".join(lines)
-
-
-def select_skills_for(
-    skills: list[WritingSkill],
-    context: str = "",
-    prefs: list[str] | None = None,
-    limit: int = 3,
-    target: str = "writing",
-) -> list[WritingSkill]:
-    """按会话意图/用户文风偏好匹配选取相关技巧（渐进式披露：多后不全量注入）。
-
-    S53 心智联动：prefs（用户文风偏好，如'喜欢白话文风'）优先匹配 skill
-    的 name/description/tags——作者喜欢白话 → 白话文相关 skill 进上下文。
-    其次按 context（会话意图）匹配 tags。都不匹配 → 按顺序取前 limit 条保底。
-    S57：target 分流——writing 目标选 target∈{writing,both}；main 选 {main,both}。
-    """
-    enabled = [s for s in skills if s.enabled and _target_matches(s.target, target)]
-    if not enabled:
-        return []
-    if len(enabled) <= 5:  # 技巧少 → 全量（现状保持）
-        return enabled
-    matched: list[WritingSkill] = []
-    seen: set[str] = set()
-    # 1) 用户文风偏好匹配（心智驱动，最高优先）
-    for p in prefs or []:
-        for s in enabled:
-            if s.id in seen:
-                continue
-            haystack = f"{s.name} {s.description} {s.tags} {s.content}"
-            if p in haystack:
-                matched.append(s)
-                seen.add(s.id)
-    # 2) 会话意图匹配 tags
-    if len(matched) < limit and context:
-        for s in enabled:
-            if s.id in seen:
-                continue
-            if any(t in context for t in s.tag_list()):
-                matched.append(s)
-                seen.add(s.id)
-    if matched:
-        return matched[:limit]
-    return enabled[:limit]
 
 
 def _target_matches(skill_target: str, want: str) -> bool:
@@ -532,37 +484,12 @@ def _target_matches(skill_target: str, want: str) -> bool:
     return skill_target in (want, "both")
 
 
-def render_skills_content(
-    skills: list[WritingSkill],
-    context: str = "",
-    prefs: list[str] | None = None,
-    limit: int = 3,
-    target: str = "writing",
-) -> str:
-    """渲染启用的技巧完整内容（技法 + 情形案例，注入写作上下文）。
-
-    context：会话意图；prefs：S53 用户文风偏好（心智联动，优先匹配 skill）；
-    target：S57 分流（writing 注入写作调用 / main 注入主循环）。
-    """
-    selected = select_skills_for(skills, context, prefs, limit, target)
-    if not selected:
-        return ""
-    lines = ["# 叙事技巧（内容）"]
-    for s in selected:
-        block = f"【{s.name}】{s.content}"
-        if s.example:
-            block += f"\n  例：{s.example}"
-        lines.append(block)
-    return "\n".join(lines)
-
-
 def render_skills_by_name(skills: list[WritingSkill], names: list[str]) -> str:
     """按名字渲染点名技巧的完整内容（技法 + 情形案例）。
 
     S60：主循环看到全部技巧索引（名字+描述）后，可在 write_chapter 的 skills 参数
     显式点名本次写作要运用的技巧——点名时按名精确匹配，找不到的忽略。
-    与 render_skills_content 同构（技法正文 + 情形案例），仅选择策略不同：
-    前者按偏好/意图自动匹配，后者主循环显式点名。
+    写作调用是被执行方不自行选技巧：主循环点名了才注入（S61 删自动匹配兜底）。
     """
     want = {n.strip() for n in names if n.strip()}
     if not want:

@@ -6,6 +6,6 @@ S15 起重试实现移到 core（anyspark.core.retry）——流程基建（A �
 本模块保留 `retry_with_backoff` 的 re-export，旧调用方（test_retry 等）不受影响。
 """
 
-from anyspark.core.retry import RETRYABLE, RetryingModel, retry_with_backoff
+from anyspark.core.retry import RetryingModel, retry_with_backoff
 
-__all__ = ["RETRYABLE", "RetryingModel", "retry_with_backoff"]
+__all__ = ["RetryingModel", "retry_with_backoff"]

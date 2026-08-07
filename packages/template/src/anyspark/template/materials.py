@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from anyspark.core.types import Message
+from anyspark.core import Message, Model
 
 # 资料用途（S50：默认建议集 style/fact/both；纯类型注解无运行时校验，
 # 内容层可自由扩展——用户可写任意用途标签，不强制枚举）
@@ -201,12 +201,12 @@ DIGEST_PROMPT = """你是资料消化器。把下面的材料压缩成**摘要�
 class MaterialDigestor:
     """真实 LLM 把上传材料消化成摘要卡。"""
 
-    def __init__(self, model: object) -> None:
+    def __init__(self, model: Model) -> None:
         self._model = model
 
     def digest(self, raw_text: str, purpose: Purpose = "fact") -> MaterialCard:
         prompt = DIGEST_PROMPT + raw_text[:4000]
-        output = self._model.respond(  # type: ignore[attr-defined]
+        output = self._model.respond(
             [Message(role="system", content=prompt)],
             [],
         )

@@ -89,7 +89,9 @@ class WorkflowNode:
     def from_dict(cls, data: dict[str, Any]) -> WorkflowNode:
         kind = str(data.get("kind") or data.get("type") or "agent")
         if kind not in ("agent", "script", "approval", "gate", "loop"):
-            kind = "agent"
+            # S62：未知 kind 不再静默纠正为 agent（写错=白烧一次模型调用）——
+            # 显式报错，让定义者/生成器修复
+            raise ValueError(f"未知节点类型 {kind!r}（可选：agent/script/approval/gate/loop）")
         return cls(
             id=str(data.get("id") or _gen("n")),
             kind=kind,  # type: ignore[arg-type]
@@ -182,6 +184,23 @@ class WorkflowDef:
                 errors.append(
                     f"节点 {n.id}({n.kind}) 有 {out_degree[n.id]} 条出边（仅 gate 允许多出边）"
                 )
+        # S62：有向环检测（DFS 三色法）——非 loop 语义的环会死循环（引擎互递归炸栈）
+        # loop 节点按循环语义豁免（body 内部的环由 max_iterations 收敛）
+        if self._has_cycle():
+            errors.append("存在有向环（非 loop 语义的循环边，会死循环）")
+        # gate 条件语法校验（S62 补：DESIGN §12.22 承诺的条件语法检查落地）
+        for e in self.edges:
+            cond = e.condition
+            if not cond or cond.get("type") != "rule":
+                continue  # model 型条件由 LLM 评估（无静态语法）；无 condition=默认分支
+            expr = str(cond.get("expression") or "").strip()
+            if not expr:
+                continue
+            from .condition import validate_rule_syntax as _vrs
+
+            syntax_errors = _vrs(expr)
+            if syntax_errors:
+                errors.append(f"边 {e.id} 条件表达式语法错误: {'; '.join(syntax_errors)}")
         # gate 出边必须带 condition（无 condition 的边视为 default 分支）
         # loop 必须有 body + max_iterations
         for n in self.nodes:
@@ -197,6 +216,30 @@ class WorkflowDef:
 
     def is_valid(self) -> bool:
         return not self.validate()
+
+    def _has_cycle(self) -> bool:
+        """有向环检测（DFS 三色）：0=未访问 1=访问中 2=已完。loop 节点豁免
+        （其 body 内循环由 max_iterations 收敛，入口边本身不入环判定）。"""
+        adj: dict[str, list[str]] = {n.id: [] for n in self.nodes}
+        for e in self.edges:
+            adj.setdefault(e.source, []).append(e.target)
+        color: dict[str, int] = {}
+        loop_ids = {n.id for n in self.nodes if n.kind == "loop"}
+
+        def dfs(node_id: str) -> bool:
+            color[node_id] = 1
+            for nxt in adj.get(node_id, []):
+                if nxt in loop_ids:  # 进入 loop 节点不算环（body 内由 max 收敛）
+                    continue
+                c = color.get(nxt, 0)
+                if c == 1:
+                    return True
+                if c == 0 and dfs(nxt):
+                    return True
+            color[node_id] = 2
+            return False
+
+        return any(dfs(n.id) for n in self.nodes if color.get(n.id, 0) == 0)
 
     def start_node(self) -> WorkflowNode | None:
         """起始节点：无入边的第一个节点（定义顺序）。"""

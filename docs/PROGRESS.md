@@ -24,7 +24,7 @@
 
 - **设计实现审计报告**：见 `docs/AUDIT-V1.md`（基准 `a08894d`：S32-S46 实测演进复核）
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22 为 S59 工作流）
-- **当前状态**：S0-S58 全部完成 + **S59 工作流扩展包**（新增 packages/workflow）+ **S60 skill 注入瘦身**（索引常驻/按需细看/写作点名），pytest 357 全绿，总闸全绿
+- **当前状态**：S0-S58 全部完成 + **S59 工作流扩展包** + **S60 skill 注入瘦身**（索引常驻/按需细看/写作点名）+ **S60 深化（S61）**（写作调用不自行选技巧，删自动匹配规则），pytest 346 全绿，总闸全绿
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）
   2. **对比层回归**：S18 三任务（设定忠实/长书一致/偏好记忆）在 S32-S46 后重跑（成本 ~20min）
@@ -1667,3 +1667,66 @@ align 60 + app 20 全过；ruff 全绿；真实链路 3 项全过。
 skill 从"注入即内容"改为"索引常驻 + 按需细看 + 写作点名"——与图谱按需查询同一哲学；
 主循环=决策者（看全量索引），写作调用=干净执行者（接收点名注入）。全局池 skill 再多
 也不怕（索引轻、内容按需），作者资产随人走天然成立，零新增表结构。
+
+### S60 深化（S61 定案：写作调用不自行选技巧）
+主人追问："skill 不是改成全量列表了吗？三个 limit 是啥意思？"——审查发现 S60 只改了
+主循环侧，写作调用兜底仍走 S53 的 `render_skills_content`（prefs/tags/limit=3/保底
+自动匹配）。主人定案：**写作调用是被执行方，所有注入由主循环点名决定，不能有自己的
+选择规则**。
+- 删除 `select_skills_for` + `render_skills_content`（S53 渐进式披露自动匹配全删，
+  含 ≤5 全量/limit=3/tags 匹配/prefs 匹配/保底 3 条——人类预设规则）
+- `_clean_write` 未点名 → 不注入任何技巧（干净）；点名 → 只注入点名技巧
+- 保留：`render_skill_index`（主循环索引）+ `render_skills_by_name`（点名注入）——
+  写作调用注入只剩主循环点名这一条路
+- `style_prefs` 保留作心智块注入/主循环决策用（不直接驱动写作调用）
+- 验证：pytest 346 全绿（删旧测试后 357→346）；ruff/mypy 全绿；真实链路——
+  未点名不含"叙事技巧" ✓ / 点名只含"节奏控制"不含"镜头感" ✓
+
+## S62 哲学审查修复：去垃圾补丁（已完成 ✅）
+
+**背景（主人指示）**："虽然我们在做这个智能体的时候再三强调要符合哲学，但写这个项目的 AI 在很多地方采用了笨拙的硬编码导入、不解耦的设计、强制性的护栏——审查项目找到这些问题，全部修复。"
+
+**审查方式**：三路独立 subagent 审查（app / align+explore+check / core+graph+template+workflow）+ 主会话复核验证。判据：DESIGN §1（机制硬编码/内容自然语言、极简方法论、相信模型、单向依赖、模型无关、YAGNI）。安全底线（沙箱/幻觉检测/超时）与过程控制（循环/重试/压缩）确认为设计允许，未动。
+
+### 修复清单（全部落地 + 总闸全绿 346 passed）
+
+**C 类 强制性护栏（哲学红线）**：
+1. **规则编译器 LLM 化**（check/rules.py）：原 3 正则模板+术语白名单，模板外规则静默丢弃（偏离 DESIGN"内置编码 agent 编译"）。新 `compile_with_model`：LLM 解析用户自然语言 → 结构化指令（forbidden/term/sentences/unknown）→ 确定性执行器硬编码；识别不了**明确告知**用户（不静默丢）。真实链路：字面规则"不要用破折号"命中 ✓；语义规则"少用形容词堆砌"正确提示超出字面检测能力 ✓
+2. **删除 NegativeCapture 正则层**（mindup.py）：原 7 正则+守卫补丁猜用户话语机械落雷区（模板外漏捕+"不要停"子串误吞）。负例信号原文本就在 signals 表（不丢），"是否构成雷区"是内容判断 → 交给轮末提炼器 LLM/学习审查。实测 negative 信号只进表不机械落条目 ✓
+3. **删除 skill 描述写入截断**（skills.py SKILL_DESC_LIMIT=100）：用户/模型内容被腰斩不可恢复 + 草稿/正式路径行为不一致。改为**存储永不截断**（内容主权），索引渲染层展示省略（"…（全文见 skill_lookup）"）
+4. **档位启发式静默应用移除**（mind.py _infer_agency + app.py）：S61 已证"不要反复确认"的"确认"抵消"直接写"（否定误判）。删除关键词启发式推断——用户未显式指定档位时一律用**已存档位**；推断只经 L2（/api/mind/agency-suggest LLM）呈现，不自动应用（用户主权）。chat 实测档位保持 default-2 未被静默改 ✓
+5. **弱信号关键词层删除**（weak_signal_from_text）：试探语句作为 custom 信号原文进表，判定交给提炼器 LLM
+6. **workflow 校验补齐**（definition.py）：validate() 补**有向环检测**（DFS 三色，loop 豁免）+ **条件语法校验**（DESIGN §12.22 承诺落地）；from_dict 未知 kind 不再静默变 agent（显式报错）；condition 非数字字符串关系比较不再按长度回退（"abc">"d" 伪结果）——求值失败走默认分支；死代码 normalize_condition_expr 删除；"孤立 NOT"检查修正（tokenize 已规范化为 NOT）
+
+**B 类 不解耦**：
+7. **ToolContext 收敛**（toolkit.py）：build_toolkit 15 个 Any 命名参数 → `ToolContext` dataclass（依赖收敛单对象，签名稳定）
+8. **注入块表驱动**（app.py _make_agent）：11 块 if 链 → prepend/append 块列表（顺序/去留/优先级可读数据）；顺带修复 L5：伏笔渲染硬编码 "main" → book_id
+9. **后台任务 typed**（app.py BgTask）：元组魔法派发（task[0]+len 判断+位置解包，未知任务静默丢弃）→ dataclass + kind 字段分派
+10. **explore_direction 工具吃维度内容化**（tools_extras.py）：此前绕过 DimensionStore 回落 DEFAULT_DIMENSIONS（S50 只接一半）——注入 dim_store
+11. **core retry 厂商错误表标注边界**（retry.py）：Node/undici 生态文本特征集中注释说明（未来多厂商由适配器扩展，core 不背厂商表——YAGNI 不移动）
+12. **core 取消钩子显式协议**（loop.py）：getattr 探测 → `Cancellable` Protocol（runtime_checkable isinstance）
+13. **事件协议声明补全**（events.py）：user_text/aborted/record 补入 GENERIC_EVENT_TYPES（此前 loop 发出但未声明，2 种无人消费已记录）；删除无调用方的 register_hook/run_hook 死机制
+
+**A 类 硬编码导入/死代码（零风险机械清理）**：
+14. 深路径导入统一走包公共 API（10+ 处：run_roleplay/run_exploration/IntentUnderstander/render_plan/Message/Conversation/NodeResult 等，各 __init__ 早已导出）
+15. `_validate_thinking` 私有符号 → 公开 `validate_thinking` + models/__init__ 导出（2 处跨模块导入）
+16. 函数内重复导入 Message/json 删除（顶部已有）；app.py PlotIn 重复定义删除
+17. align/__init__ `__all__` 悬挂 `DEFAULT_MOOD_DIMS`（from * 会崩）→ 删
+18. skills.py 破损 `delete_draft`（DELETE+fetchone 恒 False、无 commit、无调用方）→ 删
+19. inject.py 死模块（ManualInjector/MemoryInjector 生产未接线，S53 后心智块替代）→ 删
+20. explore strategy.py EXPLORER_DIMS / direction.py DIMENSIONS 旧名别名（无消费者）→ 删
+21. core 演示工具（echo/add/register_builtins）从公共 API 摘除（保留 core/tools.py 供测试/demo 深路径）
+22. retry RETRYABLE 旧名别名链清理；Model/StreamModel 协议从 loop.py 移到 protocol.py（消除 retry→loop 模块耦合）
+23. graph/template `model: object` + 4 处 type: ignore → `model: Model`（绕过协议）；graph/schema `extraction: object` + getattr → `Extraction` 类型
+24. manual.py docstring "交集≥2" vs 代码 ">=3" 文档失实修正；`_keyword_set` 私有跨模块 → 公共 `keyword_set`；skills revision() 签名补 tags/target
+25. app pyproject 依赖补齐（此前只声明 core+graph，实际 import align/check/explore/template/workflow——拆包即崩）
+26. core 事件协议/其他死代码清理（EventEmitter hooks、demo 导出）
+
+### 验证
+- 总闸全绿：pytest 346 + tsc + eslint + build ✅（ruff/mypy/format 0 错误）
+- 真实链路（deepseek-v4-pro）：规则 LLM 编译（字面命中/语义明确提示）✓ / chat 注入表驱动+档位保持 ✓ / negative 信号只进表 ✓
+- 验证污染已清理（测试章节/信号删除）
+
+### 观察
+- app.py 3275 行巨型组合根（135 端点 + 后台 worker + 注入装配）未拆 router——纯结构重构、diff 巨大、与前端 F 系列并行工作冲突风险高。经 ToolContext/BgTask/注入表驱动已大幅瘦身；拆 router 建议独立阶段（S63+）单独做，与前端错开。
+- 规则 LLM 编译耗时 ~90s（deepseek-v4-pro 思考）——成本可接受（规则编译低频、一次性）。

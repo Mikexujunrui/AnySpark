@@ -28,8 +28,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from anyspark.core import Message, ModelOutput
 from anyspark.core.protocol import ToolSpec
-from anyspark.core.types import Message, ModelOutput
 from anyspark.models.deepseek import DEFAULT_BASE_URL, DEFAULT_MODEL, DeepSeekModel
 
 DEFAULT_CONTEXT_WINDOW = int(os.getenv("DEEPSEEK_CONTEXT_WINDOW", "65536"))
@@ -193,9 +193,9 @@ class ModelRegistry:
 
         thinking 取值合法性在此校验（非法值抛 ValueError）。
         """
-        from anyspark.models.deepseek import _validate_thinking
+        from anyspark.models import validate_thinking
 
-        cfg.thinking = _validate_thinking(cfg.thinking)
+        cfg.thinking = validate_thinking(cfg.thinking)
         cfg.updated_at = _now()
         existing = self.get(cfg.id)
         with self._lock:

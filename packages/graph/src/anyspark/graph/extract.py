@@ -13,7 +13,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from anyspark.core.types import Message
+from anyspark.core import Message, Model
 
 # 默认实体类型（S50 内容化：GraphExtractor 可注入自定义类型集，提示词动态拼）
 VALID_TYPES = ("角色", "地点", "事件", "物件", "设定")
@@ -101,7 +101,7 @@ class StateUpdate:
 class GraphExtractor:
     """真实 LLM 抽取器（模型无关，适配器注入）。"""
 
-    def __init__(self, model: object, types: list[str] | None = None) -> None:
+    def __init__(self, model: Model, types: list[str] | None = None) -> None:
         # model 实现 core.Model 协议（respond(messages, tools) -> ModelOutput）
         self._model = model
         # S50：类型集内容化——项目级可配置（缺省默认 5 类），提示词动态拼
@@ -127,7 +127,7 @@ class GraphExtractor:
         )
         parsed = Extraction()
         for _attempt in range(2):
-            output = self._model.respond(  # type: ignore[attr-defined]
+            output = self._model.respond(
                 [Message(role="system", content=prompt)],
                 [],
             )

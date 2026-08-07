@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from anyspark.core.types import Message
+from anyspark.core import Message, Model
 
 # 关键点类别（自然语言，模型无关）
 PLOT_CATEGORIES = ("主线冲突", "角色弧", "情感核", "世界规则", "情绪峰值", "伏笔", "节奏")
@@ -309,14 +309,14 @@ PLOT_PROMPT = (
 class PlotGenerator:
     """LLM 生成关键点图谱草案（模型无关）。"""
 
-    def __init__(self, model: object) -> None:
+    def __init__(self, model: Model) -> None:
         self._model = model
 
     def generate(self, book_id: str, store: PlotStore, settings: str = "") -> list[PlotPoint]:
         prompt = (
             PLOT_PROMPT + f"\n{settings[:2000]}\n\n已有关键点：\n{store.render(book_id)[:1500]}"
         )
-        out = self._model.respond(  # type: ignore[attr-defined]
+        out = self._model.respond(
             [Message(role="system", content=prompt)],
             [],
         )
@@ -367,7 +367,7 @@ class PlotResolver:
     机制硬编码（匹配/更新），内容模型生成（证据/判断）。失败静默（不影响写作主链路）。
     """
 
-    def __init__(self, model: object) -> None:
+    def __init__(self, model: Model) -> None:
         self._model = model
 
     def resolve(self, book_id: str, title: str, content: str, store: PlotStore) -> list[str]:
@@ -380,7 +380,7 @@ class PlotResolver:
         listing = "\n".join(f"- [{p.category}] {p.content}" for p in open_pts)
         prompt = RESOLVE_PROMPT + listing + f"\n\n章节《{title}》正文：\n{content[:6000]}"
         try:
-            out = self._model.respond(  # type: ignore[attr-defined]
+            out = self._model.respond(
                 [Message(role="system", content=prompt)],
                 [],
             )

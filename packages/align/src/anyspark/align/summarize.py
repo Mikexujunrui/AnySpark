@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from anyspark.core.types import Message
+from anyspark.core import Message
 
 SUMMARIZE_PROMPT = """你是小说写作协作系统的会话摘要器。把下面这段对话摘要成**场景记忆**，
 供下一轮会话续接使用。要求：

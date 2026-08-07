@@ -11,6 +11,7 @@ import json
 import queue
 import threading
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
@@ -27,7 +28,6 @@ from anyspark.align import (
     ManualStore,
     MemoryStore,
     MindPlanner,
-    NegativeCapture,
     PreferenceExtractor,
     SessionSummarizer,
     SignalCollector,
@@ -51,27 +51,27 @@ from anyspark.align import (
     render_plan,
     render_settings,
     render_skill_index,
-    weak_signal_from_text,
 )
-from anyspark.check import compile_rule, run_review
+from anyspark.check import compile_rule, compile_with_model, run_review
 from anyspark.core import (
     Agent,
     CancellationToken,
+    Conversation,
     Message,
     Model,
     RetryingModel,
     ToolRegistry,
 )
-from anyspark.core.storage import Conversation
 from anyspark.explore import (
     DimensionStore,
     DirectionCard,
     IntentUnderstander,
     ProjectArchive,
     run_exploration,
+    run_roleplay,
 )
 from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
-from anyspark.models.deepseek import DEFAULT_BASE_URL, DeepSeekModel
+from anyspark.models import DEFAULT_BASE_URL, DeepSeekModel
 from anyspark.models.registry import (
     DEFAULT_CONTEXT_WINDOW,
     DEFAULT_MAX_TOKENS,
@@ -85,7 +85,7 @@ from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.recorder import RunRecorder
 from anyspark.server.stats import compute_stats
-from anyspark.server.toolkit import build_toolkit
+from anyspark.server.toolkit import ToolContext, build_toolkit
 from anyspark.server.tools_extensions import (
     ExtensionToolStore,
 )
@@ -100,13 +100,14 @@ from anyspark.template import (
     PlotStore,
 )
 from anyspark.workflow import (
+    NodeResult,
+    RunContext,
     WorkflowDef,
     WorkflowEngine,
     WorkflowGenerator,
     WorkflowStore,
     wait_approval,
 )
-from anyspark.workflow.engine import NodeResult, RunContext
 
 # 数据根：项目 data/（gitignored，绝不入库）
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
@@ -665,12 +666,27 @@ def build_app(
     # 启动时注册、结束时注销；steer 端点据此把插话消息投入 steer_queue。
     _active_agents: dict[str, Agent] = {}
     _active_lock: threading.Lock = threading.Lock()
+
     # 后台任务队列 + 独立 worker（S21 修 BackgroundTasks 共享线程池排队缺陷）：
     # 图谱抽取/伏笔回收/信号提炼不占请求线程池，请求立即返回、后台串行处理。
     # 任务负载类型（S28 扩展）：("chapter", title, content, order) 图谱抽取/伏笔回收；
     # ("refine",) 信号→说明书提炼；("batch_rewrite", batch_id, ids, instruction) 批量改写；
     # ("batch_review", batch_id, ids) 批量审读（S40）。
-    _bg_queue: queue.Queue[Any] = queue.Queue()  # 任务负载类型见 _bg_worker（S28/S40）
+    @dataclass
+    class BgTask:
+        """后台任务（S62：取代元组魔法派发——kind 字段 + 类型化负载，新增任务类型只加一条）。"""
+
+        kind: str  # chapter|refine|skill_drafts|summarize|batch_rewrite|batch_review
+        title: str = ""
+        content: str = ""
+        order: int = 0
+        line: str = "main"
+        conv_id: str = ""
+        batch_id: str = ""
+        ids: list[str] = field(default_factory=list)
+        instruction: str = ""
+
+    _bg_queue: queue.Queue[BgTask] = queue.Queue()  # 后台任务队列（S28/S40）
     # S40 批量任务状态（内存会话级）：id → {status, done, total, results}
     _batches: dict[str, dict[str, Any]] = {}
     _batch_lock: threading.Lock = threading.Lock()
@@ -692,8 +708,6 @@ def build_app(
                         "只按指令调整（风格/情节/表达）。直接输出改写后的完整正文。\n"
                         f"【指令】{instruction}\n【原章】\n{ch.content}\n【改写后正文】"
                     )
-                    from anyspark.core.types import Message
-
                     out = model.respond([Message(role="user", content=prompt)], [])
                     new_text = (out.text or "").strip()
                     if new_text:
@@ -742,21 +756,20 @@ def build_app(
         while True:
             try:
                 task = _bg_queue.get()
-                if task and task[0] == "chapter" and len(task) == 5:
-                    _, title, content, order, line = task
-                    _extract_chapter("main", title, content, order, line)
-                elif task and task[0] == "refine":
+                if task.kind == "chapter":
+                    _extract_chapter("main", task.title, task.content, task.order, task.line)
+                elif task.kind == "refine":
                     _refine_from_signals()
-                elif task and task[0] == "skill_drafts":
+                elif task.kind == "skill_drafts":
                     _refine_skill_drafts()
-                elif task and task[0] == "summarize" and len(task) == 2:
-                    _summarize_conversation(task[1])
-                elif task and task[0] == "batch_rewrite" and len(task) == 4:
-                    _, bid, ids, inst = task
-                    _run_batch_rewrite(bid, ids, inst)
-                elif task and task[0] == "batch_review" and len(task) == 3:
-                    _, bid, ids = task
-                    _run_batch_review(bid, ids)
+                elif task.kind == "summarize":
+                    _summarize_conversation(task.conv_id)
+                elif task.kind == "batch_rewrite":
+                    _run_batch_rewrite(task.batch_id, task.ids, task.instruction)
+                elif task.kind == "batch_review":
+                    _run_batch_review(task.batch_id, task.ids)
+                else:
+                    logger.warning("后台任务未知 kind: %r", getattr(task, "kind", task))
             except Exception as exc:
                 logger.warning("后台任务异常: %s", exc)
             finally:
@@ -852,7 +865,6 @@ def build_app(
 
     mind_planner = MindPlanner(manual)  # S50 心智模型=会话规划器（不从写作循环注入）
     signal_collector = SignalCollector(signals)
-    negative_capture = NegativeCapture(manual)  # S53c ⑤ 实时负例→雷区条目
     # S47 运行时模型：注册表（持久化多配置）+ 动态 Provider——
     # 默认装配 RetryingModel(ModelProvider(registry))，所有组件跟随当前激活配置；
     # 测试可注入 fake model（实现 core Model 协议），走共享分支不受影响。
@@ -1102,43 +1114,41 @@ def build_app(
         else:
             session_plan = mind_planner.plan(book_id, context=context)
         # 工具装配（S52 抽出为独立模块 toolkit.build_toolkit——组合根接口化，
-        # 与 HTTP 编排解耦；写作/探索常驻 + domain/codex/extras/search 按开关点亮）
+        # 与 HTTP 编排解耦；S62：依赖收敛为 ToolContext 单对象，签名稳定）
         registry = build_toolkit(
             ToolRegistry(),
-            chapters=chapters,
-            workspace=workspace,
-            model=model,
-            graph=graph,
-            plots=plots,
-            plans=plans,
-            settings=settings,
-            materials=materials,
-            ext_tools=ext_tools,
-            manual=manual,
-            skills_store=skills,
-            style_prefs=session_plan.style_prefs,
+            ToolContext(
+                chapters=chapters,
+                workspace=workspace,
+                model=model,
+                graph=graph,
+                plots=plots,
+                plans=plans,
+                settings=settings,
+                materials=materials,
+                ext_tools=ext_tools,
+                dim_store=dim_store,
+                manual=manual,
+                skills_store=skills,
+                style_prefs=session_plan.style_prefs,
+                workflow_store=workflow_store,
+                workflow_engine=workflow_engine,
+                workflow_generator=workflow_generator,
+            ),
             enable_domain=enable_domain,
             enable_codex=enable_codex,
             enable_extras=enable_extras,
             enable_search=enable_search,
             # S59：工作流 agent 工具（默认关，enable_workflow 点亮）
-            workflow_store=workflow_store,
-            workflow_engine=workflow_engine,
-            workflow_generator=workflow_generator,
             enable_workflow=enable_workflow,
         )
         # 能动级别：显式传入 > 心智规划建议 > 已存档位（S35：档位记录，温度入档）
-        # S50：心智模型=会话规划器——未显式指定时，MindPlanner 按 collab 条目建议档位
+        # S50：心智模型=会话规划器——S62 修正：启发式档位推断**不自动应用**
+        # （对齐 S61"建议不自动应用，用户主权"；启发式关键词猜意图会误判，
+        # 见 S61 实测"不要反复确认"的"确认"抵消"直接写"）。用户未显式指定时
+        # 一律用已存档位；推断结果只经 /api/mind/agency-suggest 呈现供用户采纳。
         if agency_level is None:
-            if session_plan.agency_level is not None:
-                agency_level = session_plan.agency_level
             current = agency.get_current(book_id)
-            if agency_level is not None:
-                levels = agency.list_levels()
-                current = next(
-                    (lv for lv in levels if lv.order == agency_level),
-                    agency.get_level(f"default-{agency_level}") or current,
-                )
         else:
             levels = agency.list_levels()
             current = next(
@@ -1182,76 +1192,89 @@ def build_app(
         # 心智习惯/世界事实（简介/设定档）始终保留（行为底线，非进程状态）。
         if context_mode != "continue":
             skip = skip | {"memory", "plan"}
-        full_prompt = system_prompt
-        # S58 项目智能体简介：给 AI 和用户看的项目总览（世界观/主线/主角/基调/已固化设定/进展）
-        # ——常驻注入（小、高价值、定调），用户可直接编辑 data/<book>/简介.md
-        brief_block = workspace.read_brief(book_id)
-        if "brief" not in skip and brief_block:
-            full_prompt = f"# 项目简介\n{brief_block}\n\n" + full_prompt
-        # S59 叙事树 + 线进度：方向感（主线轨迹/锚点/探索可能性/各线进度）——
-        # 稀疏常驻（极小），AI 知道"往哪走"但锚点间自由写。
+        # 注入块装配（S62：表驱动重构——块定义收敛为 (key, 位置, 内容)，
+        # 顺序/去留/优先级从 90 行 if 链变成可读数据；语义不变：
+        # prepend 块（brief/collab 协作约定）置顶，其余按声明顺序追加）
+        prepend_blocks: list[str] = []
+        append_blocks: list[str] = []
+
+        # 置顶块：项目简介（定调）→ 协作约定（怎么配合我）
+        if "brief" not in skip:
+            brief_block = workspace.read_brief(book_id)
+            if brief_block:
+                prepend_blocks.append(f"# 项目简介\n{brief_block}")
+        if "manual" not in skip:
+            collab_block = session_plan.collab_block()
+            if collab_block:
+                prepend_blocks.append(collab_block)
+
+        # 追加块（按声明顺序 = 优先级）
         if "story" not in skip:
             tree_block = story_tree.render_tree(book_id)
             thread_block = story_threads.render_threads(book_id)
             nav = "\n\n".join(x for x in (tree_block, thread_block) if x)
             if nav:
-                full_prompt = full_prompt + "\n\n" + nav
-        # S53 心智模型=会话规划器：协作约定注入系统提示顶部（怎么配合我）
-        collab_block = session_plan.collab_block()
-        if "manual" not in skip and collab_block:
-            full_prompt = collab_block + "\n\n" + full_prompt
-        # S58 图谱不再常驻注入：改由 graph_query 工具按需查询（网络小说上下文贵，
-        # 全量注入占 token；AI 需要世界事实时自己查）。skip_inject 保留 'graph' 兼容。
-        # 此问题封入 PROGRESS（图谱注入瘦身 vs 工具查询 待后续解决）
+                append_blocks.append(nav)
         # 能动性注入：当前档位（机制 2；职责边界：档位只管能动性，心智模型独立系统）
-        agency_block = build_agency_block(current)
-        if "agency" not in skip and agency_block:
-            full_prompt = full_prompt + "\n\n" + agency_block
+        if "agency" not in skip:
+            agency_block = build_agency_block(current)
+            if agency_block:
+                append_blocks.append(agency_block)
         # AI 倾向档案注入（双向黑盒解法）
-        bias_block = bias.render()
-        if "bias" not in skip and bias_block:
-            full_prompt = full_prompt + "\n\n" + bias_block
+        if "bias" not in skip:
+            bias_block = bias.render()
+            if bias_block:
+                append_blocks.append(bias_block)
         # 关键点图谱注入（T2 阶段 3：当前推进状态——哪些伏笔还开着/刚回收）
         # S31：注入时传当前章节数（老龄化：must 钩子标"已开放 N 章"，中性事实）
-        plot_block = plots.render("main", current_order=len(chapters.list_by_book(book_id)))
-        if "plot" not in skip and plot_block:
-            full_prompt = full_prompt + "\n\n" + plot_block
+        if "plot" not in skip:
+            plot_block = plots.render(book_id, current_order=len(chapters.list_by_book(book_id)))
+            if plot_block:
+                append_blocks.append(plot_block)
         # 设定档注入（S41 作者正典：人物卡/能力体系/世界观规则——与图谱互补）
-        settings_block = render_settings(settings.list())
-        if "settings" not in skip and settings_block:
-            full_prompt = full_prompt + "\n\n" + settings_block
+        if "settings" not in skip:
+            settings_block = render_settings(settings.list())
+            if settings_block:
+                append_blocks.append(settings_block)
         # S53 心智指导块：文风偏好 + 习惯（渐进式披露：只列关键条目，指导性保留）
-        mind_block = session_plan.mind_block()
-        if "manual" not in skip and mind_block:
-            full_prompt = full_prompt + "\n\n" + mind_block
-        # S53c ④ 下轮展示学到：上次会话的场景记忆（发生了什么/进行到哪/做过哪些决定）
-        # ——承担跨会话延续性；只有归档过才注入，失败静默。
-        last_memory = memory_store.latest(book_id)
-        if "memory" not in skip and last_memory is not None:
-            full_prompt = full_prompt + "\n\n# 上次会话的延续（场景记忆）\n" + last_memory.content
-        # 叙事技巧注入（S50：skill 重构——名+技法+情形案例；索引常驻+内容按需）
-        # S55 #3 分层缓存：索引块按 skills 内容签名缓存（stable），避免每次查库渲染
-        # S60：主循环只注入全部技巧索引（名字+描述，target 不限——决策者需要看到
-        # 全部可用技巧才能点名给写作调用）；完整内容不再常驻注入，靠 skill_lookup
-        # 工具按需细看 / write_chapter 的 skills 参数点名（对齐图谱：内容按需查）。
-        skill_sig = skills.revision()
-        cached = _skill_cache.get(skill_sig)
-        if cached is not None:
-            skill_block = cached
-        else:
-            skill_list = skills.list_skills()
-            skill_block = render_skill_index(skill_list, target="")
-            _skill_cache[skill_sig] = skill_block
-            # 缓存防膨胀：超过 16 个签名清理最旧（长会话/多书场景安全阀）
-            if len(_skill_cache) > 16:
-                oldest = next(iter(_skill_cache))
-                _skill_cache.pop(oldest, None)
-        if "skills" not in skip and skill_block:
-            full_prompt = full_prompt + "\n\n" + skill_block
+        if "manual" not in skip:
+            mind_block = session_plan.mind_block()
+            if mind_block:
+                append_blocks.append(mind_block)
+        # S53c ④ 下轮展示学到：上次会话的场景记忆（跨会话延续性，归档过才注入）
+        if "memory" not in skip:
+            last_memory = memory_store.latest(book_id)
+            if last_memory is not None:
+                append_blocks.append("# 上次会话的延续（场景记忆）\n" + last_memory.content)
+        # 叙事技巧注入（S50：索引常驻+内容按需；S55 #3 按 skills 内容签名缓存）
+        # S60：主循环只注入全部技巧索引（target 不限——决策者需要看到全部可用
+        # 技巧才能点名给写作调用）；完整内容靠 skill_lookup 按需 / write_chapter
+        # 的 skills 参数点名（对齐图谱：内容按需查）。
+        if "skills" not in skip:
+            skill_sig = skills.revision()
+            cached = _skill_cache.get(skill_sig)
+            if cached is not None:
+                skill_block = cached
+            else:
+                skill_block = render_skill_index(skills.list_skills(), target="")
+                _skill_cache[skill_sig] = skill_block
+                # 缓存防膨胀：超过 16 个签名清理最旧（长会话/多书场景安全阀）
+                if len(_skill_cache) > 16:
+                    oldest = next(iter(_skill_cache))
+                    _skill_cache.pop(oldest, None)
+            if skill_block:
+                append_blocks.append(skill_block)
         # 剧情计划注入（S46：当前章+后续计划——AI 知道接下来写什么）
-        plan_block = render_plan(plans.list())
-        if "plan" not in skip and plan_block:
-            full_prompt = full_prompt + "\n\n" + plan_block
+        if "plan" not in skip:
+            plan_block = render_plan(plans.list())
+            if plan_block:
+                append_blocks.append(plan_block)
+
+        full_prompt = system_prompt
+        if prepend_blocks:
+            full_prompt = "\n\n".join(prepend_blocks) + "\n\n" + full_prompt
+        if append_blocks:
+            full_prompt = full_prompt + "\n\n" + "\n\n".join(append_blocks)
         return Agent(
             model=m,
             registry=registry,
@@ -1383,10 +1406,10 @@ def build_app(
     @app.post("/api/models", response_model=dict[str, Any])
     def upsert_model(req: ModelIn) -> dict[str, Any]:
         """新增或更新模型配置（同 id 覆盖；id 缺省由 name 生成 slug）。"""
-        from anyspark.models.deepseek import _validate_thinking
+        from anyspark.models import validate_thinking
 
         try:
-            _validate_thinking(req.thinking)  # 非法思考强度 → 400（尽早暴露配置错误）
+            validate_thinking(req.thinking)  # 非法思考强度 → 400（尽早暴露配置错误）
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         cfg = ModelConfig(
@@ -1552,7 +1575,7 @@ def build_app(
             "chat 完成: conv=%s 输出%d字 工具%d次", conv_id, len(turn.text), len(turn.tool_calls)
         )
         # S53c ② 归档后分析：会话结束后台摘要成场景记忆（不阻塞响应）
-        _bg_queue.put(("summarize", conv_id))
+        _bg_queue.put(BgTask(kind="summarize", conv_id=conv_id))
         # 图谱抽取：写入章节后自动抽取入库（后台任务，不阻塞响应；失败不影响写作）
         # extract_graph 开关（S15）：默认开保持现状，可关省 token（手动 /api/graph/extract 兜底）
         if req.extract_graph:
@@ -1565,7 +1588,11 @@ def build_app(
                         order = next((c.order_index for c in chs if c.title == title), len(chs))
                         logger.info("后台图谱抽取挂载: 《%s》", title)
                         line = str(wc.arguments.get("line", "main")).strip() or "main"
-                        _bg_queue.put(("chapter", title, content, order, line))
+                        _bg_queue.put(
+                            BgTask(
+                                kind="chapter", title=title, content=content, order=order, line=line
+                            )
+                        )
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
         # AI 档位声明解析（机制 2：AI 可声明，用户点选确认）
         declared = parse_agency_declaration(turn.text)
@@ -1599,7 +1626,7 @@ def build_app(
                     with _active_lock:
                         _active_agents.pop(conv_id, None)
                 # S53c ② 归档后分析：会话结束后台摘要成场景记忆（不阻塞 SSE done 帧）
-                _bg_queue.put(("summarize", conv_id))
+                _bg_queue.put(BgTask(kind="summarize", conv_id=conv_id))
                 # 图谱抽取：与 /api/chat 行为一致（write_chapter 落盘后自动抽取）
                 # extract_graph 开关（S15）：默认开保持现状，可关省 token
                 if req.extract_graph:
@@ -1615,7 +1642,11 @@ def build_app(
                                 )
                                 # 后台队列处理（不阻塞 SSE 的 done 帧）
                                 line = str(wc.arguments.get("line", "main")).strip() or "main"
-                        _bg_queue.put(("chapter", title, content, order, line))
+                        _bg_queue.put(
+                            BgTask(
+                                kind="chapter", title=title, content=content, order=order, line=line
+                            )
+                        )
             except Exception as exc:  # 异常转 error 帧（不中断连接）
                 logger.exception("chat/stream 执行异常: %s", exc)
                 events_queue.put(("error", {"message": f"执行失败: {exc}"}))
@@ -1737,7 +1768,7 @@ def build_app(
         manual.add(entry)
         # S54-B：新增 style 偏好 → 后台生成对应 skill 候选草稿（人工确认生效）
         if entry.category == "style":
-            _bg_queue.put(("skill_drafts",))
+            _bg_queue.put(BgTask(kind="skill_drafts"))
         return entry.to_dict()
 
     @app.patch("/api/manual/{entry_id}", response_model=dict[str, Any])
@@ -1841,21 +1872,17 @@ def build_app(
             sig = signal_collector.rejected(req.content, req.context)
             agency.adjust(-1)  # 拒绝=降级
         elif req.kind == "negative":
-            # S53c ⑤ 实时负例：用户明确否定 → 即时落雷区条目（不等轮末提炼）
+            # S53c ⑤ 实时负例：负例信号原文进 signals 表（不丢）——"是否构成雷区、
+            # 雷区是什么"是内容判断，交给轮末提炼器 LLM（S62：删除正则机械落条目）
             sig = signal_collector.negative(req.content, req.context)
-            negative_capture.capture(req.content, req.context)
         elif req.kind == "custom":
             sig = signal_collector.custom(req.content, req.context)
-            # S53c ⑦ 弱信号快照：试探/微调类语句留快照（供轮末提炼参考）
-            weak = weak_signal_from_text(req.content, req.context)
-            if weak is not None:
-                signal_collector.custom(weak.content, weak.context)
         else:  # modified
             sig = signal_collector.modified(req.content, req.new_content or "", req.context)
         # S28：信号 → 后台提炼 → 说明书（异步，不阻塞操作；修复对齐闭环缺口）
-        _bg_queue.put(("refine",))
+        _bg_queue.put(BgTask(kind="refine"))
         # S54-C：信号驱动 → skill 候选草稿（后台，人工确认生效）
-        _bg_queue.put(("skill_drafts",))
+        _bg_queue.put(BgTask(kind="skill_drafts"))
         return sig.to_dict()
 
     @app.post("/api/mind/reconcile", response_model=dict[str, Any])
@@ -2049,10 +2076,21 @@ def build_app(
 
     @app.post("/api/check/rule", response_model=dict[str, object])
     def check_rule_route(req: RuleRequest) -> dict[str, object]:
-        """轻量规则编译器：用户自然语言规则 → 检测命中。"""
-        compiled = compile_rule(req.rule)
+        """规则编译：用户自然语言规则 → 检测命中（内容判断交给模型，模板 fallback）。
+
+        哲学（DESIGN §1）：用户规则"是什么意思"是内容判断 → LLM 编译；
+        检测"怎么做"是过程 → 确定性执行器硬编码。模型/模板都识别不了时
+        明确告知（不再静默丢弃）。
+        """
+        assert model is not None
+        # LLM 编译（内容判断）→ 失败回退轻量模板（无 LLM 场景）
+        compiled = compile_with_model(req.rule, model) or compile_rule(req.rule)
         if compiled is None:
-            return {"ok": False, "description": "未能识别的规则", "hits": []}
+            return {
+                "ok": False,
+                "description": "未能识别的规则：请用更具体的字面/结构描述（如'不要用破折号'）",
+                "hits": [],
+            }
         hits = compiled.checker(req.text)
         return {"ok": True, "description": compiled.description, "hits": hits}
 
@@ -2073,9 +2111,6 @@ def build_app(
     def delete_template(name: str) -> dict[str, bool]:
         templates_external.delete(name)
         return {"ok": True}
-
-    class PlotIn(BaseModel):
-        settings: str = ""  # 作品设定/种子（可选，缺省用已写章节）
 
     @app.post("/api/plot", response_model=list[dict[str, object]])
     def generate_plot(req: PlotIn) -> list[dict[str, object]]:
@@ -2253,7 +2288,11 @@ def build_app(
                 "kind": "rewrite",
                 "instruction": req.instruction,
             }
-        _bg_queue.put(("batch_rewrite", bid, req.chapter_ids, req.instruction))
+        _bg_queue.put(
+            BgTask(
+                kind="batch_rewrite", batch_id=bid, ids=req.chapter_ids, instruction=req.instruction
+            )
+        )
         return {"batch_id": bid, "total": len(req.chapter_ids)}
 
     @app.post("/api/batch/review", response_model=dict[str, object])
@@ -2270,7 +2309,7 @@ def build_app(
                 "results": [],
                 "kind": "review",
             }
-        _bg_queue.put(("batch_review", bid, req.chapter_ids))
+        _bg_queue.put(BgTask(kind="batch_review", batch_id=bid, ids=req.chapter_ids))
         return {"batch_id": bid, "total": len(req.chapter_ids)}
 
     @app.get("/api/batch/{batch_id}", response_model=dict[str, object])
@@ -2370,8 +2409,6 @@ def build_app(
             '"name": "顾欣桐", "content": "..."}]}\n'
             f"【实体】\n{ent_txt}\n【事件】\n{ev_txt}"
         )
-        from anyspark.core.types import Message
-
         out = model.respond(
             [
                 Message(
@@ -2382,14 +2419,13 @@ def build_app(
             ],
             [],
         )
-        import json as _json
         import re as _re
 
         m = _re.search(r"\{.*\}", out.text, _re.DOTALL)
         if not m:
             return {"draft": [], "raw": out.text[:500]}
         try:
-            data = _json.loads(m.group(0))
+            data = json.loads(m.group(0))
             draft = [
                 s for s in data.get("settings", []) if isinstance(s, dict) and s.get("content")
             ]
@@ -2570,7 +2606,6 @@ def build_app(
             f"章节《{ch.title}》正文：\n{ch.content[:4000]}"
         )
         out = model.respond([Message(role="system", content=prompt)], [])
-        import json as _json
         import re
 
         cleaned = out.text.strip()
@@ -2581,11 +2616,11 @@ def build_app(
         summary, hint = "", ""
         if start != -1 and end != -1 and end > start:
             try:
-                data = _json.loads(cleaned[start : end + 1])
+                data = json.loads(cleaned[start : end + 1])
                 if isinstance(data, dict):
                     summary = str(data.get("summary", ""))
                     hint = str(data.get("next_hint", ""))
-            except _json.JSONDecodeError:
+            except json.JSONDecodeError:
                 pass
         # 图谱统计（本章涉及的实体）
         involved = graph_verifier.facts_for("main", ch.content[:2000])
@@ -2682,7 +2717,6 @@ def build_app(
     @app.post("/api/role/play", response_model=dict[str, Any])
     def role_play(req: RolePlayIn) -> dict[str, Any]:
         """角色推演：角色卡 + 当前状态 + 场景 → N 路隔离推演 → 判别选优（作为参考）。"""
-        from anyspark.explore.roleplay import run_roleplay
 
         # 角色卡：文件优先，缺省从图谱实体描述兜底
         card_path = workspace.cards_dir("main") / f"角色卡-{req.role}.md"

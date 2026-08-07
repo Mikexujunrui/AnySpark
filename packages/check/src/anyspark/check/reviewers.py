@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from anyspark.core.types import Message
+from anyspark.core import Message
 
 from .report import Finding, ReviewReport
 from .skeleton import SkeletonCheckItem

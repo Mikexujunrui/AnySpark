@@ -7,7 +7,7 @@ anyspark.check — 检测网包。
 
 from .report import Finding, ReviewReport
 from .reviewers import ReviewEngine, run_review
-from .rules import CompiledRule, check_text, compile_rule
+from .rules import CompiledRule, check_text, compile_rule, compile_with_model
 from .skeleton import SKELETON_CHECKS, SkeletonCheckItem
 
 __all__ = [
@@ -19,5 +19,6 @@ __all__ = [
     "SkeletonCheckItem",
     "check_text",
     "compile_rule",
+    "compile_with_model",
     "run_review",
 ]

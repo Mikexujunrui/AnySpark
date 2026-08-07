@@ -19,10 +19,17 @@ import queue
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Protocol
 
 from .events import Event, EventEmitter
-from .protocol import ToolRegistry, ToolSpec, backfill_content_tool_result, execute
+from .protocol import (
+    Cancellable,
+    ContextCompressor,
+    Model,
+    ToolRegistry,
+    ToolSpec,
+    backfill_content_tool_result,
+    execute,
+)
 from .storage import ConversationStore, InMemoryConversationStore
 from .types import Message, ModelOutput, Role, ToolCall, ToolResult, Turn
 
@@ -54,38 +61,6 @@ class CancellationToken:
 
     def is_cancelled(self) -> bool:
         return self._event.is_set()
-
-
-class Model(Protocol):
-    """模型协议：输入上下文消息 + 工具清单，返回结构化 ModelOutput。
-
-    适配器自行把真实 LLM（如 DeepSeek）的响应翻译成模型无关的 ModelOutput
-    （text + tool_calls）。这是"模型无关"的解耦点。
-    """
-
-    def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput: ...
-
-
-class StreamModel(Protocol):
-    """流式模型协议（可选）：实现后 Agent 循环以流式事件驱动。
-
-    移植自 pi 的 streamAssistantResponse 模式：模型边生成边通过 on_event
-    回调发出流式事件（text_delta / toolcall_delta / done），最后返回完整
-    ModelOutput。事件名与 pi 对齐。未实现此协议的模型走 respond 非流式路径。
-    """
-
-    def respond_stream(
-        self,
-        messages: list[Message],
-        tools: list[ToolSpec],
-        on_event: Callable[[Event], None],
-    ) -> ModelOutput: ...
-
-
-# 上下文压缩协议：输入完整 prompt 消息列表，输出压缩后的列表（token 预算）。
-# 核心只声明协议（零依赖铁律）；具体实现（tiktoken 计数 + prune/summarize）由
-# app 层注入（见 anyspark.server.context.TokenBudget）。模型无关。
-ContextCompressor = Callable[[list[Message]], list[Message]]
 
 
 @dataclass
@@ -499,9 +474,12 @@ class Agent:
     @staticmethod
     def _set_cancelled_hook(model: Model, token: CancellationToken | None) -> None:
         """S22（D2）：把取消回调注入模型包装（RetryingModel.set_cancelled），
-        使重试退避睡眠期间可被 cancel 中断（分段检查）。模型不支持则静默跳过。"""
+        使重试退避睡眠期间可被 cancel 中断（分段检查）。模型不支持则静默跳过。
+
+        S62：用显式 Cancellable 协议（runtime_checkable isinstance）替代
+        getattr 探测——loop 不再隐式依赖"存在会睡眠的包装器"的方法名。
+        """
         if token is None:
             return
-        setter = getattr(model, "set_cancelled", None)
-        if setter is not None:
-            setter(token.is_cancelled)
+        if isinstance(model, Cancellable):
+            model.set_cancelled(token.is_cancelled)

@@ -16,8 +16,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from anyspark.core import ToolCall
 from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
-from anyspark.core.types import ToolCall
 
 
 def make_workflow_tools(

@@ -7,8 +7,11 @@
 __version__ = "0.0.1"
 
 from .events import GENERIC_EVENT_TYPES, Event, EventEmitter, EventListener
-from .loop import Agent, CancellationToken, ContextCompressor, Model
+from .loop import Agent, CancellationToken
 from .protocol import (
+    Cancellable,
+    ContextCompressor,
+    Model,
     ParamSpec,
     ToolRegistry,
     ToolResult,
@@ -18,17 +21,13 @@ from .protocol import (
 )
 from .retry import RETRYABLE_EXC_TYPES, RetryingModel, retry_with_backoff
 from .storage import Conversation, ConversationStore, InMemoryConversationStore
-from .tools import (
-    add_implementer,
-    echo_implementer,
-    register_builtins,
-)
 from .types import Message, ModelOutput, ToolCall, Turn
 
 __all__ = [
     "GENERIC_EVENT_TYPES",
     "RETRYABLE_EXC_TYPES",
     "Agent",
+    "Cancellable",
     "CancellationToken",
     "ContextCompressor",
     "Conversation",
@@ -47,10 +46,7 @@ __all__ = [
     "ToolResult",
     "ToolSpec",
     "Turn",
-    "add_implementer",
     "backfill_content_tool_result",
-    "echo_implementer",
     "execute",
-    "register_builtins",
     "retry_with_backoff",
 ]

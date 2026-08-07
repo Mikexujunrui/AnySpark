@@ -18,9 +18,10 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from anyspark.align import ManualEntry
+from anyspark.align import ManualEntry, render_plan
+from anyspark.core import ToolCall
 from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
-from anyspark.core.types import ToolCall
+from anyspark.explore import run_roleplay
 
 # 查询返回上限（防 token 爆炸：Agent 是裁剪消费者，需要细节再查）
 _QUERY_LIMIT = 10
@@ -227,8 +228,6 @@ def make_plan_implementer(plans: Any) -> tuple[list[Any], list[Any]]:
     def list_plans(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec_.name, arguments=arguments)
         try:
-            from anyspark.align.plan import render_plan
-
             entries = plans.list("main")
             if not entries:
                 return ToolResult(call=call, ok=True, content="尚无剧情计划。")
@@ -513,8 +512,6 @@ def make_roleplay_implementer(workspace: Any, graph: Any, model: Any) -> tuple[A
         if not role or not scenario:
             return ToolResult(call=call, ok=False, content="缺少参数 role 或 scenario。")
         try:
-            from anyspark.explore.roleplay import run_roleplay
-
             card_path = workspace.cards_dir("main") / f"角色卡-{role}.md"
             role_card = ""
             if card_path.exists():

@@ -11,7 +11,7 @@ from anyspark.align import (
     DEFAULT_SKILLS,
     WritingSkillStore,
     render_skill_index,
-    render_skills_content,
+    render_skills_by_name,
 )
 from anyspark.core.types import Message, ModelOutput
 from anyspark.server.app import build_app
@@ -43,21 +43,21 @@ def test_skills_seed_and_render() -> None:
     # 索引（描述常驻）
     idx = render_skill_index(skills)
     assert "叙事技巧" in idx and "镜头感与视角" in idx
-    # 内容（技法 + 案例注入）
-    content = render_skills_content(skills)
+    # 内容（点名注入：技法 + 案例；写作调用不自行选）
+    content = render_skills_by_name(skills, ["镜头感与视角"])
     assert "把叙事当作镜头" in content  # 技法正文
     assert "例：" in content  # 情形案例随内容注入
-    # 关闭一条 → 内容不再注入
+    # 关闭一条 → 点名该条不再注入
     store.update(skills[0].id, enabled=False)
-    content2 = render_skills_content(store.list_skills())
-    assert "镜头语言" not in content2
+    content2 = render_skills_by_name(store.list_skills(), ["镜头感与视角"])
+    assert content2 == ""
 
 
 def test_skills_select_by_tags() -> None:
-    """渐进式披露：技巧多后按 tags 匹配会话意图选取，不全量注入。"""
+    """S61：写作调用不自行选技巧——未点名不注入任何内容，点名只注入点名技巧。"""
     store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk2.db")
     store.list_skills()  # 触发种子
-    # 补到 6 条（超过全量阈值 5），触发按需选取
+    # 补到 6 条以上（即使很多也不自动选——写作调用是被执行方）
     for i in range(3):
         store.add(
             name=f"技巧{i}",
@@ -67,13 +67,12 @@ def test_skills_select_by_tags() -> None:
             tags="打斗" if i % 2 else "心理",
         )
     skills = store.list_skills()
-    # 会话含"打斗" → 只选中打斗标签的技巧（≤3 条）
-    sel = render_skills_content(skills, context="写一场雨夜打斗", limit=3)
-    assert "内容0" not in sel  # 心理标签的不该被选中
-    assert "例：" in sel
-    # 无 context → 保底前 3 条（不全量）
-    sel2 = render_skills_content(skills, context="", limit=3)
-    assert len(sel2) > 0
+    # 未点名 → 不注入任何内容（render_skills_by_name 空名单返回空）
+    assert render_skills_by_name(skills, []) == ""
+    # 点名才注入：只渲染点名的那条
+    block = render_skills_by_name(skills, ["节奏控制"])
+    assert "句子长度即情绪刻度" in block
+    assert "内容0" not in block  # 未点名的技巧不注入
 
 
 def test_skills_api_and_injection() -> None:
@@ -115,8 +114,8 @@ def test_skills_api_and_injection() -> None:
 
 
 def test_skill_target_routing() -> None:
-    """S57：target 分流——main 目标只进主循环，writing 只进写作调用，both 都进。"""
-    from anyspark.align import render_skill_index, render_skills_content, select_skills_for
+    """S57/S61：target 只影响索引可见性与点名注入；写作调用不自动选。"""
+    from anyspark.align import render_skill_index, render_skills_by_name
 
     store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk3.db")
     # 三目标各造一条
@@ -124,19 +123,14 @@ def test_skill_target_routing() -> None:
     store.add(name="文笔技巧B", description="写作用", content="句子技法", target="writing")
     store.add(name="通用技巧C", description="都可用", content="通用", target="both")
     skills = store.list_skills()
-    # 主循环：main+both
-    main_sel = select_skills_for(skills, target="main")
-    main_names = {s.name for s in main_sel}
-    assert "类型指导A" in main_names and "通用技巧C" in main_names
-    assert "文笔技巧B" not in main_names
-    # 写作调用：writing+both
-    write_sel = select_skills_for(skills, target="writing")
-    write_names = {s.name for s in write_sel}
-    assert "文笔技巧B" in write_names and "通用技巧C" in write_names
-    assert "类型指导A" not in write_names
-    # 渲染分流一致
-    assert "类型指导A" in render_skill_index(skills, target="main")
-    assert "文笔技巧B" in render_skills_content(skills, target="writing")
+    # 主循环索引 = 全部（target 不限，S60：决策者看全部才能点名）
+    idx = render_skill_index(skills, target="")
+    assert "类型指导A" in idx and "文笔技巧B" in idx and "通用技巧C" in idx
+    # 点名注入：按名字精确匹配，与 target 无关（主循环点名了就该进写作调用）
+    block = render_skills_by_name(skills, ["文笔技巧B"])
+    assert "句子技法" in block
+    block2 = render_skills_by_name(skills, ["类型指导A"])
+    assert "结构指导" in block2
 
 
 def test_skills_legacy_seed_migration() -> None:
@@ -165,23 +159,30 @@ def test_skills_legacy_seed_migration() -> None:
     assert "镜头感与视角" in names
 
 
-def test_skill_description_guard() -> None:
-    """S55 #4 描述截断守卫：超限入库被截断。"""
+def test_skill_description_preserved_full() -> None:
+    """S62：skill 描述存储永不截断（内容主权）；索引渲染层才展示省略。"""
     from anyspark.align import WritingSkillStore
-    from anyspark.align.skills import SKILL_DESC_LIMIT
+    from anyspark.align.skills import (
+        _INDEX_DESC_ELIDE,
+        render_skill_index,
+    )
 
     store = WritingSkillStore(Path(tempfile.mkdtemp()) / "s.db")
     try:
         long_desc = "这是一段非常长的描述" * 20
-        assert len(long_desc) > SKILL_DESC_LIMIT
+        assert len(long_desc) > _INDEX_DESC_ELIDE
         s = store.add("test-skill", long_desc, "技法内容")
-        assert len(s.description) <= SKILL_DESC_LIMIT
-        assert s.description.endswith("...")
-        # update 同样守卫
-        s2 = store.update(s.id, description="短描述")
-        assert s2 is not None and s2.description == "短描述"
-        s3 = store.update(s.id, description=long_desc)
-        assert s3 is not None and len(s3.description) <= SKILL_DESC_LIMIT
+        # 存储保全文（不再截断）
+        assert s.description == long_desc
+        # update 同样保全文
+        s2 = store.update(s.id, description=long_desc)
+        assert s2 is not None and s2.description == long_desc
+        # 渲染层展示省略（含提示看全文），存储内容不变
+        idx = render_skill_index(store.list_skills())
+        assert "test-skill" in idx and "…（全文见 skill_lookup）" in idx
+        assert idx.count(long_desc) == 0  # 索引行不出现超长描述
+        stored = store.get(s.id)
+        assert stored is not None and stored.description == long_desc  # 存储未损坏
     finally:
         store.close()
 
@@ -239,24 +240,26 @@ def test_skill_lookup_tool() -> None:
     """S60：skill_lookup 工具——按名细看完整内容（索引配套的按需查证）。"""
     from anyspark.align import WritingSkillStore
     from anyspark.core.protocol import ToolRegistry
-    from anyspark.server.toolkit import build_toolkit
+    from anyspark.server.toolkit import ToolContext, build_toolkit
     from anyspark.server.tools_extensions import ExtensionToolStore
 
     store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk5.db")
     try:
         registry = build_toolkit(
             ToolRegistry(),
-            chapters=None,
-            workspace=None,
-            model=None,
-            graph=None,
-            plots=None,
-            plans=None,
-            settings=None,
-            materials=None,
-            ext_tools=ExtensionToolStore(Path(tempfile.mkdtemp()) / "ext.db"),
-            manual=None,
-            skills_store=store,
+            ToolContext(
+                chapters=None,
+                workspace=None,
+                model=None,
+                graph=None,
+                plots=None,
+                plans=None,
+                settings=None,
+                materials=None,
+                ext_tools=ExtensionToolStore(Path(tempfile.mkdtemp()) / "ext.db"),
+                manual=None,
+                skills_store=store,
+            ),
         )
         spec, impl = registry.get("skill_lookup") or (None, None)
         assert spec is not None, "skill_lookup 应注册"
@@ -324,11 +327,12 @@ def test_write_chapter_skills_param() -> None:
         assert "节奏控制" in model.last_system
         assert "句子长度即情绪刻度" in model.last_system
         assert "镜头感" not in model.last_system  # 未点名不注入
-        # 未点名 → 自动匹配兜底（无 prefs 时保底前 limit 条，此处种子仅 3 条全量注入）
+        # 未点名 → 不注入任何技巧（写作调用是被执行方，不自行选）
         model.last_system = ""
         res2 = impl(spec, {"title": "第二章 路上", "intent": "继续赶路"})
         assert res2.ok
-        assert "叙事技巧" in model.last_system  # 兜底注入（选择策略不同，内容仍在）
+        assert "叙事技巧" not in model.last_system
+        assert "节奏控制" not in model.last_system
     finally:
         store.close()
         ch.close()

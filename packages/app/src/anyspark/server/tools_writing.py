@@ -13,8 +13,8 @@ import zipfile
 from pathlib import Path
 from typing import Any
 
+from anyspark.core import ToolCall
 from anyspark.core.protocol import ParamSpec, ToolRegistry, ToolResult, ToolSpec
-from anyspark.core.types import ToolCall
 from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore
 
@@ -127,34 +127,31 @@ class WritingTools:
     ) -> str:
         """用干净上下文调写作模型生成正文（无历史/无工具记录）。
 
-        上下文 = 写作意图 + 主循环精选参考（原样引用）+ 文笔 skill。
-        skill_names：主循环显式点名的技巧（S60，与索引配套）；未点名时按
-        style_prefs 文风偏好自动匹配（兜底）。返回正文文本；失败抛异常（调用方降级）。
+        上下文 = 写作意图 + 主循环精选参考（原样引用）+ 主循环点名的技巧。
+        skill_names：主循环显式点名的技巧（S60/S61，与索引配套）——写作调用是
+        被执行方不自行选技巧：点名了才注入，未点名则不带任何技巧（干净）。
+        返回正文文本；失败抛异常（调用方降级）。
         """
         if self._model is None:
             raise RuntimeError("写作模型未注入（测试环境不走干净写作）")
-        from anyspark.align import render_skills_by_name, render_skills_content
+        from anyspark.align import render_skills_by_name
 
-        # 干净上下文：意图 + 参考 + 文笔 skill（不带对话历史/工具记录/旧章节全文）
+        # 干净上下文：意图 + 参考 + 点名技巧（不带对话历史/工具记录/旧章节全文）
         parts = [
             "你是 AnySpark 小说写作引擎。严格根据【写作意图】与【写作参考】撰写正文。",
             "要求：具体、有画面感、杜绝空泛总结；直接输出正文，不要解释。",
         ]
-        skill_list = self._skills_store.list_skills() if self._skills_store else []
         if skill_names:
-            # S60：主循环显式点名 → 只注入点名的技巧（不再全量/自动匹配）
+            # S60：主循环显式点名 → 只注入点名的技巧（写作调用不自行选）
+            skill_list = self._skills_store.list_skills() if self._skills_store else []
             skill_block = render_skills_by_name(skill_list, skill_names)
-        else:
-            skill_block = render_skills_content(
-                skill_list, prefs=self._style_prefs, target="writing"
-            )
-        if skill_block:
-            parts.append(skill_block)
+            if skill_block:
+                parts.append(skill_block)
         parts.append(f"【写作意图】\n{intent}")
         if references.strip():
             parts.append(f"【写作参考】（主循环精选，原样引用）\n{references}")
         system = "\n\n".join(parts)
-        from anyspark.core.types import Message
+        from anyspark.core import Message
 
         output = self._model.respond(
             [Message(role="system", content=system)],

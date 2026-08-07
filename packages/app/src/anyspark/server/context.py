@@ -31,7 +31,7 @@ from collections.abc import Callable
 
 import tiktoken
 
-from anyspark.core.types import Message
+from anyspark.core import Message
 
 # 保留最近消息的最小条数（刚发生的对话不砍，即使很小）
 KEEP_RECENT_MIN = 4

@@ -13,6 +13,7 @@ members = [
     "anyspark-explore",
     "anyspark-graph",
     "anyspark-template",
+    "anyspark-workflow",
 ]
 
 [[package]]
@@ -59,6 +60,7 @@ dependencies = [
     { name = "anyspark-explore" },
     { name = "anyspark-graph" },
     { name = "anyspark-template" },
+    { name = "anyspark-workflow" },
 ]
 
 [package.dev-dependencies]
@@ -78,6 +80,7 @@ requires-dist = [
     { name = "anyspark-explore", editable = "packages/explore" },
     { name = "anyspark-graph", editable = "packages/graph" },
     { name = "anyspark-template", editable = "packages/template" },
+    { name = "anyspark-workflow", editable = "packages/workflow" },
 ]
 
 [package.metadata.requires-dev]
@@ -103,8 +106,13 @@ name = "anyspark-app"
 version = "0.0.1"
 source = { editable = "packages/app" }
 dependencies = [
+    { name = "anyspark-align" },
+    { name = "anyspark-check" },
     { name = "anyspark-core" },
+    { name = "anyspark-explore" },
     { name = "anyspark-graph" },
+    { name = "anyspark-template" },
+    { name = "anyspark-workflow" },
     { name = "fastapi" },
     { name = "openai" },
     { name = "pydantic" },
@@ -115,8 +123,13 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "anyspark-align", editable = "packages/align" },
+    { name = "anyspark-check", editable = "packages/check" },
     { name = "anyspark-core", editable = "packages/core" },
+    { name = "anyspark-explore", editable = "packages/explore" },
     { name = "anyspark-graph", editable = "packages/graph" },
+    { name = "anyspark-template", editable = "packages/template" },
+    { name = "anyspark-workflow", editable = "packages/workflow" },
     { name = "fastapi", specifier = "==0.141.1" },
     { name = "openai", specifier = "==2.52.0" },
     { name = "pydantic", specifier = "==2.13.4" },
@@ -182,6 +195,17 @@ requires-dist = [{ name = "anyspark-core", editable = "packages/core" }]
 name = "anyspark-template"
 version = "0.0.1"
 source = { editable = "packages/template" }
+dependencies = [
+    { name = "anyspark-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "anyspark-core", editable = "packages/core" }]
+
+[[package]]
+name = "anyspark-workflow"
+version = "0.0.1"
+source = { editable = "packages/workflow" }
 dependencies = [
     { name = "anyspark-core" },
 ]

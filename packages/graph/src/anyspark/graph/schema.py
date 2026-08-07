@@ -24,6 +24,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .extract import Extraction
+
 
 def _merge_state(old_state: str, delta: str) -> str:
     """状态增量拼接：旧状态 + 本章变化（S20 角色/地点随时间演化）。
@@ -813,16 +815,16 @@ class GraphStore:
         book_id: str,
         chapter_ref: str,
         chapter_order: int,
-        extraction: object,
+        extraction: Extraction,
         line: str = "main",
     ) -> None:
         """把抽取结果幂等落库（实体合并/关系三元组去重/事件替换）。
 
         引用完整性：关系/事件里引用但未被抽出的名字，自动补建"设定"占位实体。
         """
-        entities = getattr(extraction, "entities", [])
-        relations = getattr(extraction, "relations", [])
-        events = getattr(extraction, "events", [])
+        entities = extraction.entities
+        relations = extraction.relations
+        events = extraction.events
         for e in entities:
             self.upsert_entity(
                 book_id,
@@ -847,7 +849,7 @@ class GraphStore:
                     book_id, name, "设定", [], "", chapter_ref, chapter_order, "", line
                 )
         # S20：已有实体状态更新（仅更新已存在实体的 state，不建新实体）
-        states = getattr(extraction, "states", [])
+        states = extraction.states
         for st in states:
             if not self.get_entity(book_id, st.name):
                 continue  # states 语义=已有实体；不存在则跳过（防误建）
