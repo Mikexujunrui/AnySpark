@@ -230,7 +230,14 @@ class Agent:
             # 有工具调用：并行执行并把结果回填（S21 移植 pi 的 executeToolCallsParallel；
             # ThreadPoolExecutor 保持输入顺序，写工具内部有锁保证线程安全）
             self.events.emit(
-                Event(type="tool_call", payload={"name": [c.name for c in output.tool_calls]})
+                Event(
+                    type="tool_call",
+                    payload={
+                        "name": [c.name for c in output.tool_calls],
+                        # F2.6：带 arguments——前端据此做"写作预览"（写章时展示区实时显正文）
+                        "arguments": [c.arguments for c in output.tool_calls],
+                    },
+                )
             )
             calls = list(output.tool_calls)
 
