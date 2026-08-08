@@ -36,6 +36,7 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 | [docs/UPGRADE-DISCUSSION.md](docs/UPGRADE-DISCUSSION.md) | 讨论纪要与推理过程（查证设计意图用） |
 | [docs/HANDOFF-L-SERIES.md](docs/HANDOFF-L-SERIES.md) | 与旧仓库 L 系列收尾的边界交接 |
 | [docs/FRONTEND-HANDOFF.md](docs/FRONTEND-HANDOFF.md) | **前端开发交接**（API 全契约/现状盘点/设计意图——前端开发智能体必读） |
+| [docs/EXTENDING.md](docs/EXTENDING.md) | **贡献者指南**（如何加能力：数据工具/独立包/改核心，含 workflow 模板） |
 
 ## 当前状态
 
