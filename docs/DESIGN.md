@@ -854,3 +854,33 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 - **依赖卫生**：深路径导入统一走包公共 API；私有符号（_validate_thinking）公开化；函数内重复导入/死代码（delete_draft 破损实现/inject.py 未接线/DIMENSIONS 旧别名/register_hook 死机制/演示工具占公共面）全部清除；app pyproject 补齐 5 个 workspace 依赖。
 - **护栏该硬编码的地方补齐**：workflow validate() 补无环检测+条件语法校验（DESIGN §12.22 承诺落地）；from_dict 未知 kind 不再静默纠正为 agent；condition 非数字字符串关系比较不再按长度回退（伪结果静默错误分支）。
 - **未做**：app.py 拆 router（纯结构重构、diff 大、与前端并行冲突）——独立阶段单独做。
+
+### 12.25 画蛇添足清理（S63：死代码删除 + 重复收敛 + 弱化通道退役）
+
+> 背景：主人追问"还有画蛇添足、功能重复之类吗"——对全仓做重复/死代码审计
+> （工具 50 个 / API 90+ / Store 21 个 / 每包 __init__ 导出 vs 实际使用对照）。
+
+#### 审计发现
+1. **mood.py（MoodDimStore 氛围滑块）死代码**：S13 产物，S53 全项目内容化+心智
+   模型起来后被偏好条目替代——HEAD 里无实例/无注入/无 API，只剩 skip_inject 注释
+   字符串，仅测试引用。并行会话已删文件，本次确认无残留引用。
+2. **role_play 工具 vs /api/role/play 双通道代码复制**：同一"角色卡文件→图谱兜底"
+   查找逻辑各写一份（~30 行），长期会漂移。
+3. **check_text 工具是弱化版**：S32 写后自查工具，无图谱证据/无章节上下文
+   （需 agent 自传全文）、默认关；S59 workflow 的 review_chapter script 已完整
+   取代（能读章节全文 + 接改写循环）。
+
+#### 处理（机制收敛，不新增功能）
+1. **mood**：确认删除（工作区已删文件，清理 skip_inject 注释残留）
+2. **load_role_card 共享**：`explore/roleplay.py` 新增 `load_role_card(workspace,
+   graph, role) -> (role_card, state)`——角色卡加载收敛一处；role_play 工具与
+   /api/role/play 都改调它
+3. **check_text 退役**：删 make_check_implementer + 注册 + 测试；审读能力收敛到
+   `/api/check`（人用，带证据+时序）+ workflow `review_chapter`（agent 用）两条
+   完整通道
+
+#### 哲学
+- 能力双通道（agent 工具 vs 人用 API）是设计意图，但**通道内的实现逻辑要共享**，
+  不复制（复制=漂移源）
+- 被更新的机制取代的旧通道直接退役，不留残废版（残废版=画蛇添足）
+- 验证：pytest 346 全绿；ruff/mypy 全绿

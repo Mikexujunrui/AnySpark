@@ -155,18 +155,15 @@ def build_toolkit(
         cx_spec, cx_impl = make_codex_implementer(ctx.workspace, ctx.chapters, ctx.graph)
         registry.register(cx_spec, cx_impl)
 
-    # S32 扩展：read_material / check_text，按 enable_extras 点亮（默认关，
+    # S32 扩展：read_material，按 enable_extras 点亮（默认关，
     # 防无关工具调用干扰主链路——S15 哲学延续）。
+    # S63：check_text 退役——被 S59 workflow 的 review_chapter script 取代
+    # （review_chapter 能读章节全文+接改写循环，check_text 无图谱证据/需自传全文）。
     if enable_extras:
-        from anyspark.server.tools_extras import (
-            make_check_implementer,
-            make_read_material_implementer,
-        )
+        from anyspark.server.tools_extras import make_read_material_implementer
 
         material_spec, material_impl = make_read_material_implementer(ctx.materials)
         registry.register(material_spec, material_impl)
-        check_spec, check_impl = make_check_implementer(ctx.model)
-        registry.register(check_spec, check_impl)
 
     # 网络搜索工具：按需注册（S15 起默认关——写作主链路不背考据能力，需要时点亮）
     if enable_search:

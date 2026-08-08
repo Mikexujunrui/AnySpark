@@ -21,7 +21,6 @@ from typing import Any
 from anyspark.align import ManualEntry, render_plan
 from anyspark.core import ToolCall
 from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
-from anyspark.explore import run_roleplay
 
 # 查询返回上限（防 token 爆炸：Agent 是裁剪消费者，需要细节再查）
 _QUERY_LIMIT = 10
@@ -512,18 +511,9 @@ def make_roleplay_implementer(workspace: Any, graph: Any, model: Any) -> tuple[A
         if not role or not scenario:
             return ToolResult(call=call, ok=False, content="缺少参数 role 或 scenario。")
         try:
-            card_path = workspace.cards_dir("main") / f"角色卡-{role}.md"
-            role_card = ""
-            if card_path.exists():
-                role_card = card_path.read_text(encoding="utf-8", errors="ignore")
-            state = ""
-            ent = graph.get_entity("main", role)
-            if ent is not None:
-                st = getattr(ent, "state", "") or ""
-                desc = getattr(ent, "description", "") or ""
-                state = st
-                if not role_card.strip():
-                    role_card = f"# {role}\n{desc}\n\n当前状态：{st}"
+            from anyspark.explore import load_role_card, run_roleplay
+
+            role_card, state = load_role_card(workspace, graph, role)
             if not role_card.strip():
                 return ToolResult(
                     call=call,

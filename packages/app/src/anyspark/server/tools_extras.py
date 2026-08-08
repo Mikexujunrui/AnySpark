@@ -3,11 +3,11 @@ anyspark.server.tools_extras — Agent 侧扩展能力工具（S32 补齐 Agent 
 
 背景：审计发现探索/检测/资料三类核心能力只有 HTTP API（前端面板驱动），
 写作 Agent 的注册表里只有 list/read/write/file——"能力存在但智能体看不到"。
-本模块按 pi 的扩展注册模式（能力即工具、按需调用）补三个工具：
+本模块按 pi 的扩展注册模式（能力即工具、按需调用）补工具：
 
 1. explore_direction — 任务方向不明确时多智能体探索（机制 7 补进 Agent 闭环）
 2. read_material    — 查阅已上传资料摘要卡（设定/世界观文档，写正文前查证）
-3. check_text       — 检测网审读正文（写完自查硬伤，机制 8 补进 Agent 闭环）
+3. （S63：check_text 已退役——被 S59 workflow 的 review_chapter script 取代）
 
 对齐 pi 的渐进式披露：工具描述常驻（schema 自带），完整行为封装在工具内部，
 Agent 仅在对应场景调用，不向 system_prompt 平铺大段能力说明。
@@ -148,53 +148,5 @@ def make_read_material_implementer(materials: Any) -> tuple[Any, Any]:
             content="\n\n".join(parts),
             data={"ids": [m.id for m in matched[:2]]},
         )
-
-    return spec, implementer
-
-
-def make_check_implementer(model: Any) -> tuple[Any, Any]:
-    """检测网审读工具：写完自查硬伤（机制 8 补进 Agent 闭环）。"""
-
-    from anyspark.check import run_review
-
-    spec = ToolSpec(
-        name="check_text",
-        description=(
-            "用检测网审读正文（一致性/动机因果/情感连贯/信息流/结构节奏/"
-            "预期管理/主题连贯），返回硬伤(🔴)与建议(💡)报告。"
-            "写完章节后可用来自查。"
-        ),
-        params=[
-            ParamSpec(
-                name="target",
-                type="string",
-                required=True,
-                description="审读对象描述（如章节名）",
-            ),
-            ParamSpec(
-                name="text",
-                type="string",
-                required=True,
-                description="要审读的正文全文",
-            ),
-        ],
-    )
-
-    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
-        call = ToolCall(name=spec_.name, arguments=arguments)
-        target = str(arguments.get("target", "")).strip()
-        text = str(arguments.get("text", ""))
-        if not text.strip():
-            return ToolResult(call=call, ok=False, content="缺少待审文本。")
-        try:
-            report = run_review(model, target or "未命名", text[:20000])
-            return ToolResult(
-                call=call,
-                ok=True,
-                content=report.render(),
-                data={"hard_count": report.hard_count},
-            )
-        except Exception as exc:
-            return ToolResult(call=call, ok=False, content=f"审读失败：{exc}")
 
     return spec, implementer

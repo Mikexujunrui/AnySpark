@@ -1,10 +1,10 @@
-"""S32 扩展能力工具测试：explore_direction / read_material / check_text 注册与行为。
+"""S32 扩展能力工具测试：explore_direction / read_material 注册与行为。
 
 背景：审计发现探索/检测/资料只有 HTTP API（Agent 看不到），S32 把三类能力
 注册为写作 Agent 工具（参照 pi：能力即工具、按需调用）。本测试验证：
-1. 三个工具默认注册进 Agent（Agent 可见性补齐）
+1. explore_direction 无条件注册（Agent 可见性补齐）
 2. read_material 匹配/未匹配/空库行为
-3. check_text 调用检测网返回报告（模型异常时 ok=False 不炸链路）
+3. S63：check_text 已退役（被 S59 workflow 的 review_chapter 取代）——不再注册
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from fastapi.testclient import TestClient
 from anyspark.core.types import Message, ModelOutput
 from anyspark.server.app import build_app
 from anyspark.server.tools_extras import (
-    make_check_implementer,
     make_explore_implementer,
     make_read_material_implementer,
 )
@@ -50,14 +49,13 @@ def test_explore_tool_always_registered() -> None:
 
 
 def test_extra_tools_default_off_on_demand() -> None:
-    """S32 防干扰：read_material/check_text 默认不注册（主链路轻量，防无关调用）；
-    enable_extras=True 时点亮（能力即工具，按需装配）。"""
+    """S32 防干扰：read_material 默认不注册（主链路轻量，防无关调用）；
+    enable_extras=True 时点亮（能力即工具，按需装配）。S63：check_text 已退役。"""
     m = ProbeModel()
     client = _client(m)
     client.post("/api/chat", json={"message": "写一段"})
     names = m.tool_names[0]
     assert "read_material" not in names
-    assert "check_text" not in names
     # 点亮后可见
     m2 = ProbeModel()
     db = Path(tempfile.mkdtemp()) / "test.db"
@@ -65,7 +63,6 @@ def test_extra_tools_default_off_on_demand() -> None:
     client2.post("/api/chat", json={"message": "写一段", "enable_extras": True})
     names2 = m2.tool_names[0]
     assert "read_material" in names2
-    assert "check_text" in names2
     assert "explore_direction" in names2
 
 
@@ -130,11 +127,9 @@ def test_read_material_empty_listing() -> None:
     assert "为空" in result.content
 
 
-def test_check_text_calls_review() -> None:
-    """check_text：模型异常时 ok=False 不炸；正常时返回报告（hard_count 字段）。"""
-    spec, impl = make_check_implementer(ProbeModel())
-    assert spec.name == "check_text"
-    result = impl(spec, {"target": "第一章", "text": "一段正文"})
-    # ProbeModel 返回无效 JSON → 审读解析为空报告（无硬伤），不抛异常
-    assert result.ok is True
-    assert result.data is None or isinstance(result.data.get("hard_count"), int)
+def test_check_text_retired() -> None:
+    """S63：check_text 工具已退役（S59 workflow 的 review_chapter 取代）——
+    不再从 tools_extras 导出，Agent 工具集不再含 check_text。"""
+    import anyspark.server.tools_extras as te
+
+    assert not hasattr(te, "make_check_implementer"), "check_text 应已退役"

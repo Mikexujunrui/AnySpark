@@ -18,7 +18,7 @@ import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 
-from anyspark.core.types import Message
+from anyspark.core import Message
 
 # 推演策略集（机制硬编码：多样性靠差异化指令，上下文隔离保证不锚定）
 ROLE_STRATEGIES: list[dict[str, str]] = [
@@ -153,6 +153,28 @@ class RolePlayEngine:
             [],
         )
         return RolePlayCandidate(strategy=strategy["name"], text=(output.text or "").strip())
+
+
+def load_role_card(workspace: Any, graph: Any, role: str, book_id: str = "main") -> tuple[str, str]:
+    """加载角色卡：文件（卡片/角色卡-{role}.md）优先，缺省从图谱实体描述兜底。
+
+    返回 (role_card, state)——role_card 可能为空（无角色卡也无图谱实体）。
+    S63 抽取：role_play 工具与 /api/role/play 原先各自实现了同一套查找逻辑，
+    收敛到这里共用（避免同一能力双通道代码漂移）。
+    """
+    role_card = ""
+    card_path = workspace.cards_dir(book_id) / f"角色卡-{role}.md"
+    if card_path.exists():
+        role_card = card_path.read_text(encoding="utf-8", errors="ignore")
+    state = ""
+    ent = graph.get_entity(book_id, role) if graph is not None else None
+    if ent is not None:
+        st = getattr(ent, "state", "") or ""
+        desc = getattr(ent, "description", "") or ""
+        state = st
+        if not role_card.strip():
+            role_card = f"# {role}\n{desc}\n\n当前状态：{st}"
+    return role_card, state
 
 
 def run_roleplay(
