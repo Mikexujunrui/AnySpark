@@ -12,7 +12,7 @@
 
 ## 当前状态与任务
 
-**核心功能已全部完成（S0~S58，全量测试绿 + 总闸通过）**：第一版七阶段 + 全部补缺 + 实测驱动演进 + **特化路线 P1-P5**（主人 2026-08-05 拍板：把 AnySpark 做成"小说特化版 pi"）+ **架构深化 S53-S58**（主人讨论驱动）。
+**核心功能已全部完成（S0~S63，全量测试绿 + 总闸通过）**：第一版七阶段 + 全部补缺 + 实测驱动演进 + **特化路线 P1-P5**（主人 2026-08-05 拍板：把 AnySpark 做成"小说特化版 pi"）+ **架构深化 S53-S63**（主人讨论驱动）。
 
 **特化路线已交付**（详见 PROGRESS.md S48 系）：
 - P1 工作区化（每项目一路径：上传存档/章节 md 权威/卡片 + 双写 + import 同步）
@@ -20,16 +20,18 @@
 - P3 格式管线（零依赖 txt/md/docx/pdf 提取 + 规则拆章 + 摘要卡 + EPUB 导出携图）
 - P4 角色推演（低成本多探索 + 判别选优）+ codex 只读数据环境（真实统计）
 - P5 代码扩展（沙箱 run_code + 扩展工具注册表：工具=数据，人工批准生效）
-- 正文检索（search_chapters：exclude 句级排除/regex/fragment 可调 + read_context 锚点读段落）
+- 正文检索（search_chapters：词表批量/exclude 句级排除/regex/fragment 可调 + read_context 锚点读段落）
 - 运行时模型（S47：多模型注册表 + 思考强度；V4 系列 1M 上下文）
 
-**架构深化已交付（S53-S58，详见 PROGRESS 对应阶段）**：
-- 心智模型=会话规划器（manual 分类 collab/style/habit，不再全量注入写作）；全项目内容化（mood/explore/graph/settings 维度与类别全部内容载体化）
+**架构深化已交付（S53-S63，详见 PROGRESS 对应阶段）**：
+- 心智模型=会话规划器（manual 分类 collab/style/habit，不再全量注入写作）；全项目内容化（explore/graph/settings 维度与类别全部内容载体化）
 - 叙事技巧生成器（原文提炼五段式，A 手动/B 心智联动/C 信号驱动 + 人工确认闸门）；类型 skill 生成器（mode=main，主循环看）
 - **C 架构**：write_chapter 意图模式（intent+references → 干净写作调用，治多章累积毒化——实验实证 0 幻觉）；直写=轻量写作；write_file 笔记/ 前缀=纯文档
-- skill target 分流（writing→写作调用 / main→主循环 / both→两者）
+- **S60 skill 注入瘦身**：主循环只注入全部技巧索引（名字+描述）+ `skill_lookup` 按需细看 + `write_chapter` 的 `skills` 点名——**写作调用不自行选技巧，所有注入由主循环点名决定**（S61 删自动匹配规则）
+- **S59 工作流扩展包**（packages/workflow）：顺序/分支/循环三结构 + 断点恢复 + 失败策略 + AI 生成（草稿→人工确认）；叙事树 + 线进度（S59）；会话继承 fork（S58c）；项目简介 + context_mode（S58）
+- **S61 心智完善**：档位 L2/L3 + 活跃度衰减 + context 动态选取；**S62 哲学审查**（去垃圾补丁）；**S63 画蛇添足清理**（mood 死代码/role_card 收敛/check_text 退役）
 
-**剩余（按主人路线，非缺陷）**：P6 前端壳（主人说后做）/ 多模态（未来计划）/ B 真自我修复（补丁应用，按需）/ 心智模型完整化（L2/L3 档位指导、渐进式披露按需引入）/ httpx2 迁移（等 starlette）。
+**剩余（按主人路线，非缺陷）**：新前端创作台（他人基于后端 API 开发——本仓库已无 frontend）/ 多模态（未来计划）/ B 真自我修复（补丁应用，按需）/ httpx2 迁移（等 starlette）。
 
 **当前任务：按主人指示推进**（新阶段开工前先确认，纪律 7）。接手先读：README 当前状态 → PROGRESS.md 最新阶段 → DEV-AGENT.md（接入通道/测试链路）。
 
@@ -50,7 +52,7 @@
 
 - 禁 `git add -A`，一律显式路径
 - `data/`、`chapters/`、`data_backup_*` 绝不入库
-- 依赖 pin `==` + 锁文件（uv.lock / package-lock.json）
+- 依赖 pin `==` + 锁文件（uv.lock）
 - 每个 commit 标注阶段编号（如 `S7: ...`）
-- 每阶段跑门禁：`uv run python scripts/gate.py`（ruff + mypy + pytest + tsc + eslint + build）
+- 每阶段跑门禁：`uv run python scripts/gate.py`（ruff + mypy + pytest；本仓库无前端，tsc/eslint/build 不再执行）
 - 对设计的任何偏离/新增：先停下，向主人确认，再更新 `docs/DESIGN.md`

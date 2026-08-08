@@ -2,7 +2,8 @@
 AnySpark v4 — 总闸（一次性跑全部门禁）。
 
 运行：uv run python scripts/gate.py
-覆盖：ruff check / ruff format / mypy / pytest（后端）+ tsc / eslint / build（前端）
+覆盖：ruff check / ruff format / mypy / pytest（后端）+ tsc / eslint / build（前端，仅当
+frontend/ 存在——本仓库已拆分前端，无 frontend/ 时自动跳过前端门禁）。
 """
 
 from __future__ import annotations

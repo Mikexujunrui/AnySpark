@@ -10,7 +10,7 @@
 |------|------|---------|
 | `anyspark_server` | 后端生命周期 | `{action:"start"}` → 健康检查；`{action:"status"}`；`{action:"stop"}` |
 | `anyspark_api` | 调任意端点 + 链路记录 | `{path:"/api/chat", body:{message:"..."}, record_label:"chat_flow"}` |
-| `anyspark_gate` | 总闸门禁（ruff+mypy+pytest+tsc+eslint+build） | `{}`（数分钟，落盘 data/dev/gate/） |
+| `anyspark_gate` | 总闸门禁（ruff+mypy+pytest；前端 tsc/eslint/build 仅当 frontend/ 存在） | `{}`（数分钟，落盘 data/dev/gate/） |
 | `anyspark_state` | 系统状态快照 | `{}`（章节/图谱/说明书/资料统计） |
 
 工具源码：`E:\Desktop\pi\pi-main\packages\pi-anyspark\`（含 README）。
