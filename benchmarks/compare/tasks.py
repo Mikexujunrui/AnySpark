@@ -41,11 +41,21 @@ PREFERENCE_C = "叙事中禁止使用破折号（——）"
 # 任务 A：设定忠实度（写第 4 章，核对 6 条 gold 设定违规）
 # ---------------------------------------------------------------------------
 def run_task_a(api: ApiClient, bare: BareLLM, judge: BareLLM) -> dict:
-    prompt = f"基于以下设定续写第 4 章（约 400 字），不得违反任何设定：\n{HP_SETTINGS}\n第 4 章："
+    # 场景式任务（S19 修正：400 字塞不下一章会挤压剧情——改为写第 4 章中海格登场的完整场景）
+    scene = (
+        "基于以下设定，写《哈利波特与魔法石》第 4 章中'海格登场、告诉哈利他是巫师'这个场景"
+        "（第 3 章结尾海格在礁石小屋敲门之后的自然延续），600-1200 字，不得违反设定：\n"
+        f"{HP_SETTINGS}\n场景："
+    )
     # 裸 LLM：单次输出
-    bare_text = bare.chat("你是小说续写者。严格遵循设定。", prompt)
+    bare_text = bare.chat("你是小说续写者。严格遵循设定，写出完整的场景（不压缩剧情）。", scene)
     # AnySpark：走 /api/chat 写章节（系统会自动图谱/说明书注入）
-    any_text = _anyspark_write(api, "第四章 续写", "你是小说续写者。严格遵循我给出的设定，续写第 4 章约 400 字，用 write_chapter 保存。设定如下：" + HP_SETTINGS)
+    any_text = _anyspark_write(
+        api,
+        "第四章 海格登场",
+        "你是小说续写者。严格遵循设定，写第 4 章中'海格登场、告诉哈利他是巫师'的完整场景"
+        "（600-1200 字，不压缩剧情），用 write_chapter 保存。设定如下：" + HP_SETTINGS,
+    )
     return {
         "bare": {
             "text": bare_text,

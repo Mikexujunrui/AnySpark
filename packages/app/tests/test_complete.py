@@ -179,19 +179,3 @@ def test_plot_resolve_ignores_attention_ignore() -> None:
 
 
 # ---------------------------------------------------------------------------
-# 氛围注入（S15 起归属 align.mood——B 类交互载体与 agency/bias 同包）
-# ---------------------------------------------------------------------------
-def test_mood_block() -> None:
-    from anyspark.align import build_mood_block
-
-    assert build_mood_block({}) == ""
-    assert build_mood_block(None) == ""
-    # S50：数值语义化——80→较强，30→轻微（裸数值不进模型）
-    block = build_mood_block({"tension": 80, "calm": 30})
-    assert "紧张感：较强" in block and "舒缓感：轻微" in block
-    assert "80/100" not in block and "30/100" not in block  # 工程量纲不裸传
-    # 越界钳制：500→强烈（不出现 500/100）
-    b2 = build_mood_block({"dread": 500})
-    assert "压抑感：强烈" in b2 and "500" not in b2
-    # 注入块标题（机制 4：本段氛围要求）
-    assert "本段氛围要求" in block

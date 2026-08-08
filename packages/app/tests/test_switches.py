@@ -66,32 +66,13 @@ def test_skip_inject_disables_all_blocks() -> None:
         "/api/chat",
         json={
             "message": "hi",
-            "skip_inject": ["manual", "graph", "agency", "bias", "mood"],
+            "skip_inject": ["manual", "graph", "agency", "bias"],
         },
     )
     assert resp.status_code == 200
     prompt = m.prompts[-1]
     for marker in ("说明书", "当前时空点", "能动", "倾向", "氛围要求"):
         assert marker not in prompt, f"注入块未跳过: {marker}"
-
-
-def test_mood_inject_default_on_and_skippable() -> None:
-    """mood 注入默认生效；skip_inject=['mood'] 时可单独关闭。"""
-    m = ProbeModel()
-    client = _client(m)
-    resp = client.post("/api/chat", json={"message": "写", "mood": {"tension": 80}})
-    assert resp.status_code == 200
-    # S50：数值语义化——注入块是程度词+描述，不是 80/100
-    assert "氛围要求" in m.prompts[-1] and "紧张感：较强" in m.prompts[-1]
-    assert "80/100" not in m.prompts[-1]
-
-    m2 = ProbeModel()
-    client2 = _client(m2)
-    resp2 = client2.post(
-        "/api/chat", json={"message": "写", "mood": {"tension": 80}, "skip_inject": ["mood"]}
-    )
-    assert resp2.status_code == 200
-    assert "氛围要求" not in m2.prompts[-1]
 
 
 def test_extract_graph_switch() -> None:

@@ -2,6 +2,7 @@
 data/
 chapters/
 data_backup_*/
+testdata/
 *.db
 *.db-journal
 
@@ -36,6 +37,11 @@ Thumbs.db
 # ---- 日志与临时 ----
 *.log
 *.tmp
+# 测试残留输出（对话/取消响应，绝不入库）
+cancel_resp.txt
+readtest*.txt
+resume*.txt
+s[0-9].txt
 
 # ---- 密钥 / 本地配置（绝不入库）----
 .env
@@ -47,3 +53,11 @@ benchmarks/report/
 benchmarks/assets/
 benchmarks/unit/gold/
 benchmarks/hp_compare/hp_test.db
+
+# ---- benchmark 实验数据（代码/报告入库，原始产物不入库）----
+benchmarks/context_compare/out/
+benchmarks/writing/hp/
+benchmarks/writing/hunter/
+
+# ---- pi 运行时产物 ----
+.pi-subagents/

@@ -78,7 +78,7 @@ def main() -> None:
     check("说明书条目", len(manual) >= 1)
     api("/api/signals", {"kind": "accepted", "content": "这段很好"})
     agency = api("/api/agency")
-    check("能动性档位存在", "level" in agency and len(agency.get("levels", [])) == 5)
+    check("能动性档位存在", "current" in agency and len(agency.get("levels", [])) == 5)
 
     print("\n== 5. 探索引擎 ==")
     intent = api("/api/explore/intent", {"seed": "码头雾夜，白手套神秘人递照片"})

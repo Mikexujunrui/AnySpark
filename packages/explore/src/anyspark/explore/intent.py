@@ -11,7 +11,7 @@ import json
 import re
 from typing import Any
 
-from anyspark.core.types import Message
+from anyspark.core import Message
 
 INTENT_PROMPT = """你是小说创作协作的意图理解者。用户给出写作种子/意图，请产出**对齐确认**，包含：
 1. 概念卡：把用户的话复述成清晰的概念（画面核心/情绪基调/类型直觉/种子位置）
