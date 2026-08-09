@@ -40,7 +40,13 @@ MAX_CONTEXT_BLOCK = 4000
 
 
 class ReviewPanel:
-    """评审团：加载评审员 + 并发评审 + 主席汇总。"""
+    """评审团：加载评审员 + 并发评审 + 主席汇总。
+
+    S71 已知重复标记：与 anyspark.check.reviewers.ReviewEngine 是同一机制模式
+    （并行 LLM 调用 → 宽容 JSON 解析 → 汇总报告），语义分工：本类=人格化评价
+    （S64），ReviewEngine=确定性硬伤检测（检测网）。接受重复（理由见 check 侧
+    注释）；若未来出现第三处并行 LLM 编排，再抽 core 公共组件。
+    """
 
     def __init__(self, system_dir: Path | None = None) -> None:
         self._system_dir = Path(system_dir) if system_dir else DEFAULT_REVIEWERS_DIR

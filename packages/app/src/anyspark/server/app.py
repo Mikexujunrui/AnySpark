@@ -3028,12 +3028,12 @@ def build_app(
             )
 
             if ch is None:
-                return {"error": f"章节不存在: {chapter_ref}"}
+                raise HTTPException(status_code=400, detail=f"章节不存在: {chapter_ref}")
 
             text, chapter_ref = ch.content, ch.title
 
         if not text.strip():
-            return {"error": "缺少评审文本（text 或 chapter_ref）"}
+            raise HTTPException(status_code=400, detail="缺少评审文本（text 或 chapter_ref）")
 
         context: dict[str, str] = {}
 
