@@ -39,14 +39,17 @@ def load_old_prompt() -> str:
     return '"""' + m.group(1) + '"""'
 
 
-def load_sample() -> str:
+def load_sample(chapter_no: int = 0) -> str:
+    """抽取指定章节正文（chapter_no=章节序号，0=第一章）。"""
     # Windows 长路径（E501 豁免：断行破坏路径字面量）
     path = r"E:\Desktop\新建文件夹\soushu2023.com@《猎手准则》（校对版全本） 作者：你是不是笨蛋[搜书吧].txt"  # noqa: E501
     with open(path, encoding="gb18030", errors="replace") as fh:
         raw = fh.read()
-    m = re.search(r"第一章.*?\n", raw)
-    seg = raw[m.end() : m.end() + 2500]
-    return seg
+    matches = list(re.finditer(r"第[一二三四五六七八九十百千0-9]+章.*?\n", raw))
+    idx = min(chapter_no, len(matches) - 1)
+    m = matches[idx]
+    print(f"抽取章节: {m.group(0).strip()}（第 {idx} 个章节匹配）")
+    return raw[m.end() : m.end() + 2500]
 
 
 def run(model: object, prompt: str, text: str, max_items: int = 5) -> list[dict[str, str]]:
@@ -62,12 +65,18 @@ def run(model: object, prompt: str, text: str, max_items: int = 5) -> list[dict[
 
 
 def main() -> None:
+    import argparse
+
     from dotenv import load_dotenv
+
+    parser = argparse.ArgumentParser(description="文风提取新旧 prompt 对比")
+    parser.add_argument("--chapter", type=int, default=0, help="章节序号（0=第一章，默认第一章）")
+    args = parser.parse_args()
 
     load_dotenv(ROOT / ".env")
     os.environ.setdefault("DEEPSEEK_MODEL", "deepseek-v4-pro")
     model = DeepSeekModel(temperature=0.3)
-    text = load_sample()
+    text = load_sample(args.chapter)
     old_prompt = load_old_prompt()
     out_dir = ROOT / "data" / "dev" / "skillgen_compare"
     out_dir.mkdir(parents=True, exist_ok=True)
