@@ -86,7 +86,11 @@ def run_branch(rounds: int, with_alignment: bool) -> dict:
             "SELECT title, content FROM chapters ORDER BY updated_at DESC LIMIT 1"
         ).fetchone()
         chapters.append(
-            {"title": row["title"], "content": row["content"], "dashes": _count_dash(row["content"])}
+            {
+                "title": row["title"],
+                "content": row["content"],
+                "dashes": _count_dash(row["content"]),
+            }
         )
         # 分支 A：轮 1 喂"拒绝+修改"信号（表达偏好），后续轮 accepted
         if with_alignment:
@@ -180,7 +184,9 @@ def main() -> None:
     ]
     report.write_text("\n".join(lines), encoding="utf-8")
 
-    print(f"\n分支 A: 说明书 {len(a['manual_entries'])} 条 | 破折号 {a_first_last} | 提炼{'✅' if a['refined_ok'] else '❌'}")
+    print(
+        f"\n分支 A: 说明书 {len(a['manual_entries'])} 条 | 破折号 {a_first_last} | 提炼{'✅' if a['refined_ok'] else '❌'}"
+    )
     print(f"分支 B: 破折号 {dash_b}")
     print(f"报告: {report}")
 

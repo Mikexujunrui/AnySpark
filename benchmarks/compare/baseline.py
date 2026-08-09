@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2 as httpx  # S66: httpx2（下一代，API 兼容）
 
 ROOT = Path(__file__).resolve().parent.parent.parent
 

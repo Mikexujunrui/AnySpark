@@ -23,6 +23,7 @@ dependencies = [
     "openai==2.52.0",
     "python-dotenv==1.1.1",
     "tiktoken==0.9.0",
+    "httpx2==2.9.1",  # S66：下一代 HTTP 客户端（starlette TestClient 已原生支持，httpx 1.x 回退 deprecated）
 ]
 
 [project.scripts]

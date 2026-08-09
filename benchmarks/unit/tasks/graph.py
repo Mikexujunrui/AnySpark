@@ -56,14 +56,25 @@ def t1_extract_f1(api: ApiClient) -> tuple[bool, dict, str]:
     if n_pred == 0:
         return False, {"f1": 0.0, "detail": "抽取 0 实体"}, "无实体被抽取（两次尝试）"
     # 精确率：每个抽取实体是否命中任一 gold
-    tp_pred = sum(1 for e in extracted if any(entity_hit(g, e.get("name", "")) for g in gold_entities))
+    tp_pred = sum(
+        1 for e in extracted if any(entity_hit(g, e.get("name", "")) for g in gold_entities)
+    )
     # 召回率：每个 gold 实体是否被任一抽取命中
-    tp_gold = sum(1 for g in gold_entities if any(entity_hit(g, e.get("name", "")) for e in extracted))
+    tp_gold = sum(
+        1 for g in gold_entities if any(entity_hit(g, e.get("name", "")) for e in extracted)
+    )
     prf = precision_recall_f1(tp_gold, n_pred, len(gold_entities))
     names = ", ".join(e.get("name", "") for e in extracted[:12])
     return (
         prf["f1"] >= 0.4,
-        {"f1": prf["f1"], "precision": prf["precision"], "recall": prf["recall"], "n_pred": n_pred, "n_gold": len(gold_entities), "extract_api": counts},
+        {
+            "f1": prf["f1"],
+            "precision": prf["precision"],
+            "recall": prf["recall"],
+            "n_pred": n_pred,
+            "n_gold": len(gold_entities),
+            "extract_api": counts,
+        },
         f"抽取实体: {names}",
     )
 
@@ -99,7 +110,11 @@ def t3_context_block(api: ApiClient) -> tuple[bool, dict, str]:
     hit = sum(1 for c in checks if c in block)
     # 事件/关系块头
     has_rel = "实体关系" in block or "最近事件" in block
-    return hit >= 2 and has_rel, {"hit": hit, "has_rel": has_rel, "block_len": len(block)}, f"注入块: {block[:200]}"
+    return (
+        hit >= 2 and has_rel,
+        {"hit": hit, "has_rel": has_rel, "block_len": len(block)},
+        f"注入块: {block[:200]}",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +123,13 @@ def t3_context_block(api: ApiClient) -> tuple[bool, dict, str]:
 def t5_temporal(api: ApiClient) -> tuple[bool, dict, str]:
     # 准备章节序号：写 3 个占位章（不开图谱抽取，省 token）
     for title in ("第一章", "第二章", "第三章"):
-        api.post("/api/chat", {"message": f"请用 write_chapter 写《{title}》，内容为一行占位文字。", "extract_graph": False})
+        api.post(
+            "/api/chat",
+            {
+                "message": f"请用 write_chapter 写《{title}》，内容为一行占位文字。",
+                "extract_graph": False,
+            },
+        )
     # 第 1 章实体入库（order=0）
     api.post("/api/graph/extract", {"chapter_ref": "第一章", "text": _chapter_text(1)})
     # 未来实体（分院帽/尼可勒梅/魔法石）入库，chapter_ref 映射到第三章（order=2）

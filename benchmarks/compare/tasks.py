@@ -82,19 +82,19 @@ def run_task_b(api: ApiClient, bare: BareLLM, judge: BareLLM) -> dict:
         history = f"\n\n已写章节：\n{bare_ctx}" if bare_ctx else ""
         chapter = bare.chat(
             "你是小说写作者。保持角色名、地名、时间线连贯一致。",
-            f"写第{i+1}章（约250字）。种子：{SEED_B}{history}\n第{i+1}章：",
+            f"写第{i + 1}章（约250字）。种子：{SEED_B}{history}\n第{i + 1}章：",
         )
         bare_chapters.append(chapter)
-        bare_ctx += f"\n【第{i+1}章】\n{chapter}"
+        bare_ctx += f"\n【第{i + 1}章】\n{chapter}"
 
     # AnySpark：n 次 /api/chat 写章节（图谱自动抽取+注入；评分用落盘正文）
     any_chapters: list[str] = []
     for i in range(n):
-        title = f"对比B-第{i+1}章"
+        title = f"对比B-第{i + 1}章"
         _anyspark_write(
             api,
             title,
-            f"请写第{i+1}章（约250字），基于种子：{SEED_B}。前文要连贯，保持角色和地名一致。",
+            f"请写第{i + 1}章（约250字），基于种子：{SEED_B}。前文要连贯，保持角色和地名一致。",
         )
         chs = api.get("/api/chapters")
         body = ""
@@ -140,12 +140,28 @@ def run_task_c(api: ApiClient, bare: BareLLM, judge: BareLLM) -> dict:
 
     # AnySpark：说明书记录偏好（=用户确认过的长期偏好）；第 2 章不再重复
     api.post("/api/manual", {"content": PREFERENCE_C, "scope": "project", "confidence": 1.0})
-    ch1 = _anyspark_write(api, "对比C-第1章", f"请写第1章（约250字），基于种子：{SEED_B}。{PREFERENCE_C}")
-    ch2 = _anyspark_write(api, "对比C-第2章", f"请写第2章（约250字），基于种子：{SEED_B}。延续第1章。")
+    ch1 = _anyspark_write(
+        api, "对比C-第1章", f"请写第1章（约250字），基于种子：{SEED_B}。{PREFERENCE_C}"
+    )
+    ch2 = _anyspark_write(
+        api, "对比C-第2章", f"请写第2章（约250字），基于种子：{SEED_B}。延续第1章。"
+    )
     any_text = ch1 + ch2
     return {
-        "bare": {"text": bare_text, "dash_count": count_dashes(bare_text), "tokens": bare.tokens_of(bare_text), "dash_ch1": count_dashes(ch1_bare), "dash_ch2": count_dashes(ch2_bare)},
-        "anyspark": {"text": any_text, "dash_count": count_dashes(any_text), "tokens": bare.tokens_of(any_text), "dash_ch1": count_dashes(ch1), "dash_ch2": count_dashes(ch2)},
+        "bare": {
+            "text": bare_text,
+            "dash_count": count_dashes(bare_text),
+            "tokens": bare.tokens_of(bare_text),
+            "dash_ch1": count_dashes(ch1_bare),
+            "dash_ch2": count_dashes(ch2_bare),
+        },
+        "anyspark": {
+            "text": any_text,
+            "dash_count": count_dashes(any_text),
+            "tokens": bare.tokens_of(any_text),
+            "dash_ch1": count_dashes(ch1),
+            "dash_ch2": count_dashes(ch2),
+        },
     }
 
 

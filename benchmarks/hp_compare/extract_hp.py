@@ -25,9 +25,7 @@ load_dotenv(Path(__file__).resolve().parents[2] / ".env")
 
 HERE = Path(__file__).resolve().parent
 REPORT_DIR = HERE / "report"
-OLD_DATA = Path(
-    r"D:\总\小说\写作辅助\自研高级时间线辅助写作agent\data"
-)
+OLD_DATA = Path(r"D:\总\小说\写作辅助\自研高级时间线辅助写作agent\data")
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "core" / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "graph" / "src"))
@@ -49,9 +47,7 @@ def load_old_chapters() -> list[dict]:
             (v for v in ch.get("versions", []) if v.get("id") == cur),
             ch.get("versions", [{}])[0],
         )
-        out.append(
-            {"title": ch["title"], "content": ver.get("content", ""), "order": len(out) + 1}
-        )
+        out.append({"title": ch["title"], "content": ver.get("content", ""), "order": len(out) + 1})
     return out
 
 
@@ -151,7 +147,9 @@ def main() -> None:
 
     REPORT_DIR.mkdir(exist_ok=True)
     chapters = load_old_chapters()
-    print(f"旧项目哈利波特全文: {len(chapters)} 章, 总字数 {sum(len(c['content']) for c in chapters)}")
+    print(
+        f"旧项目哈利波特全文: {len(chapters)} 章, 总字数 {sum(len(c['content']) for c in chapters)}"
+    )
 
     if not skip_extract:
         print("\n== 图谱抽取（真实 DeepSeek，逐章）==")
@@ -195,11 +193,17 @@ def main() -> None:
     lines.append("## AnySpark v4 伏笔/关键点（全文）")
     lines.append("")
     for p in plots:
-        lines.append(f"- [{p['category']}] {p['content']}（{p.get('chapter_ref') or '全书'}｜{p.get('status')}）")
+        lines.append(
+            f"- [{p['category']}] {p['content']}（{p.get('chapter_ref') or '全书'}｜{p.get('status')}）"
+        )
     lines.append("")
     report.write_text("\n".join(lines), encoding="utf-8")
-    print(f"\n统计: 实体 {g.get('entities')} 关系 {g.get('relations')} 事件 {g.get('events')} 伏笔 {len(plots)}")
-    print(f"对比: 旧项目 实体 {old.get('entity_count')} worldbuilding {old.get('worldbuilding_entries')} 事件 {old.get('timeline_events')}")
+    print(
+        f"\n统计: 实体 {g.get('entities')} 关系 {g.get('relations')} 事件 {g.get('events')} 伏笔 {len(plots)}"
+    )
+    print(
+        f"对比: 旧项目 实体 {old.get('entity_count')} worldbuilding {old.get('worldbuilding_entries')} 事件 {old.get('timeline_events')}"
+    )
     print(f"报告: {report}")
 
 

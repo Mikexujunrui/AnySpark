@@ -22,14 +22,14 @@ SETTING_JUDGE_SYSTEM = (
     "检查文本中是否出现与设定清单**矛盾**的表述（角色关系/身份/地点/事件因果等）。\n"
     "注意：只是没提到不算违规；只有明确写出与设定冲突的内容才算。\n"
     '输出严格 JSON：{"violations": [{"setting": "被违反的设定（原文摘录）", "reason": "文本中的矛盾表述"}]}\n'
-    "无违规时输出 {\"violations\": []}\n"
+    '无违规时输出 {"violations": []}\n'
 )
 
 
-def judge_setting_violations(
-    judge: BareLLM, settings: str, text: str
-) -> list[dict[str, str]]:
-    out = judge.chat(SETTING_JUDGE_SYSTEM, f"【设定清单】\n{settings}\n\n【待审文本】\n{text[:5000]}")
+def judge_setting_violations(judge: BareLLM, settings: str, text: str) -> list[dict[str, str]]:
+    out = judge.chat(
+        SETTING_JUDGE_SYSTEM, f"【设定清单】\n{settings}\n\n【待审文本】\n{text[:5000]}"
+    )
     m = re.search(r"\{.*\}", out, re.DOTALL)
     if not m:
         return []
@@ -52,16 +52,12 @@ NAME_JUDGE_SYSTEM = (
     "（如改名叫了别的、性别/身份变了、地名变了）。\n"
     "只报确实漂移的；第3章新出现的人物不算。\n"
     '输出严格 JSON：{"drifts": [{"ch1_name": "第1章的名字", "ch3_name": "第3章的名字", "type": "角色/地点/物件"}]}\n'
-    "无漂移输出 {\"drifts\": []}\n"
+    '无漂移输出 {"drifts": []}\n'
 )
 
 
-def judge_name_drifts(
-    judge: BareLLM, ch1: str, ch3: str
-) -> list[dict[str, str]]:
-    out = judge.chat(
-        NAME_JUDGE_SYSTEM, f"【第1章】\n{ch1[:4000]}\n\n【第3章】\n{ch3[:4000]}"
-    )
+def judge_name_drifts(judge: BareLLM, ch1: str, ch3: str) -> list[dict[str, str]]:
+    out = judge.chat(NAME_JUDGE_SYSTEM, f"【第1章】\n{ch1[:4000]}\n\n【第3章】\n{ch3[:4000]}")
     m = re.search(r"\{.*\}", out, re.DOTALL)
     if not m:
         return []

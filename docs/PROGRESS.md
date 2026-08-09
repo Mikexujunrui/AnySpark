@@ -24,15 +24,15 @@
 
 - **设计实现审计报告**：见 `docs/AUDIT-V1.md`（基准 `6e8df7f`：S32-S63 全复核）
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63）
-- **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级），pytest 全量绿，总闸全绿
+- **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级）+ **S66 httpx2 迁移**（starlette 原生支持后落地，TestClient/CLI/benchmarks 全切，无回归），pytest 全量绿，总闸全绿
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）
   2. **对比层回归**：S18 三任务（设定忠实/长书一致/偏好记忆）在 S32-S46 后重跑（成本 ~20min）
   3. **前端 UI**（主人明确不优先）：伏笔面板/图谱可视化/设定档/技巧/计划/批量/定点编辑/影响分析均无 UI（API 全）
-  4. **httpx2 迁移**（工程性）：等 starlette 原生支持
-  5. **设定档渐进式披露**：条目多时分段/按需注入（当前全量）
-  6. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
-  7. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
+  4. **设定档渐进式披露**：条目多时分段/按需注入（当前全量）
+  5. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
+  6. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
+- ~~httpx2 迁移~~ ✅（S66 完成）；~~Autopilot~~ —— 已划掉：S59 工作流（loop+gate+approval+AI 生成流程）已吸收其全部机制价值，需要"全书自动连写"时用 workflow_generate + 人工确认 + 跑循环即可，不另起包（同评审团判断逻辑）
 - 纪律：每阶段开工前向主人确认；对设计的偏离/新增先确认再改 DESIGN.md
 
 ## 关键决策记录（主人拍板，见下方日期）
@@ -1894,3 +1894,26 @@ checkout 冲掉、他们随后恢复（他们记录②），我确认后直接�
 **并行会话协调**：并行会话做 httpx2 迁移又标 S66（app/pyproject、cli_chat.py）——
 编号让位 S67；benchmarks/、cli_chat.py 为并行改动不提交；DESIGN §12.28（评审团）
 留在工作区归并行会话。
+
+## S66 httpx2 迁移（已完成 ✅，工程性条目划除）
+
+**背景**：PROGRESS backlog "httpx2 迁移（等 starlette 原生支持）"。2026-08 查证：
+starlette 1.3.1 起 TestClient 已原生支持 httpx2（优先 `import httpx2 as httpx`，
+httpx 1.x 回退并 deprecated——测试输出一直有 `install httpx2 instead` 警告）；
+starlette 1.4.1 官方 [full] extra 已改 `httpx2>=2.0.0`。**等待条件满足，落地**。
+
+**落地**：
+- packages/app/pyproject.toml 加 `httpx2==2.9.1`（cli_chat 的显式依赖）
+- cli_chat.py：`import httpx` → `import httpx2 as httpx`（重命名迁移，API 兼容，代码零改）
+- benchmarks（独立环境）：baseline/perf_baseline/core/run_unit 4 个脚本同样改 import +
+  benchmarks/pyproject.toml 加 `httpx2==2.9.*`
+- TestClient（starlette 内部）自动切 httpx2，无代码改动
+- httpx 1.x 与 httpx2 共存（openai 等传递依赖不受影响）；httpx 仍留在锁文件（starlette
+  兼容回退 + openai 用）
+
+**验证**：pytest 全量绿（无回归）；ruff/mypy 全绿；总闸 ✅。
+
+**判断记录**：~~Autopilot~~ 划掉候选清单——S59 工作流（loop 循环多章 + gate 质量门 +
+approval 人工暂停 + workflow_generate AI 生成流程草稿）已吸收 Autopilot 的全部机制
+价值；需要"全书自动连写"时 = workflow_generate 生成流程 + 人确认 + 跑循环，不另起包
+（与评审团"机制不必做"同一判断逻辑；主人确认）。

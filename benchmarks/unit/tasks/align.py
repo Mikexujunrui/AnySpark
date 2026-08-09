@@ -10,7 +10,9 @@ from benchmarks.unit.core import ApiClient
 # ---------------------------------------------------------------------------
 def t8_manual_crud(api: ApiClient) -> tuple[bool, dict, str]:
     # 新增
-    added = api.post("/api/manual", {"content": "叙事克制，少用感叹号", "scope": "project", "confidence": 0.5})
+    added = api.post(
+        "/api/manual", {"content": "叙事克制，少用感叹号", "scope": "project", "confidence": 0.5}
+    )
     eid = added.get("id", "")
     if not eid:
         return False, {}, "新增失败（无 id）"
@@ -42,7 +44,10 @@ def t8_manual_crud(api: ApiClient) -> tuple[bool, dict, str]:
 # ---------------------------------------------------------------------------
 def t9_signals(api: ApiClient) -> tuple[bool, dict, str]:
     a = api.post("/api/signals", {"kind": "accepted", "content": "这段很好", "context": "chat"})
-    m = api.post("/api/signals", {"kind": "modified", "content": "原文", "new_content": "改后", "context": "chat"})
+    m = api.post(
+        "/api/signals",
+        {"kind": "modified", "content": "原文", "new_content": "改后", "context": "chat"},
+    )
     d = api.post("/api/signals", {"kind": "deleted", "content": "删掉这段", "context": "chat"})
     ok = all(x.get("kind") in ("accepted", "modified", "deleted") for x in (a, m, d))
     # 接受=升级 → 能动档位应存在（S35：current.order）
@@ -50,6 +55,11 @@ def t9_signals(api: ApiClient) -> tuple[bool, dict, str]:
     level = (agency.get("current") or {}).get("order")
     return (
         ok and level is not None,
-        {"accepted": a.get("kind"), "modified": m.get("kind"), "deleted": d.get("kind"), "agency_level_after": level},
+        {
+            "accepted": a.get("kind"),
+            "modified": m.get("kind"),
+            "deleted": d.get("kind"),
+            "agency_level_after": level,
+        },
         "",
     )

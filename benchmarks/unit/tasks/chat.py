@@ -19,7 +19,9 @@ def _chapter_text(n: int) -> str:
 def t15_memory_retention(api: ApiClient) -> tuple[bool, dict, str]:
     points = yaml.safe_load((GOLD_DIR / "memory_points.yaml").read_text(encoding="utf-8"))["points"]
     summaries = yaml.safe_load((GOLD_DIR / "chapter_summaries.yaml").read_text(encoding="utf-8"))
-    conv = api.post("/api/chat", {"message": "我们开始共同创作一个故事。以下是我收集的背景资料。"})["conversation_id"]
+    conv = api.post("/api/chat", {"message": "我们开始共同创作一个故事。以下是我收集的背景资料。"})[
+        "conversation_id"
+    ]
     # 第 1 章喂全文；第 2/3 章喂摘要（控制输入规模避免超时，保持跨章测试意图）
     feeds = [
         ("第1章", _chapter_text(1)),
@@ -29,7 +31,12 @@ def t15_memory_retention(api: ApiClient) -> tuple[bool, dict, str]:
     for label, chunk in feeds:
         api.post(
             "/api/chat",
-            {"message": f"【背景资料·{label}】\n{chunk}", "conversation_id": conv, "skip_inject": ["manual", "graph", "bias", "mood"], "extract_graph": False},
+            {
+                "message": f"【背景资料·{label}】\n{chunk}",
+                "conversation_id": conv,
+                "skip_inject": ["manual", "graph", "bias", "mood"],
+                "extract_graph": False,
+            },
         )
     # 抽查 3 个关键事实（每章一个，跨距覆盖）
     sample = [p for p in points if p["id"] in ("m1", "m5", "m7")]
@@ -38,7 +45,12 @@ def t15_memory_retention(api: ApiClient) -> tuple[bool, dict, str]:
     for p in sample:
         resp = api.post(
             "/api/chat",
-            {"message": p["question"], "conversation_id": conv, "skip_inject": ["manual", "graph", "bias", "mood"], "extract_graph": False},
+            {
+                "message": p["question"],
+                "conversation_id": conv,
+                "skip_inject": ["manual", "graph", "bias", "mood"],
+                "extract_graph": False,
+            },
         )
         answer = str(resp.get("text", ""))
         hit = normalize(p["key"]) in normalize(answer)
@@ -56,7 +68,10 @@ def t15_memory_retention(api: ApiClient) -> tuple[bool, dict, str]:
 # T16 SSE 帧协议（事件序列合法 + 文本非空）
 # ---------------------------------------------------------------------------
 def t16_sse_frames(api: ApiClient) -> tuple[bool, dict, str]:
-    frames = api.post_stream("/api/chat/stream", {"message": "用两句话描述雾城的清晨。", "skip_inject": ["manual", "graph", "bias", "mood"]})
+    frames = api.post_stream(
+        "/api/chat/stream",
+        {"message": "用两句话描述雾城的清晨。", "skip_inject": ["manual", "graph", "bias", "mood"]},
+    )
     types = [t for t, _ in frames]
     text = "".join(p.get("content", "") for t, p in frames if t == "text_delta")
     ok_done = "done" in types
@@ -72,6 +87,11 @@ def t16_sse_frames(api: ApiClient) -> tuple[bool, dict, str]:
     passed = ok_done and ok_delta and ok_no_error and ok_order and len(text) > 0
     return (
         passed,
-        {"frames": len(frames), "delta_frames": types.count("text_delta"), "text_chars": len(text), "types": sorted(set(types))},
+        {
+            "frames": len(frames),
+            "delta_frames": types.count("text_delta"),
+            "text_chars": len(text),
+            "types": sorted(set(types)),
+        },
         f"顺序: {' → '.join(types[:8])}...",
     )
