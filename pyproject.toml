@@ -33,6 +33,7 @@ anyspark-explore = { workspace = true }
 anyspark-check = { workspace = true }
 anyspark-template = { workspace = true }
 anyspark-graph = { workspace = true }
+anyspark-play = { workspace = true }
 anyspark-workflow = { workspace = true }
 anyspark-desktop = { workspace = true }
 
@@ -100,6 +101,7 @@ files = [
     "packages/template",
     "packages/graph",
     "packages/workflow",
+    "packages/play",
 ]
 mypy_path = [
     "packages/core/src",
@@ -110,6 +112,7 @@ mypy_path = [
     "packages/template/src",
     "packages/graph/src",
     "packages/workflow/src",
+    "packages/play/src",
 ]
 explicit_package_bases = true
 

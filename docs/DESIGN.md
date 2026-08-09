@@ -884,3 +884,66 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
   不复制（复制=漂移源）
 - 被更新的机制取代的旧通道直接退役，不留残废版（残废版=画蛇添足）
 - 验证：pytest 346 全绿；ruff/mypy 全绿
+
+### 12.27 互动推演扩展包（S65：主人拍板独立包，与 explore 区分）
+
+> 背景：主人提议"推演小说"功能——互动小说式推演树玩法：从某场景切入、扮演某
+> 角色、每步给多个候选行动、用户选择后剧情推进、继续给选项……形成一棵推演树。
+> 用途：灵感来源 + 互动玩法（有用户喜欢这种玩法）。主人拍板：**做成独立扩展包
+> anyspark-play，与正文探索 explore 平级区分**（不是 explore 的子功能）。
+
+#### 与 explore（正文探索）的本质区别
+
+| | explore 探索 | play 互动推演 |
+|---|---|---|
+| 回答的问题 | 怎么写（方向/风格/结构） | 写什么（具体剧情/行动/后果） |
+| 产出 | 抽象方向卡（一句话方向） | 具象剧情（场景描述+行动选项+后果） |
+| 视角 | 上帝视角/写作者视角 | 第一人称扮演角色 |
+| 轮次 | 单轮发散 | 多轮累积成树（选择→推进→再选择） |
+| 判别 | 用户选方向（抽象） | 用户选行动（代入式） |
+| 用在哪 | 开书/定调/换风格 | 写章节前/卡文时/纯玩 |
+
+- explore 管"航向"，play 管"画面"：**探索定航向 → 推演演画面 → 写正文**
+- explore.roleplay（S48-P4 单轮角色反应推演）保留不动——它是"探索"的一种手段；
+  play 是新的"互动玩法"，二者定位不同
+
+#### 机制（机制硬编码、内容自然语言）
+
+- **回合流程**（每轮 1 次 LLM 调用，轻量上下文）：
+  - 创建：seed（切入场景）+ role（扮演角色）→ 生成根节点 scene（当前局势）+ N 个候选行动
+  - 选择：选 A / 自定义输入 → 结算：生成子节点 scene'（上一轮选择的后果 + 他角反应 + 新局势）
+    + 新 N 个候选行动
+  - 回溯分叉：从历史任意节点重走新路（树只记录，每次走一条线，不指数展开）
+  - 终止：用户喊停 / 剧情自然收束（模型 options 为空）/ 最大深度（默认 20）
+- **选项生成（主人修正：不硬编码策略集）**：
+  - 模型自由发挥生成 3-5 个差异化候选行动（推进主线/制造冲突/出人意料/按兵不动等，
+    方向由模型按场景与角色自由判断，通过提示词引导，非代码固定策略标签）
+  - **自定义位是唯一硬编码**：选项列表末尾始终有"自定义行动"输入位，用户输入任意
+    文本即作为所选行动进入结算（机制硬编码=这个入口；内容=用户自由输入）
+- **上下文注入**（轻量）：扮演角色卡（复用 explore `load_role_card`）+ 当前节点 scene
+  + 图谱角色 state（角色卡加载返回）——不背全量图谱/章节，省 token
+- **跨包依赖**：play 依赖 core + explore（复用 `load_role_card` 与 `extract_json_dict`，
+  避免复制=漂移源；单向链 core ← explore ← play，无环）
+
+#### 存储（SQLite，树形）
+
+- play_sessions：id / book_id / title / role / seed / status（running|ended）/
+  max_depth / current_node_id（当前推演所在节点）/ created_at / updated_at
+- play_nodes：id / session_id / parent_id（根为空）/ depth / scene / chosen_label
+  （本节点由哪条选择产生，根为空）/ created_at
+- play_options：id / node_id / label / is_custom（自定义位落库标记）/ chosen /
+  child_node_id（选择后生成的子节点）/ created_at
+- 回溯分叉：branch 把 current_node_id 指回目标节点并重新生成一批新 options 挂其下
+  （原选项保留=历史记录）；choose 只允许选 current_node 下的选项
+
+#### API + agent 工具
+
+- `POST /api/play/sessions`（{book_id, title, role, seed, max_depth}）→ session + 根节点
+- `GET /api/play/sessions`（列表）/ `GET /api/play/sessions/{id}`（树+当前路径）
+- `POST /api/play/sessions/{id}/choose`（{option_id} 或 {custom_text}）→ 子节点 + 新选项
+- `POST /api/play/sessions/{id}/branch`（{node_id}）→ 回溯分叉
+- `POST /api/play/sessions/{id}/stop`（终止）/ `GET /api/play/sessions/{id}/export`
+  （当前路径导出灵感卡 md——接 write_chapter 参考）
+- agent 工具（enable_play 默认关，S15 按需点亮）：play_start / play_choose /
+  play_status / play_export（启动/推进/查看/导出，只读+启动，无删除，对齐哲学）
+- 角色卡缺失 → 404 提示先建卡（对齐 role_play 先例）

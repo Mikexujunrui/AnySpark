@@ -978,3 +978,185 @@ def make_mind_register_implementer(manual: Any) -> tuple[Any, Any]:
             return ToolResult(call=call, ok=False, content=f"登记失败：{exc}")
 
     return spec, implementer
+
+
+def make_play_implementer(engine: Any) -> tuple[list[Any], list[Any]]:
+    """互动推演工具（S65，enable_play 点亮，默认关）：扮演角色多轮选择推进。
+
+    play_start / play_choose / play_status / play_export——灵感来源 + 互动玩法：
+    - 卡文/想剧情时：扮演一个角色从场景切入，多轮选择推演，看剧情怎么发酵；
+    - 推演路径导出灵感卡，作为写正文的参考素材（对齐哲学：参考，不直接写正文）。
+    只读 + 启动，无删除（内容裁决权保留在用户/API）。
+    """
+
+    specs: list[Any] = []
+    impls: list[Any] = []
+
+    start_spec = ToolSpec(
+        name="play_start",
+        description=(
+            "启动一次互动推演（扮演角色从场景切入，多轮选择推进剧情）。"
+            "需要灵感/想玩推演时使用——返回初始场景与 3-5 个候选行动，"
+            "后续用 play_choose 选择推进。role 须已有角色卡。"
+        ),
+        params=[
+            ParamSpec(
+                name="role",
+                type="string",
+                required=True,
+                description="扮演的角色名（须有角色卡）",
+            ),
+            ParamSpec(
+                name="seed",
+                type="string",
+                required=True,
+                description="切入场景（自然语言，如'码头雨夜，有人送来一封信'）",
+            ),
+            ParamSpec(
+                name="title",
+                type="string",
+                required=False,
+                description="推演标题（可选）",
+            ),
+        ],
+    )
+
+    def start(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        role = str(arguments.get("role", "")).strip()
+        seed = str(arguments.get("seed", "")).strip()
+        if not role or not seed:
+            return ToolResult(call=call, ok=False, content="缺少参数 role 或 seed。")
+        try:
+            result = engine.create(role=role, seed=seed, title=str(arguments.get("title", "")))
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"启动推演失败：{exc}")
+        node = result["node"]
+        lines = [
+            f"【互动推演已启动】会话 {result['session']['id']}",
+            f"扮演：{role}",
+            f"场景：{node['scene']}",
+            "候选行动：",
+        ]
+        for i, o in enumerate(node["options"], 1):
+            lines.append(f"{i}. {o['label']}")
+        lines.append("（用 play_choose 选择，或输入自定义行动）")
+        return ToolResult(call=call, ok=True, content="\n".join(lines))
+
+    choose_spec = ToolSpec(
+        name="play_choose",
+        description=(
+            "互动推演中选择一个候选行动（或自定义行动），剧情结算并推进到下一场景，"
+            "返回新的候选行动。option_id 来自 play_start / 上次 play_choose 的结果；"
+            "也可传 custom_text 输入自定义行动。"
+        ),
+        params=[
+            ParamSpec(
+                name="session_id",
+                type="string",
+                required=True,
+                description="推演会话 ID（play_start 返回）",
+            ),
+            ParamSpec(
+                name="option_id",
+                type="string",
+                required=False,
+                description="候选行动 ID（与 custom_text 二选一）",
+            ),
+            ParamSpec(
+                name="custom_text",
+                type="string",
+                required=False,
+                description="自定义行动文本（与 option_id 二选一）",
+            ),
+        ],
+    )
+
+    def choose(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        sid = str(arguments.get("session_id", "")).strip()
+        if not sid:
+            return ToolResult(call=call, ok=False, content="缺少参数 session_id。")
+        try:
+            result = engine.choose(
+                sid,
+                option_id=str(arguments.get("option_id", "")).strip(),
+                custom_text=str(arguments.get("custom_text", "")).strip(),
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"推进失败：{exc}")
+        node = result["node"]
+        lines = [
+            f"【第 {node['depth']} 步】你选择了：{node['chosen_label']}",
+            node["scene"],
+        ]
+        if result["ended"]:
+            lines.append("\n（故事自然收束，推演结束。可用 play_export 导出灵感卡）")
+        else:
+            lines.append("候选行动：")
+            for i, o in enumerate(node["options"], 1):
+                lines.append(f"{i}. {o['label']}")
+            lines.append("（继续 play_choose，或自定义行动；可回溯重走）")
+        return ToolResult(call=call, ok=True, content="\n".join(lines))
+
+    status_spec = ToolSpec(
+        name="play_status",
+        description="查看互动推演的当前状态：当前场景、候选行动、已走的路径。",
+        params=[
+            ParamSpec(
+                name="session_id",
+                type="string",
+                required=True,
+                description="推演会话 ID",
+            ),
+        ],
+    )
+
+    def status(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        sid = str(arguments.get("session_id", "")).strip()
+        if not sid:
+            return ToolResult(call=call, ok=False, content="缺少参数 session_id。")
+        try:
+            node = engine.current_node(sid)
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"查看失败：{exc}")
+        lines = [
+            f"【推演状态】会话 {sid}（深度 {node['depth']}）",
+            node["scene"],
+            "候选行动：",
+        ]
+        for i, o in enumerate(node["options"], 1):
+            lines.append(f"{i}. {o['label']}")
+        return ToolResult(call=call, ok=True, content="\n".join(lines))
+
+    export_spec = ToolSpec(
+        name="play_export",
+        description=(
+            "把互动推演的当前路径导出为灵感卡（markdown）——作为写作参考素材，"
+            "可交给 write_chapter 参考或给作者浏览。"
+        ),
+        params=[
+            ParamSpec(
+                name="session_id",
+                type="string",
+                required=True,
+                description="推演会话 ID",
+            ),
+        ],
+    )
+
+    def export(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        sid = str(arguments.get("session_id", "")).strip()
+        if not sid:
+            return ToolResult(call=call, ok=False, content="缺少参数 session_id。")
+        try:
+            md = engine.export_markdown(sid)
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"导出失败：{exc}")
+        return ToolResult(call=call, ok=True, content=md)
+
+    specs = [start_spec, choose_spec, status_spec, export_spec]
+    impls = [start, choose, status, export]
+    return specs, impls

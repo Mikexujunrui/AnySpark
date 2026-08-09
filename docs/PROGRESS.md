@@ -1784,3 +1784,44 @@ pytest 346 全绿；ruff/mypy 全绿。
 - 命名：沿用码头/江心楼/旧书店既有名，细节全部来自已写章节（AI 自标"未新增"）✓
 
 **门禁**：ruff/mypy/测试全绿；验证章节已清理。
+
+## S65 互动推演扩展包 anyspark-play（已完成 ✅，DESIGN §12.27）
+
+**背景（主人讨论定稿）**：主人提议"推演小说"功能——互动小说式推演树玩法：从某场景
+切入、扮演某角色、每步给多个候选行动、用户选择后剧情推进、继续给选项……形成推演树。
+用途：灵感来源 + 互动玩法（有用户喜欢这种玩法）。与正文探索 explore 的区别（主人确认）：
+探索回答"怎么写"（方向卡，上帝视角单轮），推演回答"写什么"（具体剧情，第一人称多轮）。
+**主人拍板：做成独立扩展包 anyspark-play，与 explore 平级区分**；三点确认：自用灵感
+工具 / 导出灵感卡接 write_chapter 参考 / 单路径推进 + 可回溯分叉。
+
+**策略修正（主人要求）**：固定策略不硬编码——选项由模型自由发挥生成 3-5 个差异化
+候选行动（提示词引导方向，非代码固定"最稳妥/最激进"标签）；**自定义位是唯一硬编码**
+（选项列表末尾始终有"自定义行动"输入位，用户任意文本即作为所选行动进入结算）。
+
+**落地**：
+- `packages/play/`（anyspark-play==0.0.1，依赖 core + explore）：tree.py（SQLite 推演树
+  sessions/nodes/options，单连接+锁对齐项目 store 模式）+ engine.py（创建/选择/回溯/终止/
+  导出，每轮 1 次 LLM 调用，轻量上下文=角色卡+当前 scene）+ export.py（路径导出灵感卡 md）
+- 装配：app.py 7 端点（POST /api/play/sessions、GET 列表/详情、POST choose/branch/stop、
+  GET export）+ ChatRequest.enable_play + ToolkitContext.play_engine + tools_domain
+  make_play_implementer（play_start/play_choose/play_status/play_export，enable_play 默认关）
+- 异常分层：ValueError（角色卡缺失/非法操作）→404/400；RuntimeError（模型生成失败）→502
+- 测试 9 个：创建/选选项推进/自定义输入/回溯分叉/终止导出/无卡报错/深度上限/API 全链路/错误路径
+
+**真实链路（deepseek-v4-pro）**：建卡→创建会话（模型自由生成 5 个差异化选项：查证/打听/
+调档/静候/对比）→选选项（结算老周反应+新选项）→自定义输入（"把烟盒递给老周套话"→结算
+引出"深色大衣陌生人"线）→回溯分叉（根节点重生成 5 个新选项，原选项保留）→导出灵感卡 md
+（路径完整可作写正文参考）。全程自然无幻觉。
+
+**并行会话冲突处理（多会话纪律实测）**：本阶段期间并行会话在开发 anyspark-review（评审团，
+也标 S64），共同修改 app.py/toolkit.py/pyproject.toml。处理：①编号让位 S64→S65（防文档
+冲突）②提交前 git status 逐文件核对归属 ③混合文件用"备份→checkout 重建→恢复并行改动"
+分离暂存（只提交我的 hunk，工作区保留并行改动）④恢复并行会话被误 checkout 的改动
+（app.py 的 review import/ReviewPanelRequest/review_panel/两个 review 端点 + toolkit 的
+review_panel 字段/工具注册——期间踩坑：grab 提取块过宽复制了 _bg_worker 等中间代码，
+F811/no-redef 后精确修复）⑤不提交 scripts/gate.py、tools_review.py、packages/review/。
+
+**门禁**：pytest 全量（app 148 + 其他包 190 + play 9）绿；ruff/mypy 我的文件全绿（app.py
+仅剩并行会话的 I001 import 排序问题不碰）；flaky 已确认：test_manual_decay_api 全量跑偶发
+失败（时间戳竞态，单独跑两次通过，与本次改动无关）；gate.py 全量门禁被并行会话未完成
+的 review 包 mypy 错误卡住（预存，非本提交范围）。

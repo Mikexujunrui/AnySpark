@@ -46,6 +46,7 @@ class ToolContext:
     workflow_store: Any = None  # S59 工作流 agent 工具（默认关：可选增强，需要时点亮）
     workflow_engine: Any = None
     workflow_generator: Any = None
+    play_engine: Any = None  # S65 互动推演 agent 工具（默认关：玩法/灵感，需要时点亮）
 
 
 def build_toolkit(
@@ -57,6 +58,7 @@ def build_toolkit(
     enable_extras: bool = False,
     enable_search: bool = False,
     enable_workflow: bool = False,
+    enable_play: bool = False,
 ) -> ToolRegistry:
     """把全部工具装配进 registry（按 enable_* 开关分组点亮），返回同一注册表。
 
@@ -179,6 +181,13 @@ def build_toolkit(
         for _spec, _impl in make_workflow_tools(
             ctx.workflow_store, ctx.workflow_engine, ctx.workflow_generator
         ):
+            registry.register(_spec, _impl)
+
+    # S65 互动推演 agent 工具：默认关，enable_play 点亮（玩法/灵感：启动/选择/查看/导出）
+    if enable_play and ctx.play_engine is not None:
+        from anyspark.server.tools_domain import make_play_implementer
+
+        for _spec, _impl in make_play_implementer(ctx.play_engine):
             registry.register(_spec, _impl)
 
     return registry

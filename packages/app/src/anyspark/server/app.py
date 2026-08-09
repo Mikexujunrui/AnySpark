@@ -108,6 +108,7 @@ from anyspark.workflow import (
     WorkflowStore,
     wait_approval,
 )
+from anyspark.play import PlayEngine, PlayStore
 
 # 数据根：项目 data/（gitignored，绝不入库）
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
@@ -167,6 +168,7 @@ class ChatRequest(BaseModel):
     enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认开
     enable_codex: bool = False  # S48-P5 代码扩展 run_code（沙箱，默认关：安全按需点亮）
     enable_workflow: bool = False  # S59 工作流 agent 工具（list/run/status/generate）默认关
+    enable_play: bool = False  # S65 互动推演 agent 工具（play_start/choose/status/export）默认关
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/plot 子集
     # S58b 上下文模式：auto(默认=干净,不继承场景记忆)/continue(显式继承场景记忆+计划)/fresh(同auto)
@@ -222,6 +224,29 @@ class RolePlayIn(BaseModel):
     role: str  # 角色名（角色卡文件名 + 图谱实体）
     scenario: str  # 推演场景（自然语言）
     n: int = 4  # 推演路数（2-6）
+
+
+class PlayCreateIn(BaseModel):
+    """S65 互动推演：创建会话（扮演角色从场景切入）。"""
+
+    role: str  # 扮演的角色（须有角色卡）
+    seed: str  # 切入场景（自然语言）
+    book_id: str = "main"
+    title: str = ""
+    max_depth: int = 20  # 最大推演深度（默认 20）
+
+
+class PlayChooseIn(BaseModel):
+    """S65 互动推演：选择候选行动（option_id 与 custom_text 二选一）。"""
+
+    option_id: str | None = None
+    custom_text: str | None = None
+
+
+class PlayBranchIn(BaseModel):
+    """S65 互动推演：回溯分叉（回到指定节点重新生成候选行动）。"""
+
+    node_id: str
 
 
 class CodexIn(BaseModel):
@@ -912,6 +937,8 @@ def build_app(
     # approval=等待人工。
     workflow_store = WorkflowStore(real_db)
     workflow_generator = WorkflowGenerator(model)
+    # S65 互动推演（独立扩展包 anyspark-play）：扮演角色多轮选择推进的推演树
+    play_store = PlayStore(real_db)
 
     def _wf_run_agent(ctx: RunContext, node: Any) -> NodeResult:
         """agent 节点：干净单次 LLM 调用（无对话历史/工具记录——对齐 S56 干净写作）。
@@ -1080,6 +1107,8 @@ def build_app(
         return has_pos and not has_neg
 
     workflow_engine = WorkflowEngine(workflow_store, _wf_runner, model_judge=_wf_judge)
+    # S65：play 引擎（树存储 + LLM 生成；角色卡加载复用 explore load_role_card）
+    play_engine = PlayEngine(play_store, model, workspace, graph)
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
@@ -1106,6 +1135,7 @@ def build_app(
         enable_domain: bool = True,
         enable_codex: bool = False,
         enable_workflow: bool = False,
+        enable_play: bool = False,
         skip_inject: set[str] | None = None,
         context_mode: str = "auto",
         model_id: str | None = None,
@@ -1141,6 +1171,7 @@ def build_app(
                 workflow_store=workflow_store,
                 workflow_engine=workflow_engine,
                 workflow_generator=workflow_generator,
+                play_engine=play_engine,
             ),
             enable_domain=enable_domain,
             enable_codex=enable_codex,
@@ -1148,6 +1179,8 @@ def build_app(
             enable_search=enable_search,
             # S59：工作流 agent 工具（默认关，enable_workflow 点亮）
             enable_workflow=enable_workflow,
+            # S65：互动推演 agent 工具（默认关，enable_play 点亮）
+            enable_play=enable_play,
         )
         # 能动级别：显式传入 > 心智规划建议 > 已存档位（S35：档位记录，温度入档）
         # S50：心智模型=会话规划器——S62 修正：启发式档位推断**不自动应用**
@@ -1517,6 +1550,7 @@ def build_app(
             enable_domain=req.enable_domain,
             enable_codex=req.enable_codex,
             enable_workflow=req.enable_workflow,
+            enable_play=req.enable_play,
             skip_inject=set(req.skip_inject),
             context_mode=req.context_mode,
             model_id=req.model_id,
@@ -1556,6 +1590,7 @@ def build_app(
                 "enable_domain": req.enable_domain,
                 "enable_codex": req.enable_codex,
                 "enable_workflow": req.enable_workflow,
+                "enable_play": req.enable_play,
                 "thinking": req.thinking,
                 "model_id": req.model_id,
             },
@@ -1677,6 +1712,7 @@ def build_app(
                 enable_domain=req.enable_domain,
                 enable_codex=req.enable_codex,
                 enable_workflow=req.enable_workflow,
+                enable_play=req.enable_play,
                 skip_inject=set(req.skip_inject),
                 context_mode=req.context_mode,
                 model_id=req.model_id,
@@ -1702,6 +1738,7 @@ def build_app(
                     "enable_domain": req.enable_domain,
                     "enable_codex": req.enable_codex,
                     "enable_workflow": req.enable_workflow,
+                    "enable_play": req.enable_play,
                     "thinking": req.thinking,
                     "model_id": req.model_id,
                 },
@@ -2742,6 +2779,82 @@ def build_app(
             result.best.strategy if result.best else "?",
         )
         return result.to_dict()
+
+    # -----------------------------------------------------------------------
+    # S65 互动推演（独立扩展包 anyspark-play：扮演角色多轮选择推进的推演树）
+    # -----------------------------------------------------------------------
+    @app.post("/api/play/sessions", response_model=dict[str, Any])
+    def play_create(req: PlayCreateIn) -> dict[str, Any]:
+        """创建互动推演会话（seed 切入 + 扮演 role → 根节点 scene + 候选行动）。"""
+        try:
+            return play_engine.create(
+                role=req.role,
+                seed=req.seed,
+                book_id=req.book_id,
+                title=req.title,
+                max_depth=req.max_depth,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/api/play/sessions", response_model=list[dict[str, Any]])
+    def play_list() -> list[dict[str, Any]]:
+        return play_store.list_sessions()
+
+    @app.get("/api/play/sessions/{session_id}", response_model=dict[str, Any])
+    def play_get(session_id: str) -> dict[str, Any]:
+        session = play_store.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"推演会话不存在：{session_id}")
+        tree = play_store.session_tree(session_id)
+        current_id = session["current_node_id"] or ""
+        path = play_store.path_to(current_id)
+        return {"session": session, "tree": tree, "path": path}
+
+    @app.post("/api/play/sessions/{session_id}/choose", response_model=dict[str, Any])
+    def play_choose(session_id: str, req: PlayChooseIn) -> dict[str, Any]:
+        """选择候选行动（或自定义输入）→ 结算推进到下一场景。"""
+        try:
+            return play_engine.choose(
+                session_id, option_id=req.option_id or "", custom_text=req.custom_text or ""
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/play/sessions/{session_id}/branch", response_model=dict[str, Any])
+    def play_branch(session_id: str, req: PlayBranchIn) -> dict[str, Any]:
+        """回溯分叉：回到指定节点重新生成一批候选行动（原选项保留）。"""
+        try:
+            return play_engine.branch(session_id, req.node_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/play/sessions/{session_id}/stop", response_model=dict[str, Any])
+    def play_stop(session_id: str) -> dict[str, Any]:
+        """终止推演会话。"""
+        try:
+            return play_engine.stop(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/play/sessions/{session_id}/export", response_model=dict[str, Any])
+    def play_export(session_id: str) -> dict[str, Any]:
+        """当前路径导出灵感卡 md（接写正文参考）。"""
+        try:
+            md = play_engine.export_markdown(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"session_id": session_id, "markdown": md}
 
     # -----------------------------------------------------------------------
     # S48-P4/B 扩展工具注册表：Agent 写的工具，人工批准才生效
