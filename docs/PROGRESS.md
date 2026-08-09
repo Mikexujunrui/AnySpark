@@ -24,7 +24,7 @@
 
 - **设计实现审计报告**：见 `docs/AUDIT-V1.md`（基准 `6e8df7f`：S32-S63 全复核）
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63）
-- **当前状态**：S0-S58 全部完成 + **S59 工作流扩展包** + **S60 skill 注入瘦身**（索引常驻/按需细看/写作点名）+ **S60 深化（S61）**（写作调用不自行选技巧）+ **S63 画蛇添足清理**（mood 死代码/role_card 收敛/check_text 退役），pytest 346 全绿，总闸全绿
+- **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级），pytest 全量绿，总闸全绿
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）
   2. **对比层回归**：S18 三任务（设定忠实/长书一致/偏好记忆）在 S32-S46 后重跑（成本 ~20min）
@@ -1825,3 +1825,46 @@ F811/no-redef 后精确修复）⑤不提交 scripts/gate.py、tools_review.py�
 仅剩并行会话的 I001 import 排序问题不碰）；flaky 已确认：test_manual_decay_api 全量跑偶发
 失败（时间戳竞态，单独跑两次通过，与本次改动无关）；gate.py 全量门禁被并行会话未完成
 的 review 包 mypy 错误卡住（预存，非本提交范围）。
+
+## S64 拟人化评审团扩展包 anyspark-review（已完成 ✅，DESIGN §12.28）
+
+**背景（主人拍板）**：主人展示自研高级时间线辅助写作 agent（"还蛮好的"）——14 位拟人化
+评审员（YAML 人设）+ 并发评审 + 主席汇总报告。评估结论：**评审团机制不必要（YAGNI），
+拟人化呈现值得做**——用户喜欢"拟人化评审员 + 报告"的体验形态。做成独立扩展包。
+
+**设计定稿**：
+- 与 check 分工：check=确定性硬伤规则引擎（客观事实，不动）；review=人格化评价（体验）。
+  **硬伤层复用 check**——逻辑审校评审员注入 check_report 硬伤清单逐条核实，拟人层不产生
+  新事实（防人格漂移污染客观事实）
+- context_keys 按需注入外部上下文（check_report/foreshadow），取不到自动跳过不阻断；
+  优于参考项目的布尔 needs_knowledge
+- 综合分 = 确定性加权平均优先（维度齐时不用 LLM 自报总分，防乱打）；主席汇总失败降级
+  启发式（不挂死）；每评审员独立超时 90s；宽容 JSON 解析（fence/噪声/平衡结构）
+
+**落地**：
+- `packages/review/`（anyspark-review==0.0.1，依赖 core + pyyaml==6.0.2）：
+  defs.py（ReviewerDef/ScoreDim/ReviewResult/ReviewReport，render 完整版 +
+  render_compact 紧凑版给 agent）+ parse.py（宽容提取/评分越界过滤）+ panel.py
+  （ReviewPanel YAML 加载/并发编排/汇总降级）+ prompts.py（提示词内容资产，
+  per-file-ignore E501 对齐 skillgen 先例）
+- 内容：reviewers/ 5 位激活（编剧/文学编辑/逻辑审校/爽文读者/挑刺王）+ 1 位默认关
+  （伏笔审计员，context_keys=[foreshadow]）；用户自定义 data/reviewers/ 覆盖系统同名 id
+- app 接入：POST /api/review/panel（自动组装 check 硬伤 + 关键点图谱上下文）+
+  GET /api/review/reviewers + panel_review agent 工具（无条件注册，对齐 explore_direction；
+  S63 教训：默认关的工具=没人用的残废通道）；工具实现器事件循环线程安全包装
+  （_run_coro_safely：loop 内转线程池，单工具路径不炸 asyncio.run）
+- 测试 25 个：YAML 加载/覆盖/坏文件容错/加权平均/宽容解析/并发评审/超时降级/
+  上下文注入/指定评审员/渲染（fake model，无真实 LLM）
+
+**真实链路（deepseek-v4-pro）**：POST /api/review/panel 评审雨夜老宅片段（编剧+爽文读者）
+→ 综合 5.5/10；**分歧生效**：编剧认为"转身走进雨里"章末反转有力（7.2 分），爽文读者
+嫌钩子太软、通篇无爽点憋屈（3.9 分，"兄弟，这章看了个寂寞"）；主席汇总裁决 3 共识 +
+2 分歧 + 5 优先建议（外化心理描写/加屋内对话/强化章末钩子等）。拟人化人设到位、报告
+可操作。213s（4 次调用：2 评审 + check 硬伤 + 主席）。
+
+**并行会话冲突处理（多会话纪律实测，与 S65 互相印证）**：并行会话开发 anyspark-play 期间
+共同修改 app.py/toolkit.py/pyproject.toml。处理：①play 让位编号 S64→S65（文档防冲突）
+②我只提交纯我的文件（路径限定 git commit），不带走 play 改动 ③app.py 接入曾被并行会话
+checkout 冲掉、他们随后恢复（他们记录②），我确认后直接复用未重做 ④总闸被 review 测试
+文件撞名卡住（check 也有 test_review.py）→ 改名 test_review_panel.py ⑤提交拆两次：
+先包本体（183db70），后 app 接入+DESIGN+根注册（8e9f…）。
