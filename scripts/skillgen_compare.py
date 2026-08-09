@@ -42,7 +42,8 @@ def load_old_prompt() -> str:
 def load_sample() -> str:
     # Windows 长路径（E501 豁免：断行破坏路径字面量）
     path = r"E:\Desktop\新建文件夹\soushu2023.com@《猎手准则》（校对版全本） 作者：你是不是笨蛋[搜书吧].txt"  # noqa: E501
-    raw = open(path, encoding="gb18030", errors="replace").read()
+    with open(path, encoding="gb18030", errors="replace") as fh:
+        raw = fh.read()
     m = re.search(r"第一章.*?\n", raw)
     seg = raw[m.end() : m.end() + 2500]
     return seg
