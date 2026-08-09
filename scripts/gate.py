@@ -33,7 +33,23 @@ def _run(cmd: list[str], cwd: Path) -> tuple[int, str]:
     return proc.returncode, out
 
 
+def _print_preflight() -> None:
+    """提交前状态核查（S70 加固）：输出最近提交 + 工作区归属，逼确认并行边界。
+
+    多会话共享工作区：跑 gate 前先看对方动态（撞号/撞文件立即让位），再核对
+    工作区改动归属（只显式 add 本次任务文件，不带走并行会话改动）。
+    """
+    print("\n" + "=" * 50)
+    print("【提交前核查】最近提交（看并行会话动态，撞阶段号立即让位）：")
+    subprocess.run(["git", "log", "--oneline", "-3"], cwd=ROOT)
+    print("\n【提交前核查】工作区改动归属（只显式 add 本次任务文件）：")
+    subprocess.run(["git", "status", "--short"], cwd=ROOT)
+    print("=" * 50 + "\n")
+
+
 def main() -> int:
+    # S70：提交前核查（强制输出，逼确认并行边界后再跑门禁）
+    _print_preflight()
     py_pkgs = [
         "packages/core",
         "packages/app",

@@ -25,6 +25,10 @@
 - **设计实现审计报告**：见 `docs/AUDIT-V1.md`（基准 `6e8df7f`：S32-S63 全复核）
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63）
 - **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级）+ **S66 httpx2 迁移**（starlette 原生支持后落地，TestClient/CLI/benchmarks 全切，无回归），pytest 全量绿，总闸全绿
+### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
+> 当前无会话声明。
+> 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
+
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）
   2. **对比层回归**：S18 三任务（设定忠实/长书一致/偏好记忆）在 S32-S46 后重跑（成本 ~20min）
@@ -1997,3 +2001,23 @@ template 来源（strategy.py 三来源之一）只是 prompt 文字描述"从�
 message 注明 gate format 红归因（S67 遗留：path.py 与 app.py path 区域 HEAD 即
 未按 ruff 格式，play 不在 gate 列表）——**gate 红 ≠ 我的改动问题**，验证方法：
 HEAD 状态下同文件同样红。
+
+## S70 并行协作加固（已完成 ✅）——行尾根治 + 提交前核查 + 协作纪律固化
+
+**背景（主人指示）**：双智能体并行编辑本项目实测冲突频发（S60 裹挟 / S64·S66 撞号 /
+S65 play 逃 gate / S67 漏 format / 行尾污染 3 连踩）。主人拍板三项加固：① .gitattributes
+行尾根治 ② gate.py 提交前核查 ③ 协作纪律补进 AGENTS.md（强制加载，读完同步工作）。
+
+**落地**：
+- **.gitattributes**：git 内部存 LF、checkout 转 CRLF（text=auto + 各类型 eol 规则 +
+  二进制 binary）——行尾差异不再算内容变化；`git add --renormalize .` 一次性规范化
+  106 个已有 blob（纯行尾，内容零变化——用 `--ignore-space-at-eol` 验证）
+- **gate.py**：开头输出「提交前核查」块（git log -3 + git status --short）——跑 gate
+  即逼确认并行边界（撞号让位/归属核对）
+- **AGENTS.md 并行协作纪律章节**（强制加载）：开工五步（git log/编号/声明区/改共享
+  文件先声明/提交前 gate）+ 提交前必跑完整 gate（不跑子集）+ 新包注册 6 处清单 +
+  行尾纪律（不手动统一行尾）+ 同文件冲突救火流程
+- **PROGRESS.md 并行声明区**：改共享文件前先声明（`> [S6x] 正在改 <文件>`），提交后删
+
+**验证**：总闸全绿（ruff check/format 148 + mypy 135 + pytest 387 全过）；renormalize
+后 `git diff --cached --ignore-space-at-eol` 确认除 4 个真实改动文件外全为纯行尾变化。
