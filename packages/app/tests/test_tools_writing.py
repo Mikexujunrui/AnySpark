@@ -8,6 +8,7 @@ from pathlib import Path
 from anyspark.core import ToolRegistry
 from anyspark.core.types import Message, ModelOutput, ToolResult
 from anyspark.server.tools_writing import register_writing_tools
+from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore
 
 
@@ -120,3 +121,39 @@ def test_write_chapter_missing_both_args() -> None:
     r = _invoke(reg, "write_chapter", {"title": "第4章"})
     assert r.ok is False
     assert "intent" in str(r.content)
+
+
+# ---------------------------------------------------------------------------
+# S70：破限模式注入（干净写作调用）
+# ---------------------------------------------------------------------------
+def _unc_registry(model: object, workspace: Workspace) -> ToolRegistry:
+    db = Path(tempfile.mkdtemp()) / "ch.db"
+    chapters = ChapterStore(db)
+    reg = ToolRegistry()
+    register_writing_tools(reg, chapters, model=model, skills_store=_Skills(), workspace=workspace)
+    return reg
+
+
+def test_clean_write_injects_uncensored_when_flag_on() -> None:
+    """S70：破限开关开 → 写作调用注入破限提示词。"""
+    from anyspark.server.tools_writing import UNCENSORED_PROMPT
+    from anyspark.server.workspace import Workspace
+
+    ws = Workspace(root=Path(tempfile.mkdtemp()) / "ws")
+    ws.set_uncensored("main", True)
+    model = CleanWriteModel()
+    reg = _unc_registry(model, ws)
+    r = _invoke(reg, "write_chapter", {"title": "测试章", "intent": "写一段黑暗氛围的场景"})
+    assert r.ok is True
+    assert UNCENSORED_PROMPT in model.clean_contexts[0]
+
+
+def test_clean_write_no_inject_when_flag_off() -> None:
+    """S70：破限开关关 → 不注入（默认行为不变）。"""
+    from anyspark.server.workspace import Workspace
+
+    ws = Workspace(root=Path(tempfile.mkdtemp()) / "ws")
+    model = CleanWriteModel()
+    reg = _unc_registry(model, ws)
+    _invoke(reg, "write_chapter", {"title": "测试章", "intent": "写一段黑暗氛围的场景"})
+    assert all("创作模式声明" not in c for c in model.clean_contexts)

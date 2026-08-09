@@ -104,6 +104,23 @@ class Workspace:
         f.write_text(text, encoding="utf-8")
         return f
 
+    # -- S70 分级开关：破限模式（每书一标志文件，存在=开） --
+    def uncensored_flag(self, book_id: str = "main") -> Path:
+        return self.project_dir(book_id) / ".uncensored"
+
+    def is_uncensored(self, book_id: str = "main") -> bool:
+        """该书是否开启破限模式（写作自由度：不设题材禁区）。"""
+        return self.uncensored_flag(book_id).exists()
+
+    def set_uncensored(self, book_id: str = "main", enabled: bool = True) -> bool:
+        """设置破限开关（True=开）。返回设置后的状态。"""
+        f = self.uncensored_flag(book_id)
+        if enabled:
+            f.touch(exist_ok=True)
+        elif f.exists():
+            f.unlink()
+        return f.exists()
+
     # -- 章节文件操作（权威存储） --
     def list_chapter_files(self, book_id: str = "main") -> list[dict[str, Any]]:
         """扫描章节目录，返回 [{order, title, filename, path}]（按 order 排序）。"""

@@ -93,6 +93,7 @@ from anyspark.server.toolkit import ToolContext, build_toolkit
 from anyspark.server.tools_extensions import (
     ExtensionToolStore,
 )
+from anyspark.server.tools_writing import UNCENSORED_PROMPT
 from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import (
@@ -250,6 +251,13 @@ class PlayBranchIn(BaseModel):
     """S65 互动推演：回溯分叉（回到指定节点重新生成候选行动）。"""
 
     node_id: str
+
+
+class UncensorIn(BaseModel):
+    """S70：破限模式开关（书籍级，写作自由度：不设题材禁区）。"""
+
+    book_id: str = "main"
+    enabled: bool = True
 
 
 class CodexIn(BaseModel):
@@ -1357,6 +1365,11 @@ def build_app(
             plan_block = render_plan(plans.list())
             if plan_block:
                 append_blocks.append(plan_block)
+
+        # S70：破限模式（书籍级开关）——写作自由度：黑暗/暴力/敏感题材不设禁区。
+        # 注入 agent 主循环（对话/写作全路径）+ write_chapter 干净调用（工具侧另注）。
+        if workspace.is_uncensored(book_id):
+            append_blocks.append(UNCENSORED_PROMPT)
 
         full_prompt = system_prompt
         if prepend_blocks:
@@ -2530,6 +2543,16 @@ def build_app(
         if not ok:
             raise HTTPException(status_code=404, detail="设定条目不存在")
         return {"ok": True}
+
+    # S70：破限模式开关（书籍级）——GET 查 / POST 设；文件标志在每书工作区
+    @app.get("/api/uncensored", response_model=dict[str, object])
+    def get_uncensored(book_id: str = "main") -> dict[str, object]:
+        return {"book_id": book_id, "enabled": workspace.is_uncensored(book_id)}
+
+    @app.post("/api/uncensored", response_model=dict[str, object])
+    def set_uncensored(req: UncensorIn) -> dict[str, object]:
+        enabled = workspace.set_uncensored(req.book_id, req.enabled)
+        return {"book_id": req.book_id, "enabled": enabled}
 
     @app.post("/api/settings/extract", response_model=dict[str, object])
     def extract_settings(req: WorldSettingExtractIn) -> dict[str, object]:
