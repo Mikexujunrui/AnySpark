@@ -1938,3 +1938,31 @@ approval 人工暂停 + workflow_generate AI 生成流程草稿）已吸收 Auto
 **教训（验证纪律）**：下断言前先核对完整输入（尤其"XX 不在输入里"类负断言
 必须全文搜索，不能只看片段就下结论）；负向结论比正向结论更容易因采样不足
 而误判。
+
+## S68 模板库接线探索（已完成 ✅）——template 来源注入真实模板内容（死库复活）
+
+**背景（主人追问"模板库 vs 剧情库"触发审计）**：审计发现模板库（DESIGN 机制 6，
+L2 默认 5 模板 + L3 外部导入 SQLite）**只有存储 + CRUD API，消费端为零**——探索的
+template 来源（strategy.py 三来源之一）只是 prompt 文字描述"从成熟叙事模板派生方向"，
+让模型自己"想象"模板，库内容从未被读取注入。设计定位"模板只做探索方向生成器"
+未真正兑现。结论（主人拍板）：**剧情库不是新需求，是"把已存在的模板库完成"**——
+先接线（S68），后加自动提炼来源（剧情库的真正增量，复用 skillgen 管线）。
+
+**落地**：
+- strategy.py：`ExplorationStrategy.templates`（自然语言模板描述列表）+ explorer_prompt
+  注入——**仅 source=template 的探索者注入**（grow/user 保持纯原创/纯用户，三来源隔离）；
+  MAX_TEMPLATES=12 防超预算；模板是方向生成器非内容框架（提示"组合/变体——模板是
+  起点，变体才是目标"）
+- explorers.py run_exploration 加 templates 参数；app.py /api/explore/cards + toolkit
+  ToolContext 传 L2+L3 合并描述（`f"{t.name}：{t.description}"`）；tools_extras
+  explore_direction（agent 路径）同样注入
+- 测试 3 个：template 注入 / grow-user 隔离 / 上限截断（纯机制，fake 验证 prompt 构造）
+
+**真实链路（deepseek-v4-pro）**：种子"废土护送会说话的白骨去传说之城"→ template 探索者
+产出"白骨低语：双线交织的废土旅程"，**term 明确标注库内模板名"双线·明线暗线交织"**
+（此前模型只能凭内化知识想象，现在引用真实库内容）；两个 template 探索者派生不同具体
+设计（非复制模板）；grow/user 无模板痕迹。三来源隔离生效。
+
+**教训（多会话纪律续）**：`ruff format packages/app packages/explore` 全目录跑会污染
+并行会话活跃文件（path.py/tools_domain/test_path_api/app.py 的 path 区域格式被改）。
+已 checkout 恢复；后续 format 只针对自己改的文件，不跑全目录。
