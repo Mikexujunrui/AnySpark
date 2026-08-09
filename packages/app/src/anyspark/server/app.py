@@ -1374,16 +1374,73 @@ def build_app(
     def list_conversations() -> list[dict[str, Any]]:
         """会话列表（含继承链条：parent_id/fork_point，可追溯）。"""
         convs = store.list_conversations()
-        return [
-            {
-                "id": c.id,
-                "created_at": c.created_at,
-                "parent_id": c.parent_id,
-                "fork_point": c.fork_point,
-                "message_count": len(store.messages(c.id)),
-            }
-            for c in reversed(convs)  # 新的在前
-        ]
+        result = []
+        for c in reversed(convs):  # 新的在前
+            # 获取 title（兼容旧数据）
+            row = store._conn.execute(
+                "SELECT title FROM conversations WHERE id = ?", (c.id,)
+            ).fetchone()
+            title = row["title"] if row and "title" in row.keys() else ""
+            result.append(
+                {
+                    "id": c.id,
+                    "created_at": c.created_at,
+                    "parent_id": c.parent_id,
+                    "fork_point": c.fork_point,
+                    "message_count": len(store.messages(c.id)),
+                    "title": title,
+                }
+            )
+        return result
+
+    @app.get("/api/conversations/{conv_id}/messages", response_model=list[dict[str, Any]])
+    def get_conversation_messages(conv_id: str) -> list[dict[str, Any]]:
+        """获取指定会话的消息历史（前端会话恢复用）。"""
+        msgs = store.messages(conv_id)
+        # 过滤不完整的工具轮次（流式请求被中断时可能出现）
+        # 两种情况：
+        # 1. assistant 有 tool_calls 但 tool 响应不完整 → 全部跳过
+        # 2. 孤立的 tool 消息（前面没有对应的 assistant tool_calls）→ 跳过
+        filtered: list[dict[str, Any]] = []
+        i = 0
+        while i < len(msgs):
+            m = msgs[i]
+            tool_calls = m.metadata.get("tool_calls", []) if m.metadata else []
+
+            if m.role == "assistant" and tool_calls:
+                # 检查后面是否有足够数量的 tool 响应
+                expected_count = len(tool_calls)
+                actual_count = 0
+                j = i + 1
+                while j < len(msgs) and msgs[j].role == "tool":
+                    actual_count += 1
+                    j += 1
+                if actual_count >= expected_count:
+                    # 完整轮次：保留 assistant + 对应的 tool 消息
+                    filtered.append(
+                        {"role": m.role, "content": m.content or "", "metadata": m.metadata}
+                    )
+                    for k in range(i + 1, i + 1 + expected_count):
+                        tm = msgs[k]
+                        filtered.append(
+                            {"role": tm.role, "content": tm.content or "", "metadata": tm.metadata}
+                        )
+                    i = i + 1 + expected_count
+                else:
+                    # 不完整：跳过 assistant 和已有的 tool 消息
+                    i = j
+                continue
+
+            if m.role == "tool":
+                # 孤立的 tool 消息 → 跳过
+                i += 1
+                continue
+
+            filtered.append(
+                {"role": m.role, "content": m.content or "", "metadata": m.metadata}
+            )
+            i += 1
+        return filtered
 
     @app.post("/api/conversations/{conv_id}/fork", response_model=dict[str, Any])
     def fork_conversation(conv_id: str, fork_point: str = "") -> dict[str, Any]:
@@ -1406,6 +1463,23 @@ def build_app(
             "fork_point": child.fork_point,
             "chain": chain,  # [新会话, 源, 源的源...] 继承链条
         }
+
+    @app.put("/api/conversations/{conv_id}")
+    def rename_conversation(conv_id: str, body: dict[str, str]) -> dict[str, Any]:
+        """重命名会话。"""
+        title = body.get("title", "")
+        ok = store.rename(conv_id, title)
+        if not ok:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        return {"ok": True}
+
+    @app.delete("/api/conversations/{conv_id}")
+    def delete_conversation(conv_id: str) -> dict[str, Any]:
+        """删除会话及其消息。"""
+        ok = store.delete_conversation(conv_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        return {"ok": True}
 
     # -----------------------------------------------------------------------
     # S47 运行时模型配置：注册表 CRUD + 激活切换（换供应商/换模型/选思考强度）

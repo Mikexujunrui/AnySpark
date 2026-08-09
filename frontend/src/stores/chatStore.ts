@@ -1,5 +1,12 @@
 import { create } from "zustand";
 import { streamChat, getCandidates, steerChat, type Candidate } from "../api/chat";
+import {
+  listConversations,
+  getConversationMessages,
+  renameConversation as apiRenameConversation,
+  deleteConversation as apiDeleteConversation,
+  type Conversation,
+} from "../api/conversations";
 import type { ChatMessage, SSEEvent } from "../types";
 import { useChapterStore } from "./chapterStore";
 
@@ -15,6 +22,7 @@ interface ChatState {
   streamingText: string;
   conversationId: string | null;
   abortController: (() => void) | null;
+  conversations: Conversation[];
 
   sendMessage: (text: string) => void;
   sendSteer: (text: string) => void;
@@ -22,6 +30,14 @@ interface ChatState {
   selectCandidate: (candidate: Candidate) => void;
   cancelStream: () => void;
   clearMessages: () => void;
+  loadConversation: (convId: string) => Promise<void>;
+  loadLatestConversation: () => Promise<void>;
+  setConversations: (convs: Conversation[]) => void;
+  switchConversation: (convId: string) => void;
+  startNewConversation: () => void;
+  refreshConversations: () => Promise<void>;
+  renameConversation: (convId: string, title: string) => Promise<void>;
+  deleteConversation: (convId: string) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -30,6 +46,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamingText: "",
   conversationId: null,
   abortController: null,
+  conversations: [],
 
   sendMessage: (text: string) => {
     const { streaming, conversationId } = get();
@@ -154,6 +171,94 @@ export const useChatStore = create<ChatState>((set, get) => ({
   clearMessages: () => {
     set({ messages: [], conversationId: null, streaming: false });
   },
+
+  loadConversation: async (convId: string) => {
+    try {
+      const msgs = await getConversationMessages(convId);
+      set({
+        messages: msgs.map((m) => ({ role: m.role, content: m.content })),
+        conversationId: convId,
+      });
+    } catch (err) {
+      console.error("Failed to load conversation:", err);
+    }
+  },
+
+  loadLatestConversation: async () => {
+    try {
+      const convs = await listConversations();
+      set({ conversations: convs });
+      if (convs.length > 0) {
+        const latest = convs[0]; // 新的在前
+        await get().loadConversation(latest.id);
+      }
+    } catch (err) {
+      console.error("Failed to load latest conversation:", err);
+    }
+  },
+
+  setConversations: (convs: Conversation[]) => {
+    set({ conversations: convs });
+  },
+
+  switchConversation: (convId: string) => {
+    const { abortController } = get();
+    // 先中断当前流式请求
+    if (abortController) {
+      abortController();
+    }
+    get().loadConversation(convId);
+  },
+
+  startNewConversation: () => {
+    const { abortController } = get();
+    // 先中断当前流式请求
+    if (abortController) {
+      abortController();
+    }
+    set({
+      messages: [],
+      conversationId: null,
+      streaming: false,
+      streamingText: "",
+      abortController: null,
+    });
+  },
+
+  refreshConversations: async () => {
+    try {
+      const convs = await listConversations();
+      set({ conversations: convs });
+    } catch (err) {
+      console.error("Failed to refresh conversations:", err);
+    }
+  },
+
+  renameConversation: async (convId: string, title: string) => {
+    try {
+      await apiRenameConversation(convId, title);
+      // 更新本地 conversations 列表中该项的 title
+      set((state) => ({
+        conversations: state.conversations.map((c) =>
+          c.id === convId ? { ...c, title } : c
+        ),
+      }));
+    } catch (err) {
+      console.error("Failed to rename conversation:", err);
+    }
+  },
+
+  deleteConversation: async (convId: string) => {
+    try {
+      await apiDeleteConversation(convId);
+      // 从本地列表中移除
+      set((state) => ({
+        conversations: state.conversations.filter((c) => c.id !== convId),
+      }));
+    } catch (err) {
+      console.error("Failed to delete conversation:", err);
+    }
+  },
 }));
 
 // 处理 SSE 事件
@@ -203,6 +308,7 @@ function handleSSEEvent(
         abortController: null,
       }));
       useChapterStore.getState().fetchChapters();
+      get().refreshConversations();
       break;
 
     case "error":

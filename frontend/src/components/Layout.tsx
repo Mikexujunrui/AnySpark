@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import ChapterSidebar from "./ChapterSidebar";
+import ConversationList from "./ConversationList";
 import Paper from "./Paper";
 import ChatPanel from "./ChatPanel";
 import ModelPicker from "./ModelPicker";
@@ -7,17 +8,20 @@ import ManualPanel from "./ManualPanel";
 import SkillPanel from "./SkillPanel";
 import GraphPanel from "./GraphPanel";
 import { useModelStore } from "../stores/modelStore";
+import { useChatStore } from "../stores/chatStore";
 
 export default function Layout() {
   const fetchModels = useModelStore((s) => s.fetchModels);
+  const loadLatestConversation = useChatStore((s) => s.loadLatestConversation);
   const [manualOpen, setManualOpen] = useState(false);
   const [skillOpen, setSkillOpen] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
 
-  // 初始化加载模型列表
+  // 初始化加载模型列表 + 恢复最近会话
   useEffect(() => {
     fetchModels();
-  }, [fetchModels]);
+    loadLatestConversation();
+  }, [fetchModels, loadLatestConversation]);
 
   return (
     <div className="h-screen flex flex-col bg-zinc-950 text-zinc-100">
@@ -64,8 +68,13 @@ export default function Layout() {
 
       {/* 主体 */}
       <div className="flex-1 flex overflow-hidden">
-        {/* 左侧章节栏 */}
-        <ChapterSidebar />
+        {/* 左侧：会话列表 + 章节栏 */}
+        <div className="flex shrink-0">
+          <div className="w-40 h-full">
+            <ConversationList />
+          </div>
+          <ChapterSidebar />
+        </div>
 
         {/* 右侧：稿纸 + 对话 */}
         <div className="flex-1 flex flex-col overflow-hidden">
