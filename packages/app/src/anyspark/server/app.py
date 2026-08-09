@@ -1206,6 +1206,8 @@ def build_app(
                 workflow_generator=workflow_generator,
                 play_engine=play_engine,
                 review_panel=review_panel,
+                # S68：探索注入真实模板库（L2+L3 合并，agent 的 explore_direction 消费）
+                templates=[f"{t.name}：{t.description}" for t in templates_external.all()[:12]],
             ),
             enable_domain=enable_domain,
             enable_codex=enable_codex,
@@ -2046,6 +2048,8 @@ def build_app(
     def explore_cards(req: ExploreCardsIn) -> list[dict[str, object]]:
         """确认后的意图 → 方向卡 ×4（并行探索，三来源混合）。"""
         constraints = archive.constraints("main")
+        # S68：探索注入真实模板库（L2+L3 合并；template 来源探索者消费，死库接线）
+        templates = [f"{t.name}：{t.description}" for t in templates_external.all()[:12]]
         cards = run_exploration(
             model,
             req.seed,
@@ -2053,6 +2057,7 @@ def build_app(
             constraints,
             n_explorers=4,
             dimensions=dim_store.list_names(),  # S50：维度来自内容载体（可增删改）
+            templates=templates,
         )
         return [c.to_dict() for c in cards]
 

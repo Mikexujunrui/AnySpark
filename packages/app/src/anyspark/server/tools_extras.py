@@ -22,7 +22,9 @@ from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
 from anyspark.explore import IntentUnderstander, run_exploration
 
 
-def make_explore_implementer(model: Any, dim_names: list[str] | None = None) -> tuple[Any, Any]:
+def make_explore_implementer(
+    model: Any, dim_names: list[str] | None = None, templates: list[str] | None = None
+) -> tuple[Any, Any]:
     """探索方向工具：意图理解 + 多智能体并行探索 → 候选方向。
 
     Agent 在任务方向不明确时调用；返回方向卡供 Agent 呈现给用户选择
@@ -30,6 +32,7 @@ def make_explore_implementer(model: Any, dim_names: list[str] | None = None) -> 
     dim_names：S50 内容化维度集（用户可增删改）；缺省用默认种子——S62 修正：
     agent 工具路径不再绕过维度内容化（此前回落 DEFAULT_DIMENSIONS，用户自定义
     维度在自主探索时不生效）。
+    templates（S68）：真实模板描述列表（template 来源探索者注入）。
     """
 
     spec = ToolSpec(
@@ -58,7 +61,13 @@ def make_explore_implementer(model: Any, dim_names: list[str] | None = None) -> 
             understander = IntentUnderstander(model)
             concept = understander.understand(task)
             cards = run_exploration(
-                model, task, concept, constraints=None, n_explorers=4, dimensions=dim_names
+                model,
+                task,
+                concept,
+                constraints=None,
+                n_explorers=4,
+                dimensions=dim_names,
+                templates=templates,
             )
             c = concept.get("concept", {})
             lines = [
