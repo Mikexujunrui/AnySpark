@@ -47,6 +47,7 @@ class ToolContext:
     workflow_engine: Any = None
     workflow_generator: Any = None
     play_engine: Any = None  # S65 互动推演 agent 工具（默认关：玩法/灵感，需要时点亮）
+    review_panel: Any = None  # S64 拟人化评审团面板（panel_review 工具用）
 
 
 def build_toolkit(
@@ -189,5 +190,13 @@ def build_toolkit(
 
         for _spec, _impl in make_play_implementer(ctx.play_engine):
             registry.register(_spec, _impl)
+
+    # S64：拟人化评审团 agent 工具（无条件注册——用户喊"帮我看看这章"时 agent
+    # 自主调用；对齐 explore_direction，S63 教训：默认关的工具=没人用的残废通道）
+    if ctx.review_panel is not None:
+        from anyspark.server.tools_review import make_review_tools
+
+        for _rspec, _rimpl in make_review_tools(ctx.review_panel, ctx.chapters, ctx.model):
+            registry.register(_rspec, _rimpl)
 
     return registry

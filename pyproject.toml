@@ -17,6 +17,7 @@ dependencies = [
     "anyspark-template", # 工作区成员：模式库+资料
     "anyspark-graph",    # 工作区成员：知识图谱（AI 事实源）
     "anyspark-workflow", # 工作区成员：工作流（S59 可选增强：顺序/分支/循环 + 断点恢复）
+    "anyspark-review",   # 工作区成员：拟人化评审团（S64 可选增强：YAML 人设 + 并发评审 + 主席汇总）
     "anyspark-desktop",  # 工作区成员：桌面壳
 ]
 
@@ -35,6 +36,7 @@ anyspark-template = { workspace = true }
 anyspark-graph = { workspace = true }
 anyspark-play = { workspace = true }
 anyspark-workflow = { workspace = true }
+anyspark-review = { workspace = true }
 anyspark-desktop = { workspace = true }
 
 
@@ -47,6 +49,7 @@ dev = [
     "pytest==7.4.3",
     "ruff==0.16.1",
     "mypy==1.11.2",
+    "types-PyYAML==6.0.12",  # S64：review 包 yaml 类型桩
 ]
 
 [tool.ruff]
@@ -61,6 +64,7 @@ src = [
     "packages/template",
     "packages/graph",
     "packages/workflow",
+    "packages/review",
     "scripts",
 ]
 
@@ -84,6 +88,8 @@ ignore = [
 "packages/app/tests/test_workflow_api.py" = ["E501"]
 # S59 补充：workflow model 条件冒烟脚本是长中文 JSON 行
 "scripts/workflow_model_cond_smoke.py" = ["E501"]
+# S64：评审团提示词是给 LLM 看的内容（JSON 示例紧凑性优先），断行破坏语义
+"packages/review/src/anyspark/review/prompts.py" = ["E501"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["anyspark"]
@@ -102,6 +108,7 @@ files = [
     "packages/graph",
     "packages/workflow",
     "packages/play",
+    "packages/review",
 ]
 mypy_path = [
     "packages/core/src",
@@ -113,6 +120,7 @@ mypy_path = [
     "packages/graph/src",
     "packages/workflow/src",
     "packages/play/src",
+    "packages/review/src",
 ]
 explicit_package_bases = true
 
@@ -126,5 +134,6 @@ testpaths = [
     "packages/template/tests",
     "packages/graph/tests",
     "packages/workflow/tests",
+    "packages/review/tests",
 ]
 addopts = "-q"

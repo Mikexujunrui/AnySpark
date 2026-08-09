@@ -7,6 +7,8 @@ anyspark.server.app — FastAPI 后端（真实 API 层）。
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import queue
 import threading
@@ -81,6 +83,8 @@ from anyspark.models.registry import (
     ModelRegistry,
     slugify,
 )
+from anyspark.play import PlayEngine, PlayStore
+from anyspark.review import ReviewPanel
 from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.recorder import RunRecorder
@@ -108,7 +112,6 @@ from anyspark.workflow import (
     WorkflowStore,
     wait_approval,
 )
-from anyspark.play import PlayEngine, PlayStore
 
 # 数据根：项目 data/（gitignored，绝不入库）
 PROJECT_ROOT = Path(__file__).resolve().parents[5]
@@ -422,6 +425,17 @@ class MaterialIn(BaseModel):
 class GraphExtractIn(BaseModel):
     chapter_ref: str
     text: str
+
+
+class ReviewPanelRequest(BaseModel):
+    """S65：拟人化评审团请求。chapter_ref 与 text 二选一（ref 优先）。"""
+
+    chapter_ref: str = ""  # 章节标题（从 chapters 取正文）
+    text: str = ""  # 直接评审文本
+    book_id: str = "main"
+    reviewer_ids: list[str] = []  # 空 = 全部激活评审员
+    with_check: bool = True  # 注入 check 硬伤清单（逻辑审校用）
+    with_foreshadow: bool = True  # 注入关键点图谱（伏笔审计员用）
 
 
 class AgencyIn(BaseModel):
@@ -938,6 +952,12 @@ def build_app(
     workflow_store = WorkflowStore(real_db)
     workflow_generator = WorkflowGenerator(model)
     # S65 互动推演（独立扩展包 anyspark-play）：扮演角色多轮选择推进的推演树
+    # S65：拟人化评审团面板（系统评审员随包分发 + 用户自定义覆盖 data/reviewers/）
+    review_panel = ReviewPanel()
+    try:
+        review_panel.add_dir(DATA_DIR / "reviewers")
+    except Exception as _rpe:  # 用户目录损坏不影响服务启动
+        logger.warning("加载用户评审员失败: %s", _rpe)
     play_store = PlayStore(real_db)
 
     def _wf_run_agent(ctx: RunContext, node: Any) -> NodeResult:
@@ -1172,6 +1192,7 @@ def build_app(
                 workflow_engine=workflow_engine,
                 workflow_generator=workflow_generator,
                 play_engine=play_engine,
+                review_panel=review_panel,
             ),
             enable_domain=enable_domain,
             enable_codex=enable_codex,
@@ -2855,6 +2876,78 @@ def build_app(
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return {"session_id": session_id, "markdown": md}
+
+    @app.get("/api/review/reviewers", response_model=list[dict[str, object]])
+    def review_reviewers_route() -> list[dict[str, object]]:
+        """S65：列出评审团评审员（含人设/维度/激活态）。激活改 YAML（内容资产）。"""
+        return review_panel.list_reviewers()
+
+    @app.post("/api/review/panel", response_model=dict[str, object])
+    async def review_panel_route(req: ReviewPanelRequest) -> dict[str, object]:
+        """S65：拟人化评审团——并发评审 + 主席汇总裁决报告。
+
+
+
+        自动组装外部上下文：check_report（规则引擎硬伤清单）+ foreshadow（关键点图谱）。
+
+        与 /api/check 的分工：check=确定性硬伤（客观）；review=人格化评价（体验）。
+
+        """
+
+        text, chapter_ref = req.text, req.chapter_ref
+
+        if not text.strip() and chapter_ref:
+            ch = next(
+                (c for c in chapters.list_by_book(req.book_id) if c.title == chapter_ref),
+                None,
+            )
+
+            if ch is None:
+                return {"error": f"章节不存在: {chapter_ref}"}
+
+            text, chapter_ref = ch.content, ch.title
+
+        if not text.strip():
+            return {"error": "缺少评审文本（text 或 chapter_ref）"}
+
+        context: dict[str, str] = {}
+
+        if req.with_check:
+            check_report = await asyncio.to_thread(
+                run_review, model, chapter_ref or "当前章节", text[:20000]
+            )
+
+            context["check_report"] = (
+                f"规则引擎硬伤检测（{check_report.hard_count} 处硬伤，供核实）：\n"
+                f"{check_report.render()}"
+            )
+
+        if req.with_foreshadow:
+            with contextlib.suppress(Exception):  # 关键点图谱取不到不阻断评审
+                context["foreshadow"] = plots.render(
+                    req.book_id, current_order=len(chapters.list_by_book(req.book_id))
+                )
+
+        report = await review_panel.run_review(
+            model,
+            text,
+            chapter_ref=chapter_ref or "当前章节",
+            reviewer_ids=req.reviewer_ids or None,
+            context=context,
+        )
+
+        return {
+            "overall_score": report.overall_score,
+            "summary": report.summary,
+            "consensus": report.consensus,
+            "divergences": report.divergences,
+            "top_suggestions": report.top_suggestions,
+            "reviewer_count": report.reviewer_count,
+            "valid_count": report.valid_count,
+            "errors": report.errors,
+            "markdown": report.render(),
+            "compact": report.render_compact(),
+        }
 
     # -----------------------------------------------------------------------
     # S48-P4/B 扩展工具注册表：Agent 写的工具，人工批准才生效

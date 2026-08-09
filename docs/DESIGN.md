@@ -947,3 +947,49 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 - agent 工具（enable_play 默认关，S15 按需点亮）：play_start / play_choose /
   play_status / play_export（启动/推进/查看/导出，只读+启动，无删除，对齐哲学）
 - 角色卡缺失 → 404 提示先建卡（对齐 role_play 先例）
+
+### 12.28 拟人化评审团扩展包（S64：主人拍板独立包，参考自研高级时间线辅助 agent）
+
+> 背景：主人展示自研高级时间线辅助写作 agent（"还蛮好的"）——内置 14 位拟人化
+> 评审员（YAML 人设），并发评审 + 主席汇总（共识/分歧/优先建议）。主人结论：
+> 用户喜欢"拟人化评审员 + 报告"的体验形态。评审团机制不必要（YAGNI），
+> **拟人化呈现值得做**——做成独立扩展包 anyspark-review。
+
+#### 定位：评审团机制 = 不要；拟人化报告 = 轻量模板方案
+
+| | check（既有） | review（S64 新增） |
+|---|---|---|
+| 性质 | 确定性硬伤规则引擎 | 人格化评价（体验） |
+| 产出 | 硬伤清单（证据+位置） | 评分+共识/分歧+优先建议+人格评语 |
+| 事实来源 | 规则/图谱/时序 | LLM 评价（**不产生新事实**） |
+| 触发 | /api/check、workflow review_chapter | /api/review/panel、panel_review 工具 |
+
+硬伤层照旧走 check（客观事实不被人格漂移污染）；拟人层只做呈现与评价。
+**拒绝**：质量门控/Autopilot 集成（YAGNI 后补）、管理面板 UI、14 评审员全量
+（起步 5 位：编剧/文学编辑/逻辑审校/爽文读者/挑刺王 + 伏笔审计员默认关）。
+
+#### 机制硬编码、内容自然语言
+
+- **机制**（packages/review）：YAML 加载 / 并发编排（每评审员独立超时）/ 宽容 JSON
+  解析 / 综合分=确定性加权平均优先（防 LLM 乱打总分）/ 主席汇总失败降级启发式 /
+  模型无关（走 core Model 协议）
+- **内容**（reviewers/*.yaml）：评审员人设（persona + scoring_dimensions 带权重 +
+  context_keys + avatar/category/active）。系统内置随包分发；用户自定义放
+  data/reviewers/ 覆盖同名 id。**改人设 = 改文本，不动机制**。
+- `context_keys` 按需注入外部上下文：check_report（逻辑审校核实硬伤清单）、
+  foreshadow（伏笔审计员核对关键点图谱）——取不到自动跳过，评审不阻断。
+  比参考项目的布尔 needs_knowledge 更精确。
+
+#### 报告结构
+
+- 综合分（加权平均）+ 主席汇总裁决（summary/consensus/divergences/top_suggestions）
+  + 各评审员详情（分维度评分/亮点/问题/建议/人格语气 comment）
+- render() 完整 markdown 给人看；render_compact() 紧凑摘要给 agent 工具回填（省 token）
+
+#### 接入
+
+- `POST /api/review/panel`（chapter_ref/text + reviewer_ids + with_check/with_foreshadow）
+  → 自动组装 check 硬伤 + 关键点图谱上下文 → 报告
+- `GET /api/review/reviewers` 列出评审员（激活改 YAML）
+- agent 工具 `panel_review`（无条件注册，对齐 explore_direction；S63 教训：
+  默认关的工具=没人用的残废通道）
