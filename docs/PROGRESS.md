@@ -1966,3 +1966,34 @@ template 来源（strategy.py 三来源之一）只是 prompt 文字描述"从�
 **教训（多会话纪律续）**：`ruff format packages/app packages/explore` 全目录跑会污染
 并行会话活跃文件（path.py/tools_domain/test_path_api/app.py 的 path 区域格式被改）。
 已 checkout 恢复；后续 format 只针对自己改的文件，不跑全目录。
+
+## S69 从书自动提炼剧情模式 → 模板库（已完成 ✅，剧情库闭环第 2 步）
+
+**背景（主人拍板第 1 步接线后继续）**：S68 完成模板库接线探索（死库复活）。第 2 步 =
+用户设想的核心增量：**像文风提取一样，从书自动提炼剧情模式**（复用 skillgen 管线，
+输入改多章/全书，输出改模板四要素）。
+
+**设计**：
+- skillgen 新增 mode=plot：GENERATE_PROMPT_PLOT（跨章结构归纳：开篇钩子/冲突升级/
+  章节衔接/情感节拍/收束方式 + 复现测试"有辨识度 vs 通用套路" + 简洁自检 +
+  可变参数要求）+ _parse_templates（四要素校验，维度乱填回落默认，params 归一）
+  + generate_plot；输入窗口 6000→12000（剧情模式需多章，单章提不到——与文风
+  提取的本质差异）
+- 与 mode=main 的分工：main=给主循环的组织指导（决策指令）；plot=给探索的模式
+  模板（四要素元数据，S68 已接线的 template 来源消费）
+- API：POST /api/templates/generate（候选 + 与 L2/L3 去重）→ 人工确认 → 走既有
+  /api/templates/import 入库（复用确认闸门，不新造流程）
+- 测试 5 个：四要素解析/乱填回落/plot prompt/便捷方法/API 去重
+
+**真实链路闭环（deepseek-v4-pro，猎手准则 第1+300+800章 拼 9036 字）**：
+提炼 4 条（尸体环境·生存解谜开局 / 多线汇合式·危机迭代升级 / 诡异引路人·
+规则入场仪式 / 身份反差·授权式战力展示）——**"诡异引路人"精准命中第 800 章
+白骨引路人结构**（引路人+代价+仪式规则+可变参数），复现测试起效 → 导入 L3 →
+探索（种子"猎人入禁忌山谷"）两个 template 探索者都消费该模板派生不同变体
+（代价类型不同），grow/user 隔离。**剧情库完整闭环：提炼→入库→探索消费 全通**。
+
+**教训（多会话纪律 3 连踩）**：`ruff format` 全目录跑第三次污染并行会话文件
+（path.py/tools_domain/test_path_api/app.py path 区域）。已 checkout 恢复；commit
+message 注明 gate format 红归因（S67 遗留：path.py 与 app.py path 区域 HEAD 即
+未按 ruff 格式，play 不在 gate 列表）——**gate 红 ≠ 我的改动问题**，验证方法：
+HEAD 状态下同文件同样红。
