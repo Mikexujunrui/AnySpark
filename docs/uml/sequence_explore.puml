@@ -1,0 +1,49 @@
+@startuml AnySpark v4 - Sequence: Exploration Flow
+!theme plain
+title AnySpark v4 — 顺序图：探索-判别双循环（Exploration Flow）
+skinparam sequenceMessageAlign center
+
+actor User
+participant "FastAPI\n/app.py" as API
+participant "IntentUnderstander\n/explore.intent" as Intent
+participant "ExplorationEngine\n/explore.explorers" as Engine
+participant "ExplorationStrategy\n/explore.strategy" as Strategy
+participant "Model (LLM)" as LLM
+participant "ProjectArchive\n/explore.direction" as Archive
+
+== 阶段 1：意图理解 ==
+User -> API: POST /api/explore/intent\n{seed}
+API -> Intent: understand(seed)
+Intent -> LLM: respond(INTENT_PROMPT + seed)
+LLM --> Intent: JSON{concept, questions}
+Intent --> API: concept_card
+API -> Intent: build_confirmation(concept)
+Intent --> API: confirmation_text
+API --> User: 对齐确认（概念卡 + 歧义问题）
+
+User -> API: POST /api/explore/confirm\n{confirmed_concept}
+
+== 阶段 2：并行探索 ==
+API -> Engine: run_exploration(model, seed, confirmed, constraints)
+API -> Strategy: ExplorationStrategy(seed, confirmed, constraints)
+
+loop 4 个探索者并行（asyncio.gather）
+  API -> Strategy: explorer_prompt(i)
+  Strategy --> API: 差异化指令\n（维度 + 来源分派）
+  API -> LLM: respond(prompt_i, [])
+  note right: 上下文隔离\n保证真多样性
+  LLM --> API: JSON{title, summary, term}
+  API -> Strategy: card_from_response(i, raw)
+  Strategy --> API: DirectionCard
+end
+
+API --> User: 4 张方向卡（候选堆）
+
+== 阶段 3：判别固化 ==
+User -> API: POST /api/explore/select\n{card_id}
+API -> Archive: archive_direction(card, book_id)
+Archive --> API: saved_direction
+API -> Archive: add_constraint(content)
+API --> User: 已固化方向 + 约束
+
+@enduml

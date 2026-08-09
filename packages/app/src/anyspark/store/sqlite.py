@@ -345,6 +345,7 @@ class ChapterStore:
         with self._lock:
             cur = self._conn.execute("DELETE FROM chapters WHERE id = ?", (chapter_id,))
             self._conn.execute("DELETE FROM chapter_versions WHERE chapter_id = ?", (chapter_id,))
+            self._conn.commit()
         return cur.rowcount > 0
 
     def close(self) -> None:

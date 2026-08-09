@@ -1,0 +1,73 @@
+@startuml AnySpark v4 - State Machine: Agent Loop
+!theme plain
+title AnySpark v4 — 状态机图：Agent 循环状态（Agent Loop State Machine）
+
+[*] --> Idle : 初始化
+
+state Idle {
+  [*] --> WaitingInput
+  WaitingInput --> BuildingPrompt : 收到 user_prompt
+}
+
+state Running {
+  state "构建上下文" as BuildCtx
+  state "调用模型" as CallModel
+  state "解析输出" as ParseOutput
+  state "执行工具" as ExecTools
+  state "回填结果" as Backfill
+
+  BuildCtx --> CallModel : prompt_messages 就绪
+  CallModel --> ParseOutput : ModelOutput
+  ParseOutput --> ExecTools : 有 tool_calls
+  ParseOutput --> FinalAnswer : 无 tool_calls（终答）
+  ExecTools --> Backfill : ToolResult(s)
+  Backfill --> BuildCtx : 下一轮迭代
+
+  state "压缩" as Compress
+  BuildCtx --> Compress : 超预算阈值
+  Compress --> BuildCtx : 压缩后消息
+}
+
+state FinalAnswer {
+  [*] --> EmitText
+  EmitText --> EmitDone
+}
+
+state ErrorState {
+  [*] --> ModelFail
+  ModelFail --> EmitError
+}
+
+state AbortedState {
+  [*] --> CancelDetected
+  CancelDetected --> EmitAborted
+}
+
+Idle --> Running : Agent.run()
+
+Running --> Running : 工具迭代循环\n(max_tool_iterations)
+Running --> FinalAnswer : 终答 / 全部 terminate
+Running --> ErrorState : 模型调用失败\n(重试耗尽)
+Running --> AbortedState : 用户取消\n(token.is_cancelled)
+
+FinalAnswer --> [*] : Turn{text}
+ErrorState --> [*] : Turn{error}
+AbortedState --> [*] : Turn{已中断}
+
+note right of Running
+  **关键防护机制**：
+  - 截断防护：truncated=True → 拒绝整批工具调用
+  - 协作式取消：每轮/工具执行前检查
+  - 异常平衡：模型调用失败不毒化上下文
+  - 智能停止：全部 terminate → 提前结束
+end note
+
+note right of ExecTools
+  **工具执行模式**：
+  - parallel：默认并行（ThreadPoolExecutor）
+  - sequential：批内任一工具标 sequential → 整批串行
+  - before_tool_call 钩子：可拦截
+  - after_tool_call 钩子：可改写结果
+end note
+
+@enduml

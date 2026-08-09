@@ -506,6 +506,12 @@ class ChapterPatchIn(BaseModel):
     operations: list[dict[str, Any]]
 
 
+class ChapterUpdateIn(BaseModel):
+    """前端稿纸编辑：直接替换内容。"""
+
+    content: str
+
+
 class ImpactIn(BaseModel):
     """S45：影响分析（连锁修改）——改某章（涉及实体）→ 受影响下游章节。"""
 
@@ -1647,13 +1653,13 @@ def build_app(
                                     (c.order_index for c in chs if c.title == title),
                                     len(chs),
                                 )
-                                # 后台队列处理（不阻塞 SSE 的 done 帧）
                                 line = str(wc.arguments.get("line", "main")).strip() or "main"
-                        _bg_queue.put(
-                            BgTask(
-                                kind="chapter", title=title, content=content, order=order, line=line
-                            )
-                        )
+                                # 后台队列处理（不阻塞 SSE 的 done 帧）
+                                _bg_queue.put(
+                                    BgTask(
+                                        kind="chapter", title=title, content=content, order=order, line=line
+                                    )
+                                )
             except Exception as exc:  # 异常转 error 帧（不中断连接）
                 logger.exception("chat/stream 执行异常: %s", exc)
                 events_queue.put(("error", {"message": f"执行失败: {exc}"}))
@@ -3008,6 +3014,27 @@ def build_app(
             "results": results,
             "chars": len(new_content),
         }
+
+    @app.put("/api/chapters/{chapter_id}")
+    def update_chapter_content(chapter_id: str, req: ChapterUpdateIn) -> ChapterOut:
+        """前端稿纸编辑：直接替换章节内容。"""
+        ch = chapters.get(chapter_id)
+        if ch is None:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        updated = chapters.upsert(ch.book_id, ch.title, req.content, ch.order_index, ch.narrative_line)
+        # 双写落盘
+        try:
+            workspace.write_chapter(ch.book_id, ch.order_index, ch.title, req.content)
+        except Exception:
+            pass
+        return ChapterOut(
+            id=updated.id,
+            book_id=updated.book_id,
+            title=updated.title,
+            content=updated.content,
+            order_index=updated.order_index,
+            updated_at=updated.updated_at,
+        )
 
     @app.get("/api/chapters/{chapter_id}/export")
     def export_chapter(chapter_id: str, format: str = "txt") -> Response:

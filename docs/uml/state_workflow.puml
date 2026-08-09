@@ -1,0 +1,99 @@
+@startuml AnySpark v4 - State Machine: Workflow
+!theme plain
+title AnySpark v4 — 状态机图：工作流任务/节点状态（Workflow State Machine）
+
+' ============================================================
+' 任务状态机
+' ============================================================
+state "任务状态（TaskStatus）" as TaskSM {
+  [*] --> queued : create_task()
+
+  queued --> running : run_task()
+
+  running --> waiting_approval : approval 节点\n触发 _WaitApproval
+  running --> done : 全部节点完成
+  running --> failed : 节点失败\n(无重试/跳过策略)
+  running --> cancelled : request_stop()\n用户取消
+
+  waiting_approval --> running : approve(decision="ok")\n续跑
+  waiting_approval --> failed : approve(decision="reject")\n驳回
+
+  done --> [*]
+  failed --> [*]
+  cancelled --> [*]
+}
+
+' ============================================================
+' 节点状态机
+' ============================================================
+state "节点状态（NodeStatus）" as NodeSM {
+  [*] --> pending : 初始
+
+  pending --> running : _execute_node()\n开始执行
+
+  running --> done : 执行成功\n(result.ok)
+  running --> failed : 执行失败\n(重试耗尽)
+  running --> skipped : fail_auto_skip=True\n自动跳过继续
+
+  failed --> running : 自动重试\n(auto_retry_count > 0)
+
+  done --> [*]
+  failed --> [*]
+  skipped --> [*]
+}
+
+' ============================================================
+' 节点类型行为说明
+' ============================================================
+state "节点执行行为（按 kind 分派）" as KindNote {
+  state "agent" as AgentKind
+  state "script" as ScriptKind
+  state "approval" as ApprovalKind
+  state "gate" as GateKind
+  state "loop" as LoopKind
+}
+
+note right of AgentKind
+  调用 LLM 模型
+  runner(ctx, node) → NodeResult
+end note
+
+note right of ScriptKind
+  确定性函数
+  runner(ctx, node) → NodeResult
+end note
+
+note right of ApprovalKind
+  等待人工确认
+  runner → _WaitApproval
+  approve() → 续跑
+end note
+
+note right of GateKind
+  条件分支（引擎级）
+  评估出边 condition
+  rule: 表达式求值
+  model: LLM 判断
+  取首个命中分支
+end note
+
+note right of LoopKind
+  循环（引擎级）
+  body: 循环体节点列表
+  max_iterations: 防死循环
+  continue_condition: 为真继续
+  断点恢复：从记录迭代数续跑
+end note
+
+' ============================================================
+' 断点恢复说明
+' ============================================================
+note bottom of TaskSM
+  **断点恢复机制**：
+  - 每节点状态落盘（WorkflowStore.update_node_state）
+  - 恢复时 done 节点跳过，沿已记录去向推进
+  - loop 从 output 记录的迭代数续跑
+  - body 内 done 节点在循环体内强制重跑（force=True）
+end note
+
+@enduml

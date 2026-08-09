@@ -1,0 +1,100 @@
+import { create } from "zustand";
+import { listChapters, getChapter, createChapter, deleteChapter, patchChapter } from "../api/chapters";
+import type { Chapter } from "../types";
+
+interface ChapterState {
+  chapters: Chapter[];
+  selectedId: string | null;
+  selectedChapter: Chapter | null;
+  loading: boolean;
+  saving: boolean;
+
+  fetchChapters: () => Promise<void>;
+  selectChapter: (id: string) => Promise<void>;
+  addChapter: (title: string) => Promise<void>;
+  removeChapter: (id: string) => Promise<void>;
+  updateChapterContent: (content: string) => Promise<void>;
+}
+
+export const useChapterStore = create<ChapterState>((set, get) => ({
+  chapters: [],
+  selectedId: null,
+  selectedChapter: null,
+  loading: false,
+  saving: false,
+
+  fetchChapters: async () => {
+    set({ loading: true });
+    try {
+      const chapters = await listChapters();
+      set({ chapters, loading: false });
+      
+      // 如果之前选中的章节还在列表中，保持选中
+      const { selectedId } = get();
+      if (selectedId && !chapters.find((c) => c.id === selectedId)) {
+        set({ selectedId: null, selectedChapter: null });
+      }
+    } catch (error) {
+      console.error("Failed to fetch chapters:", error);
+      set({ loading: false });
+    }
+  },
+
+  selectChapter: async (id: string) => {
+    set({ selectedId: id });
+    try {
+      const chapter = await getChapter(id);
+      set({ selectedChapter: chapter });
+    } catch (error) {
+      console.error("Failed to get chapter:", error);
+      set({ selectedChapter: null });
+    }
+  },
+
+  addChapter: async (title: string) => {
+    try {
+      const chapter = await createChapter(title);
+      set((state) => ({
+        chapters: [...state.chapters, chapter],
+      }));
+      // 自动选中新建的章节
+      await get().selectChapter(chapter.id);
+    } catch (error) {
+      console.error("Failed to create chapter:", error);
+      throw error;
+    }
+  },
+
+  removeChapter: async (id: string) => {
+    try {
+      await deleteChapter(id);
+      set((state) => ({
+        chapters: state.chapters.filter((c) => c.id !== id),
+        selectedId: state.selectedId === id ? null : state.selectedId,
+        selectedChapter: state.selectedChapter?.id === id ? null : state.selectedChapter,
+      }));
+    } catch (error) {
+      console.error("Failed to delete chapter:", error);
+      throw error;
+    }
+  },
+
+  updateChapterContent: async (content: string) => {
+    const { selectedId, selectedChapter } = get();
+    if (!selectedId || !selectedChapter) return;
+
+    set({ saving: true });
+    try {
+      const updated = await patchChapter(selectedId, { content });
+      set((state) => ({
+        selectedChapter: updated,
+        chapters: state.chapters.map((c) => (c.id === selectedId ? updated : c)),
+        saving: false,
+      }));
+    } catch (error) {
+      console.error("Failed to save chapter:", error);
+      set({ saving: false });
+      throw error;
+    }
+  },
+}));

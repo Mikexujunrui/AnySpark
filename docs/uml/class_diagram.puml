@@ -1,0 +1,591 @@
+@startuml AnySpark v4 - Class Diagram
+!theme plain
+title AnySpark v4 — 类图（Class Diagram）
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam linetype ortho
+
+' ============================================================
+'  core — 内核包（零依赖）
+' ============================================================
+package "anyspark-core" {
+
+  package "core.types" {
+    class Message {
+      + role: Role
+      + content: str
+      + metadata: dict
+    }
+    class ToolCall {
+      + name: str
+      + arguments: dict
+      + id: str
+    }
+    class ToolResult {
+      + call: ToolCall
+      + ok: bool
+      + content: str
+      + data: dict
+      + terminate: bool
+    }
+    class Turn {
+      + text: str
+      + tool_calls: list[ToolCall]
+      + tool_results: list[ToolResult]
+      + error: str | None
+    }
+    class ModelOutput {
+      + text: str
+      + tool_calls: list[ToolCall]
+      + truncated: bool
+      + reasoning: str
+    }
+  }
+
+  package "core.protocol" {
+    class ParamSpec {
+      + name: str
+      + type: str
+      + required: bool
+      + description: str
+    }
+    class ToolSpec {
+      + name: str
+      + description: str
+      + params: list[ParamSpec]
+      + execution_mode: str
+      + validate(arguments): list[str]
+    }
+    class ToolRegistry {
+      - _tools: dict
+      + register(spec, implementer)
+      + specs(): list[ToolSpec]
+      + get(name): tuple
+      + has(name): bool
+      + describe(): str
+    }
+    protocol Model {
+      + respond(messages, tools): ModelOutput
+    }
+    protocol StreamModel {
+      + respond_stream(messages, tools, on_event): ModelOutput
+    }
+    protocol Cancellable {
+      + set_cancelled(check)
+    }
+    protocol ToolImplementer {
+      + __call__(spec, arguments): ToolResult
+    }
+  }
+
+  package "core.storage" {
+    class Conversation {
+      + id: str
+      + created_at: str
+      + messages: list[Message]
+      + parent_id: str | None
+      + fork_point: str
+    }
+    abstract ConversationStore {
+      + {abstract} create(conversation_id?): Conversation
+      + {abstract} get(conversation_id): Conversation | None
+      + {abstract} list_conversations(): list[Conversation]
+      + {abstract} append(conversation_id, message)
+      + {abstract} replace_messages(conversation_id, messages)
+      + {abstract} messages(conversation_id): list[Message]
+      + {abstract} fork(conversation_id, fork_point?, inherit_messages?): Conversation | None
+    }
+    class InMemoryConversationStore {
+      - _conversations: dict
+    }
+    InMemoryConversationStore --|> ConversationStore
+  }
+
+  package "core.events" {
+    class Event {
+      + type: str
+      + payload: dict
+    }
+    class EventEmitter {
+      - _listeners: dict
+      + on(event_type, listener)
+      + off(event_type, listener)
+      + emit(event)
+    }
+  }
+
+  package "core.loop" {
+    class CancellationToken {
+      - _event: threading.Event
+      + cancel()
+      + is_cancelled(): bool
+    }
+    class Agent {
+      + model: Model
+      + registry: ToolRegistry
+      + store: ConversationStore
+      + events: EventEmitter
+      + system_prompt: str
+      + max_tool_iterations: int
+      + context_compressor: ContextCompressor?
+      + before_tool_call: Callable?
+      + after_tool_call: Callable?
+      + steer_queue: SimpleQueue
+      + followup_queue: SimpleQueue
+      + run(user_prompt, conversation_id?, token?): Turn
+      + steer(text, role?)
+      + follow_up(text, role?)
+    }
+  }
+
+  package "core.retry" {
+    class RetryingModel {
+      + inner: Model
+      + respond(messages, tools): ModelOutput
+      + respond_stream(messages, tools, on_event?): ModelOutput
+      + set_cancelled(cancelled?)
+      + model_name: str
+    }
+    RetryingModel ..|> Model
+    RetryingModel ..|> StreamModel
+    RetryingModel ..|> Cancellable
+  }
+}
+
+' ============================================================
+'  app — 组合根（FastAPI 服务 / 模型适配 / 持久化）
+' ============================================================
+package "anyspark-app" {
+
+  package "models.deepseek" {
+    class DeepSeekModel {
+      - _client: OpenAI
+      - _model: str
+      - _temperature: float
+      - _max_tokens: int
+      - _thinking: str?
+      - _context_window: int
+      + respond(messages, tools): ModelOutput
+      + respond_stream(messages, tools, on_event?): ModelOutput
+      + model_name: str
+      + context_window: int
+    }
+    DeepSeekModel ..|> Model
+    DeepSeekModel ..|> StreamModel
+  }
+
+  package "models.registry" {
+    class ModelConfig {
+      + id: str
+      + name: str
+      + base_url: str
+      + model: str
+      + api_key: str?
+      + context_window: int
+      + max_tokens: int
+      + temperature: float
+      + thinking: str?
+      + is_active: bool
+    }
+    class ModelRegistry {
+      + list(): list[ModelConfig]
+      + get(cfg_id): ModelConfig?
+      + active(): ModelConfig
+      + upsert(cfg): ModelConfig
+      + delete(cfg_id): bool
+      + activate(cfg_id): ModelConfig?
+    }
+    class ModelProvider {
+      + respond(messages, tools): ModelOutput
+      + respond_stream(messages, tools, on_event?): ModelOutput
+      + build(temperature?, thinking?): DeepSeekModel
+      + model_name: str
+      + context_window: int
+      + active_config: ModelConfig
+    }
+    ModelProvider ..|> Model
+    ModelProvider ..|> StreamModel
+    ModelProvider --> ModelRegistry : delegates to
+  }
+
+  package "store.sqlite" {
+    class SqliteConversationStore {
+      - _conn: sqlite3.Connection
+      - _lock: threading.Lock
+    }
+    SqliteConversationStore --|> ConversationStore
+
+    class Chapter {
+      + id: str
+      + book_id: str
+      + title: str
+      + content: str
+      + order_index: int
+      + narrative_line: str
+      + versions: list[dict]
+    }
+    class ChapterStore {
+      + upsert(book_id, title, content, ...): Chapter
+      + get(chapter_id): Chapter?
+      + list_by_book(book_id): list[Chapter]
+      + delete(chapter_id): bool
+    }
+  }
+
+  package "server.context" {
+    class TokenBudget {
+      - _budget: int
+      - _enc: tiktoken.Encoding
+      - _summarize: Summarizer?
+      + count(text): int
+      + count_messages(messages): int
+      + compress(messages): list[Message]
+    }
+    TokenBudget ..|> ContextCompressor
+  }
+}
+
+' ============================================================
+'  explore — 探索包
+' ============================================================
+package "anyspark-explore" {
+  class IntentUnderstander {
+    - _model: object
+    + understand(seed): dict
+    + build_confirmation(concept): str
+  }
+  class ExplorationEngine {
+    - _model: object
+    - _n: int
+    + explore(strategy): list[DirectionCard]
+  }
+  class ExplorationStrategy {
+    + seed: str
+    + intent_confirmed: dict
+    + constraints: list[str]
+    + dimensions: list[str]
+    + assign(index): tuple
+    + explorer_prompt(index): str
+    + card_from_response(index, raw): DirectionCard
+  }
+  class DirectionCard {
+    + title: str
+    + summary: str
+    + dimension: str
+    + source: Source
+    + term: str
+    + id: str
+    + to_dict(): dict
+  }
+  class DimensionStore {
+    + list_names(): list[str]
+    + list_all(): list[dict]
+    + add(name): dict?
+    + set_enabled(dim_id, enabled): dict?
+    + delete(dim_id): bool
+  }
+  class ProjectArchive {
+    + archive_direction(card, book_id?): dict
+    + directions(book_id?): list[dict]
+    + add_constraint(content, book_id?): dict
+    + constraints(book_id?): list[str]
+  }
+}
+
+' ============================================================
+'  align — 对齐包
+' ============================================================
+package "anyspark-align" {
+  class AgencyLevel {
+    + id: str
+    + name: str
+    + description: str
+    + temperature: float
+    + order: int
+    + is_default: bool
+    + to_dict(): dict
+  }
+  class AgencyStore {
+    + list_levels(): list[AgencyLevel]
+    + get_level(level_id): AgencyLevel?
+    + get_current(book_id?): AgencyLevel
+    + set_current(level_id, book_id?): AgencyLevel?
+    + add_level(name, desc, temp): AgencyLevel
+    + update_level(level_id, ...): AgencyLevel?
+    + delete_level(level_id): bool
+    + reset_defaults(): list[AgencyLevel]
+    + adjust(delta, book_id?): str
+  }
+  class ManualEntry {
+    + content: str
+    + source: Source
+    + confidence: float
+    + activity: Activity
+    + locked: bool
+    + scope: Scope
+    + book_id: str
+    + category: Category
+    + to_dict(): dict
+  }
+  class ManualStore {
+    + add(entry): ManualEntry
+    + merge_add(entry): tuple
+    + list(scope, book_id?): list[ManualEntry]
+    + get(entry_id): ManualEntry?
+    + update(entry_id, ...): ManualEntry?
+    + set_locked(entry_id, locked): ManualEntry?
+    + delete(entry_id)
+    + dedupe(scope, book_id?): int
+    + decay_stale(days_high?, days_medium?): int
+  }
+  class SessionPlan {
+    + agency_level: int?
+    + collab_notes: list[str]
+    + style_prefs: list[str]
+    + habit_notes: list[str]
+    + reason: str
+    + collab_block(): str
+    + mind_block(): str
+  }
+  class MindPlanner {
+    - _manual: ManualStore
+    + plan(book_id?, base_agency?, context?): SessionPlan
+  }
+  class BiasStore { }
+  class SignalStore { }
+  class SignalCollector { }
+  class PreferenceExtractor { }
+  class WritingSkillStore { }
+  class WorldSettingStore { }
+  class StoryTreeStore { }
+  class StoryThreadStore { }
+  class StoryPlanStore { }
+  class SkillGenerator { }
+}
+
+' ============================================================
+'  graph — 知识图谱包
+' ============================================================
+package "anyspark-graph" {
+  class Entity {
+    + id: str
+    + book_id: str
+    + entity_type: str
+    + name: str
+    + aliases: list[str]
+    + description: str
+    + state: str
+    + weight: int
+    + lines: list[str]
+    + to_dict(): dict
+  }
+  class Relation {
+    + id: str
+    + book_id: str
+    + from_id: str
+    + to_id: str
+    + rel_type: str
+    + description: str
+    + to_dict(): dict
+  }
+  class GraphEvent {
+    + id: str
+    + book_id: str
+    + chapter_ref: str
+    + chapter_order: int
+    + time_point: str
+    + label: str
+    + involved: list[str]
+    + to_dict(): dict
+  }
+  class GraphStore {
+    + upsert_entity(...): Entity
+    + get_entity(book_id, name): Entity?
+    + list_entities(book_id, q?, type?, limit?): list[Entity]
+    + search(book_id, query, limit?): list[Entity]
+    + upsert_relation(...): Relation?
+    + list_relations(book_id, limit?): list[Relation]
+    + upsert_event(...): GraphEvent
+    + list_events(book_id, ...): list[GraphEvent]
+    + known_facts(book_id, ...): dict
+    + ingest_chapter(book_id, ...): void
+    + impact_chapters(book_id, ...): list[dict]
+  }
+  class GraphExtractor { }
+  class GraphInjector { }
+  class GraphVerifier { }
+}
+
+' ============================================================
+'  check — 检测网包
+' ============================================================
+package "anyspark-check" {
+  class SkeletonCheckItem {
+    + category: str
+    + description: str
+  }
+  class Finding {
+    + category: str
+    + severity: Severity
+    + message: str
+    + evidence: str
+    + suggestion: str
+    + source: str
+  }
+  class ReviewReport {
+    + target: str
+    + findings: list[Finding]
+    + hard_count: int
+    + render(): str
+  }
+  class ReviewEngine {
+    - _model: object
+    + review(target, text, checks): ReviewReport
+  }
+}
+
+' ============================================================
+'  template — 模式库包
+' ============================================================
+package "anyspark-template" {
+  class Template {
+    + name: str
+    + description: str
+    + granularity: Granularity
+    + position: Position
+    + function: Function
+    + params: list[str]
+    + layer: str
+    + to_dict(): dict
+  }
+  class ExternalLibrary {
+    + import_template(...): Template
+    + list_external(): list[Template]
+    + all(): list[Template]
+    + delete(name)
+  }
+  class MaterialDigestor { }
+  class MaterialStore { }
+  class PlotStore { }
+  class PlotGenerator { }
+  class PlotResolver { }
+}
+
+' ============================================================
+'  workflow — 工作流扩展包
+' ============================================================
+package "anyspark-workflow" {
+  class WorkflowDef {
+    + id: str
+    + name: str
+    + description: str
+    + nodes: list[WorkflowNode]
+    + edges: list[WorkflowEdge]
+    + validate(): list[str]
+    + is_valid(): bool
+    + start_node(): WorkflowNode?
+    + from_dict(data): WorkflowDef
+    + to_dict(): dict
+  }
+  class WorkflowNode {
+    + id: str
+    + kind: NodeKind
+    + label: str
+    + params: dict
+    + fail: FailPolicy
+    + from_dict(data): WorkflowNode
+    + to_dict(): dict
+  }
+  class WorkflowEdge {
+    + source: str
+    + target: str
+    + id: str
+    + condition: Condition?
+    + from_dict(data): WorkflowEdge
+    + to_dict(): dict
+  }
+  class FailPolicy {
+    + auto_retry_count: int
+    + auto_retry_interval_seconds: int
+    + fail_auto_skip: bool
+    + from_dict(data?): FailPolicy
+    + to_dict(): dict
+  }
+  class NodeResult {
+    + output: str
+    + token_usage: int
+    + error: str
+    + ok: bool
+  }
+  class RunContext {
+    + task_id: str
+    + book_id: str
+    + definition: WorkflowDef
+    + results: dict
+    + var(key): Any
+  }
+  protocol NodeRunner {
+    + __call__(ctx, node): NodeResult
+  }
+  class WorkflowEngine {
+    - _store: WorkflowStore
+    - _runner: NodeRunner
+    - _model_judge: Callable?
+    + run_task(task_id): dict
+    + approve(task_id, decision?): dict
+    + request_stop()
+    + clear_stop()
+  }
+  class WorkflowStore { }
+  class WorkflowGenerator { }
+}
+
+' ============================================================
+'  关键关系
+' ============================================================
+Agent --> Model : uses
+Agent --> ToolRegistry : uses
+Agent --> ConversationStore : uses
+Agent --> EventEmitter : uses
+Agent --> CancellationToken : uses
+
+ToolRegistry --> ToolSpec : manages
+ToolSpec --> ParamSpec : contains
+
+ConversationStore --> Conversation : manages
+Conversation --> Message : contains
+
+RetryingModel --> Model : wraps
+
+ModelProvider --> ModelRegistry : reads config
+ModelProvider --> DeepSeekModel : creates
+
+DeepSeekModel ..|> Model
+DeepSeekModel ..|> StreamModel
+
+SqliteConversationStore --> ChapterStore : coexists in same DB
+
+ExplorationEngine --> ExplorationStrategy : uses
+ExplorationStrategy --> DirectionCard : produces
+
+MindPlanner --> ManualStore : reads
+MindPlanner --> SessionPlan : produces
+
+AgencyStore --> AgencyLevel : manages
+ManualStore --> ManualEntry : manages
+
+GraphStore --> Entity : manages
+GraphStore --> Relation : manages
+GraphStore --> GraphEvent : manages
+
+ReviewEngine --> SkeletonCheckItem : uses
+ReviewEngine --> ReviewReport : produces
+ReviewReport --> Finding : contains
+
+WorkflowEngine --> WorkflowDef : executes
+WorkflowDef --> WorkflowNode : contains
+WorkflowDef --> WorkflowEdge : contains
+WorkflowEngine --> WorkflowStore : persists state
+WorkflowEngine ..> NodeRunner : delegates execution
+
+@enduml
