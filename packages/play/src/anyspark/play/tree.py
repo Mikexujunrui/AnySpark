@@ -162,9 +162,7 @@ class PlayStore:
 
     def get_node(self, node_id: str) -> dict[str, Any] | None:
         with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM play_nodes WHERE id = ?", (node_id,)
-            ).fetchone()
+            row = self._conn.execute("SELECT * FROM play_nodes WHERE id = ?", (node_id,)).fetchone()
         return dict(row) if row is not None else None
 
     def add_options(self, node_id: str, labels: list[str]) -> list[dict[str, Any]]:
@@ -262,7 +260,5 @@ class PlayStore:
         return {"nodes": [dict(n) for n in nodes], "options": opts}
 
     def _option_dict(self, option_id: str) -> dict[str, Any]:
-        row = self._conn.execute(
-            "SELECT * FROM play_options WHERE id = ?", (option_id,)
-        ).fetchone()
+        row = self._conn.execute("SELECT * FROM play_options WHERE id = ?", (option_id,)).fetchone()
         return dict(row) if row is not None else {"id": option_id}

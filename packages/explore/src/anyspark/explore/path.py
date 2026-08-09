@@ -71,9 +71,7 @@ class PathExploreResult:
         return {"paths": [p.to_dict() for p in self.paths]}
 
 
-def _build_prompt(
-    from_desc: str, to_desc: str, constraints: list[str] | None, n: int
-) -> str:
+def _build_prompt(from_desc: str, to_desc: str, constraints: list[str] | None, n: int) -> str:
     if constraints:
         c_block = "\n【已固化设定约束（不得冲突，避开）】\n- " + "\n- ".join(constraints)
     else:

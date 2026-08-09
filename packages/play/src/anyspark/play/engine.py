@@ -94,9 +94,7 @@ class PlayEngine:
         session = self._store.create_session(
             role=role, seed=seed, book_id=book_id, title=title, max_depth=max_depth
         )
-        root_id = self._store.add_node(
-            session_id=session["id"], parent_id="", depth=0, scene=scene
-        )
+        root_id = self._store.add_node(session_id=session["id"], parent_id="", depth=0, scene=scene)
         opt_dicts = self._store.add_options(root_id, options[:MAX_OPTIONS])
         self._store.set_current(session["id"], root_id)
         node = self._node_view(self._store.get_node(root_id), opt_dicts)
@@ -246,8 +244,11 @@ class PlayEngine:
     def _build_prompt(self, role: str, role_card: str, scene: str, history_block: str) -> str:
         n = f"{MIN_OPTIONS}-{MAX_OPTIONS} 个"
         return PROMPT_TEMPLATE.format(
-            role=role, role_card=role_card or "（无角色卡）", scene=scene,
-            history_block=history_block, n=n,
+            role=role,
+            role_card=role_card or "（无角色卡）",
+            scene=scene,
+            history_block=history_block,
+            n=n,
         )
 
     def _generate(self, prompt: str) -> dict[str, Any]:

@@ -104,9 +104,7 @@ def test_path_api_errors() -> None:
 
     client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
     # 节点不存在
-    r = client.post(
-        "/api/explore/path", json={"from_node_id": "nope", "to_desc": "B"}
-    )
+    r = client.post("/api/explore/path", json={"from_node_id": "nope", "to_desc": "B"})
     assert r.status_code == 404
     # archive 但无 from_node_id
     r = client.post(

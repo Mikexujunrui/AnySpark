@@ -1206,8 +1206,7 @@ def make_path_explore_implementer(model: Any) -> tuple[Any, Any]:
         if not from_desc or not to_desc:
             return ToolResult(call=call, ok=False, content="缺少参数 from_desc 或 to_desc。")
         constraints = [
-            c.strip() for c in str(arguments.get("constraints", "")).split("；")
-            if c.strip()
+            c.strip() for c in str(arguments.get("constraints", "")).split("；") if c.strip()
         ] or None
         try:
             from anyspark.explore import explore_path

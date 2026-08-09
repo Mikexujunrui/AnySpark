@@ -2086,9 +2086,7 @@ def build_app(
         if req.from_node_id:
             node = story_tree.get(req.from_node_id)
             if node is None:
-                raise HTTPException(
-                    status_code=404, detail=f"起点节点不存在：{req.from_node_id}"
-                )
+                raise HTTPException(status_code=404, detail=f"起点节点不存在：{req.from_node_id}")
             from_desc = node.content
         if not from_desc.strip():
             raise HTTPException(status_code=400, detail="需要 from_desc 或 from_node_id")
@@ -2106,9 +2104,7 @@ def build_app(
         if req.archive_index is not None:
             idx = req.archive_index - 1
             if not (0 <= idx < len(paths)):
-                raise HTTPException(
-                    status_code=400, detail=f"archive_index 越界（1-{len(paths)}）"
-                )
+                raise HTTPException(status_code=400, detail=f"archive_index 越界（1-{len(paths)}）")
             if not req.from_node_id:
                 raise HTTPException(
                     status_code=400, detail="落树需要 from_node_id（起点必须是叙事树节点）"
@@ -2125,7 +2121,9 @@ def build_app(
             archived = {"node_ids": node_ids, "path": chosen}
         logger.info(
             "路径探索: %s → %s × %d 条%s",
-            from_desc[:20], to_desc[:20], len(paths),
+            from_desc[:20],
+            to_desc[:20],
+            len(paths),
             "（已落树）" if archived else "",
         )
         return {"paths": paths, "archived": archived}

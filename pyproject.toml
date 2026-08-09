@@ -65,6 +65,7 @@ src = [
     "packages/graph",
     "packages/workflow",
     "packages/review",
+    "packages/play",
     "scripts",
 ]
 
