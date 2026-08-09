@@ -1160,3 +1160,70 @@ def make_play_implementer(engine: Any) -> tuple[list[Any], list[Any]]:
     specs = [start_spec, choose_spec, status_spec, export_spec]
     impls = [start, choose, status, export]
     return specs, impls
+
+
+def make_path_explore_implementer(model: Any) -> tuple[Any, Any]:
+    """叙事路径探索工具（S67）：起点 A → 终点 B 的中间串联路径候选。
+
+    章节间过渡/情节点连接/卡文找过渡时使用——生成 N 条不同思路的事件链
+    （A → 事件1 → 事件2 → B）供作者选择。作为参考，不直接写正文。
+    """
+
+    spec = ToolSpec(
+        name="path_explore",
+        description=(
+            "叙事路径探索：给定起点和终点（两个情节点/章节间），生成 2-4 条不同的"
+            "中间串联路径候选（每条一串中间事件：A → 事件1 → 事件2 → B）。"
+            "章节间过渡、情节点连接、卡文找过渡方向时使用——返回候选路径供呈现"
+            "给用户选择，作为写作参考（不直接写正文）。"
+        ),
+        params=[
+            ParamSpec(
+                name="from_desc",
+                type="string",
+                required=True,
+                description="起点（自然语言描述，如'陈渡收到旧船票'）",
+            ),
+            ParamSpec(
+                name="to_desc",
+                type="string",
+                required=True,
+                description="终点（如'陈渡发现父亲没死'）",
+            ),
+            ParamSpec(
+                name="constraints",
+                type="string",
+                required=False,
+                description="已固化设定约束（可空，'女主=医者'之类）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        from_desc = str(arguments.get("from_desc", "")).strip()
+        to_desc = str(arguments.get("to_desc", "")).strip()
+        if not from_desc or not to_desc:
+            return ToolResult(call=call, ok=False, content="缺少参数 from_desc 或 to_desc。")
+        constraints = [
+            c.strip() for c in str(arguments.get("constraints", "")).split("；")
+            if c.strip()
+        ] or None
+        try:
+            from anyspark.explore import explore_path
+
+            result = explore_path(model, from_desc, to_desc, constraints, n=4)
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"路径探索失败：{exc}")
+        if not result.paths:
+            return ToolResult(call=call, ok=False, content="路径探索失败（无有效候选）。")
+        lines = [f"【路径探索】{from_desc} → {to_desc}"]
+        for i, p in enumerate(result.paths, 1):
+            chain = " → ".join(["A", *p.events, "B"])
+            lines.append(f"{i}. [{p.style or '路径'}] {chain}")
+            if p.note:
+                lines.append(f"   （{p.note}）")
+        lines.append("（供作者选择作为过渡参考；不直接写正文）")
+        return ToolResult(call=call, ok=True, content="\n".join(lines))
+
+    return spec, implementer

@@ -379,6 +379,19 @@ class ExploreCardsIn(BaseModel):
     intent_confirmed: dict[str, object]
 
 
+class PathExploreIn(BaseModel):
+    """S67 路径探索：叙事树节点之间串联（起点 A → 终点 B 的中间事件链候选）。"""
+
+    from_desc: str = ""  # 起点描述（from_node_id 传入时自动取节点内容；两者至少其一）
+    to_desc: str  # 终点描述
+    from_node_id: str | None = None  # 叙事树起点节点（内容自动带入）
+    to_node_id: str | None = None  # 叙事树终点节点
+    constraints: list[str] = []  # 补充设定约束（与项目档案约束合并）
+    book_id: str = "main"
+    n: int = 4  # 路径数（2-6）
+    archive_index: int | None = None  # 选中第几条写入叙事树（1-based，显式才落树）
+
+
 class ExploreArchiveIn(BaseModel):
     card: dict[str, object]
     parent_node_id: str | None = None  # S59：叙事树父节点（探索分叉从哪长出）
@@ -2042,6 +2055,63 @@ def build_app(
             dimensions=dim_store.list_names(),  # S50：维度来自内容载体（可增删改）
         )
         return [c.to_dict() for c in cards]
+
+    @app.post("/api/explore/path", response_model=dict[str, object])
+    def explore_path_route(req: PathExploreIn) -> dict[str, object]:
+        """路径探索（S67）：起点 A → 终点 B 的 N 条串联路径候选（叙事树节点之间）。
+
+        三层探索粒度的中间层：大方向 explore → 桥梁 path → 场景内 play。
+        输出作为参考（不直接写正文）；archive_index 显式传才落叙事树。
+        """
+        from anyspark.explore import explore_path
+
+        from_desc, to_desc = req.from_desc, req.to_desc
+        if req.from_node_id:
+            node = story_tree.get(req.from_node_id)
+            if node is None:
+                raise HTTPException(
+                    status_code=404, detail=f"起点节点不存在：{req.from_node_id}"
+                )
+            from_desc = node.content
+        if not from_desc.strip():
+            raise HTTPException(status_code=400, detail="需要 from_desc 或 from_node_id")
+        if req.to_node_id:
+            node = story_tree.get(req.to_node_id)
+            if node is None:
+                raise HTTPException(status_code=404, detail=f"终点节点不存在：{req.to_node_id}")
+            to_desc = node.content
+        constraints = archive.constraints(req.book_id) + req.constraints
+        result = explore_path(model, from_desc, to_desc, constraints, n=req.n)
+        if not result.paths:
+            raise HTTPException(status_code=502, detail="路径探索失败（无有效候选）")
+        paths = result.to_dict()["paths"]
+        archived: dict[str, object] | None = None
+        if req.archive_index is not None:
+            idx = req.archive_index - 1
+            if not (0 <= idx < len(paths)):
+                raise HTTPException(
+                    status_code=400, detail=f"archive_index 越界（1-{len(paths)}）"
+                )
+            if not req.from_node_id:
+                raise HTTPException(
+                    status_code=400, detail="落树需要 from_node_id（起点必须是叙事树节点）"
+                )
+            chosen = paths[idx]
+            node_ids: list[str] = []
+            cur_parent: str | None = req.from_node_id
+            for ev in chosen["events"]:
+                node = story_tree.add_node(
+                    content=ev, book_id=req.book_id, parent_id=cur_parent, kind="candidate"
+                )
+                node_ids.append(node.id)
+                cur_parent = node.id
+            archived = {"node_ids": node_ids, "path": chosen}
+        logger.info(
+            "路径探索: %s → %s × %d 条%s",
+            from_desc[:20], to_desc[:20], len(paths),
+            "（已落树）" if archived else "",
+        )
+        return {"paths": paths, "archived": archived}
 
     @app.get("/api/explore/dims", response_model=list[dict[str, object]])
     def list_explore_dims() -> list[dict[str, object]]:

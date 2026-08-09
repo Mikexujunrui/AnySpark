@@ -95,6 +95,7 @@ def build_toolkit(
             make_graph_query_implementer,
             make_ingest_implementer,
             make_mind_register_implementer,
+            make_path_explore_implementer,
             make_plan_implementer,
             make_plot_implementer,
             make_read_context_implementer,
@@ -125,6 +126,9 @@ def build_toolkit(
         registry.register(st_spec, st_impl)
         rp_spec, rp_impl = make_roleplay_implementer(ctx.workspace, ctx.graph, ctx.model)
         registry.register(rp_spec, rp_impl)
+        # S67：叙事路径探索（起点 A → 终点 B 串联候选，章节间过渡/情节点连接）
+        px_spec, px_impl = make_path_explore_implementer(ctx.model)
+        registry.register(px_spec, px_impl)
         sc_spec, sc_impl = make_search_chapters_implementer(ctx.chapters)
         registry.register(sc_spec, sc_impl)
         rc_spec, rc_impl = make_read_context_implementer(ctx.chapters)

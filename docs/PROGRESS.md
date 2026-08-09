@@ -1868,3 +1868,29 @@ F811/no-redef 后精确修复）⑤不提交 scripts/gate.py、tools_review.py�
 checkout 冲掉、他们随后恢复（他们记录②），我确认后直接复用未重做 ④总闸被 review 测试
 文件撞名卡住（check 也有 test_review.py）→ 改名 test_review_panel.py ⑤提交拆两次：
 先包本体（183db70），后 app 接入+DESIGN+根注册（8e9f…）。
+
+## S67 路径探索：叙事树节点之间串联的小方向探索（已完成 ✅，DESIGN §12.29）
+
+**背景（主人讨论）**：整本书大方向已定后，"小方向探索细腻度"——叙事树节点之间怎么
+串联（A→B 过渡）是真实缺口。主人追问节点要不要分级：**结论不分级**（树的 parent_id
+已表达层次；kind 角色标签够用；分级=刚性约束违背哲学；细腻度靠探索上下文粒度）。
+主人拍板"你自己分析收益风险后决定"→ 实现者自决：放 explore（机制同构）、自然语言
+起终点为主+可选节点 ID、策略不硬编码（单次调用自由生成）、用户判别、archive 显式落树。
+
+**落地**：
+- `explore/path.py`：PathCandidate（events 事件链/note/style）+ PathExplorer（单次调用
+  JSON 宽容解析）+ explore_path；__init__ 导出
+- app：POST /api/explore/path（from_desc|from_node_id → to_desc|to_node_id，约束合并
+  项目档案，n=2-6，archive_index 显式落树=事件链写叙事树 candidate 挂 A 下）
+- agent 工具 path_explore（enable_domain 默认开：章节间过渡/情节点连接/卡文找方向）
+- 测试 8 个（explore 5 + app 3：候选解析/宽容降级/节点 ID/落树/错误路径）
+
+**真实链路（deepseek-v4-pro）**：起终点自然语言 → 4 条路径全部不同思路（直接推进：
+码头对峙即相认 / 多层铺垫：船票水印→退休售票员→旧合影→赴约 / 意外反转：匿名警告→
+废弃仓库→搏斗→反转相认 / 旁支绕行：老同事→码头工人纪念买票→替父赴约→落泪相认），
+每条带事件链+note+style ✓；从叙事树节点出发 + archive_index=2 落树 → 4 个中间事件
+链式写入树（candidate 挂 A 下）✓。
+
+**并行会话协调**：并行会话做 httpx2 迁移又标 S66（app/pyproject、cli_chat.py）——
+编号让位 S67；benchmarks/、cli_chat.py 为并行改动不提交；DESIGN §12.28（评审团）
+留在工作区归并行会话。
