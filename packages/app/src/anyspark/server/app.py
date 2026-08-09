@@ -552,6 +552,18 @@ class SkillGenerateIn(BaseModel):
     mode: str = "writing"  # S58：writing（文风/叙事技法）/ main（类型/结构组织指导）
 
 
+class TemplateGenerateIn(BaseModel):
+    """S69：从书提炼剧情模式模板候选（人工确认后走 /api/templates/import 入库）。
+
+    与 skill 生成的区别：输出模板四要素（粒度/位置/功能/可变参数），
+    输入应为多章/全书片段（跨章结构归纳，单章提不到剧情模式）。
+    """
+
+    source_text: str  # 多章/全书片段（真实原文）
+    hint: str = ""  # 可选指引（如"侧重悬疑递进"）
+    max_items: int = 5
+
+
 class ChapterPatchIn(BaseModel):
     """S44：定点编辑操作列表。"""
 
@@ -2593,6 +2605,23 @@ def build_app(
         existing_names = {s.name for s in skills.list_skills()}
         fresh = [c for c in candidates if c["name"] not in existing_names]
         return {"candidates": fresh, "existing_skills": sorted(existing_names)}
+
+    @app.post("/api/templates/generate", response_model=dict[str, object])
+    def generate_template(req: TemplateGenerateIn) -> dict[str, object]:
+        """S69：从书提炼剧情模式模板候选（人工确认后走 /api/templates/import 入库）。
+
+        输入多章/全书片段 → 跨章结构归纳 → 模板四要素候选；
+        与 /api/skills/generate 的区别：输出供探索 template 来源派生方向（S68 接线）。
+        """
+        if not req.source_text.strip():
+            raise HTTPException(status_code=400, detail="source_text 不能为空")
+        candidates = skill_generator.generate(req.source_text, req.hint, req.max_items, mode="plot")
+        if not candidates:
+            raise HTTPException(status_code=502, detail="提炼失败（无有效候选）")
+        # 去重：与现有模板库（L2+L3）名比对
+        existing_names = {t.name for t in templates_external.all()}
+        fresh = [c for c in candidates if c["name"] not in existing_names]
+        return {"candidates": fresh, "existing_templates": sorted(existing_names)}
 
     @app.get("/api/skills", response_model=list[dict[str, Any]])
     def list_skills() -> list[dict[str, Any]]:

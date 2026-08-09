@@ -185,3 +185,77 @@ def test_drafts_api() -> None:
     assert r.status_code == 502
     # drafts 列表空（无后台生成）
     assert client.get("/api/skills/drafts").json() == []
+
+
+# ──────────────────────────────────────────────────────────────
+# S69：剧情模式模板提炼（plot mode）
+# ──────────────────────────────────────────────────────────────
+PLOT_OUTPUT = """```json
+[
+  {"name": "护送式旅程·双线交汇", "description": "以护送/押运为明线（地理位移+生存危机），暗线为被护送物的记忆/身份碎片逐章洒落，终点汇合引爆真相。可变参数：护送目标、暗线内容、汇合代价。", "granularity": "全书", "position": "发展", "function": "悬念", "params": ["护送目标", "暗线内容", "汇合代价"]},
+  {"name": "章末急刹车", "description": "每章末尾留一个未落地的事实或突然的异动（不解释），下一章开头先回应再继续推进。可变参数：刹车事件类型。", "granularity": "章", "position": "结局", "function": "悬念", "params": ["刹车事件"]},
+  {"name": "乱填的维度", "description": "这个模板的维度故意乱填，应回落默认。", "granularity": "乱填", "position": "乱填", "function": "乱填", "params": "逗号,串"}
+]
+```"""
+
+
+def test_parse_templates_four_elements() -> None:
+    """S69：解析模板四要素（粒度/位置/功能/可变参数）。"""
+    from anyspark.align.skillgen import _parse_templates
+
+    cands = _parse_templates(PLOT_OUTPUT)
+    assert len(cands) == 3
+    t = cands[0]
+    assert t["name"] == "护送式旅程·双线交汇"
+    assert t["granularity"] == "全书"
+    assert t["position"] == "发展"
+    assert t["function"] == "悬念"
+    assert t["params"] == "护送目标,暗线内容,汇合代价"
+
+
+def test_parse_templates_invalid_dimension_falls_back() -> None:
+    """S69：维度不在分类集内回落默认（防模型乱填）。"""
+    from anyspark.align.skillgen import _parse_templates
+
+    cands = _parse_templates(PLOT_OUTPUT)
+    bad = cands[2]
+    assert bad["granularity"] == "章"  # "乱填" → 默认
+    assert bad["position"] == "发展"
+    assert bad["function"] == "主线"
+    assert bad["params"] == "逗号,串"  # 字符串 params 归一为逗号串
+
+
+def test_generate_plot_mode_uses_plot_prompt() -> None:
+    """S69：mode=plot 走剧情模式 prompt，输出四要素候选。"""
+    model = FakeSkillModel(PLOT_OUTPUT)
+    gen = SkillGenerator(model)
+    cands = gen.generate("多章正文", max_items=3, mode="plot")
+    assert len(cands) == 3
+    assert cands[0]["granularity"] == "全书"
+    # prompt 含剧情模式特征
+    assert "剧情模式" in model.prompts[0]
+    assert "多章" in model.prompts[0]
+
+
+def test_generate_plot_helper() -> None:
+    """S69：generate_plot 便捷方法。"""
+    model = FakeSkillModel(PLOT_OUTPUT)
+    gen = SkillGenerator(model)
+    cands = gen.generate_plot("多章正文")
+    assert cands and cands[0]["name"].startswith("护送式")
+
+
+def test_generate_plot_api_and_dedup() -> None:
+    """S69：/api/templates/generate 端点 + 与现有模板库去重。"""
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=FakeSkillModel(PLOT_OUTPUT), db_path=db))
+    r = client.post("/api/templates/generate", json={"source_text": "多章", "max_items": 3})
+    assert r.status_code == 200
+    data = r.json()
+    assert len(data["candidates"]) == 3
+    assert "护送式旅程·双线交汇" in [c["name"] for c in data["candidates"]]
+    # existing_templates 返回 L2 默认库名（去重参考）
+    assert "废柴流开局·反差铺垫" in data["existing_templates"]
+    # 空输入 → 400
+    r2 = client.post("/api/templates/generate", json={"source_text": ""})
+    assert r2.status_code == 400

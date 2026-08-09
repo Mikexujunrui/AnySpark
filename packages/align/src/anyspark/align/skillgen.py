@@ -92,6 +92,40 @@ GENERATE_PROMPT_MAIN = """你是小说结构分析器。给定一部小说的正
 给定正文：
 """
 
+# 剧情模式模板生成提示（S69：从书提炼剧情模式 → 模板库）
+# 用途：给探索的"剧情模式模板"——DESIGN 机制 6 的四要素元数据（粒度/位置/功能/
+# 可变参数），探索的 template 来源据此派生方向（S68 已接线真实模板注入）。
+# 与 GENERATE_PROMPT_MAIN 的区别：main=给主循环看的组织指导（决策指令）；
+# plot=给探索看的模式模板（"怎么用能变出什么"，模板是起点变体才是目标）。
+# 输入为**多章/全书片段**（跨章结构归纳，单章提不到剧情模式）。
+GENERATE_PROMPT_PLOT = """你是小说剧情模式提炼器。给定一部小说的**多章片段**，提炼出**可复用剧情模式模板**。
+
+【什么对探索最有指导价值】
+- 提炼的是**结构层的剧情模式**（跨章组织方式），不是句子/用词技法（那是文风提取的事）：
+  ① 开篇钩子：故事/章节怎么开场立钩子（什么悬念/代价/身份设定）
+  ② 冲突升级：冲突怎么逐步升级（间隔、台阶、爆点在哪）
+  ③ 章节衔接：章末怎么留钩子、跨章怎么保持张力
+  ④ 情感节拍：情绪起伏的分布（铺垫→谷底→爆发→余波）
+  ⑤ 收束方式：高潮怎么处理、结局/悬念怎么收
+- 每个模式要写明**可变参数**（模板中可替换的位置）——探索派生方向时靠变体，不是照搬。
+
+【复现测试】
+- 提炼前问自己：这是这本书**有辨识度的剧情组织方式**，还是通用套路？
+  通用套路不要提炼（如"主角成长变强"人人都会）；有辨识度的组织方式才提炼。
+
+【跨章要求】
+- 输入是多章片段：先看整体结构再提炼，案例要引用具体章节位置
+  （如"第1章埋身世钩子，第3章才揭示"），不是单句摘录。
+
+【简洁自检】
+- 每条模板 description 应能**一次读完就内化**：2-4 句，去掉形容词，只留结构动作。
+
+【输出格式】（严格 JSON 数组，不要其它文字）：
+[{"name": "模板名（具体可执行，如'护送式旅程·双线交汇'）", "description": "剧情模式说明（结构/冲突/节拍，含可变参数位置），2-4 句", "granularity": "粒度：全书/卷/章/场景/段落 之一", "position": "位置：开局/发展/高潮/结局 之一", "function": "功能：铺垫/主线/悬念/爽点/情感 之一", "params": ["可变参数1", "可变参数2"]}]
+
+给定多章片段：
+"""
+
 
 def _parse_skills(raw: str) -> list[dict[str, str]]:
     """宽容解析模型输出的 skill JSON 数组（去围栏/取数组/过滤空）。"""
@@ -133,11 +167,66 @@ def _parse_skills(raw: str) -> list[dict[str, str]]:
     return out
 
 
-class SkillGenerator:
-    """skill 生成器：原文 → 可执行 skill 候选（真实 LLM，无工具单次调用）。
+def _parse_templates(raw: str) -> list[dict[str, str]]:
+    """宽容解析剧情模式模板候选（JSON 数组，含四要素元数据）。
 
-    S58：mode 区分——writing（文风/叙事技巧，target=writing）/
-    main（类型/结构指导，target=main，给主循环看）。
+    与 _parse_skills 共用提取逻辑，但校验四要素：granularity/position/function
+    限制在默认分类集内（防模型乱填；未知值回落默认），params 归一为逗号串。
+    """
+    cleaned = raw.strip()
+    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
+    if fence:
+        cleaned = fence.group(1)
+    start, end = cleaned.find("["), cleaned.rfind("]")
+    if start == -1 or end == -1 or end <= start:
+        return []
+    try:
+        data = json.loads(cleaned[start : end + 1])
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, list):
+        return []
+    valid_gr = ("全书", "卷", "章", "场景", "段落")
+    valid_pos = ("开局", "发展", "高潮", "结局")
+    valid_fn = ("铺垫", "主线", "悬念", "爽点", "情感")
+    out: list[dict[str, str]] = []
+    for d in data:
+        if not isinstance(d, dict):
+            continue
+        name = str(d.get("name", "")).strip()
+        description = str(d.get("description", "")).strip()
+        if not name or not description:
+            continue
+        params = d.get("params", []) or []
+        if isinstance(params, str):
+            params = [p.strip() for p in params.split(",") if p.strip()]
+        elif not isinstance(params, list):
+            params = []
+        out.append(
+            {
+                "name": name,
+                "description": description,
+                "granularity": str(d.get("granularity", "章")).strip()
+                if str(d.get("granularity", "")).strip() in valid_gr
+                else "章",
+                "position": str(d.get("position", "发展")).strip()
+                if str(d.get("position", "")).strip() in valid_pos
+                else "发展",
+                "function": str(d.get("function", "主线")).strip()
+                if str(d.get("function", "")).strip() in valid_fn
+                else "主线",
+                "params": ",".join(str(p).strip() for p in params if str(p).strip()),
+            }
+        )
+    return out
+
+
+class SkillGenerator:
+    """skill/模板 生成器：原文 → 可执行候选（真实 LLM，无工具单次调用）。
+
+    S58：mode 区分——writing（文风/叙事技巧，target=writing）/ main
+    （类型/结构指导，target=main，给主循环看）/ plot（S69：剧情模式模板，
+    四要素元数据，给探索的 template 来源派生方向）。
     """
 
     def __init__(self, model: object) -> None:
@@ -150,14 +239,25 @@ class SkillGenerator:
         max_items: int = 5,
         mode: str = "writing",
     ) -> list[dict[str, str]]:
-        """从原文提炼 skill 候选。
+        """从原文提炼候选。
 
         source_text：待提炼的正文（导入的小说章节/片段，真实原文）。
         hint：可选指引（如"侧重打斗文风"/"侧重爽文节奏"），追加到提示。
-        mode：S58——writing（文风/叙事技法）/ main（类型/结构组织指导，主循环看）。
+        mode：S58——writing（文风/叙事技法）/ main（类型/结构组织指导，主循环看）/\n        plot（S69：剧情模式模板，四要素元数据，给探索用）。
         """
         if not source_text.strip():
             return []
+        if mode == "plot":
+            # S69：剧情模式需要跨章结构归纳——输入窗口比单章文风提炼更大
+            prompt = GENERATE_PROMPT_PLOT + f"\n{source_text[:12000]}\n"
+            if hint.strip():
+                prompt += f"\n额外指引：{hint.strip()}\n"
+            prompt += f"\n提炼最多 {max_items} 条模板，输出 JSON 数组。"
+            output = self._model.respond(  # type: ignore[attr-defined]
+                [Message(role="system", content=prompt)],
+                [],
+            )
+            return _parse_templates(output.text)[:max_items]
         prompt = GENERATE_PROMPT_MAIN if mode == "main" else GENERATE_PROMPT
         prompt += f"\n{source_text[:6000]}\n"
         if hint.strip():
@@ -182,6 +282,15 @@ class SkillGenerator:
     ) -> list[dict[str, str]]:
         """S58：类型/结构指导生成（target=main，给主循环看）。"""
         return self.generate(source_text, hint, max_items, mode="main")
+
+    def generate_plot(
+        self,
+        source_text: str,
+        hint: str = "",
+        max_items: int = 5,
+    ) -> list[dict[str, str]]:
+        """S69：剧情模式模板生成（四要素元数据，给探索用）。"""
+        return self.generate(source_text, hint, max_items, mode="plot")
 
 
 def render_skill_candidates(candidates: list[dict[str, str]]) -> str:
