@@ -16,7 +16,7 @@ const SEVERITY_STYLES: Record<CheckFinding["severity"], { bg: string; text: stri
 };
 
 export default function CheckReport() {
-  const { report, loading, error, runCheck, clearReport } = useCheckStore();
+  const { report, loading, error, timestamp, runCheck, clearReport } = useCheckStore();
 
   const handleRunCheck = () => {
     runCheck();
@@ -77,7 +77,10 @@ export default function CheckReport() {
         <div className="flex items-center justify-between">
           <div>
             <h3 className="text-sm font-medium text-zinc-200">审读报告</h3>
-            <p className="text-xs text-zinc-500 mt-0.5">目标：{report.target}</p>
+            <p className="text-xs text-zinc-500 mt-0.5">
+              目标：{report.target}
+              {timestamp && <span className="ml-2">· {new Date(timestamp).toLocaleString()}</span>}
+            </p>
           </div>
           <div className="flex items-center gap-3">
             {report.hard_count > 0 && (

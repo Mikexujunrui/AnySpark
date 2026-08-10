@@ -6,6 +6,7 @@ interface CheckState {
   report: CheckReport | null;
   loading: boolean;
   error: string | null;
+  timestamp: string | null;
 
   runCheck: (chapterId?: string) => Promise<void>;
   clearReport: () => void;
@@ -15,6 +16,7 @@ export const useCheckStore = create<CheckState>((set, get) => ({
   report: null,
   loading: false,
   error: null,
+  timestamp: null,
 
   runCheck: async (chapterId?: string) => {
     set({ loading: true, error: null });
@@ -43,12 +45,12 @@ export const useCheckStore = create<CheckState>((set, get) => ({
         chapterOrder >= 0 ? chapterOrder : undefined
       );
       
-      set({ report, loading: false });
+      set({ report, loading: false, timestamp: new Date().toISOString() });
     } catch (error) {
       console.error("Failed to run check:", error);
       set({ loading: false, error: error instanceof Error ? error.message : "审读失败" });
     }
   },
 
-  clearReport: () => set({ report: null, error: null }),
+  clearReport: () => set({ report: null, error: null, timestamp: null }),
 }));

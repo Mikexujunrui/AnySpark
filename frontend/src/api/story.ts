@@ -32,6 +32,11 @@ export interface StoryTree {
   thread_render: string;
 }
 
+// 获取叙事节点列表
+export function listStoryNodes(bookId = "main"): Promise<StoryNode[]> {
+  return apiGet<StoryNode[]>(`/api/story/nodes?book_id=${bookId}`);
+}
+
 // 获取完整叙事树
 export function getStoryTree(bookId = "main"): Promise<StoryTree> {
   return apiGet<StoryTree>(`/api/story/tree?book_id=${bookId}`);
