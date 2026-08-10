@@ -10,11 +10,18 @@ export interface DirectionCard {
   term: string;
 }
 
+// 种子概念（后端返回）
+export interface SeedConcept {
+  core: string;
+  mood: string;
+  genre: string;
+  seed_position: string;
+}
+
 // 意图理解结果
 export interface IntentResult {
-  concepts: string[];
-  ambiguities: string[];
-  seed_analysis?: string;
+  concept: SeedConcept;
+  questions: string[];
 }
 
 // 已固化的方向

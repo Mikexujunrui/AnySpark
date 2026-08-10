@@ -83,36 +83,50 @@ export default function ExploreView() {
               AI 对种子的理解如下，确认后生成方向卡。
             </p>
             
-            {intent.seed_analysis && (
+            {/* 种子分析 */}
+            {intent.concept?.core && (
               <div className="mb-4 p-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
                 <p className="text-xs text-zinc-500 mb-1">种子分析</p>
-                <p className="text-sm text-zinc-300">{intent.seed_analysis}</p>
+                <p className="text-sm text-zinc-300">{intent.concept.core}</p>
               </div>
             )}
 
-            {intent.concepts.length > 0 && (
-              <div className="mb-4">
-                <p className="text-xs text-zinc-500 mb-2">核心概念</p>
-                <div className="flex flex-wrap gap-2">
-                  {intent.concepts.map((c, i) => (
-                    <span
-                      key={i}
-                      className="text-xs px-2 py-1 bg-emerald-900/30 text-emerald-400 rounded border border-emerald-900/50"
-                    >
-                      {c}
-                    </span>
-                  ))}
+            {/* 概念标签 */}
+            <div className="mb-4">
+              {intent.concept?.genre && intent.concept.genre !== "待定" && (
+                <div className="mb-3">
+                  <p className="text-xs text-zinc-500 mb-2">类型</p>
+                  <span className="text-xs px-2 py-1 bg-emerald-900/30 text-emerald-400 rounded border border-emerald-900/50">
+                    {intent.concept.genre}
+                  </span>
                 </div>
-              </div>
-            )}
+              )}
+              {intent.concept?.mood && intent.concept.mood !== "待定" && (
+                <div className="mb-3">
+                  <p className="text-xs text-zinc-500 mb-2">情绪</p>
+                  <span className="text-xs px-2 py-1 bg-blue-900/30 text-blue-400 rounded border border-blue-900/50">
+                    {intent.concept.mood}
+                  </span>
+                </div>
+              )}
+              {intent.concept?.seed_position && intent.concept.seed_position !== "未知" && (
+                <div className="mb-3">
+                  <p className="text-xs text-zinc-500 mb-2">种子位置</p>
+                  <span className="text-xs px-2 py-1 bg-purple-900/30 text-purple-400 rounded border border-purple-900/50">
+                    {intent.concept.seed_position}
+                  </span>
+                </div>
+              )}
+            </div>
 
-            {intent.ambiguities.length > 0 && (
+            {/* AI 追问 */}
+            {intent.questions && intent.questions.length > 0 && (
               <div className="mb-4">
-                <p className="text-xs text-zinc-500 mb-2">歧义点</p>
+                <p className="text-xs text-zinc-500 mb-2">AI 追问</p>
                 <div className="space-y-1">
-                  {intent.ambiguities.map((a, i) => (
+                  {intent.questions.map((q, i) => (
                     <p key={i} className="text-xs text-amber-400/80">
-                      • {a}
+                      • {q}
                     </p>
                   ))}
                 </div>
