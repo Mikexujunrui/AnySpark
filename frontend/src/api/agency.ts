@@ -1,7 +1,7 @@
 import { apiGet, apiPost } from "./client";
 
 export interface AgencyLevel {
-  level_id: string;
+  id: string;
   name: string;
   description: string;
   order: number;
