@@ -26,13 +26,13 @@ interface SettingsState {
   addSetting: (category: string, name: string, content: string) => Promise<void>;
   updateSetting: (id: string, data: Partial<{ name: string; content: string }>) => Promise<void>;
   removeSetting: (id: string) => Promise<void>;
-  toggleUncensored: (enabled: boolean, level?: string) => Promise<void>;
+  toggleUncensored: (enabled: boolean) => Promise<void>;
 }
 
 export const useSettingsStore = create<SettingsState>((set, get) => ({
   categories: [],
   settings: [],
-  uncensored: { enabled: false, level: "standard" },
+  uncensored: { book_id: "main", enabled: false },
   loading: false,
 
   fetchAll: async () => {
@@ -100,9 +100,9 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
     }
   },
 
-  toggleUncensored: async (enabled: boolean, level: string = "standard") => {
+  toggleUncensored: async (enabled: boolean) => {
     try {
-      const updated = await setUncensored(enabled, level);
+      const updated = await setUncensored(enabled);
       set({ uncensored: updated });
     } catch (error) {
       console.error("Failed to toggle uncensored:", error);

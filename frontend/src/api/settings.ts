@@ -56,17 +56,17 @@ export function deleteSetting(id: string): Promise<void> {
 
 // 破限模式
 export interface UncensoredConfig {
+  book_id: string;
   enabled: boolean;
-  level?: string;
 }
 
 export function getUncensored(): Promise<UncensoredConfig> {
   return apiFetch<UncensoredConfig>("/api/uncensored");
 }
 
-export function setUncensored(enabled: boolean, level: string = "standard"): Promise<UncensoredConfig> {
+export function setUncensored(enabled: boolean): Promise<UncensoredConfig> {
   return apiFetch<UncensoredConfig>("/api/uncensored", {
     method: "POST",
-    body: JSON.stringify({ enabled, level }),
+    body: JSON.stringify({ enabled }),
   });
 }

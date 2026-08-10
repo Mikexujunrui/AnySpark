@@ -95,7 +95,7 @@ export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               </div>
               {uncensored.enabled && (
                 <div className="mt-3 pt-3 border-t border-zinc-700">
-                  <p className="text-xs text-zinc-400">当前级别：{uncensored.level || "standard"}</p>
+                  <p className="text-xs text-zinc-400">已启用：AI 生成内容不设题材禁区，评价标准为文学价值</p>
                 </div>
               )}
             </div>
