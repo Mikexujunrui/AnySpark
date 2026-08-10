@@ -1,6 +1,9 @@
 import { useDisplayStore, type DisplayMode } from "../stores/displayStore";
 import Paper from "./Paper";
 import SkillPanel from "./SkillPanel";
+import StoryTreeView from "./StoryTreeView";
+import CheckReport from "./CheckReport";
+import ExploreView from "./ExploreView";
 import { useState } from "react";
 
 interface DisplayAreaProps {
@@ -107,21 +110,9 @@ export default function DisplayArea({
         {mode === "skills" || (mode === "paper" && skillOpen) ? (
           <SkillPanel open={true} onClose={() => setSkillOpen(false)} embedded />
         ) : null}
-        {mode === "tree" && (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-zinc-600">叙事树视图（待实现）</p>
-          </div>
-        )}
-        {mode === "check" && (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-zinc-600">审读报告（待实现）</p>
-          </div>
-        )}
-        {mode === "explore" && (
-          <div className="flex items-center justify-center h-full">
-            <p className="text-sm text-zinc-600">探索视图（待实现）</p>
-          </div>
-        )}
+        {mode === "tree" && <StoryTreeView />}
+        {mode === "check" && <CheckReport />}
+        {mode === "explore" && <ExploreView />}
       </div>
     </div>
   );
