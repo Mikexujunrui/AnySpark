@@ -6,6 +6,7 @@ const SEVERITY_ORDER: Record<CheckFinding["severity"], number> = {
   hard: 0,
   soft: 1,
   info: 2,
+  suggestion: 3,
 };
 
 // severity 样式
@@ -13,6 +14,7 @@ const SEVERITY_STYLES: Record<CheckFinding["severity"], { bg: string; text: stri
   hard: { bg: "bg-red-900/30", text: "text-red-400", label: "严重" },
   soft: { bg: "bg-amber-900/30", text: "text-amber-400", label: "警告" },
   info: { bg: "bg-blue-900/30", text: "text-blue-400", label: "提示" },
+  suggestion: { bg: "bg-zinc-800/50", text: "text-zinc-400", label: "建议" },
 };
 
 export default function CheckReport() {

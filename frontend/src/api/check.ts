@@ -3,7 +3,7 @@ import { apiPost } from "./client";
 // 审读发现项
 export interface CheckFinding {
   category: string;
-  severity: "hard" | "soft" | "info";
+  severity: "hard" | "soft" | "info" | "suggestion";
   message: string;
   evidence: string;
   suggestion: string;
