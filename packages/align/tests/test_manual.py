@@ -179,3 +179,42 @@ def test_decay_stale_downgrades_unused_entries() -> None:
         assert got[locked_old.id] == "high"  # 锁定条目不降（用户主权）
     finally:
         store.close()
+
+
+def test_notices_on_update_and_delete() -> None:
+    """S74c：update/delete 写变更通知，add 不写；unread/mark/list。"""
+    import tempfile
+    from pathlib import Path
+
+    from anyspark.align import ManualEntry, ManualStore
+
+    store = ManualStore(Path(tempfile.mkdtemp()) / "t.db")
+    e = store.add(ManualEntry(content="对话克制", category="style", source="user"))
+    assert store.unread_notices() == []  # add 不写通知
+
+    # update 写通知（内容变化）
+    store.update(e.id, content="对话克制，少用感叹号")
+    n = store.unread_notices()
+    assert len(n) == 1
+    assert n[0]["action"] == "update"
+    assert n[0]["old_content"] == "对话克制"
+    assert n[0]["new_content"] == "对话克制，少用感叹号"
+
+    # 无实际变化的 update 不写通知
+    store.update(e.id, content="对话克制，少用感叹号")
+    assert len(store.unread_notices()) == 1
+
+    # mark read
+    assert store.mark_notices_read() == 1
+    assert store.unread_notices() == []
+
+    # delete 写通知（旧内容保留）
+    store.delete(e.id)
+    n2 = store.unread_notices()
+    assert len(n2) == 1 and n2[0]["action"] == "delete"
+    assert n2[0]["old_content"] == "对话克制，少用感叹号"
+
+    # list 含已读
+    store.mark_notices_read()
+    all_n = store.list_notices()
+    assert len(all_n) == 2  # update + delete

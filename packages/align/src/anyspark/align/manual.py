@@ -81,6 +81,9 @@ class ManualEntry:
         }
 
 
+_NoticeList = list  # 类型别名：绕开 ManualStore.list 方法遮蔽（S74c 注解用）
+
+
 def _now() -> str:
     return datetime.now(UTC).isoformat()
 
@@ -121,6 +124,23 @@ class ManualStore:
                 self._conn.execute(
                     "ALTER TABLE manual_entries ADD COLUMN category TEXT NOT NULL DEFAULT 'style'"
                 )
+            # S74c 心智变更通知：update/delete 落通知（会话注入提醒，用户知情+指导权）
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS manual_notices (
+                    id TEXT PRIMARY KEY,
+                    action TEXT NOT NULL,           -- add | update | delete
+                    entry_id TEXT DEFAULT '',
+                    old_content TEXT DEFAULT '',    -- 变更前（update/delete 用）
+                    new_content TEXT DEFAULT '',    -- 变更后（add/update 用）
+                    category TEXT DEFAULT '',
+                    scope TEXT DEFAULT 'project',
+                    book_id TEXT DEFAULT 'main',
+                    created_at TEXT NOT NULL,
+                    read INTEGER NOT NULL DEFAULT 0
+                )
+                """
+            )
             self._conn.commit()
 
     def add(self, entry: ManualEntry) -> ManualEntry:
@@ -285,12 +305,19 @@ class ManualStore:
         confidence: float | None = None,
         category: str | None = None,
     ) -> ManualEntry | None:
-        """更新条目内容/置信度/类别（锁定条目不可改，用户主权）。"""
+        """更新条目内容/置信度/类别（锁定条目不可改，用户主权）。
+
+        S74c：实际变化（内容/分类）时写变更通知——用户知情（会话注入提醒）。
+        """
         entry = self.get(entry_id)
         if entry is None:
             return None
         if entry.locked:
             return entry
+        changed = (content is not None and content != entry.content) or (
+            category is not None and category in ("collab", "style", "habit")
+            and category != entry.category
+        )
         with self._lock:
             sets: list[str] = []
             params: list[Any] = []
@@ -307,6 +334,23 @@ class ManualStore:
             params.append(_now())
             params.append(entry_id)
             self._conn.execute(f"UPDATE manual_entries SET {', '.join(sets)} WHERE id=?", params)
+            if changed:
+                self._conn.execute(
+                    "INSERT INTO manual_notices"
+                    " (id, action, entry_id, old_content, new_content, category, scope,"
+                    "  book_id, created_at, read)"
+                    " VALUES (?, 'update', ?, ?, ?, ?, ?, ?, ?, 0)",
+                    (
+                        uuid.uuid4().hex,
+                        entry_id,
+                        entry.content,
+                        content or entry.content,
+                        category or entry.category,
+                        entry.scope,
+                        entry.book_id,
+                        _now(),
+                    ),
+                )
             self._conn.commit()
         return self.get(entry_id)
 
@@ -320,9 +364,58 @@ class ManualStore:
         return self.get(entry_id)
 
     def delete(self, entry_id: str) -> None:
+        """删除条目（S74c：先取旧内容写变更通知，再删——用户知情）。"""
+        entry = self.get(entry_id)
         with self._lock:
+            if entry is not None:
+                self._conn.execute(
+                    "INSERT INTO manual_notices"
+                    " (id, action, entry_id, old_content, new_content, category, scope,"
+                    "  book_id, created_at, read)"
+                    " VALUES (?, 'delete', ?, ?, '', ?, ?, ?, ?, 0)",
+                    (
+                        uuid.uuid4().hex,
+                        entry_id,
+                        entry.content,
+                        entry.category,
+                        entry.scope,
+                        entry.book_id,
+                        _now(),
+                    ),
+                )
             self._conn.execute("DELETE FROM manual_entries WHERE id=?", (entry_id,))
             self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # S74c 变更通知（用户知情 + 指导权；会话注入提醒，API 供前端展示）
+    # ------------------------------------------------------------------
+    def unread_notices(self, book_id: str = "main") -> _NoticeList[dict[str, Any]]:
+        """未读变更通知（会话注入渲染用）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM manual_notices WHERE book_id=? AND read=0"
+                " ORDER BY created_at",
+                (book_id,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_notices_read(self, book_id: str = "main") -> int:
+        """标记未读通知为已读（会话注入呈现后调用）。"""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE manual_notices SET read=1 WHERE book_id=? AND read=0", (book_id,)
+            )
+            self._conn.commit()
+        return cur.rowcount
+
+    def list_notices(self, book_id: str = "main", limit: int = 20) -> _NoticeList[dict[str, Any]]:
+        """通知列表（API 供前端展示，含已读）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM manual_notices WHERE book_id=? ORDER BY created_at DESC LIMIT ?",
+                (book_id, limit),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def close(self) -> None:
         self._conn.close()

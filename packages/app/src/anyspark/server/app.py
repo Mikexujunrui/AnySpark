@@ -1396,6 +1396,22 @@ def build_app(
             mind_block = session_plan.mind_block()
             if mind_block:
                 append_blocks.append(mind_block)
+        # S74c 心智变更通知（未读）：agent 读到应告知用户（知情），用户可要求改回（指导权）
+        if "manual" not in skip:
+            notices = manual.unread_notices(book_id)
+            if notices:
+                nlines = ["# 心智变更通知（请在本轮回复中告知用户；用户可要求改回/纠正）"]
+                for n in notices:
+                    if n["action"] == "update":
+                        nlines.append(
+                            f"- 修改了偏好：「{n['old_content']}」→「{n['new_content']}」"
+                        )
+                    elif n["action"] == "delete":
+                        nlines.append(f"- 删除了偏好：「{n['old_content']}」")
+                    else:
+                        nlines.append(f"- 新增偏好：「{n['new_content']}」")
+                append_blocks.append("\n".join(nlines))
+                manual.mark_notices_read(book_id)
         # S53c ④ 下轮展示学到：上次会话的场景记忆（跨会话延续性，归档过才注入）
         if "memory" not in skip:
             last_memory = memory_store.latest(book_id)
@@ -1913,6 +1929,15 @@ def build_app(
         """说明书条目（scope=project|global）。"""
         entries = manual.list(scope, "main")  # type: ignore[arg-type]
         return [e.to_dict() for e in entries]
+
+    @app.get("/api/manual/notices", response_model=list[dict[str, Any]])
+    def list_manual_notices(limit: int = 20) -> list[dict[str, Any]]:
+        """心智变更通知（S74c：供前端展示——用户知情：谁在何时改了哪条偏好）。
+
+        前端展示建议：通知列表（action=add/update/delete，old→new 变更内容、时间、
+        已读态）；未读高亮；可跳转到对应条目操作（保留/改回）。
+        """
+        return manual.list_notices(book_id="main", limit=limit)
 
     @app.post("/api/manual", response_model=dict[str, Any])
     def add_manual(req: ManualEntryIn) -> dict[str, Any]:
