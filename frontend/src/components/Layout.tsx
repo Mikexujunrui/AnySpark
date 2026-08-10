@@ -8,6 +8,7 @@ import ManualPanel from "./ManualPanel";
 import SkillPanel from "./SkillPanel";
 import GraphPanel from "./GraphPanel";
 import SettingsPanel from "./SettingsPanel";
+import MaterialPanel from "./MaterialPanel";
 import { useModelStore } from "../stores/modelStore";
 import { useChatStore } from "../stores/chatStore";
 
@@ -18,6 +19,7 @@ export default function Layout() {
   const [skillOpen, setSkillOpen] = useState(false);
   const [graphOpen, setGraphOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [materialOpen, setMaterialOpen] = useState(false);
 
   // 初始化加载模型列表 + 恢复最近会话
   useEffect(() => {
@@ -65,6 +67,16 @@ export default function Layout() {
             图谱
           </button>
           <button
+            onClick={() => setMaterialOpen(!materialOpen)}
+            className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
+              materialOpen
+                ? "bg-zinc-700 text-zinc-200"
+                : "bg-zinc-800 hover:bg-zinc-700 text-zinc-400"
+            }`}
+          >
+            资料
+          </button>
+          <button
             onClick={() => setSettingsOpen(!settingsOpen)}
             className={`text-xs px-2.5 py-1 rounded-md transition-colors ${
               settingsOpen
@@ -109,6 +121,9 @@ export default function Layout() {
 
       {/* 设置面板 */}
       <SettingsPanel open={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {/* 资料面板 */}
+      <MaterialPanel open={materialOpen} onClose={() => setMaterialOpen(false)} />
     </div>
   );
 }

@@ -39,3 +39,20 @@ export async function apiFetch<T>(
 
   return response.json();
 }
+
+// 便捷方法
+export function apiGet<T>(path: string): Promise<T> {
+  return apiFetch<T>(path);
+}
+
+export function apiPost<T>(path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, { method: "POST", body: JSON.stringify(body) });
+}
+
+export function apiPut<T>(path: string, body: unknown): Promise<T> {
+  return apiFetch<T>(path, { method: "PUT", body: JSON.stringify(body) });
+}
+
+export function apiDelete<T = void>(path: string): Promise<T> {
+  return apiFetch<T>(path, { method: "DELETE" });
+}
