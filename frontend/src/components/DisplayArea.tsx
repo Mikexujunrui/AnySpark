@@ -4,7 +4,6 @@ import SkillPanel from "./SkillPanel";
 import StoryTreeView from "./StoryTreeView";
 import CheckReport from "./CheckReport";
 import ExploreView from "./ExploreView";
-import { useState } from "react";
 
 interface DisplayAreaProps {
   onManualClick?: () => void;
@@ -33,7 +32,6 @@ export default function DisplayArea({
 }: DisplayAreaProps = {}) {
   const mode = useDisplayStore((s) => s.mode);
   const setMode = useDisplayStore((s) => s.setMode);
-  const [skillOpen, setSkillOpen] = useState(false);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -46,14 +44,17 @@ export default function DisplayArea({
               key={m}
               onClick={() => {
                 if (m === "skills") {
-                  setSkillOpen(!skillOpen);
+                  if (mode === "skills") {
+                    setMode("paper");
+                  } else {
+                    setMode("skills");
+                  }
                 } else {
                   setMode(m);
-                  setSkillOpen(false);
                 }
               }}
               className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
-                (m === "skills" && skillOpen) || (m !== "skills" && mode === m)
+                mode === m
                   ? "bg-zinc-700 text-zinc-200"
                   : "text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
               }`}
@@ -106,10 +107,8 @@ export default function DisplayArea({
 
       {/* 展示内容 */}
       <div className="flex-1 overflow-hidden">
-        {mode === "paper" && !skillOpen && <Paper />}
-        {mode === "skills" || (mode === "paper" && skillOpen) ? (
-          <SkillPanel open={true} onClose={() => setSkillOpen(false)} embedded />
-        ) : null}
+        {mode === "paper" && <Paper />}
+        {mode === "skills" && <SkillPanel open={true} onClose={() => setMode("paper")} embedded />}
         {mode === "tree" && <StoryTreeView />}
         {mode === "check" && <CheckReport />}
         {mode === "explore" && <ExploreView />}

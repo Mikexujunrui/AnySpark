@@ -95,7 +95,7 @@ export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
               </div>
               {uncensored.enabled && (
                 <div className="mt-3 pt-3 border-t border-zinc-700">
-                  <p className="text-xs text-zinc-400">当前级别：{uncensored.level}</p>
+                  <p className="text-xs text-zinc-400">当前级别：{uncensored.level || "standard"}</p>
                 </div>
               )}
             </div>

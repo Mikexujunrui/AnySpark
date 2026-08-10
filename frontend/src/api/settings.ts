@@ -57,7 +57,7 @@ export function deleteSetting(id: string): Promise<void> {
 // 破限模式
 export interface UncensoredConfig {
   enabled: boolean;
-  level: string;
+  level?: string;
 }
 
 export function getUncensored(): Promise<UncensoredConfig> {
