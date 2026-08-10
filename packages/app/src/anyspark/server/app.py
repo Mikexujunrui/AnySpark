@@ -317,6 +317,12 @@ class ChapterCreate(BaseModel):
     content: str = ""
 
 
+class ChapterUpdate(BaseModel):
+    """F2a：稿纸编辑器保存章节内容。"""
+
+    content: str
+
+
 class ManualEntryIn(BaseModel):
     content: str
     confidence: float = 0.5
@@ -1511,6 +1517,15 @@ def build_app(
         conv.title = req.title
         store.save(conv)
         return {"ok": True}
+
+    @app.get("/api/conversations/{conv_id}/messages", response_model=list[dict[str, Any]])
+    def get_conversation_messages(conv_id: str) -> list[dict[str, Any]]:
+        """获取会话的全部消息（F4a：会话历史恢复）。"""
+        conv = store.get(conv_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        msgs = store.messages(conv_id)
+        return [{"role": m.role, "content": m.content} for m in msgs]
 
     @app.delete("/api/conversations/{conv_id}", response_model=dict[str, bool])
     def delete_conversation(conv_id: str) -> dict[str, bool]:
@@ -3332,6 +3347,23 @@ def build_app(
             content=ch.content,
             order_index=ch.order_index,
             updated_at=ch.updated_at,
+        )
+
+    @app.put("/api/chapters/{chapter_id}", response_model=ChapterOut)
+    def update_chapter(chapter_id: str, req: ChapterUpdate) -> ChapterOut:
+        """F2a：稿纸编辑器保存章节内容。"""
+        ch = chapters.get(chapter_id)
+        if ch is None:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        chapters.upsert(ch.book_id, ch.title, req.content, ch.order_index, ch.narrative_line)
+        updated = chapters.get(chapter_id)
+        return ChapterOut(
+            id=updated.id,
+            book_id=updated.book_id,
+            title=updated.title,
+            content=updated.content,
+            order_index=updated.order_index,
+            updated_at=updated.updated_at,
         )
 
     @app.delete("/api/chapters/{chapter_id}", response_model=dict[str, object])
