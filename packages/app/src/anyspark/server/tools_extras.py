@@ -22,6 +22,22 @@ from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
 from anyspark.explore import IntentUnderstander, run_exploration
 
 
+# S72：资料用途标注 + 使用边界（防"文风参考当设定"混淆——读原文合法，但必须
+# 知道这条资料什么能用什么不能：文风参考只借鉴写法，设定参考内容权威）
+def _purpose_label(purpose: str) -> str:
+    return {"style": "文风参考", "fact": "设定参考", "both": "文风+设定"}.get(
+        purpose, purpose or "设定参考"
+    )
+
+
+def _purpose_boundary(purpose: str) -> str:
+    if purpose == "style":
+        return "使用边界：仅借鉴写法（句式/节奏/用词/视角）；其具体人物/地名/设定不得进入正文"
+    if purpose == "both":
+        return "使用边界：写法可借鉴；其设定/专名可直接引用"
+    return "使用边界：内容为权威设定，可直接引用"
+
+
 def make_explore_implementer(
     model: Any, dim_names: list[str] | None = None, templates: list[str] | None = None
 ) -> tuple[Any, Any]:
@@ -105,9 +121,11 @@ def make_read_material_implementer(materials: Any) -> tuple[Any, Any]:
     spec = ToolSpec(
         name="read_material",
         description=(
-            "查阅已上传的资料摘要卡（设定/世界观/参考文档）。"
+            "查阅已上传的资料摘要卡（设定/世界观/文风参考）。"
             "写正文需要设定细节或查证时使用；title 可给关键词，"
-            "不给则列出全部资料标题。"
+            "不给则列出全部资料标题。返回会标注资料用途（设定参考/文风参考）——"
+            "文风参考只可借鉴写法（句式/节奏/用词/视角），其具体人物/地名/设定"
+            "不得进入正文；设定参考内容为权威可直接引用。"
         ),
         params=[
             ParamSpec(
@@ -127,7 +145,7 @@ def make_read_material_implementer(materials: Any) -> tuple[Any, Any]:
             if not cards:
                 return ToolResult(call=call, ok=True, content="资料库为空。")
             lines = ["资料库现有材料："]
-            lines.extend(f"- {m.title}（{m.topic}）" for m in cards)
+            lines.extend(f"- {m.title}（{m.topic}）[{_purpose_label(m.purpose)}]" for m in cards)
             return ToolResult(call=call, ok=True, content="\n".join(lines))
         matched = [
             m
@@ -147,7 +165,9 @@ def make_read_material_implementer(materials: Any) -> tuple[Any, Any]:
         parts = []
         for m in matched[:2]:
             parts.append(
-                f"【{m.title}】\n主题：{m.topic}\n要点：{'；'.join(m.key_points[:5])}"
+                f"【{m.title}】（用途：{_purpose_label(m.purpose)}）\n"
+                f"{_purpose_boundary(m.purpose)}\n"
+                f"主题：{m.topic}\n要点：{'；'.join(m.key_points[:5])}"
                 f"\n设定：{'；'.join(m.key_settings[:5])}\n角色：{'、'.join(m.characters[:8])}"
                 f"\n术语：{'、'.join(m.terms[:8])}"
             )

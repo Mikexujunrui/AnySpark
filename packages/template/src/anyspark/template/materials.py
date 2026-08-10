@@ -183,19 +183,40 @@ class MaterialStore:
         self._conn.close()
 
 
-DIGEST_PROMPT = """你是资料消化器。把下面的材料压缩成**摘要卡**（供写作时注入，省 token）。
+DIGEST_PROMPT_TMPL = """你是资料消化器。把下面的材料压缩成**摘要卡**（供写作时注入，省 token）。
+{purpose_guide}
 输出（严格 JSON，不要其它文字）：
-{
+{{
   "title": "材料标题",
   "topic": "主题一句话",
   "key_points": ["要点1", "要点2", "要点3"],
   "key_settings": ["关键设定1", "关键设定2"],
   "characters": ["涉及角色1", "涉及角色2"],
   "terms": ["术语1", "术语2"]
-}
+}}
 
 材料：
 """
+
+# S72：按用途区分消化引导（防文风参考被当设定）——style 卡提炼"文风特征"不编设定
+_PURPOSE_GUIDES = {
+    "style": (
+        "本材料是【文风参考】（用户想学它的写法）。"
+        "key_points 提炼其文风特征（句式长短/节奏/用词/叙述视角/氛围手法）；"
+        "key_settings 写该文风适合表现的场景或空白；characters/terms 留空。"
+        "不得为其编造世界观设定（它只是写法范本，不是设定文档）。"
+    ),
+    "both": (
+        "本材料【既是文风参考又是设定来源】（如作者自己的旧书）。"
+        "key_points 提炼文风特征（句式/节奏/用词/视角）；key_settings 提炼可沿用的设定；"
+        "characters/terms 照实填写。"
+    ),
+    "fact": (
+        "本材料是【设定参考】（世界观/规则/资料文档），内容为权威设定。"
+        "key_points 提炼关键信息；key_settings 提炼可引用的具体设定；"
+        "characters/terms 照实填写。"
+    ),
+}
 
 
 class MaterialDigestor:
@@ -205,7 +226,8 @@ class MaterialDigestor:
         self._model = model
 
     def digest(self, raw_text: str, purpose: Purpose = "fact") -> MaterialCard:
-        prompt = DIGEST_PROMPT + raw_text[:4000]
+        guide = _PURPOSE_GUIDES.get(purpose, _PURPOSE_GUIDES["fact"])
+        prompt = DIGEST_PROMPT_TMPL.format(purpose_guide=guide) + raw_text[:4000]
         output = self._model.respond(
             [Message(role="system", content=prompt)],
             [],

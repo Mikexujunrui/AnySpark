@@ -119,6 +119,41 @@ def test_read_material_match_and_miss() -> None:
     assert "未找到" in miss.content
 
 
+def test_read_material_marks_purpose_and_boundary() -> None:
+    """S72：输出标注用途 + 使用边界（防文风参考被当设定）。"""
+    from anyspark.template.materials import MaterialCard
+
+    style_card = MaterialCard(
+        title="某作家文风",
+        topic="雾城系列写法",
+        key_points=["短句", "克制"],
+        key_settings=["悲剧基调"],
+        characters=[],
+        terms=[],
+        purpose="style",
+    )
+    fact_card = MaterialCard(
+        title="世界观设定",
+        topic="大陆地理",
+        key_points=["三块大陆"],
+        key_settings=["魔法体系"],
+        characters=[],
+        terms=["法力"],
+        purpose="fact",
+    )
+    spec, impl = make_read_material_implementer(FakeMaterials([style_card, fact_card]))
+
+    r1 = impl(spec, {"title": "文风"})
+    assert "用途：文风参考" in r1.content
+    assert "不得进入正文" in r1.content  # 使用边界
+    r2 = impl(spec, {"title": "世界观"})
+    assert "用途：设定参考" in r2.content
+    assert "可直接引用" in r2.content
+    # 列表也带用途标注
+    r3 = impl(spec, {"title": ""})
+    assert "文风参考" in r3.content and "设定参考" in r3.content
+
+
 def test_read_material_empty_listing() -> None:
     store = FakeMaterials([])
     spec, impl = make_read_material_implementer(store)

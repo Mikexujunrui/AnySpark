@@ -980,6 +980,89 @@ def make_mind_register_implementer(manual: Any) -> tuple[Any, Any]:
     return spec, implementer
 
 
+def make_graph_register_implementer(graph: Any) -> tuple[Any, Any]:
+    """S72：图谱登记工具——对话中"把XX记进图谱"→ 立即登记实体（+可选关系）。
+
+    对齐 mind_register（用户主动登记模式）：抽取会错/会漏，用户明确表述的设定
+    应即时落库（source=user 高置信度），不依赖自动抽取。只登记不删除
+    （删除走 API，内容裁决权在用户）。
+    """
+
+    spec = ToolSpec(
+        name="graph_register",
+        description=(
+            "把用户明确表述的设定/角色/关系登记进知识图谱。"
+            "当用户在对话中明确陈述设定（如'顾欣桐是赵光离的线人''雾城是边境城市'）"
+            "或纠正图谱错误时使用。登记后写作时图谱注入会自动包含。"
+        ),
+        params=[
+            ParamSpec(
+                name="name",
+                type="string",
+                required=True,
+                description="实体名（角色/地点/物件/设定）",
+            ),
+            ParamSpec(
+                name="entity_type",
+                type="string",
+                required=False,
+                description="类型：角色/地点/事件/物件/设定（缺省 设定）",
+            ),
+            ParamSpec(
+                name="description",
+                type="string",
+                required=False,
+                description="实体描述（自然语言）",
+            ),
+            ParamSpec(
+                name="rel_to",
+                type="string",
+                required=False,
+                description="关联的另一实体名（可选，同时登记关系时给）",
+            ),
+            ParamSpec(
+                name="rel_type",
+                type="string",
+                required=False,
+                description="关系类型（如 师父/线人/敌对；rel_to 有值时生效）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        name = str(arguments.get("name", "")).strip()
+        if not name:
+            return ToolResult(call=call, ok=False, content="缺少参数 name。")
+        etype = str(arguments.get("entity_type", "设定")).strip() or "设定"
+        desc = str(arguments.get("description", "")).strip()
+        rel_to = str(arguments.get("rel_to", "")).strip()
+        rel_type = str(arguments.get("rel_type", "")).strip()
+        try:
+            ent = graph.get_entity("main", name)
+            if ent is None:
+                graph.upsert_entity("main", name, etype, description=desc)
+            elif desc:
+                graph.update_entity_fields("main", name, description=desc, entity_type=etype)
+            lines = [f"已登记实体：{name}（{etype}）"]
+            if rel_to and rel_type:
+                rel = graph.upsert_relation("main", name, rel_to, rel_type, description=desc)
+                if rel is None:
+                    lines.append(f"关系未登记：{rel_to} 不存在（先登记该实体）")
+                else:
+                    lines.append(f"已登记关系：{name} —{rel_type}→ {rel_to}")
+            return ToolResult(
+                call=call,
+                ok=True,
+                content="\n".join(lines),
+                data={"entity": name, "type": etype},
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"登记失败：{exc}")
+
+    return spec, implementer
+
+
 def make_play_implementer(engine: Any) -> tuple[list[Any], list[Any]]:
     """互动推演工具（S65，enable_play 点亮，默认关）：扮演角色多轮选择推进。
 
@@ -1223,6 +1306,79 @@ def make_path_explore_implementer(model: Any) -> tuple[Any, Any]:
             if p.note:
                 lines.append(f"   （{p.note}）")
         lines.append("（供作者选择作为过渡参考；不直接写正文）")
+        return ToolResult(call=call, ok=True, content="\n".join(lines))
+
+    return spec, implementer
+
+
+def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, Any]:
+    """文风参考书 → skill 提炼工具（S72）：把原文/资料提炼成叙事技法候选。
+
+    需要借鉴某本书/资料的写法（句式/节奏/用词/视角）时使用——生成 skill 候选
+    供用户确认（人工确认闸门：不自动入库，对齐 S54 哲学）。
+    """
+
+    spec = ToolSpec(
+        name="skill_refine",
+        description=(
+            "从原文或资料库提炼叙事技法 skill 候选（把文风参考书变成方法论）。"
+            "需要借鉴某本书/某资料的写法（句式/节奏/用词/视角）时使用——"
+            "生成候选供用户确认（人工确认后生效，不自动入库）。"
+            "material_id 从资料库取原文（read_material 返回的 ids），或直接传 source_text。"
+        ),
+        params=[
+            ParamSpec(
+                name="material_id",
+                type="string",
+                required=False,
+                description="资料 ID（read_material 返回；从其原文提炼）",
+            ),
+            ParamSpec(
+                name="source_text",
+                type="string",
+                required=False,
+                description="原文文本（与 material_id 二选一）",
+            ),
+            ParamSpec(
+                name="hint",
+                type="string",
+                required=False,
+                description="可选指引（如'侧重打斗文风'/'侧重节奏'）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        source_text = str(arguments.get("source_text", "")).strip()
+        material_id = str(arguments.get("material_id", "")).strip()
+        hint = str(arguments.get("hint", "")).strip()
+        if material_id:
+            try:
+                card = materials.get(material_id)
+            except Exception as exc:
+                return ToolResult(call=call, ok=False, content=f"读取资料失败：{exc}")
+            if card is None:
+                return ToolResult(call=call, ok=False, content=f"资料不存在：{material_id}")
+            if not (card.source_text or "").strip():
+                return ToolResult(
+                    call=call, ok=False, content=f"资料无原文（{card.title}），无法提炼"
+                )
+            source_text = card.source_text.strip()
+        if not source_text:
+            return ToolResult(call=call, ok=False, content="需要 material_id 或 source_text。")
+        try:
+            candidates = generator.generate(source_text, hint, 5, mode="writing")
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"提炼失败：{exc}")
+        if not candidates:
+            return ToolResult(call=call, ok=False, content="提炼失败（无有效候选）。")
+        lines = [f"【skill 候选 {len(candidates)} 条（待人工确认，不自动生效）】"]
+        for i, c in enumerate(candidates, 1):
+            name = c.get("name", f"候选{i}")
+            desc = str(c.get("description", ""))[:60]
+            lines.append(f"{i}. {name}：{desc}")
+        lines.append("（确认后由用户走技能确认流程生效）")
         return ToolResult(call=call, ok=True, content="\n".join(lines))
 
     return spec, implementer

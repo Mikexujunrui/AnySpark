@@ -2091,3 +2091,30 @@ SQLite schema 干净；依赖无死。
 
 **门禁**：总闸全绿（含 packages/play——并行会话已把 play 加入 gate 并解决
 S67 格式遗留）。
+
+## S72 文风参考防混淆（已完成 ✅，DESIGN §12.30）——参考书 vs skill 厘清 + 三件套
+
+**背景（主人三连问定案）**：①参考书≠skill（素材 vs 方法论，正确关系=参考书→提炼→
+skill，S54 设计意图）②参考书有时必须读原文（skill 案例不够，模仿具体写法/氛围参照
+要原文）——**读原文合法，不能一刀切全走提炼** ③混淆本质=读了原文没有使用边界。
+拍板：1+2+3 全做。
+
+**落地**：
+- read_material 标注用途+边界（tools_extras）：输出带【用途：文风参考/设定参考/
+  两者】+ 使用边界行（style 借鉴写法不得搬设定；fact 可直接引用）；列表也标注
+- digest 按 purpose 引导（materials.py）：_PURPOSE_GUIDES 三段（style 提炼文风特征
+  防编造设定 / fact 照旧 / both 兼得）
+- skill 提炼链路（app.py + tools_domain）：/api/skills/generate 加 material_id
+  （资料卡 source_text 取原文，与 source_text 二选一，404/400 校验）；agent 工具
+  skill_refine（enable_domain 默认开，生成候选人工确认，不自动入库）
+- 测试 5 个新增（read_material 标注/边界、digest 引导、material_id 链路、skill_refine
+  工具、错误路径）
+
+**真实链路（deepseek-v4-pro）**：上传 style 资料（雾城手记片段）→ digest 产出场景
+元素非编造世界观 ✓；/api/skills/generate material_id → 5 条高质量候选（环境即情绪/
+动作留白/静态意象比喻/感官拟人化/感知受限叙述，负面约束+原文案例）✓。
+
+**遗留发现（待主人定）**：真实链路暴露 read_material 默认不注册（S32 防干扰，
+enable_extras 默认关）——agent 查资料去翻沙箱/设定档/图谱绕道，看不到资料库。
+标注用途对不可见的工具无效。可选：read_material 挪入 enable_domain（资料库=设定
+查证核心）——S32 权衡，主人定（详见 DESIGN §12.30 遗留）。

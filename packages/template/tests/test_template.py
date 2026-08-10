@@ -82,3 +82,30 @@ def test_digestor_fallback_on_bad_json() -> None:
     assert card.purpose == "style"
     assert card.key_points == []
     assert card.title  # 回退标题
+
+
+def test_digest_purpose_guides_prompt() -> None:
+    """S72：digest 按 purpose 注入不同引导（style 提炼文风特征，fact 提炼设定）。"""
+
+    class _RecordingDigestor:
+        model_name = "probe"
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+            self.prompts.append(messages[0].content or "")
+            return ModelOutput(
+                text='{"title": "卡", "topic": "t", "key_points": ["p"], '
+                '"key_settings": [], "characters": [], "terms": []}'
+            )
+
+    model = _RecordingDigestor()
+    digestor = MaterialDigestor(model)
+    digestor.digest("原文……", purpose="style")
+    digestor.digest("原文……", purpose="fact")
+    style_prompt, fact_prompt = model.prompts[0], model.prompts[1]
+    assert "文风参考" in style_prompt and "文风特征" in style_prompt
+    assert "编造世界观设定" in style_prompt  # style 引导防编造
+    assert "设定参考" in fact_prompt
+    assert "文风参考" not in fact_prompt

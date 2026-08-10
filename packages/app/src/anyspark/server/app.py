@@ -437,6 +437,60 @@ class GraphTypePatch(BaseModel):
     enabled: bool
 
 
+class GraphEntityIn(BaseModel):
+    """S72：手动登记/覆盖实体（幂等：同名实体字段全量覆盖，不动自动统计）。"""
+
+    name: str
+    entity_type: str = "设定"
+    aliases: list[str] = []
+    description: str = ""
+    state: str = ""
+    book_id: str = "main"
+
+
+class GraphEntityPatch(BaseModel):
+    """S72：局部编辑实体字段（只改传入字段，不改自动统计）。"""
+
+    aliases: list[str] | None = None
+    description: str | None = None
+    state: str | None = None
+    entity_type: str | None = None
+
+
+class GraphRelationIn(BaseModel):
+    """S72：手动登记关系（两端实体须存在）。"""
+
+    from_name: str
+    to_name: str
+    rel_type: str
+    description: str = ""
+    book_id: str = "main"
+
+
+class GraphRelationPatch(BaseModel):
+    rel_type: str | None = None
+    description: str | None = None
+
+
+class GraphEventIn(BaseModel):
+    """S72：手动登记事件。"""
+
+    chapter_ref: str
+    chapter_order: int = 0
+    time_point: str
+    label: str
+    description: str = ""
+    involved: list[str] = []
+    book_id: str = "main"
+
+
+class GraphEventPatch(BaseModel):
+    time_point: str | None = None
+    label: str | None = None
+    description: str | None = None
+    involved: list[str] | None = None
+
+
 class MaterialIn(BaseModel):
     text: str
     title: str = ""
@@ -554,7 +608,8 @@ class WritingSkillPatch(BaseModel):
 class SkillGenerateIn(BaseModel):
     """S54/S58：生成 skill 候选（人工确认后入库）。"""
 
-    source_text: str  # 待提炼正文（导入的小说/片段，真实原文）
+    source_text: str = ""  # 待提炼正文（导入的小说/片段，真实原文；与 material_id 二选一）
+    material_id: str | None = None  # S72：从资料库取原文（文风参考书 → skill 提炼链路）
     hint: str = ""  # 可选指引（如"侧重打斗文风"/"侧重爽文节奏"）
     max_items: int = 5
     mode: str = "writing"  # S58：writing（文风/叙事技法）/ main（类型/结构组织指导）
@@ -1226,6 +1281,7 @@ def build_app(
                 workflow_generator=workflow_generator,
                 play_engine=play_engine,
                 review_panel=review_panel,
+                skill_generator=skill_generator,
                 # S68：探索注入真实模板库（L2+L3 合并，agent 的 explore_direction 消费）
                 templates=[f"{t.name}：{t.description}" for t in templates_external.all()[:12]],
             ),
@@ -2615,11 +2671,21 @@ def build_app(
 
         mode=writing：文风/叙事技法（target=writing，写作调用用）；
         mode=main：类型/结构组织指导（target=main，主循环用）。
+        S72：material_id 支持从资料库取原文（文风参考书 → skill 提炼链路），
+        与 source_text 二选一。
         """
-        if not req.source_text.strip():
-            raise HTTPException(status_code=400, detail="source_text 不能为空")
+        source_text = req.source_text.strip()
+        if req.material_id:
+            card = materials.get(req.material_id)
+            if card is None:
+                raise HTTPException(status_code=404, detail=f"资料不存在：{req.material_id}")
+            if not card.source_text.strip():
+                raise HTTPException(status_code=400, detail=f"资料无原文（{card.title}），无法提炼")
+            source_text = card.source_text.strip()
+        if not source_text:
+            raise HTTPException(status_code=400, detail="source_text 或 material_id 不能为空")
         mode = req.mode if req.mode in ("writing", "main") else "writing"
-        candidates = skill_generator.generate(req.source_text, req.hint, req.max_items, mode=mode)
+        candidates = skill_generator.generate(source_text, req.hint, req.max_items, mode=mode)
         if not candidates:
             raise HTTPException(status_code=502, detail="提炼失败（无有效候选）")
         # 去重：与现有 skill 名比对（避免重复生成）
@@ -3407,6 +3473,106 @@ def build_app(
     def graph_context() -> dict[str, str]:
         """当前时空点已知事实注入块（预览）。"""
         return {"block": graph_injector.build_block("main")}
+
+    # ── S72：图谱条目手动管理（实体/关系/事件 增改删）──
+    @app.post("/api/graph/entities", response_model=dict[str, Any])
+    def add_graph_entity(req: GraphEntityIn) -> dict[str, Any]:
+        """S72：手动登记实体（同名=覆盖字段；不改自动统计/权重/出场记录）。"""
+        if not req.name.strip():
+            raise HTTPException(status_code=400, detail="name 不能为空")
+        ent = graph.get_entity(req.book_id, req.name)
+        if ent is None:
+            ent = graph.upsert_entity(
+                req.book_id,
+                req.name,
+                req.entity_type,
+                req.aliases,
+                req.description,
+                state_delta=req.state,
+            )
+        else:
+            ent = graph.update_entity_fields(
+                req.book_id,
+                req.name,
+                aliases=req.aliases or None,
+                description=req.description or None,
+                state=req.state or None,
+                entity_type=req.entity_type or None,
+            )
+        assert ent is not None
+        return ent.to_dict()
+
+    @app.patch("/api/graph/entities/{name}", response_model=dict[str, Any])
+    def patch_graph_entity(name: str, req: GraphEntityPatch) -> dict[str, Any]:
+        """S72：局部编辑实体字段。"""
+        ent = graph.update_entity_fields("main", name, **req.model_dump(exclude_none=True))
+        if ent is None:
+            raise HTTPException(status_code=404, detail=f"实体不存在: {name}")
+        return ent.to_dict()
+
+    @app.delete("/api/graph/entities/{name}", response_model=dict[str, bool])
+    def delete_graph_entity(name: str) -> dict[str, bool]:
+        """S72：删除实体及其关联关系。"""
+        if not graph.delete_entity("main", name):
+            raise HTTPException(status_code=404, detail=f"实体不存在: {name}")
+        return {"ok": True}
+
+    @app.post("/api/graph/relations", response_model=dict[str, Any])
+    def add_graph_relation(req: GraphRelationIn) -> dict[str, Any]:
+        """S72：手动登记关系（两端实体须存在；同三元组去重覆盖）。"""
+        rel = graph.upsert_relation(
+            req.book_id, req.from_name, req.to_name, req.rel_type, req.description
+        )
+        if rel is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"关系端点实体不存在（{req.from_name} 或 {req.to_name}），请先登记实体",
+            )
+        return rel.to_dict()
+
+    @app.patch("/api/graph/relations/{rid}", response_model=dict[str, Any])
+    def patch_graph_relation(rid: str, req: GraphRelationPatch) -> dict[str, Any]:
+        """S72：编辑关系字段。"""
+        rel = graph.update_relation_fields(rid, **req.model_dump(exclude_none=True))
+        if rel is None:
+            raise HTTPException(status_code=404, detail="关系不存在")
+        return rel.to_dict()
+
+    @app.delete("/api/graph/relations/{rid}", response_model=dict[str, bool])
+    def delete_graph_relation(rid: str) -> dict[str, bool]:
+        """S72：删除关系。"""
+        if not graph.delete_relation(rid):
+            raise HTTPException(status_code=404, detail="关系不存在")
+        return {"ok": True}
+
+    @app.post("/api/graph/events", response_model=dict[str, Any])
+    def add_graph_event(req: GraphEventIn) -> dict[str, Any]:
+        """S72：手动登记事件（同章同名去重覆盖）。"""
+        ev = graph.upsert_event(
+            req.book_id,
+            req.chapter_ref,
+            req.chapter_order,
+            req.time_point,
+            req.label,
+            req.description,
+            req.involved,
+        )
+        return ev.to_dict()
+
+    @app.patch("/api/graph/events/{eid}", response_model=dict[str, Any])
+    def patch_graph_event(eid: str, req: GraphEventPatch) -> dict[str, Any]:
+        """S72：编辑事件字段。"""
+        ev = graph.update_event_fields(eid, **req.model_dump(exclude_none=True))
+        if ev is None:
+            raise HTTPException(status_code=404, detail="事件不存在")
+        return ev.to_dict()
+
+    @app.delete("/api/graph/events/{eid}", response_model=dict[str, bool])
+    def delete_graph_event(eid: str) -> dict[str, bool]:
+        """S72：删除事件。"""
+        if not graph.delete_event(eid):
+            raise HTTPException(status_code=404, detail="事件不存在")
+        return {"ok": True}
 
     @app.post("/api/impact", response_model=dict[str, object])
     def impact_route(req: ImpactIn) -> dict[str, object]:

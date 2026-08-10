@@ -48,6 +48,7 @@ class ToolContext:
     workflow_generator: Any = None
     play_engine: Any = None  # S65 互动推演 agent 工具（默认关：玩法/灵感，需要时点亮）
     review_panel: Any = None  # S64 拟人化评审团面板（panel_review 工具用）
+    skill_generator: Any = None  # S72 文风参考 → skill 提炼工具（skill_refine）
     templates: list[str] = None  # type: ignore[assignment]  # S68 模板描述列表（explore_direction 注入）
 
 
@@ -96,6 +97,7 @@ def build_toolkit(
     if enable_domain:
         from anyspark.server.tools_domain import (
             make_graph_query_implementer,
+            make_graph_register_implementer,
             make_ingest_implementer,
             make_mind_register_implementer,
             make_path_explore_implementer,
@@ -107,6 +109,7 @@ def build_toolkit(
             make_search_chapters_implementer,
             make_setting_implementer,
             make_skill_lookup_implementer,
+            make_skill_refine_implementer,
         )
 
         gq_spec, gq_impl = make_graph_query_implementer(ctx.graph)
@@ -115,6 +118,13 @@ def build_toolkit(
         if ctx.skills_store is not None:
             sl_spec, sl_impl = make_skill_lookup_implementer(ctx.skills_store)
             registry.register(sl_spec, sl_impl)
+        # S72：图谱登记工具（对话"把XX记进图谱"→ 即时落库；对齐 mind_register）
+        gr_spec, gr_impl = make_graph_register_implementer(ctx.graph)
+        registry.register(gr_spec, gr_impl)
+        # S72：文风参考书 → skill 提炼（方法论通道；生成候选，人工确认生效）
+        if ctx.skill_generator is not None and ctx.materials is not None:
+            sr_spec, sr_impl = make_skill_refine_implementer(ctx.skill_generator, ctx.materials)
+            registry.register(sr_spec, sr_impl)
         ig_spec, ig_impl = make_ingest_implementer(
             ctx.workspace, ctx.chapters, ctx.materials, ctx.model
         )
