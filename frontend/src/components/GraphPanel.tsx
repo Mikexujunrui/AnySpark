@@ -21,7 +21,6 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
   const types = useGraphStore((s) => s.types);
   const loading = useGraphStore((s) => s.loading);
   const tab = useGraphStore((s) => s.tab);
-  const searchQuery = useGraphStore((s) => s.searchQuery);
   const typeFilter = useGraphStore((s) => s.typeFilter);
   const fetchAll = useGraphStore((s) => s.fetchAll);
   const setTab = useGraphStore((s) => s.setTab);

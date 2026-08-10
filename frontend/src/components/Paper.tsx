@@ -1,13 +1,15 @@
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useRef, useCallback, useState } from "react";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Placeholder from "@tiptap/extension-placeholder";
 import { useChapterStore } from "../stores/chapterStore";
+import { exportBook, exportChapter } from "../api/export";
 
 export default function Paper() {
   const selectedChapter = useChapterStore((s) => s.selectedChapter);
   const saving = useChapterStore((s) => s.saving);
   const updateChapterContent = useChapterStore((s) => s.updateChapterContent);
+  const [showExportMenu, setShowExportMenu] = useState(false);
 
   // 防抖定时器
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -83,10 +85,71 @@ export default function Paper() {
               第 {selectedChapter.order_index + 1} 章 · {selectedChapter.content?.length || 0} 字
             </p>
           </div>
-          {/* 保存状态指示 */}
-          <span className={`text-xs ${saving ? "text-yellow-500" : "text-zinc-600"}`}>
-            {saving ? "保存中..." : "已保存"}
-          </span>
+          <div className="flex items-center gap-3">
+            {/* 导出按钮 */}
+            <div className="relative">
+              <button
+                onClick={() => setShowExportMenu(!showExportMenu)}
+                className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded border border-zinc-700"
+              >
+                导出 ▼
+              </button>
+              {showExportMenu && (
+                <div className="absolute right-0 top-full mt-1 w-40 bg-zinc-800 border border-zinc-700 rounded shadow-lg z-10">
+                  <button
+                    onClick={() => {
+                      exportChapter(selectedChapter.id, "txt");
+                      setShowExportMenu(false);
+                    }}
+                    className="block w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700"
+                  >
+                    当前章节 TXT
+                  </button>
+                  <button
+                    onClick={() => {
+                      exportChapter(selectedChapter.id, "md");
+                      setShowExportMenu(false);
+                    }}
+                    className="block w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700"
+                  >
+                    当前章节 MD
+                  </button>
+                  <div className="border-t border-zinc-700 my-1"></div>
+                  <button
+                    onClick={() => {
+                      exportBook("txt");
+                      setShowExportMenu(false);
+                    }}
+                    className="block w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700"
+                  >
+                    全书 TXT
+                  </button>
+                  <button
+                    onClick={() => {
+                      exportBook("md");
+                      setShowExportMenu(false);
+                    }}
+                    className="block w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700"
+                  >
+                    全书 MD
+                  </button>
+                  <button
+                    onClick={() => {
+                      exportBook("epub");
+                      setShowExportMenu(false);
+                    }}
+                    className="block w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700"
+                  >
+                    全书 EPUB
+                  </button>
+                </div>
+              )}
+            </div>
+            {/* 保存状态指示 */}
+            <span className={`text-xs ${saving ? "text-yellow-500" : "text-zinc-600"}`}>
+              {saving ? "保存中..." : "已保存"}
+            </span>
+          </div>
         </div>
       )}
 

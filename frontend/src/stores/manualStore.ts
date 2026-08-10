@@ -21,7 +21,7 @@ interface ManualState {
   setFilter: (f: Category | "all") => void;
 }
 
-export const useManualStore = create<ManualState>((set, get) => ({
+export const useManualStore = create<ManualState>((set) => ({
   entries: [],
   loading: false,
   filter: "all",

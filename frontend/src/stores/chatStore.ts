@@ -86,9 +86,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       messages: [
         ...(state.streamingText
-          ? [...state.messages, { role: "assistant", content: state.streamingText }]
+          ? [...state.messages, { role: "assistant", content: state.streamingText } as ExtendedMessage]
           : state.messages),
-        { role: "user", content: `[插话] ${text}` },
+        { role: "user", content: `[插话] ${text}` } as ExtendedMessage,
       ],
       streaming: true,
       streamingText: "",
@@ -117,8 +117,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
   },
 
   requestCandidates: (prompt: string) => {
-    const { conversationId } = get();
-
     // 添加一个带 loading 状态的候选卡消息
     set((state) => ({
       messages: [
