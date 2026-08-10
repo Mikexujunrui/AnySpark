@@ -17,8 +17,8 @@ export default function AgencySelector() {
 
   const handleSelect = async (levelId: string) => {
     try {
-      const updated = await setAgency(levelId);
-      setCurrentId(updated.id);
+      const result = await setAgency(levelId);
+      setCurrentId(result.current.id);
     } catch (e) {
       console.error("Failed to set agency:", e);
     }
