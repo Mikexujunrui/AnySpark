@@ -9,6 +9,7 @@ import ManualPanel from "./ManualPanel";
 import GraphPanel from "./GraphPanel";
 import SettingsPanel from "./SettingsPanel";
 import MaterialPanel from "./MaterialPanel";
+import ChapterWrapup from "./ChapterWrapup";
 import { useModelStore } from "../stores/modelStore";
 import { useChatStore } from "../stores/chatStore";
 
@@ -21,6 +22,7 @@ export default function Layout() {
   const [graphOpen, setGraphOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [materialOpen, setMaterialOpen] = useState(false);
+  const [wrapupOpen, setWrapupOpen] = useState(false);
 
   // 初始化加载模型列表 + 恢复最近会话
   useEffect(() => {
@@ -86,6 +88,7 @@ export default function Layout() {
               onManualClick={() => setManualOpen(!manualOpen)}
               onGraphClick={() => setGraphOpen(!graphOpen)}
               onMaterialClick={() => setMaterialOpen(!materialOpen)}
+              onWrapupClick={() => setWrapupOpen(!wrapupOpen)}
               manualOpen={manualOpen}
               graphOpen={graphOpen}
               materialOpen={materialOpen}
@@ -110,6 +113,9 @@ export default function Layout() {
 
       {/* 资料面板 */}
       <MaterialPanel open={materialOpen} onClose={() => setMaterialOpen(false)} />
+
+      {/* 一章收尾 */}
+      <ChapterWrapup open={wrapupOpen} onClose={() => setWrapupOpen(false)} />
     </div>
   );
 }

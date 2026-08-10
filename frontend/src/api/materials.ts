@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, apiDelete } from "./client";
 
 export interface Material {
   id: string;
@@ -29,4 +29,8 @@ export async function getMaterial(id: string): Promise<Material> {
 
 export async function createMaterial(data: MaterialCreate): Promise<Material> {
   return apiPost<Material>("/api/materials", data);
+}
+
+export async function deleteMaterial(id: string): Promise<{ ok: boolean; id: string }> {
+  return apiDelete<{ ok: boolean; id: string }>(`/api/materials/${id}`);
 }

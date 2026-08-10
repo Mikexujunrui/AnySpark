@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { listMaterials, createMaterial, type Material, type MaterialCreate } from "../api/materials";
+import { listMaterials, createMaterial, deleteMaterial, type Material, type MaterialCreate } from "../api/materials";
 
 interface MaterialState {
   materials: Material[];
@@ -7,6 +7,7 @@ interface MaterialState {
   error: string | null;
   fetchAll: () => Promise<void>;
   add: (data: MaterialCreate) => Promise<void>;
+  remove: (id: string) => Promise<void>;
 }
 
 export const useMaterialStore = create<MaterialState>((set, get) => ({
@@ -28,6 +29,15 @@ export const useMaterialStore = create<MaterialState>((set, get) => ({
     try {
       const card = await createMaterial(data);
       set({ materials: [...get().materials, card] });
+    } catch (e) {
+      set({ error: (e as Error).message });
+    }
+  },
+
+  remove: async (id) => {
+    try {
+      await deleteMaterial(id);
+      set({ materials: get().materials.filter((m) => m.id !== id) });
     } catch (e) {
       set({ error: (e as Error).message });
     }

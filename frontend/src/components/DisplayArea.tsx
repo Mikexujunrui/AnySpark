@@ -4,11 +4,14 @@ import SkillPanel from "./SkillPanel";
 import StoryTreeView from "./StoryTreeView";
 import CheckReport from "./CheckReport";
 import ExploreView from "./ExploreView";
+import PlotPanel from "./PlotPanel";
+import PlanPanel from "./PlanPanel";
 
 interface DisplayAreaProps {
   onManualClick?: () => void;
   onGraphClick?: () => void;
   onMaterialClick?: () => void;
+  onWrapupClick?: () => void;
   manualOpen?: boolean;
   graphOpen?: boolean;
   materialOpen?: boolean;
@@ -20,12 +23,15 @@ const MODE_LABELS: Record<DisplayMode, string> = {
   skills: "技巧",
   check: "审读",
   explore: "探索",
+  plot: "关键点",
+  plan: "计划",
 };
 
 export default function DisplayArea({
   onManualClick,
   onGraphClick,
   onMaterialClick,
+  onWrapupClick,
   manualOpen,
   graphOpen,
   materialOpen,
@@ -66,6 +72,14 @@ export default function DisplayArea({
 
         {/* 右侧：面板唤起 */}
         <div className="ml-auto flex items-center gap-1">
+          {onWrapupClick && (
+            <button
+              onClick={onWrapupClick}
+              className="text-[11px] px-2 py-0.5 rounded transition-colors text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+            >
+              收尾
+            </button>
+          )}
           {onManualClick && (
             <button
               onClick={onManualClick}
@@ -112,6 +126,8 @@ export default function DisplayArea({
         {mode === "tree" && <StoryTreeView />}
         {mode === "check" && <CheckReport />}
         {mode === "explore" && <ExploreView />}
+        {mode === "plot" && <PlotPanel />}
+        {mode === "plan" && <PlanPanel />}
       </div>
     </div>
   );

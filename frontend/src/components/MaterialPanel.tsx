@@ -12,6 +12,7 @@ export default function MaterialPanel({ open, onClose }: MaterialPanelProps) {
   const loading = useMaterialStore((s) => s.loading);
   const fetchAll = useMaterialStore((s) => s.fetchAll);
   const add = useMaterialStore((s) => s.add);
+  const remove = useMaterialStore((s) => s.remove);
 
   const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState<Material | null>(null);
@@ -116,6 +117,12 @@ export default function MaterialPanel({ open, onClose }: MaterialPanelProps) {
                   }`}>
                     {selected.purpose === "style" ? "风格" : selected.purpose === "both" ? "混合" : "事实"}
                   </span>
+                  <button
+                    onClick={() => { remove(selected.id); setSelected(null); }}
+                    className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-red-900/40 hover:bg-red-800/60 text-red-400"
+                  >
+                    删除
+                  </button>
                 </div>
                 <p className="text-xs text-zinc-500 mb-3">主题：{selected.topic}</p>
 
