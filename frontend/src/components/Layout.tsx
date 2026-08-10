@@ -53,48 +53,16 @@ export default function Layout() {
         <div className="flex items-center gap-4">
           <AgencySelector />
           <ModelPicker />
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setManualOpen(!manualOpen)}
-              className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
-                manualOpen
-                  ? "bg-zinc-700 text-zinc-200"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              心智
-            </button>
-            <button
-              onClick={() => setGraphOpen(!graphOpen)}
-              className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
-                graphOpen
-                  ? "bg-zinc-700 text-zinc-200"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              图谱
-            </button>
-            <button
-              onClick={() => setMaterialOpen(!materialOpen)}
-              className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
-                materialOpen
-                  ? "bg-zinc-700 text-zinc-200"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              资料
-            </button>
-            <button
-              onClick={() => setSettingsOpen(!settingsOpen)}
-              className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
-                settingsOpen
-                  ? "bg-zinc-700 text-zinc-200"
-                  : "text-zinc-500 hover:text-zinc-300"
-              }`}
-            >
-              设置
-            </button>
-          </div>
+          <button
+            onClick={() => setSettingsOpen(!settingsOpen)}
+            className={`text-[11px] px-2 py-0.5 rounded transition-colors ${
+              settingsOpen
+                ? "bg-zinc-700 text-zinc-200"
+                : "text-zinc-500 hover:text-zinc-300"
+            }`}
+          >
+            设置
+          </button>
         </div>
       </header>
 
@@ -114,7 +82,14 @@ export default function Layout() {
 
           {/* 展示区（~60%） */}
           <div className="flex-[3] flex flex-col overflow-hidden">
-            <DisplayArea />
+            <DisplayArea
+              onManualClick={() => setManualOpen(!manualOpen)}
+              onGraphClick={() => setGraphOpen(!graphOpen)}
+              onMaterialClick={() => setMaterialOpen(!materialOpen)}
+              manualOpen={manualOpen}
+              graphOpen={graphOpen}
+              materialOpen={materialOpen}
+            />
           </div>
 
           {/* 对话区（~40%） */}
