@@ -50,6 +50,7 @@ class ToolContext:
     review_panel: Any = None  # S64 拟人化评审团面板（panel_review 工具用）
     skill_generator: Any = None  # S72 文风参考 → skill 提炼工具（skill_refine）
     templates: list[str] = None  # type: ignore[assignment]  # S68 模板描述列表（explore_direction 注入）
+    book_id: str = "main"  # S74：当前项目 id——工具层多书隔离（此前各 implementer 硬编码 main）
 
 
 def build_toolkit(
@@ -75,6 +76,7 @@ def build_toolkit(
     register_writing_tools(
         registry,
         ctx.chapters,
+        book_id=ctx.book_id,
         workspace=ctx.workspace,
         model=ctx.model,
         skills_store=ctx.skills_store,
@@ -112,39 +114,41 @@ def build_toolkit(
             make_skill_refine_implementer,
         )
 
-        gq_spec, gq_impl = make_graph_query_implementer(ctx.graph)
+        gq_spec, gq_impl = make_graph_query_implementer(ctx.graph, book_id=ctx.book_id)
         registry.register(gq_spec, gq_impl)
         # S60：技巧查证工具（与索引常驻配套：索引轻量注入，内容按需细看）
         if ctx.skills_store is not None:
             sl_spec, sl_impl = make_skill_lookup_implementer(ctx.skills_store)
             registry.register(sl_spec, sl_impl)
         # S72：图谱登记工具（对话"把XX记进图谱"→ 即时落库；对齐 mind_register）
-        gr_spec, gr_impl = make_graph_register_implementer(ctx.graph)
+        gr_spec, gr_impl = make_graph_register_implementer(ctx.graph, book_id=ctx.book_id)
         registry.register(gr_spec, gr_impl)
         # S72：文风参考书 → skill 提炼（方法论通道；生成候选，人工确认生效）
         if ctx.skill_generator is not None and ctx.materials is not None:
             sr_spec, sr_impl = make_skill_refine_implementer(ctx.skill_generator, ctx.materials)
             registry.register(sr_spec, sr_impl)
         ig_spec, ig_impl = make_ingest_implementer(
-            ctx.workspace, ctx.chapters, ctx.materials, ctx.model
+            ctx.workspace, ctx.chapters, ctx.materials, ctx.model, book_id=ctx.book_id
         )
         registry.register(ig_spec, ig_impl)
-        plot_specs, plot_impls = make_plot_implementer(ctx.plots)
+        plot_specs, plot_impls = make_plot_implementer(ctx.plots, book_id=ctx.book_id)
         for s, i in zip(plot_specs, plot_impls, strict=True):
             registry.register(s, i)
-        plan_specs, plan_impls = make_plan_implementer(ctx.plans)
+        plan_specs, plan_impls = make_plan_implementer(ctx.plans, book_id=ctx.book_id)
         for s, i in zip(plan_specs, plan_impls, strict=True):
             registry.register(s, i)
-        st_spec, st_impl = make_setting_implementer(ctx.settings)
+        st_spec, st_impl = make_setting_implementer(ctx.settings, book_id=ctx.book_id)
         registry.register(st_spec, st_impl)
-        rp_spec, rp_impl = make_roleplay_implementer(ctx.workspace, ctx.graph, ctx.model)
+        rp_spec, rp_impl = make_roleplay_implementer(
+            ctx.workspace, ctx.graph, ctx.model, book_id=ctx.book_id
+        )
         registry.register(rp_spec, rp_impl)
         # S67：叙事路径探索（起点 A → 终点 B 串联候选，章节间过渡/情节点连接）
         px_spec, px_impl = make_path_explore_implementer(ctx.model)
         registry.register(px_spec, px_impl)
-        sc_spec, sc_impl = make_search_chapters_implementer(ctx.chapters)
+        sc_spec, sc_impl = make_search_chapters_implementer(ctx.chapters, book_id=ctx.book_id)
         registry.register(sc_spec, sc_impl)
-        rc_spec, rc_impl = make_read_context_implementer(ctx.chapters)
+        rc_spec, rc_impl = make_read_context_implementer(ctx.chapters, book_id=ctx.book_id)
         registry.register(rc_spec, rc_impl)
         rt_spec, rt_impl = make_register_tool_implementer(ctx.ext_tools)
         registry.register(rt_spec, rt_impl)
@@ -172,7 +176,9 @@ def build_toolkit(
     if enable_codex:
         from anyspark.server.tools_domain import make_codex_implementer
 
-        cx_spec, cx_impl = make_codex_implementer(ctx.workspace, ctx.chapters, ctx.graph)
+        cx_spec, cx_impl = make_codex_implementer(
+            ctx.workspace, ctx.chapters, ctx.graph, book_id=ctx.book_id
+        )
         registry.register(cx_spec, cx_impl)
 
     # S32 扩展：read_material，按 enable_extras 点亮（默认关，
@@ -182,7 +188,9 @@ def build_toolkit(
     if enable_extras:
         from anyspark.server.tools_extras import make_read_material_implementer
 
-        material_spec, material_impl = make_read_material_implementer(ctx.materials)
+        material_spec, material_impl = make_read_material_implementer(
+            ctx.materials, book_id=ctx.book_id
+        )
         registry.register(material_spec, material_impl)
 
     # 网络搜索工具：按需注册（S15 起默认关——写作主链路不背考据能力，需要时点亮）
@@ -213,7 +221,9 @@ def build_toolkit(
     if ctx.review_panel is not None:
         from anyspark.server.tools_review import make_review_tools
 
-        for _rspec, _rimpl in make_review_tools(ctx.review_panel, ctx.chapters, ctx.model):
+        for _rspec, _rimpl in make_review_tools(
+            ctx.review_panel, ctx.chapters, ctx.model, book_id=ctx.book_id
+        ):
             registry.register(_rspec, _rimpl)
 
     return registry

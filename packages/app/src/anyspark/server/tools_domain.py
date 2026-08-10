@@ -79,7 +79,7 @@ def make_skill_lookup_implementer(skills_store: Any) -> tuple[Any, Any]:
     return spec, implementer
 
 
-def make_graph_query_implementer(graph: Any) -> tuple[Any, Any]:
+def make_graph_query_implementer(graph: Any, book_id: str = "main") -> tuple[Any, Any]:
     """图谱查询工具：查实体（含当前状态）/关系/事件，写作前查证用。"""
 
     spec = ToolSpec(
@@ -105,7 +105,7 @@ def make_graph_query_implementer(graph: Any) -> tuple[Any, Any]:
         if not q:
             return ToolResult(call=call, ok=False, content="缺少参数 query。")
         try:
-            entities = graph.list_entities("main", q=q, limit=_QUERY_LIMIT)
+            entities = graph.list_entities(book_id, q=q, limit=_QUERY_LIMIT)
             if not entities:
                 return ToolResult(call=call, ok=False, content=f"图谱中未找到与「{q}」相关的实体。")
             names = [e.name for e in entities]
@@ -120,7 +120,7 @@ def make_graph_query_implementer(graph: Any) -> tuple[Any, Any]:
                     line += f" {desc[:80]}"
                 lines.append(line)
             # 相关关系（实体参与的三元组）
-            relations = graph.list_relations("main", limit=_RELATION_LIMIT)
+            relations = graph.list_relations(book_id, limit=_RELATION_LIMIT)
             rels = [r for r in relations if r.from_name in names or r.to_name in names][
                 :_RELATION_LIMIT
             ]
@@ -139,7 +139,7 @@ def make_graph_query_implementer(graph: Any) -> tuple[Any, Any]:
     return spec, implementer
 
 
-def make_plot_implementer(plots: Any) -> tuple[list[Any], list[Any]]:
+def make_plot_implementer(plots: Any, book_id: str = "main") -> tuple[list[Any], list[Any]]:
     """伏笔工具：登记（埋钩子）+ 列表（看还欠哪些承诺）。"""
 
     register_spec = ToolSpec(
@@ -175,7 +175,7 @@ def make_plot_implementer(plots: Any) -> tuple[list[Any], list[Any]]:
             return ToolResult(call=call, ok=False, content="缺少参数 content。")
         try:
             p = plots.add(
-                book_id="main",
+                book_id=book_id,
                 category="伏笔",
                 content=content,
                 priority=priority,
@@ -202,7 +202,7 @@ def make_plot_implementer(plots: Any) -> tuple[list[Any], list[Any]]:
     def list_points(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec_.name, arguments=arguments)
         try:
-            render = plots.render("main")
+            render = plots.render(book_id)
             return ToolResult(
                 call=call,
                 ok=True,
@@ -214,7 +214,7 @@ def make_plot_implementer(plots: Any) -> tuple[list[Any], list[Any]]:
     return [register_spec, list_spec], [register, list_points]
 
 
-def make_plan_implementer(plans: Any) -> tuple[list[Any], list[Any]]:
+def make_plan_implementer(plans: Any, book_id: str = "main") -> tuple[list[Any], list[Any]]:
     """剧情计划工具：看计划（当前章+后续）+ 标记完成（推进）。"""
 
     list_spec = ToolSpec(
@@ -229,7 +229,7 @@ def make_plan_implementer(plans: Any) -> tuple[list[Any], list[Any]]:
     def list_plans(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec_.name, arguments=arguments)
         try:
-            entries = plans.list("main")
+            entries = plans.list(book_id)
             if not entries:
                 return ToolResult(call=call, ok=True, content="尚无剧情计划。")
             return ToolResult(call=call, ok=True, content=render_plan(entries, horizon=5))
@@ -258,7 +258,7 @@ def make_plan_implementer(plans: Any) -> tuple[list[Any], list[Any]]:
         if not title:
             return ToolResult(call=call, ok=False, content="缺少参数 title。")
         try:
-            entries = plans.list("main")
+            entries = plans.list(book_id)
             target = next((p for p in entries if p.title == title), None)
             if target is None:
                 titles = "、".join(p.title for p in entries) or "（空）"
@@ -275,7 +275,7 @@ def make_plan_implementer(plans: Any) -> tuple[list[Any], list[Any]]:
     return [list_spec, done_spec], [list_plans, mark_done]
 
 
-def make_setting_implementer(settings: Any) -> tuple[Any, Any]:
+def make_setting_implementer(settings: Any, book_id: str = "main") -> tuple[Any, Any]:
     """设定档工具：查正典条目（人物卡/能力体系/世界观规则）。"""
 
     spec = ToolSpec(
@@ -298,7 +298,7 @@ def make_setting_implementer(settings: Any) -> tuple[Any, Any]:
         call = ToolCall(name=spec_.name, arguments=arguments)
         q = str(arguments.get("keyword", "")).strip()
         try:
-            entries = settings.list("main")
+            entries = settings.list(book_id)
             if not entries:
                 return ToolResult(call=call, ok=True, content="设定档为空。")
             if not q or q in ("列出", "全部", "list"):
@@ -327,7 +327,7 @@ def make_setting_implementer(settings: Any) -> tuple[Any, Any]:
 
 
 def make_ingest_implementer(
-    workspace: Any, chapters: Any, materials: Any, model: Any
+    workspace: Any, chapters: Any, materials: Any, model: Any, book_id: str = "main"
 ) -> tuple[Any, Any]:
     """上传消化工具（S48-P3）：把上传区原始文档消化成章节 md 或摘要卡。
 
@@ -367,9 +367,9 @@ def make_ingest_implementer(
         try:
             from anyspark.server.pipeline import chapterize, extract_text
 
-            path = workspace.read_upload("main", filename)
+            path = workspace.read_upload(book_id, filename)
             if path is None:
-                ups = workspace.list_uploads("main")
+                ups = workspace.list_uploads(book_id)
                 names = "、".join(u["name"] for u in ups) or "（空）"
                 return ToolResult(
                     call=call, ok=False, content=f"上传区无「{filename}」。现有：{names}"
@@ -389,7 +389,7 @@ def make_ingest_implementer(
                 from anyspark.template import MaterialDigestor
 
                 digestor = MaterialDigestor(model)
-                saved = materials.save(digestor.digest(text))
+                saved = materials.save(digestor.digest(text), book_id)
                 card_md = (
                     f"# {saved.title}\n\n主题：{saved.topic}\n\n"
                     + "要点："
@@ -401,7 +401,7 @@ def make_ingest_implementer(
                     + "\n术语："
                     + "、".join(saved.terms[:8])
                 )
-                f = workspace.write_card("main", "摘要卡", saved.title, card_md)
+                f = workspace.write_card(book_id, "摘要卡", saved.title, card_md)
                 return ToolResult(
                     call=call,
                     ok=True,
@@ -410,8 +410,8 @@ def make_ingest_implementer(
                 )
             written: list[str] = []
             for i, ch in enumerate(chaps):
-                workspace.write_chapter("main", i, ch["title"], ch["content"])
-                chapters.upsert("main", ch["title"], ch["content"], i, "main")
+                workspace.write_chapter(book_id, i, ch["title"], ch["content"])
+                chapters.upsert(book_id, ch["title"], ch["content"], i, "main")
                 written.append(f"{i + 1}. {ch['title']}（{len(ch['content'])}字）")
             return ToolResult(
                 call=call,
@@ -424,7 +424,9 @@ def make_ingest_implementer(
     return spec, implementer
 
 
-def make_codex_implementer(workspace: Any, chapters: Any, graph: Any) -> tuple[Any, Any]:
+def make_codex_implementer(
+    workspace: Any, chapters: Any, graph: Any, book_id: str = "main"
+) -> tuple[Any, Any]:
     """代码扩展工具（S48-P5 anyspark-codex）：沙箱执行 Python，固定工具做不了时用。
 
     S48-P4/A：注入只读数据环境 ws_*（章节/图谱/上传）——可真实统计/自定义分析，
@@ -465,7 +467,7 @@ def make_codex_implementer(workspace: Any, chapters: Any, graph: Any) -> tuple[A
             timeout = 10.0
         from anyspark.server.codex import make_data_env, run_code
 
-        r = run_code(code, timeout, data_env=make_data_env(workspace, chapters, graph))
+        r = run_code(code, timeout, data_env=make_data_env(workspace, chapters, graph, book_id))
         lines = []
         if r["stdout"]:
             lines.append("【输出】\n" + r["stdout"].rstrip())
@@ -479,7 +481,9 @@ def make_codex_implementer(workspace: Any, chapters: Any, graph: Any) -> tuple[A
     return spec, implementer
 
 
-def make_roleplay_implementer(workspace: Any, graph: Any, model: Any) -> tuple[Any, Any]:
+def make_roleplay_implementer(
+    workspace: Any, graph: Any, model: Any, book_id: str = "main"
+) -> tuple[Any, Any]:
     """角色推演工具（S48-P4）：低成本多路探索，选最好的作为参考。"""
 
     spec = ToolSpec(
@@ -515,7 +519,7 @@ def make_roleplay_implementer(workspace: Any, graph: Any, model: Any) -> tuple[A
         try:
             from anyspark.explore import load_role_card, run_roleplay
 
-            role_card, state = load_role_card(workspace, graph, role)
+            role_card, state = load_role_card(workspace, graph, role, book_id=book_id)
             if not role_card.strip():
                 return ToolResult(
                     call=call,
@@ -557,7 +561,7 @@ def _sent_has(content: str, idx: int, kw_len: int, exclude: str) -> bool:
     return exclude in sent
 
 
-def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
+def make_search_chapters_implementer(chapters: Any, book_id: str = "main") -> tuple[Any, Any]:
     """正文检索工具（S48-P4/B：图谱是结构化事实检索，正文定位靠这个）。
 
     对齐 pi 的 grep 定位 + 计数：关键词/意象/短语在哪些章节出现、
@@ -637,7 +641,7 @@ def make_search_chapters_implementer(chapters: Any) -> tuple[Any, Any]:
             except ValueError:
                 frag = 20
             use_regex = str(arguments.get("regex", "")).strip().lower() in ("true", "1", "yes")
-            items = chapters.list_by_book("main")
+            items = chapters.list_by_book(book_id)
             if not items:
                 return ToolResult(call=call, ok=True, content="暂无章节。")
             # 逐章逐词统计：{chapter: {term: count, _first_ctx: ...}}
@@ -831,7 +835,7 @@ def make_register_tool_implementer(ext_tools: Any) -> tuple[Any, Any]:
     return spec, implementer
 
 
-def make_read_context_implementer(chapters: Any) -> tuple[Any, Any]:
+def make_read_context_implementer(chapters: Any, book_id: str = "main") -> tuple[Any, Any]:
     """上下文段落阅读（S48-P4/B：命中后看上下段落，不读全文省 token）。
 
     与 search_chapters 配套：检索定位到章节后，用锚点读该处前后 N 段
@@ -885,7 +889,7 @@ def make_read_context_implementer(chapters: Any) -> tuple[Any, Any]:
         except ValueError:
             before, after = 2, 2
         try:
-            ch = next((c for c in chapters.list_by_book("main") if c.title == title), None)
+            ch = next((c for c in chapters.list_by_book(book_id) if c.title == title), None)
             if ch is None:
                 return ToolResult(
                     call=call,
@@ -918,7 +922,7 @@ def make_read_context_implementer(chapters: Any) -> tuple[Any, Any]:
     return spec, implementer
 
 
-def make_mind_register_implementer(manual: Any) -> tuple[Any, Any]:
+def make_mind_register_implementer(manual: Any, book_id: str = "main") -> tuple[Any, Any]:
     """S53c ① 心智登记工具：用户对话中"记一下"→ 立即落心智条目（user 来源，高置信度）。
 
     对应 DESIGN §12.18 更新方式 #1（用户主动登记）。让 agent 在对话中识别
@@ -966,7 +970,7 @@ def make_mind_register_implementer(manual: Any) -> tuple[Any, Any]:
                     confidence=0.9,
                     activity="high",
                     scope="project",
-                    book_id="main",
+                    book_id=book_id,
                     category=category,  # type: ignore[arg-type]
                 )
             )
@@ -982,7 +986,7 @@ def make_mind_register_implementer(manual: Any) -> tuple[Any, Any]:
     return spec, implementer
 
 
-def make_graph_register_implementer(graph: Any) -> tuple[Any, Any]:
+def make_graph_register_implementer(graph: Any, book_id: str = "main") -> tuple[Any, Any]:
     """S72：图谱登记工具——对话中"把XX记进图谱"→ 立即登记实体（+可选关系）。
 
     对齐 mind_register（用户主动登记模式）：抽取会错/会漏，用户明确表述的设定
@@ -1043,14 +1047,14 @@ def make_graph_register_implementer(graph: Any) -> tuple[Any, Any]:
         rel_to = str(arguments.get("rel_to", "")).strip()
         rel_type = str(arguments.get("rel_type", "")).strip()
         try:
-            ent = graph.get_entity("main", name)
+            ent = graph.get_entity(book_id, name)
             if ent is None:
-                graph.upsert_entity("main", name, etype, description=desc)
+                graph.upsert_entity(book_id, name, etype, description=desc)
             elif desc:
-                graph.update_entity_fields("main", name, description=desc, entity_type=etype)
+                graph.update_entity_fields(book_id, name, description=desc, entity_type=etype)
             lines = [f"已登记实体：{name}（{etype}）"]
             if rel_to and rel_type:
-                rel = graph.upsert_relation("main", name, rel_to, rel_type, description=desc)
+                rel = graph.upsert_relation(book_id, name, rel_to, rel_type, description=desc)
                 if rel is None:
                     lines.append(f"关系未登记：{rel_to} 不存在（先登记该实体）")
                 else:

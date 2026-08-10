@@ -134,3 +134,31 @@ def test_chat_enable_domain_switch() -> None:
     )
     assert "graph_query" not in model.last_tools
     assert "write_chapter" in model.last_tools
+
+
+def test_tools_book_isolation() -> None:
+    """S74：领域工具按 book_id 隔离——A 书数据不会串进 B 书工具查询。"""
+    db = _db()
+    graph = GraphStore(db)
+    graph.upsert_entity("bookA", "陈渡", "角色", description="A 书侦探")
+    graph.upsert_entity("bookB", "周屿", "角色", description="B 书主角")
+
+    settings = WorldSettingStore(db)
+    settings.add("A 书正典：雾城多雾。", "世界观", "雾城", book_id="bookA")
+    settings.add("B 书正典：守钟阁存怀表。", "世界观", "守钟阁", book_id="bookB")
+
+    # A 书工具：只见 A 书数据
+    _, gq = make_graph_query_implementer(graph, book_id="bookA")
+    ra = _call(gq, query="陈渡")
+    assert ra.ok is True and "陈渡" in ra.content
+    _, st = make_setting_implementer(settings, book_id="bookA")
+    rs = _call(st, keyword="列出")
+    assert "雾城" in rs.content and "守钟阁" not in rs.content
+
+    # B 书工具：只见 B 书数据
+    _, gq_b = make_graph_query_implementer(graph, book_id="bookB")
+    rb = _call(gq_b, query="周屿")
+    assert rb.ok is True and "周屿" in rb.content
+    _, st_b = make_setting_implementer(settings, book_id="bookB")
+    rs_b = _call(st_b, keyword="列出")
+    assert "守钟阁" in rs_b.content and "雾城" not in rs_b.content

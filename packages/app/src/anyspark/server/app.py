@@ -272,13 +272,15 @@ class IngestIn(BaseModel):
 
     filename: str
     mode: str = "auto"
+    book_id: str = "main"  # S74：上传/消化按书隔离
 
 
 class UploadIn(BaseModel):
     """S48 上传存档（base64 JSON，零新依赖）。"""
 
     filename: str
-    data_b64: str  # base64 编码的文件内容
+    data_b64: str
+    book_id: str = "main"  # S74：上传区按书隔离  # base64 编码的文件内容
 
 
 class ToolEvent(BaseModel):
@@ -559,6 +561,7 @@ class WorldSettingIn(BaseModel):
     content: str
     category: str = "世界观"
     name: str = ""
+    book_id: str = "main"  # S74：设定档按书隔离（正典是书级内容）
 
 
 class WorldSettingPatch(BaseModel):
@@ -2576,14 +2579,14 @@ def build_app(
         return {"ok": True}
 
     @app.get("/api/settings", response_model=list[dict[str, Any]])
-    def list_settings() -> list[dict[str, Any]]:
-        """设定档全部条目。"""
-        return [s.to_dict() for s in settings.list()]
+    def list_settings(book_id: str = "main") -> list[dict[str, Any]]:
+        """设定档全部条目（按书）。"""
+        return [s.to_dict() for s in settings.list(book_id)]
 
     @app.post("/api/settings", response_model=dict[str, Any])
     def add_setting(req: WorldSettingIn) -> dict[str, Any]:
         """新增设定条目（作者手写）。"""
-        s = settings.add(req.content, req.category, req.name, source="manual")
+        s = settings.add(req.content, req.category, req.name, source="manual", book_id=req.book_id)
         return s.to_dict()
 
     @app.patch("/api/settings/{setting_id}", response_model=dict[str, Any])
@@ -2957,7 +2960,7 @@ def build_app(
             raise HTTPException(status_code=400, detail=f"base64 解码失败：{exc}") from exc
         if len(data) > 20 * 1024 * 1024:
             raise HTTPException(status_code=400, detail="文件超过 20MB 上限")
-        dest = workspace.save_upload("main", req.filename, data)
+        dest = workspace.save_upload(req.book_id, req.filename, data)
         logger.info("上传存档: %s -> %s", req.filename, dest.name)
         return {"ok": True, "name": dest.name, "path": str(dest), "size": len(data)}
 
@@ -3240,7 +3243,7 @@ def build_app(
         """
         from anyspark.server.pipeline import chapterize, extract_text
 
-        path = workspace.read_upload("main", req.filename)
+        path = workspace.read_upload(req.book_id, req.filename)
         if path is None:
             raise HTTPException(status_code=404, detail=f"上传区无此文件：{req.filename}")
         if path.suffix.lower() not in (".txt", ".md", ".markdown", ".docx", ".pdf"):
@@ -3258,7 +3261,7 @@ def build_app(
         if is_card:
             digestor = MaterialDigestor(model)
             card = digestor.digest(text)
-            saved = materials.save(card)
+            saved = materials.save(card, req.book_id)
             card_md = (
                 f"# {saved.title}\n\n主题：{saved.topic}\n\n"
                 + "要点："
@@ -3270,7 +3273,7 @@ def build_app(
                 + "\n术语："
                 + "、".join(saved.terms[:8])
             )
-            f = workspace.write_card("main", "摘要卡", saved.title, card_md)
+            f = workspace.write_card(req.book_id, "摘要卡", saved.title, card_md)
             return {
                 "ok": True,
                 "kind": "card",
@@ -3280,8 +3283,8 @@ def build_app(
             }
         written: list[dict[str, Any]] = []
         for i, ch in enumerate(chaps):
-            workspace.write_chapter("main", i, ch["title"], ch["content"])
-            chapters.upsert("main", ch["title"], ch["content"], i, "main")
+            workspace.write_chapter(req.book_id, i, ch["title"], ch["content"])
+            chapters.upsert(req.book_id, ch["title"], ch["content"], i, "main")
             written.append({"order": i, "title": ch["title"], "chars": len(ch["content"])})
         logger.info("消化: %s → %d 章", req.filename, len(written))
         return {"ok": True, "kind": "chapters", "count": len(written), "chapters": written}

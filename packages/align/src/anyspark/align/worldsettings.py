@@ -93,7 +93,9 @@ class WorldSettingStore:
             )
             # S74：旧库补 book_id 列（幂等）
             try:
-                self._conn.execute("ALTER TABLE world_settings ADD COLUMN book_id TEXT NOT NULL DEFAULT 'main'")
+                self._conn.execute(
+                    "ALTER TABLE world_settings ADD COLUMN book_id TEXT NOT NULL DEFAULT 'main'"
+                )
                 self._conn.commit()
             except sqlite3.OperationalError:
                 pass  # 列已存在
@@ -282,9 +284,7 @@ def render_settings(entries: list[WorldSetting], title: str = "本书设定档")
 SETTINGS_INDEX_THRESHOLD = 20
 
 
-def render_settings_adaptive(
-    entries: list[WorldSetting], title: str = "本书设定档"
-) -> str:
+def render_settings_adaptive(entries: list[WorldSetting], title: str = "本书设定档") -> str:
     """设定档渲染（渐进式披露，S73b）：条目 ≤阈值 全量；超阈值 注入索引。
 
     索引 = 类别 + 条目名/一句话截断 + 提示 read_setting 按需查——正典细节
@@ -293,8 +293,7 @@ def render_settings_adaptive(
     if len(entries) <= SETTINGS_INDEX_THRESHOLD:
         return render_settings(entries, title)
     lines = [
-        f"# {title}（共 {len(entries)} 条，只注入索引；"
-        f"写作引用前用 read_setting 按需查询具体条目）"
+        f"# {title}（共 {len(entries)} 条，只注入索引；写作引用前用 read_setting 按需查询具体条目）"
     ]
     by_cat: dict[str, list[WorldSetting]] = {}
     for e in entries:

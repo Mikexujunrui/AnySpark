@@ -26,7 +26,7 @@
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63）
 - **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级）+ **S66 httpx2 迁移**（starlette 原生支持后落地，TestClient/CLI/benchmarks 全切，无回归），pytest 全量绿，总闸全绿
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
-> [S74] 正在改 工具层 book_id + 数据隔离审计：tools_domain/tools_writing/tools_review 硬编码 "main" → ctx.book_id 注入；world_settings/materials 补 book_id 列；mood_dims 死表删除；测试残留清理（完成提交后删本行）
+> 当前无会话声明。
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 
 - **候选清单（下一步，按优先级）**：
@@ -2197,3 +2197,33 @@ POST/PATCH/DELETE 端点、无 agent 工具），且 store 层**无 delete**（�
 
 **定案**：技能索引全量常驻不披露（YAGNI）；边界条件 200+ 条时按类别分组折叠
 （不是按偏好选 2-3 条）。无代码改动，纯决策记录（DESIGN §12.24 注记）。
+
+## S74 数据隔离审计与修复（已完成 ✅，DESIGN §12.32）——book_id 贯穿工具层 + 死数据清理
+
+**背景（主人询问）**：后端有没有污染交叉？审计发现两类问题：
+- **机制层**：领域工具全部硬编码 `book_id="main"`——多书隔离在 agent 工具层从未生效；
+  world_settings/materials 表结构缺 book_id 列（list(book_id) 形同虚设）
+- **数据层**：main 书混入 6 条测试章节 + test_hp 线程 + 空 play 会话 + 25 条孤儿关系 +
+  mood 死表残留
+
+**机制修复（全部完成，测试覆盖）**：
+1. ToolContext 加 book_id，build_toolkit 透传 13 组 implementer（写作/领域/扩展/评审/沙箱）
+2. world_settings/materials 补 book_id 列（幂等 ALTER）+ list/add/save 按书；
+   /api/settings、/api/materials、/api/upload、/api/ingest 同步支持
+3. 新增 test_tools_book_isolation 回归测试（A/B 两书互不可见）
+
+**数据清理（已执行，库备份 data_backup_s74_*.db）**：
+- 删 mood_dims 死表（S63 判死刑后残留）；删 6 条测试章节（DB 镜像）+ 021-记录测试章.md
+- 删 25 条孤儿关系（两端悬空）+ 6 条引用不存在章节的测试事件
+- 删 test_hp 残留线程 + 空标题 play 会话
+
+**隔离边界定案（DESIGN §12.32 表格）**：按书 = 章节/图谱/伏笔/计划/设定档/资料库/信号/
+心智/叙事树/推演；全局复用 = explore_dims/setting_categories（跨书词典）、writing_skills
+（能力库）、agency_levels/model_configs/ai_bias（系统机制）、conversations（对话流）、
+templates/workflow 模板（与书解耦）、tools_extensions（注册表）。
+
+**验证**：pytest 413 全绿（含新回归测试）；ruff/mypy 全绿；总闸通过。
+
+**遗留（主人定夺，不擅动）**：main 书双写漂移——DB 19 条无文件旧章节 + 文件 6 条未入库
+（031-035）；033 两个文件（码头等船/第九章 折返）、031/034 是"第十章 船夫"两个草稿版本
+（内容不同）。文件层冲突属创作内容，待主人整理。

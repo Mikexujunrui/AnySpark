@@ -74,7 +74,7 @@ def _now() -> str:
 
 
 class MaterialStore:
-    """资料存储（SQLite）：摘要卡 + 原文。"""
+    """资料存储（SQLite）：摘要卡 + 原文（S74：按 book_id 隔离——资料是书级素材）。"""
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
@@ -86,6 +86,7 @@ class MaterialStore:
             """
             CREATE TABLE IF NOT EXISTS materials (
                 id TEXT PRIMARY KEY,
+                book_id TEXT NOT NULL DEFAULT 'main',
                 title TEXT NOT NULL,
                 topic TEXT NOT NULL DEFAULT '',
                 key_points TEXT NOT NULL DEFAULT '[]',
@@ -107,18 +108,27 @@ class MaterialStore:
             self._conn.commit()
         except sqlite3.OperationalError:
             pass  # 列已存在
+        # S74：补 book_id 列（幂等）
+        try:
+            self._conn.execute(
+                "ALTER TABLE materials ADD COLUMN book_id TEXT NOT NULL DEFAULT 'main'"
+            )
+            self._conn.commit()
+        except sqlite3.OperationalError:
+            pass  # 列已存在
         self._conn.commit()
 
-    def save(self, card: MaterialCard) -> MaterialCard:
+    def save(self, card: MaterialCard, book_id: str = "main") -> MaterialCard:
         import json
 
         with self._lock:
             self._conn.execute(
-                "INSERT INTO materials (id, title, topic, key_points, key_settings, "
+                "INSERT INTO materials (id, book_id, title, topic, key_points, key_settings, "
                 "characters, terms, purpose, source_text, graph_entities, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     card.id,
+                    book_id,
                     card.title,
                     card.topic,
                     json.dumps(card.key_points, ensure_ascii=False),
@@ -134,11 +144,13 @@ class MaterialStore:
             self._conn.commit()
         return card
 
-    def list(self) -> list[MaterialCard]:
+    def list(self, book_id: str = "main") -> list[MaterialCard]:
         import json
 
         with self._lock:
-            rows = self._conn.execute("SELECT * FROM materials ORDER BY rowid DESC").fetchall()
+            rows = self._conn.execute(
+                "SELECT * FROM materials WHERE book_id=? ORDER BY rowid DESC", (book_id,)
+            ).fetchall()
         return [
             MaterialCard(
                 id=r["id"],

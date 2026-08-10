@@ -117,7 +117,9 @@ SRC_ROOT = Path(__file__).resolve().parents[5] / "packages"
 _SRC_READ_MAX = 100_000
 
 
-def make_data_env(workspace: Any, chapters: Any, graph: Any) -> dict[str, Any]:
+def make_data_env(
+    workspace: Any, chapters: Any, graph: Any, book_id: str = "main"
+) -> dict[str, Any]:
     """构建沙箱只读数据环境（S48-P4/A：沙箱可读数据——真实统计/自定义分析）。
 
     注入的 ws_* 函数是**只读快照管道**：沙箱代码可调用它们拿到工作区数据
@@ -130,20 +132,20 @@ def make_data_env(workspace: Any, chapters: Any, graph: Any) -> dict[str, Any]:
     """
 
     def ws_chapters() -> list[dict[str, Any]]:
-        return [{"title": c.title, "content": c.content} for c in chapters.list_by_book("main")]
+        return [{"title": c.title, "content": c.content} for c in chapters.list_by_book(book_id)]
 
     def ws_entities() -> list[dict[str, Any]]:
-        return [e.to_dict() for e in graph.list_entities("main", limit=10000)]
+        return [e.to_dict() for e in graph.list_entities(book_id, limit=10000)]
 
     def ws_relations() -> list[dict[str, Any]]:
-        return [r.to_dict() for r in graph.list_relations("main", limit=10000)]
+        return [r.to_dict() for r in graph.list_relations(book_id, limit=10000)]
 
     def ws_events() -> list[dict[str, Any]]:
-        return [ev.to_dict() for ev in graph.list_events("main", limit=10000)]
+        return [ev.to_dict() for ev in graph.list_events(book_id, limit=10000)]
 
     def ws_read(rel_path: str) -> str:
         """只读项目目录内文件（相对项目根，如 '上传/设定.txt'）。"""
-        base = workspace.project_dir("main").resolve()
+        base = workspace.project_dir(book_id).resolve()
         p = (base / rel_path).resolve()
         if not str(p).startswith(str(base)):
             raise ValueError(f"越界：{rel_path}")
@@ -154,7 +156,7 @@ def make_data_env(workspace: Any, chapters: Any, graph: Any) -> dict[str, Any]:
         return str(p.read_text(encoding="utf-8", errors="ignore"))
 
     def ws_uploads() -> list[dict[str, Any]]:
-        return [{"name": u["name"], "size": u["size"]} for u in workspace.list_uploads("main")]
+        return [{"name": u["name"], "size": u["size"]} for u in workspace.list_uploads(book_id)]
 
     def src_read(rel_path: str) -> str:
         """只读 packages/ 源码（修 bug 辅助：定位问题/验证修复逻辑）。

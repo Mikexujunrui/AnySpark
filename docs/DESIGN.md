@@ -1122,3 +1122,52 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 **定案：技能索引保持全量常驻，不渐进披露**（YAGNI）。
 **边界条件**：真到 200+ 条（上下文 16%+）再考虑——届时按类别分组折叠（目录分组、
 主循环按需展开一组），不是按偏好选 2-3 条（那是盲选）。
+
+### 12.32 数据隔离审计与修复（S74：book_id 贯穿 + 死数据清理 + 隔离边界定案）
+
+> 背景（主人询问）：后端有没有污染交叉？审计发现两类问题：
+> ① **机制层**：领域工具（graph_query/plot/plan/read_setting/搜索/评审等）全部硬编码
+>    `book_id="main"`——多书隔离在 agent 工具层从未生效（API 层有 book_id，工具层没有）；
+>    设定档 `world_settings` / 资料库 `materials` 表结构本身缺 book_id 列（`list(book_id)`
+>    形同虚设）。② **数据层**：main 书混入测试章节（性能测试章×3/测试钩子章/测试回收/
+>    记录测试章）、测试项目线程（test_hp）、空标题 play 会话、25 条孤儿图谱关系、
+>    mood 死表残留。
+
+#### 机制修复：book_id 贯穿工具层
+
+- **ToolContext 增加 `book_id` 字段**（S74）——组合根（_make_agent）装配时注入当前
+  项目 id；build_toolkit 将其透传给全部 implementer（写作/领域/扩展/评审/沙箱数据环境）。
+- 所有 `make_*_implementer` 签名补 `book_id: str = "main"`（缺省保持向后兼容），
+  内部硬编码 `"main"` 全部替换为参数——graph_query/plot/plan/read_setting/ingest/
+  run_code/role_play/search_chapters/read_context/mind_register/graph_register/
+  read_material/panel_review 共 13 组工具全部按书隔离。
+- **world_settings / materials 补 book_id 列**（幂等 ALTER 迁移）：设定档（正典）与
+  资料库（书级素材）是书级内容，必须按书隔离；`list()/add()/save()` 均带 book_id，
+  相关 API（/api/settings、/api/materials、/api/upload、/api/ingest）同步支持。
+
+#### 数据隔离边界定案（哪些按书 / 哪些全局复用）
+
+| 数据 | 归属 | 理由 |
+|---|---|---|
+| 章节/版本历史/图谱/伏笔/计划/设定档/资料库/信号/心智/叙事树/推演会话 | **按书** | 书级内容 |
+| explore_dims（探索维度） | **全局复用** | 跨书通用词典（情节驱动/角色驱动…） |
+| setting_categories（设定分类） | **全局复用** | 跨书通用词典（人物卡/世界观/规则…） |
+| writing_skills / skill_drafts（写作技巧） | **全局复用** | 能力库（跨书），DESIGN §12.3 |
+| agency_levels（档位） / model_configs（模型注册） | **全局** | 系统机制 |
+| ai_bias（AI 倾向档案） | **全局** | 用户级稳定偏好（DESIGN §12.18） |
+| conversations/messages（会话） | **全局** | 对话流（交互过程，非书内容） |
+| templates_external / workflow 模板 | **全局** | 模板与书解耦（DESIGN §12.24） |
+| tools_extensions（扩展工具注册表） | **全局** | 工具=数据，人工批准生效 |
+
+#### 死数据清理（一次性，已执行 + 备份 data_backup_s74_*.db）
+
+- 删除 mood_dims 表（S63 判死刑后表残留）
+- 删除测试章节 6 条（DB 镜像）+ 测试残留文件（021-记录测试章.md）
+- 删除孤儿图谱关系 25 条（from/to 引用不存在实体）+ 引用不存在章节的测试事件 6 条
+- 删除 story_threads 中 test_hp 项目残留线程 + 空标题 play 会话
+
+#### 遗留（主人定夺）
+
+- **main 书章节双写漂移**：DB 有 19 条无文件章节（工作区化前旧数据）+ 文件有 6 条
+  未入库章节（031-035）；其中 033 有两个文件（码头等船/第九章 折返）、031/034 是
+  "第十章 船夫"两个草稿版本——**文件层冲突属创作内容，不擅自动**，待主人整理。

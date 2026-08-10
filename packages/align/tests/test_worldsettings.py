@@ -77,9 +77,7 @@ def test_settings_api_and_injection() -> None:
 
 def test_render_settings_adaptive_full_below_threshold() -> None:
     """≤20 条：全量渲染（与 render_settings 一致）。"""
-    entries = [
-        WorldSetting(content=f"设定{i}", category="世界观", name=f"名{i}") for i in range(5)
-    ]
+    entries = [WorldSetting(content=f"设定{i}", category="世界观", name=f"名{i}") for i in range(5)]
     full = render_settings(entries)
     adaptive = render_settings_adaptive(entries)
     assert adaptive == full

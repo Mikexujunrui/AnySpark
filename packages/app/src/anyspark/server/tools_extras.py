@@ -115,7 +115,7 @@ def make_explore_implementer(
     return spec, implementer
 
 
-def make_read_material_implementer(materials: Any) -> tuple[Any, Any]:
+def make_read_material_implementer(materials: Any, book_id: str = "main") -> tuple[Any, Any]:
     """资料查阅工具：按标题/主题/术语/角色模糊匹配资料摘要卡。"""
 
     spec = ToolSpec(

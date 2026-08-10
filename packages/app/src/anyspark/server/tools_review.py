@@ -37,7 +37,9 @@ def _run_coro_safely(factory: Any) -> Any:
     return asyncio.run(factory())
 
 
-def make_review_tools(panel: Any, chapters: Any, model: Any) -> list[tuple[Any, Any]]:
+def make_review_tools(
+    panel: Any, chapters: Any, model: Any, book_id: str = "main"
+) -> list[tuple[Any, Any]]:
     """装配评审团 agent 工具组（返回 [(spec, implementer), ...]）。"""
 
     spec = ToolSpec(
@@ -71,7 +73,7 @@ def make_review_tools(panel: Any, chapters: Any, model: Any) -> list[tuple[Any, 
         title = str(arguments.get("chapter_title") or "").strip()
         if not title:
             return ToolResult(call=call, ok=False, content="缺少 chapter_title 参数。")
-        ch = next((c for c in chapters.list_by_book("main") if c.title == title), None)
+        ch = next((c for c in chapters.list_by_book(book_id) if c.title == title), None)
         if ch is None:
             return ToolResult(call=call, ok=False, content=f"章节不存在: {title}")
         ids_raw = str(arguments.get("reviewer_ids") or "").strip()
