@@ -73,7 +73,7 @@ export default function Paper() {
   }, []);
 
   return (
-    <div className="flex-1 bg-zinc-900 border-b border-zinc-800 overflow-y-auto relative">
+    <div className="flex-1 flex flex-col bg-zinc-900 border-b border-zinc-800 overflow-y-auto relative">
       {/* 章节标题 + 保存状态 */}
       {selectedChapter && (
         <div className="px-6 pt-4 pb-2 border-b border-zinc-800/50 flex items-center justify-between">
