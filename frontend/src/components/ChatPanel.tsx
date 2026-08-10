@@ -1,16 +1,55 @@
 import { useState, useRef, useEffect } from "react";
 import { useChatStore } from "../stores/chatStore";
+import { useDisplayStore } from "../stores/displayStore";
 import type { Candidate } from "../api/chat";
+
+// 斜杠命令定义
+const SLASH_COMMANDS = [
+  { name: "write", description: "切换到稿纸模式", action: () => useDisplayStore.getState().setMode("paper") },
+  { name: "explore", description: "切换到探索模式", action: () => useDisplayStore.getState().setMode("explore") },
+  { name: "tree", description: "切换到叙事树模式", action: () => useDisplayStore.getState().setMode("tree") },
+  { name: "skills", description: "切换到技巧模式", action: () => useDisplayStore.getState().setMode("skills") },
+  { name: "check", description: "切换到审读模式", action: () => useDisplayStore.getState().setMode("check") },
+];
 
 export default function ChatPanel() {
   const { messages, streaming, streamingText, sendMessage, sendSteer, cancelStream } = useChatStore();
   const [input, setInput] = useState("");
+  const [showSlashMenu, setShowSlashMenu] = useState(false);
+  const [slashFilter, setSlashFilter] = useState("");
+  const [selectedCommandIndex, setSelectedCommandIndex] = useState(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // 过滤后的命令列表
+  const filteredCommands = SLASH_COMMANDS.filter(cmd =>
+    cmd.name.toLowerCase().includes(slashFilter.toLowerCase())
+  );
 
   // 自动滚动到底部
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingText]);
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    setInput(value);
+
+    // 检测斜杠命令
+    if (value.startsWith("/")) {
+      const filter = value.slice(1).split(" ")[0];
+      setSlashFilter(filter);
+      setShowSlashMenu(true);
+      setSelectedCommandIndex(0);
+    } else {
+      setShowSlashMenu(false);
+    }
+  };
+
+  const handleSelectCommand = (cmd: typeof SLASH_COMMANDS[0]) => {
+    cmd.action();
+    setInput("");
+    setShowSlashMenu(false);
+  };
 
   const handleSend = () => {
     const text = input.trim();
@@ -26,6 +65,26 @@ export default function ChatPanel() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // 斜杠命令导航
+    if (showSlashMenu) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSelectedCommandIndex((prev) => (prev + 1) % filteredCommands.length);
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSelectedCommandIndex((prev) => (prev - 1 + filteredCommands.length) % filteredCommands.length);
+      } else if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        if (filteredCommands[selectedCommandIndex]) {
+          handleSelectCommand(filteredCommands[selectedCommandIndex]);
+        }
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        setShowSlashMenu(false);
+      }
+      return;
+    }
+
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -80,13 +139,36 @@ export default function ChatPanel() {
       </div>
 
       {/* 输入区 */}
-      <div className="px-4 py-3 border-t border-zinc-800">
+      <div className="px-4 py-3 border-t border-zinc-800 relative">
+        {/* 斜杠命令菜单 */}
+        {showSlashMenu && filteredCommands.length > 0 && (
+          <div className="absolute bottom-full left-4 right-4 mb-2 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg overflow-hidden z-10">
+            <div className="px-3 py-2 border-b border-zinc-700 text-xs text-zinc-500">
+              斜杠命令
+            </div>
+            {filteredCommands.map((cmd, i) => (
+              <button
+                key={cmd.name}
+                onClick={() => handleSelectCommand(cmd)}
+                className={`w-full px-3 py-2 text-left flex items-center gap-3 transition-colors ${
+                  i === selectedCommandIndex
+                    ? "bg-zinc-700 text-zinc-100"
+                    : "text-zinc-300 hover:bg-zinc-700/50"
+                }`}
+              >
+                <span className="font-mono text-sm text-amber-400">/{cmd.name}</span>
+                <span className="text-xs text-zinc-500">{cmd.description}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
         <div className="flex gap-2">
           <textarea
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={handleInputChange}
             onKeyDown={handleKeyDown}
-            placeholder={streaming ? "输入插话引导方向... (Enter 发送)" : "输入消息... (Enter 发送, Shift+Enter 换行)"}
+            placeholder={streaming ? "输入插话引导方向... (Enter 发送)" : "输入消息... (/ 打开命令菜单, Enter 发送, Shift+Enter 换行)"}
             rows={1}
             className="flex-1 bg-zinc-900 text-zinc-200 text-sm px-3 py-2 rounded-lg border border-zinc-700 focus:outline-none focus:border-zinc-500 resize-none"
           />
