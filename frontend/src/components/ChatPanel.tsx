@@ -37,7 +37,7 @@ export default function ChatPanel() {
   };
 
   return (
-    <div className="h-[45%] flex flex-col bg-zinc-950 border-t border-zinc-800">
+    <div className="flex-1 flex flex-col bg-zinc-950 overflow-hidden">
       {/* 消息列表 */}
       <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
         {messages.length === 0 && !streaming && (
