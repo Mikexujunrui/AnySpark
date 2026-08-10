@@ -197,6 +197,12 @@ class ModelIn(BaseModel):
     thinking: str | None = None  # off/low/medium/high/xhigh/max（None=交模型默认）
 
 
+class ConversationRenameIn(BaseModel):
+    """会话重命名请求。"""
+
+    title: str
+
+
 class RoleCardIn(BaseModel):
     """S48-P4 角色卡（卡片/角色卡-{name}.md）。"""
 
@@ -1468,6 +1474,7 @@ def build_app(
                 "created_at": c.created_at,
                 "parent_id": c.parent_id,
                 "fork_point": c.fork_point,
+                "title": c.title,
                 "message_count": len(store.messages(c.id)),
             }
             for c in reversed(convs)  # 新的在前
@@ -1494,6 +1501,25 @@ def build_app(
             "fork_point": child.fork_point,
             "chain": chain,  # [新会话, 源, 源的源...] 继承链条
         }
+
+    @app.put("/api/conversations/{conv_id}", response_model=dict[str, bool])
+    def rename_conversation(conv_id: str, req: ConversationRenameIn) -> dict[str, bool]:
+        """重命名会话。"""
+        conv = store.get(conv_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        conv.title = req.title
+        store.save(conv)
+        return {"ok": True}
+
+    @app.delete("/api/conversations/{conv_id}", response_model=dict[str, bool])
+    def delete_conversation(conv_id: str) -> dict[str, bool]:
+        """删除会话及其所有消息。"""
+        conv = store.get(conv_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        store.delete(conv_id)
+        return {"ok": True}
 
     # -----------------------------------------------------------------------
     # S47 运行时模型配置：注册表 CRUD + 激活切换（换供应商/换模型/选思考强度）
