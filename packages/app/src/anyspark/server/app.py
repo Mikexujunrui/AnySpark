@@ -51,7 +51,7 @@ from anyspark.align import (
     parse_learning_review_result,
     parse_reconcile_result,
     render_plan,
-    render_settings,
+    render_settings_adaptive,
     render_skill_index,
 )
 from anyspark.check import compile_rule, compile_with_model, run_review
@@ -1385,7 +1385,7 @@ def build_app(
                 append_blocks.append(plot_block)
         # 设定档注入（S41 作者正典：人物卡/能力体系/世界观规则——与图谱互补）
         if "settings" not in skip:
-            settings_block = render_settings(settings.list())
+            settings_block = render_settings_adaptive(settings.list())
             if settings_block:
                 append_blocks.append(settings_block)
         # S53 心智指导块：文风偏好 + 习惯（渐进式披露：只列关键条目，指导性保留）

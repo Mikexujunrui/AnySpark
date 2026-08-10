@@ -148,6 +148,8 @@ def make_plot_implementer(plots: Any) -> tuple[list[Any], list[Any]]:
             "登记一个伏笔/剧情钩子（关键点图谱）。写作中埋下线索、悬念、承诺时使用——"
             "一句话'记一下'，系统记入关键点图谱并在后续注入中持续提醒。"
             "priority=must 表示主线承诺（必须回收，会重点标注）；默认 soft（细节线索）。"
+            "只记剧情承诺/钩子；事实类设定（谁是谁/世界规则）用 graph_register，"
+            "不要两处重复登记。"
         ),
         params=[
             ParamSpec(
@@ -994,6 +996,8 @@ def make_graph_register_implementer(graph: Any) -> tuple[Any, Any]:
             "把用户明确表述的设定/角色/关系登记进知识图谱。"
             "当用户在对话中明确陈述设定（如'顾欣桐是赵光离的线人''雾城是边境城市'）"
             "或纠正图谱错误时使用。登记后写作时图谱注入会自动包含。"
+            "只记事实（谁是谁/世界规则/关系）；剧情承诺/伏笔（'埋了线索待回收'）用"
+            "plot_register，不要两处重复登记。"
         ),
         params=[
             ParamSpec(

@@ -7,7 +7,12 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from anyspark.align import WorldSettingStore, render_settings
+from anyspark.align import (
+    WorldSetting,
+    WorldSettingStore,
+    render_settings,
+    render_settings_adaptive,
+)
 from anyspark.core.types import Message, ModelOutput
 from anyspark.server.app import build_app
 
@@ -68,3 +73,37 @@ def test_settings_api_and_injection() -> None:
     # 删除
     assert client.delete(f"/api/settings/{sid}").json()["ok"] is True
     assert client.get("/api/settings").json() == []
+
+
+def test_render_settings_adaptive_full_below_threshold() -> None:
+    """≤20 条：全量渲染（与 render_settings 一致）。"""
+    entries = [
+        WorldSetting(content=f"设定{i}", category="世界观", name=f"名{i}") for i in range(5)
+    ]
+    full = render_settings(entries)
+    adaptive = render_settings_adaptive(entries)
+    assert adaptive == full
+    assert "设定0" in adaptive and "read_setting" not in adaptive
+
+
+def test_render_settings_adaptive_index_over_threshold() -> None:
+    """超 20 条：注入索引（含 read_setting 提示 + 截断），不注入全量。"""
+    entries = [
+        WorldSetting(
+            content=(
+                f"这是第{i}号设定的超长内容用来验证渐进式披露时的截断行为"
+                "确保索引足够轻量不占上下文且写作引用前先用工具查证具体条目"
+            ),
+            category="能力体系",
+            name=f"技{i}",
+        )
+        for i in range(25)
+    ]
+    adaptive = render_settings_adaptive(entries)
+    assert "共 25 条" in adaptive
+    assert "read_setting" in adaptive  # 按需查询提示
+    assert "技0" in adaptive and "技24" in adaptive
+    assert "先用工具查证具体条目" not in adaptive  # 内容超 40 字被截断
+    # 全量版本不含索引提示
+    full = render_settings(entries)
+    assert "read_setting" not in full

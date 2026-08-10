@@ -50,7 +50,12 @@ from .storytree import (
     StoryTreeStore,
 )
 from .summarize import MemoryStore, SceneMemory, SessionSummarizer
-from .worldsettings import WorldSetting, WorldSettingStore, render_settings
+from .worldsettings import (
+    WorldSetting,
+    WorldSettingStore,
+    render_settings,
+    render_settings_adaptive,
+)
 
 __all__ = [
     "DEFAULT_ID",
@@ -94,6 +99,7 @@ __all__ = [
     "render_manual",
     "render_plan",
     "render_settings",
+    "render_settings_adaptive",
     "render_skill_candidates",
     "render_skill_index",
     "render_skills_by_name",

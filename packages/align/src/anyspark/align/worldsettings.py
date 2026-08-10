@@ -81,6 +81,7 @@ class WorldSettingStore:
                 """
                 CREATE TABLE IF NOT EXISTS world_settings (
                     id TEXT PRIMARY KEY,
+                    book_id TEXT NOT NULL DEFAULT 'main',
                     category TEXT NOT NULL DEFAULT '世界观',
                     name TEXT NOT NULL DEFAULT '',
                     content TEXT NOT NULL,
@@ -90,6 +91,12 @@ class WorldSettingStore:
                 )
                 """
             )
+            # S74：旧库补 book_id 列（幂等）
+            try:
+                self._conn.execute("ALTER TABLE world_settings ADD COLUMN book_id TEXT NOT NULL DEFAULT 'main'")
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # 列已存在
             # S50：设定档类别内容化（默认种子建议，可增删改——不再写死锁死）
             self._conn.execute(
                 """
@@ -168,7 +175,8 @@ class WorldSettingStore:
     def list(self, book_id: str = "main") -> list[WorldSetting]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM world_settings ORDER BY order_index, rowid"
+                "SELECT * FROM world_settings WHERE book_id=? ORDER BY order_index, rowid",
+                (book_id,),
             ).fetchall()
         return [_from_row(r) for r in rows]
 
@@ -185,10 +193,12 @@ class WorldSettingStore:
         category: str = "世界观",
         name: str = "",
         source: str = "manual",
+        book_id: str = "main",
     ) -> WorldSetting:
         with self._lock:
             max_order = self._conn.execute(
-                "SELECT COALESCE(MAX(order_index), -1) AS m FROM world_settings"
+                "SELECT COALESCE(MAX(order_index), -1) AS m FROM world_settings WHERE book_id=?",
+                (book_id,),
             ).fetchone()["m"]
             s = WorldSetting(
                 content=content,
@@ -199,9 +209,9 @@ class WorldSettingStore:
             )
             self._conn.execute(
                 "INSERT INTO world_settings "
-                "(id, category, name, content, source, order_index, created_at) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (s.id, s.category, s.name, s.content, s.source, s.order, s.created_at),
+                "(id, book_id, category, name, content, source, order_index, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (s.id, book_id, s.category, s.name, s.content, s.source, s.order, s.created_at),
             )
             self._conn.commit()
         return s
@@ -265,4 +275,34 @@ def render_settings(entries: list[WorldSetting], title: str = "本书设定档")
         for e in items:
             prefix = f"{e.name}：" if e.name else ""
             lines.append(f"- {prefix}{e.content}")
+    return "\n".join(lines)
+
+
+# S73b：设定档渐进式披露阈值——超过则注入索引而非全量（对齐 S60 skill 索引模式）
+SETTINGS_INDEX_THRESHOLD = 20
+
+
+def render_settings_adaptive(
+    entries: list[WorldSetting], title: str = "本书设定档"
+) -> str:
+    """设定档渲染（渐进式披露，S73b）：条目 ≤阈值 全量；超阈值 注入索引。
+
+    索引 = 类别 + 条目名/一句话截断 + 提示 read_setting 按需查——正典细节
+    不常驻（省 token），agent 决定需要哪条时用 read_setting 工具查全量。
+    """
+    if len(entries) <= SETTINGS_INDEX_THRESHOLD:
+        return render_settings(entries, title)
+    lines = [
+        f"# {title}（共 {len(entries)} 条，只注入索引；"
+        f"写作引用前用 read_setting 按需查询具体条目）"
+    ]
+    by_cat: dict[str, list[WorldSetting]] = {}
+    for e in entries:
+        by_cat.setdefault(e.category, []).append(e)
+    for cat, items in by_cat.items():
+        lines.append(f"【{cat}】")
+        for e in items:
+            prefix = f"{e.name}：" if e.name else ""
+            snippet = e.content.replace("\n", " ").strip()[:40]
+            lines.append(f"- {prefix}{snippet}…" if snippet else f"- {prefix}（空）")
     return "\n".join(lines)
