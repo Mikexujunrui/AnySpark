@@ -80,21 +80,17 @@ export default function SettingsPanel({ open, onClose }: SettingsPanelProps) {
             <h3 className="text-xs font-medium text-zinc-400 uppercase tracking-wide mb-2">破限模式</h3>
             <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-3">
               <div className="flex items-center justify-between">
-                <div>
+                <div className="min-w-0 flex-1">
                   <p className="text-sm text-zinc-200">启用破限</p>
                   <p className="text-xs text-zinc-500 mt-0.5">允许 AI 生成更自由的内容</p>
                 </div>
                 <button
                   onClick={() => toggleUncensored(!uncensored.enabled)}
-                  className={`relative w-10 h-5 rounded-full transition-colors ${
-                    uncensored.enabled ? "bg-red-500" : "bg-zinc-700"
+                  className={`relative flex-shrink-0 w-11 h-6 rounded-full transition-colors flex items-center ${
+                    uncensored.enabled ? "bg-red-500 justify-end" : "bg-zinc-600 justify-start"
                   }`}
                 >
-                  <span
-                    className={`absolute top-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
-                      uncensored.enabled ? "translate-x-5" : "translate-x-0.5"
-                    }`}
-                  />
+                  <span className="w-5 h-5 bg-white rounded-full shadow mx-0.5" />
                 </button>
               </div>
               {uncensored.enabled && (
