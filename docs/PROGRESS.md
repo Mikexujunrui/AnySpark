@@ -2118,3 +2118,29 @@ skill，S54 设计意图）②参考书有时必须读原文（skill 案例不�
 enable_extras 默认关）——agent 查资料去翻沙箱/设定档/图谱绕道，看不到资料库。
 标注用途对不可见的工具无效。可选：read_material 挪入 enable_domain（资料库=设定
 查证核心）——S32 权衡，主人定（详见 DESIGN §12.30 遗留）。
+
+## S72 图谱条目管理（已完成 ✅）——实体/关系/事件 增改删全能力
+
+**背景（主人追问"有编辑删除图谱或主动添加条目的能力吗"触发）**：审计发现图谱
+只有自动抽取（extract）+ 类型 CRUD——实体/关系/事件**无任何手动写入口**（无
+POST/PATCH/DELETE 端点、无 agent 工具），且 store 层**无 delete**（只有 upsert
+隐含的添加/覆盖）。风险：抽取错误无法修正（错误注入固化放大）、污染无法删除。
+主人拍板："管理应该是任何关系条目都可以修改"。
+
+**落地**：
+- store 层（schema.py）：update_entity_fields（局部编辑，**不动自动统计**
+  weight/出场记录——与 upsert 的区别）、delete_entity（**级联删关系**+清
+  FTS+清状态快照）、update_relation_fields/delete_relation、
+  update_event_fields/delete_event
+- API（app.py 9 端点）：实体 POST（幂等覆盖）/PATCH/DELETE；关系 POST
+  （两端须存在）/PATCH/DELETE；事件 POST/PATCH/DELETE
+- agent 工具 graph_register（tools_domain，无条件注册对齐 mind_register）：
+  对话"把XX记进图谱"→ 即时登记实体（+可选关系），纠正抽取错误不再依赖等待
+- 测试 8 个（store 局部编辑保留统计/级联删除/编辑删除 + API 全链路/幂等/400/404）
+
+**真实链路**：POST 顾欣桐/夜色镇实体 → 关系"熟悉"→ PATCH 描述/关系类型"向导"→
+事件增改 → 全部 DELETE 成功，删实体级联清关系。全通。
+
+**注意（多会话纪律续）**：API 端点与 graph_register 工具被并行会话 S72 提交
+（ce87422 文风参考防混淆）顺带入库——他们 add 工作区文件时带走了我的未提交
+改动（AGENTS 纪律 1 警告场景的"带走"方向；本次功能完整无损失，但混合提交了）。
