@@ -19,16 +19,24 @@ from .signals import Signal
 
 # 提炼提示模板（自然语言，模型无关）
 EXTRACT_PROMPT = """你是小说写作协作系统的偏好提炼器。从下面的"对话片段 + 用户操作信号"中，
-提炼出用户稳定、可复用的写作偏好条目。
+提炼出用户稳定、可复用的写作偏好/雷区条目。
+
+信号类型含义（S73d）：
+- negative（用户否定/撤回）：如"不要破折号"——提炼为**雷区/负向偏好**，句式用
+  "避免…/不要…"（如"避免使用破折号"），category=habit
+- modified（用户修改）："改成这样更好"——提炼为正向偏好（用户更想要的样子），
+  category 按内容定（style/habit/collab）
+- accepted（用户接受）：偏好确认，可提炼为高置信度偏好
+- rejected（用户拒绝）：同 negative 处理（可能是雷区）
 
 要求：
 1. 只提炼**稳定偏好**（重复出现/强烈表达），不要提炼一次性事实。
 2. 每条用一句明确无歧义的自然语言短句表达，能直接指导未来写作。
-3. 标注置信度（0-1，越高越确定）与活跃度（high/medium/low）。
+3. 标注置信度（0-1，越高越确定）、活跃度（high/medium/low）与分类（collab/style/habit）。
 4. 若某条与用户已有偏好冲突，不要输出它（写"SKIP"）。
 
 输出格式（严格 JSON 数组，不要其它文字）：
-[{"content": "偏好短句", "confidence": 0.8, "activity": "high"}]
+[{"content": "偏好短句", "confidence": 0.8, "activity": "high", "category": "style"}]
 
 对话与操作信号：
 """
@@ -78,8 +86,18 @@ class PreferenceExtractor:
                 if item.get("activity", "medium") in ("high", "medium", "low")
                 else "medium"
             )
+            # S73d：提炼条目落分类（collab/style/habit，负向偏好归 habit）
+            category = str(item.get("category", "style")).strip()
+            if category not in ("collab", "style", "habit"):
+                category = "style"
             entries.append(
-                ManualEntry(content=content, source="auto", confidence=conf, activity=activity)
+                ManualEntry(
+                    content=content,
+                    source="auto",
+                    confidence=conf,
+                    activity=activity,
+                    category=category,  # type: ignore[arg-type]
+                )
             )
         return entries
 

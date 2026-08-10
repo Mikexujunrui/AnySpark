@@ -1390,3 +1390,144 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
         return ToolResult(call=call, ok=True, content="\n".join(lines))
 
     return spec, implementer
+
+
+def make_mind_manage_implementer(manual: Any, book_id: str = "main") -> tuple[list[Any], list[Any]]:
+    """S73d 心智纠正工具：用户明确要求改/删心智条目时 agent 代执行。
+
+    边界（对齐哲学）：内容裁决权在用户——agent 只在用户明确口头要求时
+    修改/删除（"那条记错了/改成…/删掉"），不主动改删。
+    """
+
+    def _locate(query: str) -> list[Any]:
+        """定位条目：id 精确匹配；否则内容/分类包含匹配。"""
+        query = query.strip()
+        if not query:
+            return []
+        all_entries = [*manual.list("global"), *manual.list("project", book_id)]
+        if len(query) == 32 and all(c in "0123456789abcdef" for c in query):
+            exact = manual.get(query)
+            if exact is not None:
+                return [exact]
+        hits = [e for e in all_entries if query in e.content or query in e.category]
+        return hits
+
+    update_spec = ToolSpec(
+        name="mind_update",
+        description=(
+            "修改心智条目（写作说明书）：用户明确说'那条记错了/改成…/锁定'时使用。"
+            "用条目 id 或内容关键词定位（多个命中返回列表让用户确认）；"
+            "可改 content（新内容）/category（collab/style/habit）/locked（锁定）。"
+            "仅用户明确要求修改时调用，不主动改。"
+        ),
+        params=[
+            ParamSpec(
+                name="query",
+                type="string",
+                required=True,
+                description="定位：条目 id（32 位）或内容关键词",
+            ),
+            ParamSpec(
+                name="content",
+                type="string",
+                required=False,
+                description="新内容（缺省不改内容）",
+            ),
+            ParamSpec(
+                name="category",
+                type="string",
+                required=False,
+                description="新分类 collab/style/habit（缺省不改）",
+            ),
+            ParamSpec(
+                name="locked",
+                type="bool",
+                required=False,
+                description="true 锁定/false 解锁（缺省不改）",
+            ),
+        ],
+    )
+
+    def update(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        query = str(arguments.get("query", "")).strip()
+        if not query:
+            return ToolResult(call=call, ok=False, content="缺少参数 query。")
+        hits = _locate(query)
+        if not hits:
+            return ToolResult(call=call, ok=False, content=f"未找到匹配的心智条目：{query}")
+        if len(hits) > 1:
+            lines = [f"匹配到 {len(hits)} 条，请用更精确的 id 定位："]
+            lines.extend(f"- {e.id} [{e.category}] {e.content}" for e in hits[:8])
+            return ToolResult(call=call, ok=False, content="\n".join(lines))
+        entry = hits[0]
+        new_content = str(arguments.get("content", "")).strip()
+        new_category = str(arguments.get("category", "")).strip() or entry.category
+        if new_category not in ("collab", "style", "habit"):
+            new_category = entry.category
+        locked = arguments.get("locked")
+        if locked is not None:
+            manual.set_locked(entry.id, bool(locked))
+        if entry.locked and (new_content or new_category != entry.category):
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=(
+                f"条目已锁定（用户主权不可改）：[{entry.category}] {entry.content}"
+                "；先解锁再修改"
+            ),
+            )
+        updated = manual.update(
+            entry.id,
+            content=new_content or entry.content,
+            category=new_category,
+        )
+        if updated is None:
+            return ToolResult(call=call, ok=False, content="更新失败（条目可能已被删除）。")
+        return ToolResult(
+            call=call,
+            ok=True,
+            content=f"已更新心智条目 [{updated.category}] {updated.content}"
+            f"（锁定={'是' if updated.locked else '否'}）",
+            data={"entry": updated.to_dict()},
+        )
+
+    delete_spec = ToolSpec(
+        name="mind_delete",
+        description=(
+            "删除心智条目（写作说明书）：用户明确说'那条删掉/不要了'时使用。"
+            "用条目 id 或内容关键词定位（多个命中返回列表让用户确认）；"
+            "返回被删条目内容供追溯。仅用户明确要求删除时调用，不主动删。"
+        ),
+        params=[
+            ParamSpec(
+                name="query",
+                type="string",
+                required=True,
+                description="定位：条目 id（32 位）或内容关键词",
+            ),
+        ],
+    )
+
+    def delete(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        query = str(arguments.get("query", "")).strip()
+        if not query:
+            return ToolResult(call=call, ok=False, content="缺少参数 query。")
+        hits = _locate(query)
+        if not hits:
+            return ToolResult(call=call, ok=False, content=f"未找到匹配的心智条目：{query}")
+        if len(hits) > 1:
+            lines = [f"匹配到 {len(hits)} 条，请用更精确的 id 定位："]
+            lines.extend(f"- {e.id} [{e.category}] {e.content}" for e in hits[:8])
+            return ToolResult(call=call, ok=False, content="\n".join(lines))
+        entry = hits[0]
+        manual.delete(entry.id)
+        return ToolResult(
+            call=call,
+            ok=True,
+            content=f"已删除心智条目 [{entry.category}] {entry.content}",
+            data={"deleted": entry.to_dict()},
+        )
+
+    return [update_spec, delete_spec], [update, delete]

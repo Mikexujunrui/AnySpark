@@ -46,3 +46,32 @@ def test_extract_empty_output() -> None:
     model = FakeModel("什么都没有")
     ex = PreferenceExtractor(model)
     assert ex.extract(dialogue=[], signals=[]) == []
+
+
+def test_extract_parses_category_and_negative() -> None:
+    """S73d：提炼条目落分类（负向偏好归 habit，category 解析）。"""
+    from anyspark.align.extract import EXTRACT_PROMPT
+
+    # 负向句式引导在 prompt 里（natural 语言语义）
+    assert "雷区/负向偏好" in EXTRACT_PROMPT
+    assert "避免…/不要…" in EXTRACT_PROMPT
+    assert "category" in EXTRACT_PROMPT
+
+    raw = (
+        '[{"content": "避免使用破折号", "confidence": 0.9, "activity": "high",'
+        ' "category": "habit"},'
+        ' {"content": "对话要克制", "confidence": 0.7, "activity": "medium",'
+        ' "category": "style"},'
+        ' {"content": "先给大纲再动笔", "confidence": 0.6, "activity": "low",'
+        ' "category": "collab"}]'
+    )
+    model = FakeModel(raw)
+    entries = PreferenceExtractor(model).extract([], [], max_items=3)
+    cats = {e.content: e.category for e in entries}
+    assert cats["避免使用破折号"] == "habit"  # 负向偏好归 habit
+    assert cats["对话要克制"] == "style"
+    assert cats["先给大纲再动笔"] == "collab"
+    # 非法 category 回退 style
+    raw2 = '[{"content": "x", "category": "nonsense"}]'
+    entries2 = PreferenceExtractor(FakeModel(raw2)).extract([], [], max_items=1)
+    assert entries2[0].category == "style"

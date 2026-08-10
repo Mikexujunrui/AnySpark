@@ -50,6 +50,7 @@ class SessionPlan:
         """渲染心智指导块（文风偏好 + 习惯，渐进式披露：只列关键条目）。
 
         指导性保留但不堆砌——心智条目多了只取高置信/锁定条目。
+        S73d：习惯含负向偏好/雷区（"避免…"句式），标题语义涵盖遵循与规避。
         """
         parts: list[str] = []
         if self.style_prefs:
@@ -57,7 +58,7 @@ class SessionPlan:
             lines.extend(f"- {n}" for n in self.style_prefs)
             parts.append("\n".join(lines))
         if self.habit_notes:
-            lines = ["# 用户写作习惯（写作时遵循）"]
+            lines = ["# 用户写作习惯与雷区（遵循习惯、规避雷区）"]
             lines.extend(f"- {n}" for n in self.habit_notes)
             parts.append("\n".join(lines))
         return "\n\n".join(parts)

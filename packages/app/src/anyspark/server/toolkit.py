@@ -101,6 +101,7 @@ def build_toolkit(
             make_graph_query_implementer,
             make_graph_register_implementer,
             make_ingest_implementer,
+            make_mind_manage_implementer,
             make_mind_register_implementer,
             make_path_explore_implementer,
             make_plan_implementer,
@@ -156,6 +157,10 @@ def build_toolkit(
         if ctx.manual is not None:
             md_spec, md_impl = make_mind_register_implementer(ctx.manual)
             registry.register(md_spec, md_impl)
+            # S73d 心智纠正工具：用户明确要求改/删时 agent 代执行（内容裁决权在用户）
+            mm_specs, mm_impls = make_mind_manage_implementer(ctx.manual)
+            for _s, _i in zip(mm_specs, mm_impls, strict=True):
+                registry.register(_s, _i)
 
     # S48-P4/B 扩展工具注册表：已批准（active）的扩展注入工具集（无需重启生效）
     from anyspark.server.codex import make_data_env
