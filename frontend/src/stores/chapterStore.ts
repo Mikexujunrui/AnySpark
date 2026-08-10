@@ -66,13 +66,23 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
   },
 
   removeChapter: async (id: string) => {
+    const { selectedId, chapters } = get();
+    const wasSelected = selectedId === id;
+    
     try {
       await deleteChapter(id);
+      const remaining = chapters.filter((c) => c.id !== id);
+      
       set((state) => ({
-        chapters: state.chapters.filter((c) => c.id !== id),
-        selectedId: state.selectedId === id ? null : state.selectedId,
-        selectedChapter: state.selectedChapter?.id === id ? null : state.selectedChapter,
+        chapters: remaining,
+        selectedId: wasSelected ? (remaining[0]?.id ?? null) : state.selectedId,
+        selectedChapter: wasSelected ? null : state.selectedChapter,
       }));
+      
+      // 如果删除的是当前章节且还有其他章节，自动选中第一个
+      if (wasSelected && remaining.length > 0) {
+        await get().selectChapter(remaining[0].id);
+      }
     } catch (error) {
       console.error("Failed to delete chapter:", error);
       throw error;
