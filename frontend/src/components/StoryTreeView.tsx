@@ -13,7 +13,7 @@ const KIND_STYLES: Record<StoryNode["kind"], { bg: string; border: string; label
 };
 
 export default function StoryTreeView() {
-  const { nodes, threads, loading, selectedNodeId, fetchTree, addNode, choose, anchor, selectNode } =
+  const { nodes, threads, loading, selectedNodeId, fetchTree, addNode, choose, anchor, removeNode, selectNode } =
     useStoryStore();
   const [showAddInput, setShowAddInput] = useState(false);
   const [newContent, setNewContent] = useState("");
@@ -86,6 +86,7 @@ export default function StoryTreeView() {
                   onSelect={selectNode}
                   onChoose={choose}
                   onAnchor={anchor}
+                  onDelete={removeNode}
                   onAddChild={(id) => {
                     setParentId(id);
                     setShowAddInput(true);
@@ -220,6 +221,7 @@ function TreeNode({
   onSelect,
   onChoose,
   onAnchor,
+  onDelete,
   onAddChild,
   depth,
 }: {
@@ -230,6 +232,7 @@ function TreeNode({
   onSelect: (id: string) => void;
   onChoose: (id: string) => void;
   onAnchor: (id: string) => void;
+  onDelete: (id: string) => void;
   onAddChild: (id: string) => void;
   depth: number;
 }) {
@@ -274,6 +277,20 @@ function TreeNode({
           >
             +
           </button>
+          {node.kind !== "root" && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (confirm("确定删除此节点及其所有子节点？")) {
+                  onDelete(node.id);
+                }
+              }}
+              className="text-[9px] px-1 py-0.5 bg-red-900/50 text-red-400 rounded hover:bg-red-900/80"
+              title="删除节点"
+            >
+              ×
+            </button>
+          )}
         </div>
       </div>
       {/* 子节点 */}
@@ -289,6 +306,7 @@ function TreeNode({
               onSelect={onSelect}
               onChoose={onChoose}
               onAnchor={onAnchor}
+              onDelete={onDelete}
               onAddChild={onAddChild}
               depth={depth + 1}
             />

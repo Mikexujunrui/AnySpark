@@ -4,6 +4,7 @@ import {
   addStoryNode,
   chooseNode,
   anchorNode,
+  deleteNode,
   addThread,
   type StoryNode,
   type StoryThread,
@@ -19,6 +20,7 @@ interface StoryState {
   addNode: (content: string, parentId?: string) => Promise<void>;
   choose: (nodeId: string) => Promise<void>;
   anchor: (nodeId: string) => Promise<void>;
+  removeNode: (nodeId: string) => Promise<void>;
   selectNode: (nodeId: string | null) => void;
   addNewThread: (name: string, content?: string, role?: StoryThread["role"]) => Promise<void>;
 }
@@ -77,6 +79,33 @@ export const useStoryStore = create<StoryState>((set, get) => ({
       }));
     } catch (error) {
       console.error("Failed to anchor node:", error);
+      throw error;
+    }
+  },
+
+  removeNode: async (nodeId: string) => {
+    try {
+      await deleteNode(nodeId);
+      set((state) => {
+        // 删除节点及其所有后代
+        const toDelete = new Set<string>([nodeId]);
+        let changed = true;
+        while (changed) {
+          changed = false;
+          for (const n of state.nodes) {
+            if (n.parent_id && toDelete.has(n.parent_id) && !toDelete.has(n.id)) {
+              toDelete.add(n.id);
+              changed = true;
+            }
+          }
+        }
+        return {
+          nodes: state.nodes.filter((n) => !toDelete.has(n.id)),
+          selectedNodeId: state.selectedNodeId && toDelete.has(state.selectedNodeId) ? null : state.selectedNodeId,
+        };
+      });
+    } catch (error) {
+      console.error("Failed to remove node:", error);
       throw error;
     }
   },

@@ -106,7 +106,7 @@ export default function DisplayArea({
       </div>
 
       {/* 展示内容 */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0">
         {mode === "paper" && <Paper />}
         {mode === "skills" && <SkillPanel open={true} onClose={() => setMode("paper")} embedded />}
         {mode === "tree" && <StoryTreeView />}

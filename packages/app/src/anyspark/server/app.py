@@ -3535,6 +3535,14 @@ def build_app(
             raise HTTPException(status_code=404, detail="节点不存在")
         return n.to_dict()
 
+    @app.delete("/api/story/nodes/{node_id}", response_model=dict[str, Any])
+    def delete_story_node(node_id: str) -> dict[str, Any]:
+        """删除叙事节点（含所有后代）。"""
+        ok = story_tree.delete_node(node_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="节点不存在")
+        return {"ok": True, "id": node_id}
+
     @app.get("/api/story/tree", response_model=dict[str, Any])
     def story_tree_view(book_id: str = "main") -> dict[str, Any]:
         """树 + 线进度的注入视图（预览/调试）。"""

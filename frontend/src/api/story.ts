@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client";
+import { apiGet, apiPost, apiDelete } from "./client";
 
 // 叙事树节点
 export interface StoryNode {
@@ -67,6 +67,11 @@ export function chooseNode(nodeId: string): Promise<StoryNode> {
 // 标为锚点
 export function anchorNode(nodeId: string): Promise<StoryNode> {
   return apiPost<StoryNode>(`/api/story/nodes/${nodeId}/anchor`, {});
+}
+
+// 删除节点（含后代）
+export function deleteNode(nodeId: string): Promise<{ ok: boolean; id: string }> {
+  return apiDelete<{ ok: boolean; id: string }>(`/api/story/nodes/${nodeId}`);
 }
 
 // 添加叙事线
