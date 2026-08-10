@@ -452,6 +452,65 @@ class GraphStore:
         assert ent is not None
         return ent
 
+    def update_entity_fields(
+        self,
+        book_id: str,
+        name: str,
+        *,
+        aliases: list[str] | None = None,
+        description: str | None = None,
+        state: str | None = None,
+        entity_type: str | None = None,
+    ) -> Entity | None:
+        """S72：手动编辑实体字段（按 name 定位，只改传入字段）。
+
+        与 upsert_entity 的区别：不动章节统计/权重/叙事线（那些是自动抽取维护的
+        派生数据）——用户编辑 aliases/description/state/type 不应被误改出场记录。
+        aliases 更新后同步 FTS。
+        """
+        row = self._conn.execute(
+            "SELECT * FROM graph_entities WHERE book_id=? AND name=?", (book_id, name)
+        ).fetchone()
+        if not row:
+            return None
+        eid = row["id"]
+        new_aliases = (
+            list(dict.fromkeys(aliases)) if aliases is not None else json.loads(row["aliases"])
+        )
+        with self._lock:
+            self._conn.execute(
+                "UPDATE graph_entities SET aliases=?, description=COALESCE(?, description), "
+                "state=COALESCE(?, state), entity_type=COALESCE(?, entity_type), "
+                "updated_at=? WHERE id=?",
+                (
+                    json.dumps(new_aliases, ensure_ascii=False),
+                    description,
+                    state,
+                    entity_type,
+                    _now(),
+                    eid,
+                ),
+            )
+            self._sync_fts(eid, row["name"], new_aliases)
+            self._conn.commit()
+        return self.get_entity(book_id, name)
+
+    def delete_entity(self, book_id: str, name: str) -> bool:
+        """S72：删除实体及其关联关系（防悬空引用污染 JOIN 查询）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM graph_entities WHERE book_id=? AND name=?", (book_id, name)
+            ).fetchone()
+            if not row:
+                return False
+            eid = row["id"]
+            self._conn.execute("DELETE FROM graph_relations WHERE from_id=? OR to_id=?", (eid, eid))
+            self._conn.execute("DELETE FROM graph_entities_fts WHERE id=?", (eid,))
+            self._conn.execute("DELETE FROM entity_states WHERE entity_id=?", (eid,))
+            self._conn.execute("DELETE FROM graph_entities WHERE id=?", (eid,))
+            self._conn.commit()
+        return True
+
     def _sync_fts(self, eid: str, name: str, aliases: list[str]) -> None:
         """同步 FTS 派生索引（trigram 内联表：删旧插新）。"""
         self._conn.execute("DELETE FROM graph_entities_fts WHERE id=?", (eid,))
@@ -576,6 +635,49 @@ class GraphStore:
             chapter_ref=chapter_ref,
         )
 
+    def update_relation_fields(
+        self,
+        rid: str,
+        *,
+        rel_type: str | None = None,
+        description: str | None = None,
+    ) -> Relation | None:
+        """S72：手动编辑关系字段（按 id 定位）。"""
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM graph_relations WHERE id=?", (rid,)).fetchone()
+            if not row:
+                return None
+            self._conn.execute(
+                "UPDATE graph_relations SET rel_type=COALESCE(?, rel_type), "
+                "description=COALESCE(?, description) WHERE id=?",
+                (rel_type, description, rid),
+            )
+            self._conn.commit()
+            f = self._entity_by_id(row["from_id"])
+            t = self._entity_by_id(row["to_id"])
+        return Relation(
+            id=rid,
+            book_id=row["book_id"],
+            from_id=row["from_id"],
+            from_name=f.name if f else "",
+            to_id=row["to_id"],
+            to_name=t.name if t else "",
+            rel_type=rel_type or row["rel_type"],
+            description=description if description is not None else row["description"],
+            chapter_ref=row["chapter_ref"],
+        )
+
+    def delete_relation(self, rid: str) -> bool:
+        """S72：删除关系（按 id）。"""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM graph_relations WHERE id=?", (rid,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def _entity_by_id(self, eid: str) -> Entity | None:
+        row = self._conn.execute("SELECT * FROM graph_entities WHERE id=?", (eid,)).fetchone()
+        return self._entity_from_row(row) if row else None
+
     def list_relations(self, book_id: str, limit: int = 200) -> list[Relation]:
         rows = self._conn.execute(
             "SELECT r.*, fe.name AS from_name, te.name AS to_name "
@@ -663,6 +765,43 @@ class GraphStore:
             description=description,
             involved=involved,
         )
+
+    def update_event_fields(
+        self,
+        eid: str,
+        *,
+        time_point: str | None = None,
+        label: str | None = None,
+        description: str | None = None,
+        involved: list[str] | None = None,
+    ) -> GraphEvent | None:
+        """S72：手动编辑事件字段（按 id 定位）。"""
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM graph_events WHERE id=?", (eid,)).fetchone()
+            if not row:
+                return None
+            self._conn.execute(
+                "UPDATE graph_events SET time_point=COALESCE(?, time_point), "
+                "label=COALESCE(?, label), description=COALESCE(?, description), "
+                "involved=COALESCE(?, involved) WHERE id=?",
+                (
+                    time_point,
+                    label,
+                    description,
+                    json.dumps(involved, ensure_ascii=False) if involved is not None else None,
+                    eid,
+                ),
+            )
+            self._conn.commit()
+        row = self._conn.execute("SELECT * FROM graph_events WHERE id=?", (eid,)).fetchone()
+        return self._event_from_row(row) if row else None
+
+    def delete_event(self, eid: str) -> bool:
+        """S72：删除事件（按 id）。"""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM graph_events WHERE id=?", (eid,))
+            self._conn.commit()
+        return cur.rowcount > 0
 
     def list_events(
         self, book_id: str, chapter_ref: str | None = None, limit: int = 200

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from anyspark.core.types import Message, ModelOutput
 from anyspark.graph import (
@@ -439,3 +440,172 @@ def test_impact_chapters() -> None:
     # 无实体参数：自动取该章事件 involved（第 1 章→陈渡）
     hits3 = g.impact_chapters("main", 1)
     assert any("陈渡" in h["entities"] for h in hits3)
+
+
+# ──────────────────────────────────────────────────────────────
+# S72：图谱条目手动管理（update/delete 实体/关系/事件）
+# ──────────────────────────────────────────────────────────────
+def _gstore() -> GraphStore:
+    return GraphStore(Path(tempfile.mkdtemp()) / "g.db")
+
+
+def test_update_entity_fields_only_changes_passed() -> None:
+    """S72：局部编辑不动自动统计（weight/出场记录保留）。"""
+    g = _gstore()
+    g.upsert_entity(
+        "main", "陈渡", "角色", ["陈侦探"], "雨夜侦探", chapter_ref="第1章", chapter_order=1
+    )
+    g.upsert_entity("main", "陈渡", "角色", chapter_ref="第2章", chapter_order=2)
+    ent = g.get_entity("main", "陈渡")
+    assert ent is not None and ent.weight == 2  # 自动统计：两章出场
+
+    updated = g.update_entity_fields("main", "陈渡", description="雾城侦探，沉默寡言")
+    assert updated is not None
+    assert updated.description == "雾城侦探，沉默寡言"
+    assert updated.weight == 2  # 手动编辑不动权重
+    assert updated.last_chapter == "第2章"  # 不动出场记录
+    # 别名保留 + FTS 同步
+    assert "陈侦探" in updated.aliases
+    hits = g.search("main", "陈侦探")
+    assert any(e.name == "陈渡" for e in hits)
+
+
+def test_update_entity_fields_missing_returns_none() -> None:
+    g = _gstore()
+    assert g.update_entity_fields("main", "不存在", description="x") is None
+
+
+def test_delete_entity_cascades_relations() -> None:
+    """S72：删实体级联删关系（防悬空引用）。"""
+    g = _gstore()
+    g.upsert_entity("main", "陈渡", "角色")
+    g.upsert_entity("main", "雾城", "地点")
+    g.upsert_relation("main", "陈渡", "雾城", "抵达", "陈渡抵达雾城")
+    assert len(g.list_relations("main")) == 1
+    assert g.delete_entity("main", "陈渡") is True
+    assert g.get_entity("main", "陈渡") is None
+    assert g.list_relations("main") == []  # 关联关系级联删除
+    # 再删已不存在 → False
+    assert g.delete_entity("main", "陈渡") is False
+
+
+def test_relation_update_delete() -> None:
+    g = _gstore()
+    g.upsert_entity("main", "A", "角色")
+    g.upsert_entity("main", "B", "角色")
+    rel = g.upsert_relation("main", "A", "B", "敌对", "见面就吵")
+    assert rel is not None
+    updated = g.update_relation_fields(rel.id, rel_type="亦敌亦友")
+    assert updated is not None and updated.rel_type == "亦敌亦友"
+    assert updated.description == "见面就吵"  # 未传字段保留
+    assert g.delete_relation(rel.id) is True
+    assert g.delete_relation(rel.id) is False  # 已删
+
+
+def test_event_update_delete() -> None:
+    g = _gstore()
+    ev = g.upsert_event("main", "第1章", 1, "雨夜", "陈渡抵达", "雨夜到站", ["陈渡"])
+    updated = g.update_event_fields(ev.id, label="陈渡抵达雾城站", involved=["陈渡", "雾城"])
+    assert updated is not None
+    assert updated.label == "陈渡抵达雾城站"
+    assert "雾城" in updated.involved
+    assert g.delete_event(ev.id) is True
+    assert g.delete_event(ev.id) is False
+
+
+# ──────────────────────────────────────────────────────────────
+# S72：图谱管理 API（/api/graph/entities|relations|events 增改删）
+# ──────────────────────────────────────────────────────────────
+def _api_client() -> Any:
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+
+    class _NoModel:  # 图谱写端点不需要模型
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="{}")
+
+    return TestClient(build_app(model=_NoModel(), db_path=db))
+
+
+def test_entity_crud_api() -> None:
+    c = _api_client()
+    # 添加
+    r = c.post(
+        "/api/graph/entities", json={"name": "顾欣桐", "entity_type": "角色", "description": "线人"}
+    )
+    assert r.status_code == 200
+    assert r.json()["name"] == "顾欣桐"
+    # 编辑（PATCH 局部）
+    r = c.patch("/api/graph/entities/顾欣桐", json={"description": "猎手线人，知晓夜色镇"})
+    assert r.status_code == 200
+    assert "夜色镇" in r.json()["description"]
+    # 查询确认
+    assert any(e["name"] == "顾欣桐" for e in c.get("/api/graph/entities").json())
+    # 删除
+    r = c.delete("/api/graph/entities/顾欣桐")
+    assert r.status_code == 200 and r.json()["ok"] is True
+    assert not any(e["name"] == "顾欣桐" for e in c.get("/api/graph/entities").json())
+    # 删不存在 → 404
+    assert c.delete("/api/graph/entities/顾欣桐").status_code == 404
+
+
+def test_entity_add_overwrite_existing() -> None:
+    """S72：同名实体 POST = 覆盖字段（幂等），不动自动统计。"""
+    c = _api_client()
+    c.post("/api/graph/entities", json={"name": "陈渡", "description": "旧描述"})
+    r = c.post(
+        "/api/graph/entities", json={"name": "陈渡", "description": "新描述", "entity_type": "角色"}
+    )
+    assert r.status_code == 200
+    assert r.json()["description"] == "新描述"
+    assert r.json()["entity_type"] == "角色"
+
+
+def test_relation_crud_api() -> None:
+    c = _api_client()
+    c.post("/api/graph/entities", json={"name": "陈渡"})
+    c.post("/api/graph/entities", json={"name": "雾城"})
+    # 添加（两端存在）
+    r = c.post(
+        "/api/graph/relations", json={"from_name": "陈渡", "to_name": "雾城", "rel_type": "抵达"}
+    )
+    assert r.status_code == 200
+    rid = r.json()["id"]
+    # 端不存在 → 400
+    r = c.post(
+        "/api/graph/relations", json={"from_name": "陈渡", "to_name": "不存在", "rel_type": "抵达"}
+    )
+    assert r.status_code == 400
+    # 编辑
+    r = c.patch(f"/api/graph/relations/{rid}", json={"rel_type": "探索"})
+    assert r.status_code == 200 and r.json()["rel_type"] == "探索"
+    # 删除
+    assert c.delete(f"/api/graph/relations/{rid}").json()["ok"] is True
+    assert c.delete(f"/api/graph/relations/{rid}").status_code == 404
+
+
+def test_event_crud_api() -> None:
+    c = _api_client()
+    r = c.post(
+        "/api/graph/events",
+        json={
+            "chapter_ref": "第1章",
+            "chapter_order": 1,
+            "time_point": "雨夜",
+            "label": "抵达",
+            "involved": ["陈渡"],
+        },
+    )
+    assert r.status_code == 200
+    eid = r.json()["id"]
+    # 编辑
+    r = c.patch(f"/api/graph/events/{eid}", json={"description": "雨夜抵达雾城站"})
+    assert r.status_code == 200 and "雾城站" in r.json()["description"]
+    # 删除
+    assert c.delete(f"/api/graph/events/{eid}").json()["ok"] is True
+    assert c.delete(f"/api/graph/events/{eid}").status_code == 404
