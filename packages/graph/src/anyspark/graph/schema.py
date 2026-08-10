@@ -488,6 +488,103 @@ class GraphStore:
         ).fetchall()
         return [self._entity_from_row(r) for r in rows]
 
+    def create_entity(
+        self,
+        book_id: str,
+        name: str,
+        entity_type: str,
+        aliases: list[str] | None = None,
+        description: str = "",
+    ) -> Entity | None:
+        """手动创建实体（前端 CRUD）。同名实体已存在则返回 None。"""
+        if self.get_entity(book_id, name):
+            return None
+        eid = uuid.uuid4().hex
+        aliases = aliases or []
+        now = _now()
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO graph_entities (id, book_id, entity_type, name, aliases, "
+                "description, state, first_chapter, last_chapter, first_order, last_order, "
+                "weight, lines, created_at, updated_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (eid, book_id, entity_type, name, json.dumps(aliases, ensure_ascii=False),
+                 description, "", "", "", 0, 0, 0, '["main"]', now, now),
+            )
+            self._sync_fts(eid, name, aliases)
+            self._conn.commit()
+        return self.get_entity(book_id, name)
+
+    def update_entity(
+        self,
+        entity_id: str,
+        name: str | None = None,
+        entity_type: str | None = None,
+        aliases: list[str] | None = None,
+        description: str | None = None,
+        state: str | None = None,
+    ) -> Entity | None:
+        """手动更新实体字段（前端 CRUD）。只更新非 None 字段。"""
+        row = self._conn.execute(
+            "SELECT * FROM graph_entities WHERE id=?", (entity_id,)
+        ).fetchone()
+        if not row:
+            return None
+        updates: list[str] = []
+        args: list[Any] = []
+        if name is not None:
+            updates.append("name=?")
+            args.append(name)
+        if entity_type is not None:
+            updates.append("entity_type=?")
+            args.append(entity_type)
+        if aliases is not None:
+            updates.append("aliases=?")
+            args.append(json.dumps(aliases, ensure_ascii=False))
+        if description is not None:
+            updates.append("description=?")
+            args.append(description)
+        if state is not None:
+            updates.append("state=?")
+            args.append(state)
+        if not updates:
+            return self._entity_from_row(row)
+        updates.append("updated_at=?")
+        args.append(_now())
+        args.append(entity_id)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE graph_entities SET {', '.join(updates)} WHERE id=?", args
+            )
+            self._conn.commit()
+        # 同步 FTS（名字或别名变了）
+        if name is not None or aliases is not None:
+            new_name = name or row["name"]
+            new_aliases = aliases if aliases is not None else json.loads(row["aliases"] or "[]")
+            self._sync_fts(entity_id, new_name, new_aliases)
+        # 重新读取
+        new_row = self._conn.execute(
+            "SELECT * FROM graph_entities WHERE id=?", (entity_id,)
+        ).fetchone()
+        return self._entity_from_row(new_row) if new_row else None
+
+    def delete_entity(self, entity_id: str) -> bool:
+        """手动删除实体（前端 CRUD）。同时删除关联的关系和 FTS 索引。"""
+        with self._lock:
+            # 删除关联关系
+            self._conn.execute(
+                "DELETE FROM graph_relations WHERE from_id=? OR to_id=?",
+                (entity_id, entity_id),
+            )
+            # 删除 FTS 索引
+            self._conn.execute("DELETE FROM graph_entities_fts WHERE id=?", (entity_id,))
+            # 删除实体
+            cursor = self._conn.execute(
+                "DELETE FROM graph_entities WHERE id=?", (entity_id,)
+            )
+            self._conn.commit()
+        return cursor.rowcount > 0
+
     def search(self, book_id: str, query: str, limit: int = 10) -> list[Entity]:
         """FTS5 trigram 优先（≥3 字子串），短名（<3 字）回退 LIKE。"""
         q = query.strip()
@@ -600,6 +697,98 @@ class GraphStore:
         ).fetchall()
         return [self._relation_from_row(r) for r in rows]
 
+    def create_relation(
+        self,
+        book_id: str,
+        from_name: str,
+        to_name: str,
+        rel_type: str,
+        description: str = "",
+        chapter_ref: str = "",
+    ) -> Relation | None:
+        """手动创建关系（前端 CRUD）。两端实体不存在则自动创建占位实体。"""
+        # 确保两端实体存在
+        if not self.get_entity(book_id, from_name):
+            self.create_entity(book_id, from_name, "设定")
+        if not self.get_entity(book_id, to_name):
+            self.create_entity(book_id, to_name, "设定")
+        f = self.get_entity(book_id, from_name)
+        t = self.get_entity(book_id, to_name)
+        if not f or not t:
+            return None
+        rid = uuid.uuid4().hex
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO graph_relations (id, book_id, from_id, to_id, rel_type, "
+                "description, chapter_ref, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                (rid, book_id, f.id, t.id, rel_type, description, chapter_ref, _now()),
+            )
+            self._conn.commit()
+        return Relation(
+            id=rid,
+            book_id=book_id,
+            from_id=f.id,
+            from_name=f.name,
+            to_id=t.id,
+            to_name=t.name,
+            rel_type=rel_type,
+            description=description,
+            chapter_ref=chapter_ref,
+        )
+
+    def update_relation(
+        self,
+        relation_id: str,
+        rel_type: str | None = None,
+        description: str | None = None,
+    ) -> Relation | None:
+        """手动更新关系字段（前端 CRUD）。只更新非 None 字段。"""
+        row = self._conn.execute(
+            "SELECT r.*, fe.name AS from_name, te.name AS to_name "
+            "FROM graph_relations r "
+            "JOIN graph_entities fe ON fe.id = r.from_id "
+            "JOIN graph_entities te ON te.id = r.to_id "
+            "WHERE r.id=?",
+            (relation_id,),
+        ).fetchone()
+        if not row:
+            return None
+        updates: list[str] = []
+        args: list[Any] = []
+        if rel_type is not None:
+            updates.append("rel_type=?")
+            args.append(rel_type)
+        if description is not None:
+            updates.append("description=?")
+            args.append(description)
+        if not updates:
+            return self._relation_from_row(row)
+        args.append(relation_id)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE graph_relations SET {', '.join(updates)} WHERE id=?", args
+            )
+            self._conn.commit()
+        # 重新读取
+        new_row = self._conn.execute(
+            "SELECT r.*, fe.name AS from_name, te.name AS to_name "
+            "FROM graph_relations r "
+            "JOIN graph_entities fe ON fe.id = r.from_id "
+            "JOIN graph_entities te ON te.id = r.to_id "
+            "WHERE r.id=?",
+            (relation_id,),
+        ).fetchone()
+        return self._relation_from_row(new_row) if new_row else None
+
+    def delete_relation(self, relation_id: str) -> bool:
+        """手动删除关系（前端 CRUD）。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM graph_relations WHERE id=?", (relation_id,)
+            )
+            self._conn.commit()
+        return cursor.rowcount > 0
+
     # ------------------------------------------------------------------
     # 事件（时间线）
     # ------------------------------------------------------------------
@@ -677,6 +866,107 @@ class GraphStore:
             (*args, limit),
         ).fetchall()
         return [self._event_from_row(r) for r in rows]
+
+    def create_event(
+        self,
+        book_id: str,
+        label: str,
+        time_point: str = "",
+        chapter_ref: str = "",
+        chapter_order: int = 0,
+        description: str = "",
+        involved: list[str] | None = None,
+    ) -> GraphEvent:
+        """手动创建事件（前端 CRUD）。"""
+        involved = involved or []
+        eid = uuid.uuid4().hex
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO graph_events (id, book_id, chapter_ref, chapter_order, "
+                "time_point, label, description, involved, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    eid,
+                    book_id,
+                    chapter_ref,
+                    chapter_order,
+                    time_point,
+                    label,
+                    description,
+                    json.dumps(involved, ensure_ascii=False),
+                    _now(),
+                ),
+            )
+            self._conn.commit()
+        return GraphEvent(
+            id=eid,
+            book_id=book_id,
+            chapter_ref=chapter_ref,
+            chapter_order=chapter_order,
+            time_point=time_point,
+            label=label,
+            description=description,
+            involved=involved,
+        )
+
+    def update_event(
+        self,
+        event_id: str,
+        label: str | None = None,
+        time_point: str | None = None,
+        chapter_ref: str | None = None,
+        chapter_order: int | None = None,
+        description: str | None = None,
+        involved: list[str] | None = None,
+    ) -> GraphEvent | None:
+        """手动更新事件字段（前端 CRUD）。只更新非 None 字段。"""
+        row = self._conn.execute(
+            "SELECT * FROM graph_events WHERE id=?", (event_id,)
+        ).fetchone()
+        if not row:
+            return None
+        updates: list[str] = []
+        args: list[Any] = []
+        if label is not None:
+            updates.append("label=?")
+            args.append(label)
+        if time_point is not None:
+            updates.append("time_point=?")
+            args.append(time_point)
+        if chapter_ref is not None:
+            updates.append("chapter_ref=?")
+            args.append(chapter_ref)
+        if chapter_order is not None:
+            updates.append("chapter_order=?")
+            args.append(chapter_order)
+        if description is not None:
+            updates.append("description=?")
+            args.append(description)
+        if involved is not None:
+            updates.append("involved=?")
+            args.append(json.dumps(involved, ensure_ascii=False))
+        if not updates:
+            return self._event_from_row(row)
+        args.append(event_id)
+        with self._lock:
+            self._conn.execute(
+                f"UPDATE graph_events SET {', '.join(updates)} WHERE id=?", args
+            )
+            self._conn.commit()
+        # 重新读取
+        new_row = self._conn.execute(
+            "SELECT * FROM graph_events WHERE id=?", (event_id,)
+        ).fetchone()
+        return self._event_from_row(new_row) if new_row else None
+
+    def delete_event(self, event_id: str) -> bool:
+        """手动删除事件（前端 CRUD）。"""
+        with self._lock:
+            cursor = self._conn.execute(
+                "DELETE FROM graph_events WHERE id=?", (event_id,)
+            )
+            self._conn.commit()
+        return cursor.rowcount > 0
 
     # ------------------------------------------------------------------
     # 已知事实（当前时空点检索注入）

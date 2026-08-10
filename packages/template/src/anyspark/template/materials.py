@@ -179,6 +179,13 @@ class MaterialStore:
             created_at=row["created_at"],
         )
 
+    def delete(self, material_id: str) -> bool:
+        """删除资料。返回是否成功删除。"""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM materials WHERE id=?", (material_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
     def close(self) -> None:
         self._conn.close()
 

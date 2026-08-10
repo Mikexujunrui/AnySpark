@@ -449,6 +449,55 @@ class GraphTypePatch(BaseModel):
     enabled: bool
 
 
+# 图谱实体 CRUD（前端手动维护）
+class EntityCreateIn(BaseModel):
+    name: str
+    entity_type: str
+    aliases: list[str] = []
+    description: str = ""
+
+
+class EntityPatchIn(BaseModel):
+    name: str | None = None
+    entity_type: str | None = None
+    aliases: list[str] | None = None
+    description: str | None = None
+    state: str | None = None
+
+
+# 图谱关系 CRUD
+class RelationCreateIn(BaseModel):
+    from_name: str
+    to_name: str
+    rel_type: str
+    description: str = ""
+    chapter_ref: str = ""
+
+
+class RelationPatchIn(BaseModel):
+    rel_type: str | None = None
+    description: str | None = None
+
+
+# 图谱事件 CRUD
+class EventCreateIn(BaseModel):
+    label: str
+    time_point: str = ""
+    chapter_ref: str = ""
+    chapter_order: int = 0
+    description: str = ""
+    involved: list[str] = []
+
+
+class EventPatchIn(BaseModel):
+    label: str | None = None
+    time_point: str | None = None
+    chapter_ref: str | None = None
+    chapter_order: int | None = None
+    description: str | None = None
+    involved: list[str] | None = None
+
+
 class MaterialIn(BaseModel):
     text: str
     title: str = ""
@@ -2393,6 +2442,14 @@ def build_app(
             raise HTTPException(status_code=404, detail="材料不存在")
         return card.to_dict()
 
+    @app.delete("/api/materials/{material_id}", response_model=dict[str, object])
+    def delete_material(material_id: str) -> dict[str, object]:
+        """删除资料。"""
+        ok = materials.delete(material_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="材料不存在")
+        return {"ok": True, "id": material_id}
+
     @app.get("/api/agency", response_model=dict[str, object])
     def get_agency() -> dict[str, object]:
         """能动档位（机制 2 + S35 记录集）：当前档位 + 全部档位（含自定义）。"""
@@ -3453,13 +3510,103 @@ def build_app(
         items = graph.list_entities("main", q=q or None, entity_type=entity_type or None)
         return [e.to_dict() for e in items]
 
+    @app.post("/api/graph/entities", response_model=dict[str, Any])
+    def create_graph_entity(req: EntityCreateIn) -> dict[str, Any]:
+        """手动创建图谱实体。"""
+        e = graph.create_entity("main", req.name, req.entity_type, req.aliases, req.description)
+        if e is None:
+            raise HTTPException(status_code=409, detail=f"实体已存在: {req.name}")
+        return e.to_dict()
+
+    @app.patch("/api/graph/entities/{entity_id}", response_model=dict[str, Any])
+    def update_graph_entity(entity_id: str, req: EntityPatchIn) -> dict[str, Any]:
+        """手动更新图谱实体。"""
+        e = graph.update_entity(
+            entity_id,
+            name=req.name,
+            entity_type=req.entity_type,
+            aliases=req.aliases,
+            description=req.description,
+            state=req.state,
+        )
+        if e is None:
+            raise HTTPException(status_code=404, detail="实体不存在")
+        return e.to_dict()
+
+    @app.delete("/api/graph/entities/{entity_id}", response_model=dict[str, bool])
+    def delete_graph_entity(entity_id: str) -> dict[str, bool]:
+        """手动删除图谱实体（同时删除关联关系）。"""
+        ok = graph.delete_entity(entity_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="实体不存在")
+        return {"ok": True}
+
     @app.get("/api/graph/relations", response_model=list[dict[str, Any]])
     def list_graph_relations() -> list[dict[str, Any]]:
         return [r.to_dict() for r in graph.list_relations("main")]
 
+    @app.post("/api/graph/relations", response_model=dict[str, Any])
+    def create_graph_relation(req: RelationCreateIn) -> dict[str, Any]:
+        """手动创建图谱关系（两端实体不存在则自动创建占位）。"""
+        r = graph.create_relation(
+            "main", req.from_name, req.to_name, req.rel_type, req.description, req.chapter_ref
+        )
+        if r is None:
+            raise HTTPException(status_code=400, detail="创建关系失败")
+        return r.to_dict()
+
+    @app.patch("/api/graph/relations/{relation_id}", response_model=dict[str, Any])
+    def update_graph_relation(relation_id: str, req: RelationPatchIn) -> dict[str, Any]:
+        """手动更新图谱关系。"""
+        r = graph.update_relation(relation_id, rel_type=req.rel_type, description=req.description)
+        if r is None:
+            raise HTTPException(status_code=404, detail="关系不存在")
+        return r.to_dict()
+
+    @app.delete("/api/graph/relations/{relation_id}", response_model=dict[str, bool])
+    def delete_graph_relation(relation_id: str) -> dict[str, bool]:
+        """手动删除图谱关系。"""
+        ok = graph.delete_relation(relation_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="关系不存在")
+        return {"ok": True}
+
     @app.get("/api/graph/events", response_model=list[dict[str, Any]])
     def list_graph_events() -> list[dict[str, Any]]:
         return [e.to_dict() for e in graph.list_events("main")]
+
+    @app.post("/api/graph/events", response_model=dict[str, Any])
+    def create_graph_event(req: EventCreateIn) -> dict[str, Any]:
+        """手动创建图谱事件。"""
+        e = graph.create_event(
+            "main", req.label, req.time_point, req.chapter_ref, req.chapter_order,
+            req.description, req.involved
+        )
+        return e.to_dict()
+
+    @app.patch("/api/graph/events/{event_id}", response_model=dict[str, Any])
+    def update_graph_event(event_id: str, req: EventPatchIn) -> dict[str, Any]:
+        """手动更新图谱事件。"""
+        e = graph.update_event(
+            event_id,
+            label=req.label,
+            time_point=req.time_point,
+            chapter_ref=req.chapter_ref,
+            chapter_order=req.chapter_order,
+            description=req.description,
+            involved=req.involved,
+        )
+        if e is None:
+            raise HTTPException(status_code=404, detail="事件不存在")
+        return e.to_dict()
+
+    @app.delete("/api/graph/events/{event_id}", response_model=dict[str, bool])
+    def delete_graph_event(event_id: str) -> dict[str, bool]:
+        """手动删除图谱事件。"""
+        ok = graph.delete_event(event_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="事件不存在")
+        return {"ok": True}
 
     @app.get("/api/graph/context", response_model=dict[str, str])
     def graph_context() -> dict[str, str]:
