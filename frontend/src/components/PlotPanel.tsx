@@ -16,6 +16,7 @@ export default function PlotPanel() {
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   /* 新增表单 */
   const [content, setContent] = useState("");
@@ -40,11 +41,16 @@ export default function PlotPanel() {
 
   const handleAdd = async () => {
     if (!content.trim()) return;
-    await addPlotItem({ content: content.trim(), category, chapter_ref: chapterRef.trim(), priority });
-    setContent("");
-    setChapterRef("");
-    setShowAdd(false);
-    fetchPlots();
+    setError(null);
+    try {
+      await addPlotItem({ content: content.trim(), category, chapter_ref: chapterRef.trim(), priority });
+      setContent("");
+      setChapterRef("");
+      setShowAdd(false);
+      await fetchPlots();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   const handleGenerate = async () => {
@@ -60,19 +66,34 @@ export default function PlotPanel() {
 
   const handleStatusToggle = async (p: PlotPoint) => {
     const newStatus = p.status === "open" ? "resolved" : "open";
-    await updatePlot(p.id, { status: newStatus });
-    fetchPlots();
+    setError(null);
+    try {
+      await updatePlot(p.id, { status: newStatus });
+      await fetchPlots();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   const handlePriorityToggle = async (p: PlotPoint) => {
     const newPriority = p.priority === "must" ? "soft" : "must";
-    await updatePlot(p.id, { priority: newPriority });
-    fetchPlots();
+    setError(null);
+    try {
+      await updatePlot(p.id, { priority: newPriority });
+      await fetchPlots();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   const handleDelete = async (id: string) => {
-    await deletePlot(id);
-    fetchPlots();
+    setError(null);
+    try {
+      await deletePlot(id);
+      await fetchPlots();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   return (
@@ -150,6 +171,14 @@ export default function PlotPanel() {
               登记
             </button>
           </div>
+        </div>
+      )}
+
+      {/* 错误提示 */}
+      {error && (
+        <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-2 mb-3 flex items-center justify-between">
+          <p className="text-[11px] text-red-400">{error}</p>
+          <button onClick={() => setError(null)} className="text-red-500 hover:text-red-300 text-xs">×</button>
         </div>
       )}
 

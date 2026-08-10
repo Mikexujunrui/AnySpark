@@ -227,6 +227,7 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
   const [searchInput, setSearchInput] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) fetchAll();
@@ -281,6 +282,14 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
           </div>
         </div>
 
+        {/* 错误提示 */}
+        {error && (
+          <div className="px-4 py-2 bg-red-900/20 border-b border-red-800/50 flex items-center justify-between">
+            <p className="text-[11px] text-red-400">{error}</p>
+            <button onClick={() => setError(null)} className="text-red-500 hover:text-red-300 text-xs">×</button>
+          </div>
+        )}
+
         {/* 搜索 + 筛选（仅实体 Tab） */}
         {tab === "entities" && (
           <div className="px-4 py-2 border-b border-zinc-800 space-y-2">
@@ -326,8 +335,11 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
               <EntityForm
                 types={types}
                 onSubmit={async (data) => {
-                  await addEntity(data);
-                  setShowCreate(false);
+                  setError(null);
+                  try {
+                    await addEntity(data);
+                    setShowCreate(false);
+                  } catch (e) { setError((e as Error).message); }
                 }}
                 onCancel={() => setShowCreate(false)}
               />
@@ -335,8 +347,11 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
             {tab === "relations" && (
               <RelationForm
                 onSubmit={async (data) => {
-                  await addRelation(data);
-                  setShowCreate(false);
+                  setError(null);
+                  try {
+                    await addRelation(data);
+                    setShowCreate(false);
+                  } catch (e) { setError((e as Error).message); }
                 }}
                 onCancel={() => setShowCreate(false)}
               />
@@ -344,8 +359,11 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
             {tab === "events" && (
               <EventForm
                 onSubmit={async (data) => {
-                  await addEvent(data);
-                  setShowCreate(false);
+                  setError(null);
+                  try {
+                    await addEvent(data);
+                    setShowCreate(false);
+                  } catch (e) { setError((e as Error).message); }
                 }}
                 onCancel={() => setShowCreate(false)}
               />
@@ -369,8 +387,11 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
                       initial={entity}
                       types={types}
                       onSubmit={async (data) => {
-                        await editEntity(entity.id, data);
-                        setEditingId(null);
+                        setError(null);
+                        try {
+                          await editEntity(entity.id, data);
+                          setEditingId(null);
+                        } catch (e) { setError((e as Error).message); }
                       }}
                       onCancel={() => setEditingId(null)}
                     />
@@ -383,7 +404,7 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
                             {entity.entity_type}
                           </span>
                           <ActionBtn onClick={() => { setEditingId(entity.id); setShowCreate(false); }}>编辑</ActionBtn>
-                          <ActionBtn variant="danger" onClick={() => removeEntity(entity.id)}>删除</ActionBtn>
+                          <ActionBtn variant="danger" onClick={async () => { setError(null); try { await removeEntity(entity.id); } catch (e) { setError((e as Error).message); } }}>删除</ActionBtn>
                         </div>
                       </div>
                       {entity.description && <p className="text-xs text-zinc-400 line-clamp-2">{entity.description}</p>}
@@ -407,8 +428,11 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
                       key={rel.id}
                       initial={rel}
                       onSubmit={async (data) => {
-                        await editRelation(rel.id, data);
-                        setEditingId(null);
+                        setError(null);
+                        try {
+                          await editRelation(rel.id, data);
+                          setEditingId(null);
+                        } catch (e) { setError((e as Error).message); }
                       }}
                       onCancel={() => setEditingId(null)}
                     />
@@ -424,7 +448,7 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
                         </div>
                         <div className="flex gap-1">
                           <ActionBtn onClick={() => { setEditingId(rel.id); setShowCreate(false); }}>编辑</ActionBtn>
-                          <ActionBtn variant="danger" onClick={() => removeRelation(rel.id)}>删除</ActionBtn>
+                          <ActionBtn variant="danger" onClick={async () => { setError(null); try { await removeRelation(rel.id); } catch (e) { setError((e as Error).message); } }}>删除</ActionBtn>
                         </div>
                       </div>
                       {rel.description && <p className="text-xs text-zinc-500 mt-1">{rel.description}</p>}
@@ -443,8 +467,11 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
                     key={event.id}
                     initial={event}
                     onSubmit={async (data) => {
-                      await editEvent(event.id, data);
-                      setEditingId(null);
+                      setError(null);
+                      try {
+                        await editEvent(event.id, data);
+                        setEditingId(null);
+                      } catch (e) { setError((e as Error).message); }
                     }}
                     onCancel={() => setEditingId(null)}
                   />
@@ -459,7 +486,7 @@ export default function GraphPanel({ open, onClose }: GraphPanelProps) {
                           </span>
                         )}
                         <ActionBtn onClick={() => { setEditingId(event.id); setShowCreate(false); }}>编辑</ActionBtn>
-                        <ActionBtn variant="danger" onClick={() => removeEvent(event.id)}>删除</ActionBtn>
+                        <ActionBtn variant="danger" onClick={async () => { setError(null); try { await removeEvent(event.id); } catch (e) { setError((e as Error).message); } }}>删除</ActionBtn>
                       </div>
                     </div>
                     {event.description && <p className="text-xs text-zinc-400 line-clamp-2">{event.description}</p>}

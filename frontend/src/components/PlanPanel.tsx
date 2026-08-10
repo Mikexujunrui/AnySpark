@@ -1,15 +1,13 @@
 import { useState, useEffect } from "react";
 import { listPlans, createPlan, updatePlan, deletePlan, type ChapterPlan } from "../api/plan";
 
-const STATUS_OPTIONS = ["pending", "in_progress", "done"] as const;
+const STATUS_OPTIONS = ["planned", "done"] as const;
 const STATUS_LABELS: Record<string, string> = {
-  pending: "待写",
-  in_progress: "进行中",
+  planned: "待写",
   done: "已完成",
 };
 const STATUS_COLORS: Record<string, string> = {
-  pending: "bg-zinc-700/50 text-zinc-400 border-zinc-600",
-  in_progress: "bg-blue-500/20 text-blue-400 border-blue-500/30",
+  planned: "bg-zinc-700/50 text-zinc-400 border-zinc-600",
   done: "bg-green-500/20 text-green-400 border-green-500/30",
 };
 
@@ -18,6 +16,7 @@ export default function PlanPanel() {
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   /* 新增表单 */
   const [chapterOrder, setChapterOrder] = useState("");
@@ -47,12 +46,17 @@ export default function PlanPanel() {
   const handleAdd = async () => {
     const order = parseInt(chapterOrder, 10);
     if (isNaN(order)) return;
-    await createPlan({ chapter_order: order, title: title.trim(), content: content.trim() });
-    setChapterOrder("");
-    setTitle("");
-    setContent("");
-    setShowAdd(false);
-    fetchPlans();
+    setError(null);
+    try {
+      await createPlan({ chapter_order: order, title: title.trim(), content: content.trim() });
+      setChapterOrder("");
+      setTitle("");
+      setContent("");
+      setShowAdd(false);
+      await fetchPlans();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   const startEdit = (p: ChapterPlan) => {
@@ -64,19 +68,34 @@ export default function PlanPanel() {
 
   const handleSaveEdit = async () => {
     if (!editingId) return;
-    await updatePlan(editingId, { title: editTitle.trim(), content: editContent.trim(), status: editStatus });
-    setEditingId(null);
-    fetchPlans();
+    setError(null);
+    try {
+      await updatePlan(editingId, { title: editTitle.trim(), content: editContent.trim(), status: editStatus });
+      setEditingId(null);
+      await fetchPlans();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   const handleStatusChange = async (p: ChapterPlan, newStatus: string) => {
-    await updatePlan(p.id, { status: newStatus });
-    fetchPlans();
+    setError(null);
+    try {
+      await updatePlan(p.id, { status: newStatus });
+      await fetchPlans();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   const handleDelete = async (id: string) => {
-    await deletePlan(id);
-    fetchPlans();
+    setError(null);
+    try {
+      await deletePlan(id);
+      await fetchPlans();
+    } catch (e) {
+      setError((e as Error).message);
+    }
   };
 
   return (
@@ -90,6 +109,14 @@ export default function PlanPanel() {
           {showAdd ? "取消" : "+ 新增计划"}
         </button>
       </div>
+
+      {/* 错误提示 */}
+      {error && (
+        <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-2 mb-3 flex items-center justify-between">
+          <p className="text-[11px] text-red-400">{error}</p>
+          <button onClick={() => setError(null)} className="text-red-500 hover:text-red-300 text-xs">×</button>
+        </div>
+      )}
 
       {/* 新增表单 */}
       {showAdd && (

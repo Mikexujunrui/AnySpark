@@ -91,43 +91,88 @@ export const useGraphStore = create<GraphState>((set, get) => ({
 
   /* Entity */
   addEntity: async (req) => {
-    const entity = await createEntity(req);
-    set({ entities: [...get().entities, entity] });
+    try {
+      const entity = await createEntity(req);
+      set({ entities: [...get().entities, entity] });
+    } catch (e) {
+      console.error("addEntity failed:", e);
+      throw e;
+    }
   },
   editEntity: async (id, req) => {
-    const updated = await updateEntity(id, req);
-    set({ entities: get().entities.map((e) => (e.id === id ? updated : e)) });
+    try {
+      const updated = await updateEntity(id, req);
+      set({ entities: get().entities.map((e) => (e.id === id ? updated : e)) });
+    } catch (e) {
+      console.error("editEntity failed:", e);
+      throw e;
+    }
   },
   removeEntity: async (id) => {
-    await deleteEntity(id);
-    set({ entities: get().entities.filter((e) => e.id !== id) });
+    try {
+      await deleteEntity(id);
+      set({ entities: get().entities.filter((e) => e.id !== id) });
+    } catch (e) {
+      console.error("removeEntity failed:", e);
+      throw e;
+    }
   },
-
+  
   /* Relation */
   addRelation: async (req) => {
-    const rel = await createRelation(req);
-    set({ relations: [...get().relations, rel] });
+    try {
+      const rel = await createRelation(req);
+      set({ relations: [...get().relations, rel] });
+    } catch (e) {
+      console.error("addRelation failed:", e);
+      throw e;
+    }
   },
   editRelation: async (id, req) => {
-    const updated = await updateRelation(id, req);
-    set({ relations: get().relations.map((r) => (r.id === id ? updated : r)) });
+    try {
+      const updated = await updateRelation(id, req);
+      set({ relations: get().relations.map((r) => (r.id === id ? updated : r)) });
+    } catch (e) {
+      console.error("editRelation failed:", e);
+      throw e;
+    }
   },
   removeRelation: async (id) => {
-    await deleteRelation(id);
-    set({ relations: get().relations.filter((r) => r.id !== id) });
+    try {
+      await deleteRelation(id);
+      set({ relations: get().relations.filter((r) => r.id !== id) });
+    } catch (e) {
+      console.error("removeRelation failed:", e);
+      throw e;
+    }
   },
-
+  
   /* Event */
   addEvent: async (req) => {
-    const evt = await createEvent(req);
-    set({ events: [...get().events, evt] });
+    try {
+      const evt = await createEvent(req);
+      set({ events: [...get().events, evt] });
+    } catch (e) {
+      console.error("addEvent failed:", e);
+      throw e;
+    }
   },
   editEvent: async (id, req) => {
-    const updated = await updateEvent(id, req);
-    set({ events: get().events.map((e) => (e.id === id ? updated : e)) });
+    try {
+      const updated = await updateEvent(id, req);
+      set({ events: get().events.map((e) => (e.id === id ? updated : e)) });
+    } catch (e) {
+      console.error("editEvent failed:", e);
+      throw e;
+    }
   },
   removeEvent: async (id) => {
-    await deleteEvent(id);
-    set({ events: get().events.filter((e) => e.id !== id) });
+    try {
+      await deleteEvent(id);
+      set({ events: get().events.filter((e) => (e.id !== id)) });
+    } catch (e) {
+      console.error("removeEvent failed:", e);
+      throw e;
+    }
   },
 }));
