@@ -107,7 +107,7 @@ export default function ConversationList() {
                     {conv.title || formatTime(conv.created_at)}
                   </span>
                 )}
-                {currentConvId !== conv.id && editingId !== conv.id && (
+                {editingId !== conv.id && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();

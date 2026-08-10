@@ -249,10 +249,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
   deleteConversation: async (convId: string) => {
     try {
       await apiDeleteConversation(convId);
-      // 从本地列表中移除
-      set((state) => ({
-        conversations: state.conversations.filter((c) => c.id !== convId),
-      }));
+      const { conversationId, conversations } = get();
+      const remaining = conversations.filter((c) => c.id !== convId);
+      
+      // 如果删除的是当前会话，切换到其他会话或创建新会话
+      if (conversationId === convId) {
+        if (remaining.length > 0) {
+          // 切换到第一个可用会话
+          const nextConv = remaining[0];
+          const messages = await getConversationMessages(nextConv.id);
+          set({
+            conversations: remaining,
+            conversationId: nextConv.id,
+            messages: messages.map((m) => ({ ...m })),
+            streaming: false,
+            streamingText: "",
+          });
+        } else {
+          // 没有其他会话，清空状态
+          set({
+            conversations: [],
+            conversationId: null,
+            messages: [],
+            streaming: false,
+            streamingText: "",
+          });
+        }
+      } else {
+        // 删除的不是当前会话，只更新列表
+        set({ conversations: remaining });
+      }
     } catch (err) {
       console.error("Failed to delete conversation:", err);
     }
