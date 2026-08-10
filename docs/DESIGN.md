@@ -884,3 +884,156 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
   不复制（复制=漂移源）
 - 被更新的机制取代的旧通道直接退役，不留残废版（残废版=画蛇添足）
 - 验证：pytest 346 全绿；ruff/mypy 全绿
+
+### 12.27 互动推演扩展包（S65：主人拍板独立包，与 explore 区分）
+
+> 背景：主人提议"推演小说"功能——互动小说式推演树玩法：从某场景切入、扮演某
+> 角色、每步给多个候选行动、用户选择后剧情推进、继续给选项……形成一棵推演树。
+> 用途：灵感来源 + 互动玩法（有用户喜欢这种玩法）。主人拍板：**做成独立扩展包
+> anyspark-play，与正文探索 explore 平级区分**（不是 explore 的子功能）。
+
+#### 与 explore（正文探索）的本质区别
+
+| | explore 探索 | play 互动推演 |
+|---|---|---|
+| 回答的问题 | 怎么写（方向/风格/结构） | 写什么（具体剧情/行动/后果） |
+| 产出 | 抽象方向卡（一句话方向） | 具象剧情（场景描述+行动选项+后果） |
+| 视角 | 上帝视角/写作者视角 | 第一人称扮演角色 |
+| 轮次 | 单轮发散 | 多轮累积成树（选择→推进→再选择） |
+| 判别 | 用户选方向（抽象） | 用户选行动（代入式） |
+| 用在哪 | 开书/定调/换风格 | 写章节前/卡文时/纯玩 |
+
+- explore 管"航向"，play 管"画面"：**探索定航向 → 推演演画面 → 写正文**
+- explore.roleplay（S48-P4 单轮角色反应推演）保留不动——它是"探索"的一种手段；
+  play 是新的"互动玩法"，二者定位不同
+
+#### 机制（机制硬编码、内容自然语言）
+
+- **回合流程**（每轮 1 次 LLM 调用，轻量上下文）：
+  - 创建：seed（切入场景）+ role（扮演角色）→ 生成根节点 scene（当前局势）+ N 个候选行动
+  - 选择：选 A / 自定义输入 → 结算：生成子节点 scene'（上一轮选择的后果 + 他角反应 + 新局势）
+    + 新 N 个候选行动
+  - 回溯分叉：从历史任意节点重走新路（树只记录，每次走一条线，不指数展开）
+  - 终止：用户喊停 / 剧情自然收束（模型 options 为空）/ 最大深度（默认 20）
+- **选项生成（主人修正：不硬编码策略集）**：
+  - 模型自由发挥生成 3-5 个差异化候选行动（推进主线/制造冲突/出人意料/按兵不动等，
+    方向由模型按场景与角色自由判断，通过提示词引导，非代码固定策略标签）
+  - **自定义位是唯一硬编码**：选项列表末尾始终有"自定义行动"输入位，用户输入任意
+    文本即作为所选行动进入结算（机制硬编码=这个入口；内容=用户自由输入）
+- **上下文注入**（轻量）：扮演角色卡（复用 explore `load_role_card`）+ 当前节点 scene
+  + 图谱角色 state（角色卡加载返回）——不背全量图谱/章节，省 token
+- **跨包依赖**：play 依赖 core + explore（复用 `load_role_card` 与 `extract_json_dict`，
+  避免复制=漂移源；单向链 core ← explore ← play，无环）
+
+#### 存储（SQLite，树形）
+
+- play_sessions：id / book_id / title / role / seed / status（running|ended）/
+  max_depth / current_node_id（当前推演所在节点）/ created_at / updated_at
+- play_nodes：id / session_id / parent_id（根为空）/ depth / scene / chosen_label
+  （本节点由哪条选择产生，根为空）/ created_at
+- play_options：id / node_id / label / is_custom（自定义位落库标记）/ chosen /
+  child_node_id（选择后生成的子节点）/ created_at
+- 回溯分叉：branch 把 current_node_id 指回目标节点并重新生成一批新 options 挂其下
+  （原选项保留=历史记录）；choose 只允许选 current_node 下的选项
+
+#### API + agent 工具
+
+- `POST /api/play/sessions`（{book_id, title, role, seed, max_depth}）→ session + 根节点
+- `GET /api/play/sessions`（列表）/ `GET /api/play/sessions/{id}`（树+当前路径）
+- `POST /api/play/sessions/{id}/choose`（{option_id} 或 {custom_text}）→ 子节点 + 新选项
+- `POST /api/play/sessions/{id}/branch`（{node_id}）→ 回溯分叉
+- `POST /api/play/sessions/{id}/stop`（终止）/ `GET /api/play/sessions/{id}/export`
+  （当前路径导出灵感卡 md——接 write_chapter 参考）
+- agent 工具（enable_play 默认关，S15 按需点亮）：play_start / play_choose /
+  play_status / play_export（启动/推进/查看/导出，只读+启动，无删除，对齐哲学）
+- 角色卡缺失 → 404 提示先建卡（对齐 role_play 先例）
+
+### 12.28 拟人化评审团扩展包（S64：主人拍板独立包，参考自研高级时间线辅助 agent）
+
+> 背景：主人展示自研高级时间线辅助写作 agent（"还蛮好的"）——内置 14 位拟人化
+> 评审员（YAML 人设），并发评审 + 主席汇总（共识/分歧/优先建议）。主人结论：
+> 用户喜欢"拟人化评审员 + 报告"的体验形态。评审团机制不必要（YAGNI），
+> **拟人化呈现值得做**——做成独立扩展包 anyspark-review。
+
+#### 定位：评审团机制 = 不要；拟人化报告 = 轻量模板方案
+
+| | check（既有） | review（S64 新增） |
+|---|---|---|
+| 性质 | 确定性硬伤规则引擎 | 人格化评价（体验） |
+| 产出 | 硬伤清单（证据+位置） | 评分+共识/分歧+优先建议+人格评语 |
+| 事实来源 | 规则/图谱/时序 | LLM 评价（**不产生新事实**） |
+| 触发 | /api/check、workflow review_chapter | /api/review/panel、panel_review 工具 |
+
+硬伤层照旧走 check（客观事实不被人格漂移污染）；拟人层只做呈现与评价。
+**拒绝**：质量门控/Autopilot 集成（YAGNI 后补）、管理面板 UI、14 评审员全量
+（起步 5 位：编剧/文学编辑/逻辑审校/爽文读者/挑刺王 + 伏笔审计员默认关）。
+
+#### 机制硬编码、内容自然语言
+
+- **机制**（packages/review）：YAML 加载 / 并发编排（每评审员独立超时）/ 宽容 JSON
+  解析 / 综合分=确定性加权平均优先（防 LLM 乱打总分）/ 主席汇总失败降级启发式 /
+  模型无关（走 core Model 协议）
+- **内容**（reviewers/*.yaml）：评审员人设（persona + scoring_dimensions 带权重 +
+  context_keys + avatar/category/active）。系统内置随包分发；用户自定义放
+  data/reviewers/ 覆盖同名 id。**改人设 = 改文本，不动机制**。
+- `context_keys` 按需注入外部上下文：check_report（逻辑审校核实硬伤清单）、
+  foreshadow（伏笔审计员核对关键点图谱）——取不到自动跳过，评审不阻断。
+  比参考项目的布尔 needs_knowledge 更精确。
+
+#### 报告结构
+
+- 综合分（加权平均）+ 主席汇总裁决（summary/consensus/divergences/top_suggestions）
+  + 各评审员详情（分维度评分/亮点/问题/建议/人格语气 comment）
+- render() 完整 markdown 给人看；render_compact() 紧凑摘要给 agent 工具回填（省 token）
+
+#### 接入
+
+- `POST /api/review/panel`（chapter_ref/text + reviewer_ids + with_check/with_foreshadow）
+  → 自动组装 check 硬伤 + 关键点图谱上下文 → 报告
+- `GET /api/review/reviewers` 列出评审员（激活改 YAML）
+- agent 工具 `panel_review`（无条件注册，对齐 explore_direction；S63 教训：
+  默认关的工具=没人用的残废通道）
+
+### 12.29 路径探索（S67：叙事树节点之间串联的小方向探索）
+
+> 背景（主人讨论）：整本书大方向已定后，"小方向的探索细腻度"——叙事树节点之间
+> 怎么串联（A→B 过渡）是真实缺口。主人追问节点要不要分级：**结论不分级**（树的
+> 父子关系已表达层次；kind 角色标签够用；分级=刚性约束违背"内容自由"哲学；细腻度
+> 靠探索上下文粒度而非数据结构）。主人拍板由实现者自决设计并分析收益/风险。
+
+#### 定位：三层探索粒度的中间层
+
+```
+① 大方向  explore   整本书怎么写（方向卡）       起点=种子
+② 桥梁    path      叙事树节点之间怎么串（事件链） 起点=A，终点=B   ← 本次
+③ 场景内  play      角色这一步做什么（行动推演）   起点=当前场景
+```
+
+- 叙事树（S59）从"记录账本"变"可生长"：路径探索 = 树的生长器（探索→确认→落树）
+- 与 play 互补：path 给骨架（中间事件链），play 演血肉（场景内行动）
+
+#### 机制（机制硬编码、内容自然语言）
+
+- **输入**：起点 A + 终点 B（自然语言描述，或传叙事树节点 ID 自动取内容）+ 约束
+  （项目档案约束自动合并 + 请求补充）
+- **输出**：N 条候选路径（单次 LLM 调用，轻量上下文），每条 = 中间事件链
+  （A → 事件1 → 事件2 → B，2-5 个事件）+ note（戏剧效果/节奏）+ style（方向标签）
+- **策略不硬编码**（对齐 S65 教训）：模型自由发挥不同串联思路（直推/多层铺垫/
+  意外反转/旁支绕行/视角切换作提示词示例非强制）
+- **判别**：用户选（路径选择是主观创作决策，无 AI 判别器）
+- **落树（保守）**：默认只返回参考；`archive_index` 显式传才把选中路径的中间事件
+  链式写入叙事树（candidate，第一个挂 A 下）——不自动污染树；落树需 from_node_id
+
+#### API + agent 工具
+
+- `POST /api/explore/path`（{from_desc|from_node_id, to_desc|to_node_id, constraints,
+  book_id, n, archive_index?}）→ {paths: [{events, note, style}], archived?}
+- agent 工具 `path_explore`（enable_domain 默认开：章节间过渡/情节点连接/卡文找方向）
+- 错误分层：节点不存在 404 / 参数非法 400 / 模型生成失败 502（对齐 play 端点）
+
+#### 收益 vs 风险（实现者分析）
+
+- 收益：补上三层缺口；章节间过渡是长篇最高频卡点；机制全复用（explore 基建/JSON
+  宽容解析/模型协议）成本低；与叙事树闭环对齐"探索-判别"哲学
+- 风险：边界混淆（§12.29 定位锁死）；两点规划质量依赖模型（真实链路验证通过）；
+  落树污染（默认不落）；并行会话冲突（提交纪律）

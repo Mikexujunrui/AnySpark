@@ -22,7 +22,7 @@ import os
 import sys
 from pathlib import Path
 
-import httpx
+import httpx2 as httpx  # S66：httpx2（下一代 httpx；重命名迁移，API 兼容）
 
 DEFAULT_BASE = "http://127.0.0.1:8000"
 STATE_FILE = Path.home() / ".anyspark_cli.json"

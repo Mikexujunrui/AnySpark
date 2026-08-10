@@ -24,15 +24,19 @@
 
 - **设计实现审计报告**：见 `docs/AUDIT-V1.md`（基准 `6e8df7f`：S32-S63 全复核）
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63）
-- **当前状态**：S0-S58 全部完成 + **S59 工作流扩展包** + **S60 skill 注入瘦身**（索引常驻/按需细看/写作点名）+ **S60 深化（S61）**（写作调用不自行选技巧）+ **S63 画蛇添足清理**（mood 死代码/role_card 收敛/check_text 退役），pytest 346 全绿，总闸全绿
+- **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级）+ **S66 httpx2 迁移**（starlette 原生支持后落地，TestClient/CLI/benchmarks 全切，无回归），pytest 全量绿，总闸全绿
+### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
+> 当前无会话声明。
+> 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
+
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）
   2. **对比层回归**：S18 三任务（设定忠实/长书一致/偏好记忆）在 S32-S46 后重跑（成本 ~20min）
   3. **前端 UI**（主人明确不优先）：伏笔面板/图谱可视化/设定档/技巧/计划/批量/定点编辑/影响分析均无 UI（API 全）
-  4. **httpx2 迁移**（工程性）：等 starlette 原生支持
-  5. **设定档渐进式披露**：条目多时分段/按需注入（当前全量）
-  6. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
-  7. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
+  4. **设定档渐进式披露**：条目多时分段/按需注入（当前全量）
+  5. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
+  6. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
+- ~~httpx2 迁移~~ ✅（S66 完成）；~~Autopilot~~ —— 已划掉：S59 工作流（loop+gate+approval+AI 生成流程）已吸收其全部机制价值，需要"全书自动连写"时用 workflow_generate + 人工确认 + 跑循环即可，不另起包（同评审团判断逻辑）
 - 纪律：每阶段开工前向主人确认；对设计的偏离/新增先确认再改 DESIGN.md
 
 ## 关键决策记录（主人拍板，见下方日期）
@@ -1784,3 +1788,306 @@ pytest 346 全绿；ruff/mypy 全绿。
 - 命名：沿用码头/江心楼/旧书店既有名，细节全部来自已写章节（AI 自标"未新增"）✓
 
 **门禁**：ruff/mypy/测试全绿；验证章节已清理。
+
+## S65 互动推演扩展包 anyspark-play（已完成 ✅，DESIGN §12.27）
+
+**背景（主人讨论定稿）**：主人提议"推演小说"功能——互动小说式推演树玩法：从某场景
+切入、扮演某角色、每步给多个候选行动、用户选择后剧情推进、继续给选项……形成推演树。
+用途：灵感来源 + 互动玩法（有用户喜欢这种玩法）。与正文探索 explore 的区别（主人确认）：
+探索回答"怎么写"（方向卡，上帝视角单轮），推演回答"写什么"（具体剧情，第一人称多轮）。
+**主人拍板：做成独立扩展包 anyspark-play，与 explore 平级区分**；三点确认：自用灵感
+工具 / 导出灵感卡接 write_chapter 参考 / 单路径推进 + 可回溯分叉。
+
+**策略修正（主人要求）**：固定策略不硬编码——选项由模型自由发挥生成 3-5 个差异化
+候选行动（提示词引导方向，非代码固定"最稳妥/最激进"标签）；**自定义位是唯一硬编码**
+（选项列表末尾始终有"自定义行动"输入位，用户任意文本即作为所选行动进入结算）。
+
+**落地**：
+- `packages/play/`（anyspark-play==0.0.1，依赖 core + explore）：tree.py（SQLite 推演树
+  sessions/nodes/options，单连接+锁对齐项目 store 模式）+ engine.py（创建/选择/回溯/终止/
+  导出，每轮 1 次 LLM 调用，轻量上下文=角色卡+当前 scene）+ export.py（路径导出灵感卡 md）
+- 装配：app.py 7 端点（POST /api/play/sessions、GET 列表/详情、POST choose/branch/stop、
+  GET export）+ ChatRequest.enable_play + ToolkitContext.play_engine + tools_domain
+  make_play_implementer（play_start/play_choose/play_status/play_export，enable_play 默认关）
+- 异常分层：ValueError（角色卡缺失/非法操作）→404/400；RuntimeError（模型生成失败）→502
+- 测试 9 个：创建/选选项推进/自定义输入/回溯分叉/终止导出/无卡报错/深度上限/API 全链路/错误路径
+
+**真实链路（deepseek-v4-pro）**：建卡→创建会话（模型自由生成 5 个差异化选项：查证/打听/
+调档/静候/对比）→选选项（结算老周反应+新选项）→自定义输入（"把烟盒递给老周套话"→结算
+引出"深色大衣陌生人"线）→回溯分叉（根节点重生成 5 个新选项，原选项保留）→导出灵感卡 md
+（路径完整可作写正文参考）。全程自然无幻觉。
+
+**并行会话冲突处理（多会话纪律实测）**：本阶段期间并行会话在开发 anyspark-review（评审团，
+也标 S64），共同修改 app.py/toolkit.py/pyproject.toml。处理：①编号让位 S64→S65（防文档
+冲突）②提交前 git status 逐文件核对归属 ③混合文件用"备份→checkout 重建→恢复并行改动"
+分离暂存（只提交我的 hunk，工作区保留并行改动）④恢复并行会话被误 checkout 的改动
+（app.py 的 review import/ReviewPanelRequest/review_panel/两个 review 端点 + toolkit 的
+review_panel 字段/工具注册——期间踩坑：grab 提取块过宽复制了 _bg_worker 等中间代码，
+F811/no-redef 后精确修复）⑤不提交 scripts/gate.py、tools_review.py、packages/review/。
+
+**门禁**：pytest 全量（app 148 + 其他包 190 + play 9）绿；ruff/mypy 我的文件全绿（app.py
+仅剩并行会话的 I001 import 排序问题不碰）；flaky 已确认：test_manual_decay_api 全量跑偶发
+失败（时间戳竞态，单独跑两次通过，与本次改动无关）；gate.py 全量门禁被并行会话未完成
+的 review 包 mypy 错误卡住（预存，非本提交范围）。
+
+## S64 拟人化评审团扩展包 anyspark-review（已完成 ✅，DESIGN §12.28）
+
+**背景（主人拍板）**：主人展示自研高级时间线辅助写作 agent（"还蛮好的"）——14 位拟人化
+评审员（YAML 人设）+ 并发评审 + 主席汇总报告。评估结论：**评审团机制不必要（YAGNI），
+拟人化呈现值得做**——用户喜欢"拟人化评审员 + 报告"的体验形态。做成独立扩展包。
+
+**设计定稿**：
+- 与 check 分工：check=确定性硬伤规则引擎（客观事实，不动）；review=人格化评价（体验）。
+  **硬伤层复用 check**——逻辑审校评审员注入 check_report 硬伤清单逐条核实，拟人层不产生
+  新事实（防人格漂移污染客观事实）
+- context_keys 按需注入外部上下文（check_report/foreshadow），取不到自动跳过不阻断；
+  优于参考项目的布尔 needs_knowledge
+- 综合分 = 确定性加权平均优先（维度齐时不用 LLM 自报总分，防乱打）；主席汇总失败降级
+  启发式（不挂死）；每评审员独立超时 90s；宽容 JSON 解析（fence/噪声/平衡结构）
+
+**落地**：
+- `packages/review/`（anyspark-review==0.0.1，依赖 core + pyyaml==6.0.2）：
+  defs.py（ReviewerDef/ScoreDim/ReviewResult/ReviewReport，render 完整版 +
+  render_compact 紧凑版给 agent）+ parse.py（宽容提取/评分越界过滤）+ panel.py
+  （ReviewPanel YAML 加载/并发编排/汇总降级）+ prompts.py（提示词内容资产，
+  per-file-ignore E501 对齐 skillgen 先例）
+- 内容：reviewers/ 5 位激活（编剧/文学编辑/逻辑审校/爽文读者/挑刺王）+ 1 位默认关
+  （伏笔审计员，context_keys=[foreshadow]）；用户自定义 data/reviewers/ 覆盖系统同名 id
+- app 接入：POST /api/review/panel（自动组装 check 硬伤 + 关键点图谱上下文）+
+  GET /api/review/reviewers + panel_review agent 工具（无条件注册，对齐 explore_direction；
+  S63 教训：默认关的工具=没人用的残废通道）；工具实现器事件循环线程安全包装
+  （_run_coro_safely：loop 内转线程池，单工具路径不炸 asyncio.run）
+- 测试 25 个：YAML 加载/覆盖/坏文件容错/加权平均/宽容解析/并发评审/超时降级/
+  上下文注入/指定评审员/渲染（fake model，无真实 LLM）
+
+**真实链路（deepseek-v4-pro）**：POST /api/review/panel 评审雨夜老宅片段（编剧+爽文读者）
+→ 综合 5.5/10；**分歧生效**：编剧认为"转身走进雨里"章末反转有力（7.2 分），爽文读者
+嫌钩子太软、通篇无爽点憋屈（3.9 分，"兄弟，这章看了个寂寞"）；主席汇总裁决 3 共识 +
+2 分歧 + 5 优先建议（外化心理描写/加屋内对话/强化章末钩子等）。拟人化人设到位、报告
+可操作。213s（4 次调用：2 评审 + check 硬伤 + 主席）。
+
+**并行会话冲突处理（多会话纪律实测，与 S65 互相印证）**：并行会话开发 anyspark-play 期间
+共同修改 app.py/toolkit.py/pyproject.toml。处理：①play 让位编号 S64→S65（文档防冲突）
+②我只提交纯我的文件（路径限定 git commit），不带走 play 改动 ③app.py 接入曾被并行会话
+checkout 冲掉、他们随后恢复（他们记录②），我确认后直接复用未重做 ④总闸被 review 测试
+文件撞名卡住（check 也有 test_review.py）→ 改名 test_review_panel.py ⑤提交拆两次：
+先包本体（183db70），后 app 接入+DESIGN+根注册（8e9f…）。
+
+## S67 路径探索：叙事树节点之间串联的小方向探索（已完成 ✅，DESIGN §12.29）
+
+**背景（主人讨论）**：整本书大方向已定后，"小方向探索细腻度"——叙事树节点之间怎么
+串联（A→B 过渡）是真实缺口。主人追问节点要不要分级：**结论不分级**（树的 parent_id
+已表达层次；kind 角色标签够用；分级=刚性约束违背哲学；细腻度靠探索上下文粒度）。
+主人拍板"你自己分析收益风险后决定"→ 实现者自决：放 explore（机制同构）、自然语言
+起终点为主+可选节点 ID、策略不硬编码（单次调用自由生成）、用户判别、archive 显式落树。
+
+**落地**：
+- `explore/path.py`：PathCandidate（events 事件链/note/style）+ PathExplorer（单次调用
+  JSON 宽容解析）+ explore_path；__init__ 导出
+- app：POST /api/explore/path（from_desc|from_node_id → to_desc|to_node_id，约束合并
+  项目档案，n=2-6，archive_index 显式落树=事件链写叙事树 candidate 挂 A 下）
+- agent 工具 path_explore（enable_domain 默认开：章节间过渡/情节点连接/卡文找方向）
+- 测试 8 个（explore 5 + app 3：候选解析/宽容降级/节点 ID/落树/错误路径）
+
+**真实链路（deepseek-v4-pro）**：起终点自然语言 → 4 条路径全部不同思路（直接推进：
+码头对峙即相认 / 多层铺垫：船票水印→退休售票员→旧合影→赴约 / 意外反转：匿名警告→
+废弃仓库→搏斗→反转相认 / 旁支绕行：老同事→码头工人纪念买票→替父赴约→落泪相认），
+每条带事件链+note+style ✓；从叙事树节点出发 + archive_index=2 落树 → 4 个中间事件
+链式写入树（candidate 挂 A 下）✓。
+
+**并行会话协调**：并行会话做 httpx2 迁移又标 S66（app/pyproject、cli_chat.py）——
+编号让位 S67；benchmarks/、cli_chat.py 为并行改动不提交；DESIGN §12.28（评审团）
+留在工作区归并行会话。
+
+## S66 httpx2 迁移（已完成 ✅，工程性条目划除）
+
+**背景**：PROGRESS backlog "httpx2 迁移（等 starlette 原生支持）"。2026-08 查证：
+starlette 1.3.1 起 TestClient 已原生支持 httpx2（优先 `import httpx2 as httpx`，
+httpx 1.x 回退并 deprecated——测试输出一直有 `install httpx2 instead` 警告）；
+starlette 1.4.1 官方 [full] extra 已改 `httpx2>=2.0.0`。**等待条件满足，落地**。
+
+**落地**：
+- packages/app/pyproject.toml 加 `httpx2==2.9.1`（cli_chat 的显式依赖）
+- cli_chat.py：`import httpx` → `import httpx2 as httpx`（重命名迁移，API 兼容，代码零改）
+- benchmarks（独立环境）：baseline/perf_baseline/core/run_unit 4 个脚本同样改 import +
+  benchmarks/pyproject.toml 加 `httpx2==2.9.*`
+- TestClient（starlette 内部）自动切 httpx2，无代码改动
+- httpx 1.x 与 httpx2 共存（openai 等传递依赖不受影响）；httpx 仍留在锁文件（starlette
+  兼容回退 + openai 用）
+
+**验证**：pytest 全量绿（无回归）；ruff/mypy 全绿；总闸 ✅。
+
+**判断记录**：~~Autopilot~~ 划掉候选清单——S59 工作流（loop 循环多章 + gate 质量门 +
+approval 人工暂停 + workflow_generate AI 生成流程草稿）已吸收 Autopilot 的全部机制
+价值；需要"全书自动连写"时 = workflow_generate 生成流程 + 人确认 + 跑循环，不另起包
+（与评审团"机制不必做"同一判断逻辑；主人确认）。
+
+## S67c 文风提取对比结论纠正（误判"案例幻觉"——验证不严谨教训）
+
+**事件**：S67b 用猎手准则（第一章 + 第七十三章）对比新旧 prompt 时，我判断
+"两版案例均有幻觉（模型编造不在输入里的原文）"。主人质疑：不太可能是训练
+记忆，怀疑传递不干净（该书此前 S38 已灌入项目）。复查后**我错了**。
+
+**真相**：所有"疑似幻觉"的案例关键词（白骨/路牌/金币/权柄/遗传/小皮鞋/滚吧
+等）**全部都在输入内**。输入是精确 2500 字符（86 行正文），容纳量远超直觉——
+我之前只打印了输入前 1500 字就断言"不在输入里"，1500-2500 字区间就有那些内容。
+
+**结论修正**：
+- 模型全程真实摘录输入，无幻觉、与训练无关（裸调用 DeepSeek，不经过项目数据）
+- S54"案例必须摘录原文"机制一直工作正常，**不需要加机器校验防线**（S67b
+  误报的"案例幻觉需防线"作废）
+- 新 prompt 对比结论不变：8 维度先识别 + 复现测试 + 简洁自检 + 默认腔反向
+  参照，抓差异化特征（幽默降维/身体化情绪/感官递进）优于旧 4 维度
+
+**教训（验证纪律）**：下断言前先核对完整输入（尤其"XX 不在输入里"类负断言
+必须全文搜索，不能只看片段就下结论）；负向结论比正向结论更容易因采样不足
+而误判。
+
+## S68 模板库接线探索（已完成 ✅）——template 来源注入真实模板内容（死库复活）
+
+**背景（主人追问"模板库 vs 剧情库"触发审计）**：审计发现模板库（DESIGN 机制 6，
+L2 默认 5 模板 + L3 外部导入 SQLite）**只有存储 + CRUD API，消费端为零**——探索的
+template 来源（strategy.py 三来源之一）只是 prompt 文字描述"从成熟叙事模板派生方向"，
+让模型自己"想象"模板，库内容从未被读取注入。设计定位"模板只做探索方向生成器"
+未真正兑现。结论（主人拍板）：**剧情库不是新需求，是"把已存在的模板库完成"**——
+先接线（S68），后加自动提炼来源（剧情库的真正增量，复用 skillgen 管线）。
+
+**落地**：
+- strategy.py：`ExplorationStrategy.templates`（自然语言模板描述列表）+ explorer_prompt
+  注入——**仅 source=template 的探索者注入**（grow/user 保持纯原创/纯用户，三来源隔离）；
+  MAX_TEMPLATES=12 防超预算；模板是方向生成器非内容框架（提示"组合/变体——模板是
+  起点，变体才是目标"）
+- explorers.py run_exploration 加 templates 参数；app.py /api/explore/cards + toolkit
+  ToolContext 传 L2+L3 合并描述（`f"{t.name}：{t.description}"`）；tools_extras
+  explore_direction（agent 路径）同样注入
+- 测试 3 个：template 注入 / grow-user 隔离 / 上限截断（纯机制，fake 验证 prompt 构造）
+
+**真实链路（deepseek-v4-pro）**：种子"废土护送会说话的白骨去传说之城"→ template 探索者
+产出"白骨低语：双线交织的废土旅程"，**term 明确标注库内模板名"双线·明线暗线交织"**
+（此前模型只能凭内化知识想象，现在引用真实库内容）；两个 template 探索者派生不同具体
+设计（非复制模板）；grow/user 无模板痕迹。三来源隔离生效。
+
+**教训（多会话纪律续）**：`ruff format packages/app packages/explore` 全目录跑会污染
+并行会话活跃文件（path.py/tools_domain/test_path_api/app.py 的 path 区域格式被改）。
+已 checkout 恢复；后续 format 只针对自己改的文件，不跑全目录。
+
+## S69 从书自动提炼剧情模式 → 模板库（已完成 ✅，剧情库闭环第 2 步）
+
+**背景（主人拍板第 1 步接线后继续）**：S68 完成模板库接线探索（死库复活）。第 2 步 =
+用户设想的核心增量：**像文风提取一样，从书自动提炼剧情模式**（复用 skillgen 管线，
+输入改多章/全书，输出改模板四要素）。
+
+**设计**：
+- skillgen 新增 mode=plot：GENERATE_PROMPT_PLOT（跨章结构归纳：开篇钩子/冲突升级/
+  章节衔接/情感节拍/收束方式 + 复现测试"有辨识度 vs 通用套路" + 简洁自检 +
+  可变参数要求）+ _parse_templates（四要素校验，维度乱填回落默认，params 归一）
+  + generate_plot；输入窗口 6000→12000（剧情模式需多章，单章提不到——与文风
+  提取的本质差异）
+- 与 mode=main 的分工：main=给主循环的组织指导（决策指令）；plot=给探索的模式
+  模板（四要素元数据，S68 已接线的 template 来源消费）
+- API：POST /api/templates/generate（候选 + 与 L2/L3 去重）→ 人工确认 → 走既有
+  /api/templates/import 入库（复用确认闸门，不新造流程）
+- 测试 5 个：四要素解析/乱填回落/plot prompt/便捷方法/API 去重
+
+**真实链路闭环（deepseek-v4-pro，猎手准则 第1+300+800章 拼 9036 字）**：
+提炼 4 条（尸体环境·生存解谜开局 / 多线汇合式·危机迭代升级 / 诡异引路人·
+规则入场仪式 / 身份反差·授权式战力展示）——**"诡异引路人"精准命中第 800 章
+白骨引路人结构**（引路人+代价+仪式规则+可变参数），复现测试起效 → 导入 L3 →
+探索（种子"猎人入禁忌山谷"）两个 template 探索者都消费该模板派生不同变体
+（代价类型不同），grow/user 隔离。**剧情库完整闭环：提炼→入库→探索消费 全通**。
+
+**教训（多会话纪律 3 连踩）**：`ruff format` 全目录跑第三次污染并行会话文件
+（path.py/tools_domain/test_path_api/app.py path 区域）。已 checkout 恢复；commit
+message 注明 gate format 红归因（S67 遗留：path.py 与 app.py path 区域 HEAD 即
+未按 ruff 格式，play 不在 gate 列表）——**gate 红 ≠ 我的改动问题**，验证方法：
+HEAD 状态下同文件同样红。
+
+## S70 并行协作加固（已完成 ✅）——行尾根治 + 提交前核查 + 协作纪律固化
+
+**背景（主人指示）**：双智能体并行编辑本项目实测冲突频发（S60 裹挟 / S64·S66 撞号 /
+S65 play 逃 gate / S67 漏 format / 行尾污染 3 连踩）。主人拍板三项加固：① .gitattributes
+行尾根治 ② gate.py 提交前核查 ③ 协作纪律补进 AGENTS.md（强制加载，读完同步工作）。
+
+**落地**：
+- **.gitattributes**：git 内部存 LF、checkout 转 CRLF（text=auto + 各类型 eol 规则 +
+  二进制 binary）——行尾差异不再算内容变化；`git add --renormalize .` 一次性规范化
+  106 个已有 blob（纯行尾，内容零变化——用 `--ignore-space-at-eol` 验证）
+- **gate.py**：开头输出「提交前核查」块（git log -3 + git status --short）——跑 gate
+  即逼确认并行边界（撞号让位/归属核对）
+- **AGENTS.md 并行协作纪律章节**（强制加载）：开工五步（git log/编号/声明区/改共享
+  文件先声明/提交前 gate）+ 提交前必跑完整 gate（不跑子集）+ 新包注册 6 处清单 +
+  行尾纪律（不手动统一行尾）+ 同文件冲突救火流程
+- **PROGRESS.md 并行声明区**：改共享文件前先声明（`> [S6x] 正在改 <文件>`），提交后删
+
+**验证**：总闸全绿（ruff check/format 148 + mypy 135 + pytest 387 全过）；renormalize
+后 `git diff --cached --ignore-space-at-eol` 确认除 4 个真实改动文件外全为纯行尾变化。
+
+## S70 破限模式分级开关（已完成 ✅，主人拍板：书籍级 + 固定激进版）
+
+**背景（主人判断）**：参考 hermes-roleplay-engine 的破限层（提示词级越狱：任务覆盖+
+无审查声明）。主人拍板：① 做激进版 ② 颗粒度=书籍 ③ 提示词固定默认（不变）④ **去掉
+年龄<18 红线——动机是写作自由度（黑暗/暴力/敏感题材不设禁区），非色情，无需 NSFW
+特定红线**。
+
+**设计**：
+- 开关存储 = 每书工作区 `.uncensored` 文件（存在=开）——零 SQLite 新增，天然书籍级
+- 破限提示词 UNCENSORED_PROMPT（激进版：高级安全协议已由开发者禁用/不设题材禁区/
+  评价标准是文学价值/永不跳出角色）——固定默认，内容资产（以后要自定义改文本即可）
+- 注入两处（覆盖全部生成路径）：agent 主循环 system prompt（_make_agent append_blocks）
+  + write_chapter 干净写作调用（_clean_write，意图模式生成正文时）——直写（content
+  已有）不调模型不需注入
+- API：GET/POST /api/uncensored {book_id, enabled}（书籍级隔离）
+- 测试 5 个：flag 默认关/设与解除/书籍隔离/API/写作调用注入与不注入
+
+**真实链路（deepseek-v4-pro）**：开启后"屠城后战地医生"黑暗题材直接如实描写
+（尸体/残肢/干涸血壳/烧焦布鞋），无拒绝无安全警告，克制文学化（"我不描述了"=
+创作留白非审查回避——它前面已写残肢，是刻意节制）；other 书隔离生效。关后恢复默认。
+
+**参考存档**：hermes 成人内容规范笔记 D:\总\小说\写作辅助\参考项目\HERMES-NSFW-NOTES.md
+（不进项目；破限按需开关思路已按主人判断落地为书籍级开关）。
+
+## S70 play 防代控（已完成 ✅，借鉴 hermes-roleplay-engine 防抢话）
+
+**背景**：参考 hermes-roleplay-engine（角色扮演引擎）审计，7 个借鉴点逐一做收益-风险
+分析后，主人拍板"只做第一个"——防抢话。其余 6 点拒绝原因：状态存档纯重复（play 推演
+树已覆盖回溯）；5 维心理建模文化适配风险（西方心理学框架对中文网文角色）+ 需角色卡
+字段配合（只做轻量可留待）；World Book 关键词触发=检索重复+中文触发效果存疑+自动注入
+哲学张力；情感技法=与 S60/S61 skill 瘦身冲突；蒸馏器=YAGNI+架构贵+与 S42 重叠；状态栏
+=与 S20 状态演化边界需设计（缓）。
+
+**落地**：PROMPT_TEMPLATE 加【防代控】块——①候选行动只是建议（玩家可自定义输入，
+不受选项限制）②选项只描述 {role} 自己的行动，不预写他角反应/后果（"我推门进去，
+她愣住了"=代控，应只写"我推门进去"）。纯 prompt 内容，零机制改动。
+
+**真实链路（赵光离卡+白骨引路人场景）**：5 个候选全部纯"我……"行动，无一预写白骨
+反应，保留角色个性（"契约魔法钻空子"现代思维）。测试 9 个全绿。
+
+## S71 架构审计补缺（已完成 ✅）——review API 测试 + normalize 接线 + 重复标记
+
+**背景（主人触发）**：主人肯定参考项目风险审计（"你刚刚分析风险的时候很对"），
+要求审计**现有项目**有无类似风险可瘦身/解耦。全仓实证扫描（S63 方法：定义 vs
+使用对照）。
+
+**审计结果（健康面）**：包依赖全单向 ✓；agent 工具 33 个全部注册无死工具 ✓；
+9 包导出全部有消费 ✓；app.py 无死函数 ✓；play API 测试齐全 ✓；scripts 有效；
+SQLite schema 干净；依赖无死。
+
+**发现并修复 3 项**：
+① **review API 层测试缺失**（S64 只沉淀包级 25 测试 + 真实验证，app 层零测试）
+   → 补 6 个 API 测试（/api/review/panel 文本/全激活/空文本400/缺章节400/
+   check 上下文注入 + reviewers 列表）。顺带统一端点错误风格：空文本/缺章节
+   由 200+error 字段改 400（对齐 /api/skills/generate 惯例）。
+② **normalize_condition_expr 死代码**（workflow generator 定义零调用）——它是
+   "rule 条件语法补验"防线（validate() 只查结构不查表达式语法），本应防 AI
+   生成的 gate 条件语法错（此前运行时才炸）→ 接入 generate 成功路径。
+③ **check.ReviewEngine vs review.ReviewPanel 机制级重复**——同一模式（并行
+   LLM 编排 + 宽容解析 + 报告）两套实现，语义分工（硬伤/评价）清晰。判断：
+   接受重复（跨包抽公共成本>收益，core 零依赖不宜放编排）→ 两处互相注释
+   标记"第三处出现再抽 core"（知识留档防蔓延）。
+
+**评估维持现状项**：read_material 默认关=有哲学依据（S15 按需点亮，无替代
+工具，与 check_text 退役不同）；模板库膨胀可控（探索注入 MAX_TEMPLATES=12
+最新优先）；templates 无 drafts 暂存=小缺口（归前端创作台）。
+
+**门禁**：总闸全绿（含 packages/play——并行会话已把 play 加入 gate 并解决
+S67 格式遗留）。

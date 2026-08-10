@@ -134,7 +134,9 @@ def main() -> None:
     # 断言：消息数有界（不随轮次线性爆炸——压缩回写生效）
     msgs_last = hist[-1]["msgs"]
     msgs_any_compressed = any(h["summary"] for h in hist)
-    bounded = msgs_last <= max(h["msgs"] for h in hist[: max(1, len(hist) // 2)]) * 3 or len(hist) < 4
+    bounded = (
+        msgs_last <= max(h["msgs"] for h in hist[: max(1, len(hist) // 2)]) * 3 or len(hist) < 4
+    )
 
     lines = [
         "# 长书压力测试",
@@ -145,10 +147,14 @@ def main() -> None:
         "|------|--------|----------|----------------|",
     ]
     for h in hist:
-        lines.append(f"| {h['ch']} | {h['msgs']} | {h['chars']} | {'✅' if h['summary'] else '—'} |")
+        lines.append(
+            f"| {h['ch']} | {h['msgs']} | {h['chars']} | {'✅' if h['summary'] else '—'} |"
+        )
     lines.append("")
     lines.append(f"- 末轮消息数：{msgs_last}（有界断言：{'✅' if bounded else '❌'}）")
-    lines.append(f"- 压缩触发过：{'✅' if msgs_any_compressed else '❌'}（小预算下应至少触发 1 次）")
+    lines.append(
+        f"- 压缩触发过：{'✅' if msgs_any_compressed else '❌'}（小预算下应至少触发 1 次）"
+    )
     if real:
         lines.append(f"- 实际落盘章节数：{result['chapters_written']}（应为 {chapters}）")
     lines.append("")

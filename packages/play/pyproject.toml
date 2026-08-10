@@ -1,0 +1,28 @@
+# ---------------------------------------------------------------------------
+# anyspark-play — 互动推演扩展包（主人拍板独立包，与 explore 区分）
+# 互动小说式推演树：从某场景切入、扮演角色、每步多候选行动、用户选择推进、
+# 形成推演树；可回溯分叉、导出灵感卡接写正文。灵感来源 + 互动玩法。
+# 设计规格：DESIGN.md §12.27（S65）。依赖：core + explore（单向，复用角色卡加载）。
+# 哲学：机制硬编码（树存储/回合流程/自定义位）、内容自然语言（场景/选项/提示词引导）。
+# marker: S65
+# ---------------------------------------------------------------------------
+[project]
+name = "anyspark-play"
+version = "0.0.1"
+description = "AnySpark v4 互动推演：扮演角色多轮选择推进的推演树（灵感来源+玩法）"
+requires-python = ">=3.11"
+dependencies = [
+    "anyspark-core==0.0.1",  # workspace 成员
+    "anyspark-explore==0.0.1",  # workspace 成员：复用 load_role_card / extract_json_dict
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anyspark"]
+
+[tool.uv.sources]
+anyspark-core = { workspace = true }
+anyspark-explore = { workspace = true }

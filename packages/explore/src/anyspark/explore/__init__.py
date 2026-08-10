@@ -16,6 +16,7 @@ from .direction import (
 )
 from .explorers import ExplorationEngine, run_exploration
 from .intent import IntentUnderstander
+from .path import PathCandidate, PathExplorer, PathExploreResult, explore_path
 from .roleplay import RolePlayEngine, RolePlayResult, load_role_card, run_roleplay
 from .strategy import ExplorationStrategy, extract_json_dict
 
@@ -26,9 +27,13 @@ __all__ = [
     "ExplorationEngine",
     "ExplorationStrategy",
     "IntentUnderstander",
+    "PathCandidate",
+    "PathExploreResult",
+    "PathExplorer",
     "ProjectArchive",
     "RolePlayEngine",
     "RolePlayResult",
+    "explore_path",
     "extract_json_dict",
     "load_role_card",
     "run_exploration",

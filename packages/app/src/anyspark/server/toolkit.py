@@ -46,6 +46,9 @@ class ToolContext:
     workflow_store: Any = None  # S59 工作流 agent 工具（默认关：可选增强，需要时点亮）
     workflow_engine: Any = None
     workflow_generator: Any = None
+    play_engine: Any = None  # S65 互动推演 agent 工具（默认关：玩法/灵感，需要时点亮）
+    review_panel: Any = None  # S64 拟人化评审团面板（panel_review 工具用）
+    templates: list[str] = None  # type: ignore[assignment]  # S68 模板描述列表（explore_direction 注入）
 
 
 def build_toolkit(
@@ -57,6 +60,7 @@ def build_toolkit(
     enable_extras: bool = False,
     enable_search: bool = False,
     enable_workflow: bool = False,
+    enable_play: bool = False,
 ) -> ToolRegistry:
     """把全部工具装配进 registry（按 enable_* 开关分组点亮），返回同一注册表。
 
@@ -81,7 +85,9 @@ def build_toolkit(
     from anyspark.server.tools_extras import make_explore_implementer
 
     explore_spec, explore_impl = make_explore_implementer(
-        ctx.model, dim_names=ctx.dim_store.list_names() if ctx.dim_store else None
+        ctx.model,
+        dim_names=ctx.dim_store.list_names() if ctx.dim_store else None,
+        templates=ctx.templates,
     )
     registry.register(explore_spec, explore_impl)
 
@@ -92,6 +98,7 @@ def build_toolkit(
             make_graph_query_implementer,
             make_ingest_implementer,
             make_mind_register_implementer,
+            make_path_explore_implementer,
             make_plan_implementer,
             make_plot_implementer,
             make_read_context_implementer,
@@ -122,6 +129,9 @@ def build_toolkit(
         registry.register(st_spec, st_impl)
         rp_spec, rp_impl = make_roleplay_implementer(ctx.workspace, ctx.graph, ctx.model)
         registry.register(rp_spec, rp_impl)
+        # S67：叙事路径探索（起点 A → 终点 B 串联候选，章节间过渡/情节点连接）
+        px_spec, px_impl = make_path_explore_implementer(ctx.model)
+        registry.register(px_spec, px_impl)
         sc_spec, sc_impl = make_search_chapters_implementer(ctx.chapters)
         registry.register(sc_spec, sc_impl)
         rc_spec, rc_impl = make_read_context_implementer(ctx.chapters)
@@ -180,5 +190,20 @@ def build_toolkit(
             ctx.workflow_store, ctx.workflow_engine, ctx.workflow_generator
         ):
             registry.register(_spec, _impl)
+
+    # S65 互动推演 agent 工具：默认关，enable_play 点亮（玩法/灵感：启动/选择/查看/导出）
+    if enable_play and ctx.play_engine is not None:
+        from anyspark.server.tools_domain import make_play_implementer
+
+        for _spec, _impl in make_play_implementer(ctx.play_engine):
+            registry.register(_spec, _impl)
+
+    # S64：拟人化评审团 agent 工具（无条件注册——用户喊"帮我看看这章"时 agent
+    # 自主调用；对齐 explore_direction，S63 教训：默认关的工具=没人用的残废通道）
+    if ctx.review_panel is not None:
+        from anyspark.server.tools_review import make_review_tools
+
+        for _rspec, _rimpl in make_review_tools(ctx.review_panel, ctx.chapters, ctx.model):
+            registry.register(_rspec, _rimpl)
 
     return registry

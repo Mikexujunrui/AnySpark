@@ -32,6 +32,7 @@ HP4_GOLD = (ROOT / "benchmarks" / "assets" / "hp_philosophers_stone.txt").read_t
     encoding="utf-8"
 )
 
+
 # 工具噪声模板（模拟 Agent 循环里堆积的过程信息——真实链路常见形态）
 def _tool_noise(n: int) -> str:
     lines = []
@@ -258,8 +259,10 @@ def main() -> None:
         "intent": intent,
         "judge": judge(llm, c_text, HP3[-1500:], GRAPH_FACTS),
     }
-    print(f"C 完成（plan {results['C_separated']['input_tokens_plan']} + "
-          f"write {results['C_separated']['input_tokens_write']} token）")
+    print(
+        f"C 完成（plan {results['C_separated']['input_tokens_plan']} + "
+        f"write {results['C_separated']['input_tokens_write']} token）"
+    )
 
     (OUT / "results.json").write_text(
         json.dumps(results, ensure_ascii=False, indent=2), encoding="utf-8"
@@ -267,8 +270,10 @@ def main() -> None:
     print("\n=== 结果 ===")
     for k, v in results.items():
         j = v.get("judge", {})
-        print(f"{k}: 输入{v.get('input_tokens')} token | 幻觉={j.get('hallucination') or '无'} "
-              f"| 连贯={j.get('coherence')} 文笔={j.get('prose')} 聚焦={j.get('focus')}")
+        print(
+            f"{k}: 输入{v.get('input_tokens')} token | 幻觉={j.get('hallucination') or '无'} "
+            f"| 连贯={j.get('coherence')} 文笔={j.get('prose')} 聚焦={j.get('focus')}"
+        )
 
 
 if __name__ == "__main__":

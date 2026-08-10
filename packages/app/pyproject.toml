@@ -16,12 +16,14 @@ dependencies = [
     "anyspark-explore==0.0.1",  # workspace 成员：探索引擎
     "anyspark-template==0.0.1",  # workspace 成员：模式库/资料/伏笔
     "anyspark-workflow==0.0.1",  # workspace 成员：工作流扩展包
+    "anyspark-play==0.0.1",  # workspace 成员：互动推演扩展包
     "fastapi==0.141.1",
     "uvicorn==0.52.1",
     "pydantic==2.13.4",
     "openai==2.52.0",
     "python-dotenv==1.1.1",
     "tiktoken==0.9.0",
+    "httpx2==2.9.1",  # S66：下一代 HTTP 客户端（starlette TestClient 已原生支持，httpx 1.x 回退 deprecated）
 ]
 
 [project.scripts]

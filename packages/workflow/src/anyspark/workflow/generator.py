@@ -116,7 +116,10 @@ class WorkflowGenerator:
                     last_err = "校验失败: " + "; ".join(errors)
                     logger.warning("生成候选校验失败(第%d次): %s", attempt + 1, last_err)
                 else:
-                    return definition
+                    # S71：接线 normalize_condition_expr——补验 rule 条件语法
+                    # （此前定义后校验只查结构，AI 生成的 gate 条件表达式语法错误
+                    # 会在运行时才炸；此防线曾是无调用方的死代码）
+                    return normalize_condition_expr(definition)
             except Exception as exc:
                 last_err = str(exc)[:200]
                 logger.warning("生成解析失败(第%d次): %s", attempt + 1, last_err)

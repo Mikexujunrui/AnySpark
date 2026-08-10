@@ -7,6 +7,8 @@ anyspark.server.app — FastAPI 后端（真实 API 层）。
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import queue
 import threading
@@ -81,6 +83,8 @@ from anyspark.models.registry import (
     ModelRegistry,
     slugify,
 )
+from anyspark.play import PlayEngine, PlayStore
+from anyspark.review import ReviewPanel
 from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.recorder import RunRecorder
@@ -89,6 +93,7 @@ from anyspark.server.toolkit import ToolContext, build_toolkit
 from anyspark.server.tools_extensions import (
     ExtensionToolStore,
 )
+from anyspark.server.tools_writing import UNCENSORED_PROMPT
 from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import (
@@ -167,6 +172,7 @@ class ChatRequest(BaseModel):
     enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认开
     enable_codex: bool = False  # S48-P5 代码扩展 run_code（沙箱，默认关：安全按需点亮）
     enable_workflow: bool = False  # S59 工作流 agent 工具（list/run/status/generate）默认关
+    enable_play: bool = False  # S65 互动推演 agent 工具（play_start/choose/status/export）默认关
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/plot 子集
     # S58b 上下文模式：auto(默认=干净,不继承场景记忆)/continue(显式继承场景记忆+计划)/fresh(同auto)
@@ -222,6 +228,36 @@ class RolePlayIn(BaseModel):
     role: str  # 角色名（角色卡文件名 + 图谱实体）
     scenario: str  # 推演场景（自然语言）
     n: int = 4  # 推演路数（2-6）
+
+
+class PlayCreateIn(BaseModel):
+    """S65 互动推演：创建会话（扮演角色从场景切入）。"""
+
+    role: str  # 扮演的角色（须有角色卡）
+    seed: str  # 切入场景（自然语言）
+    book_id: str = "main"
+    title: str = ""
+    max_depth: int = 20  # 最大推演深度（默认 20）
+
+
+class PlayChooseIn(BaseModel):
+    """S65 互动推演：选择候选行动（option_id 与 custom_text 二选一）。"""
+
+    option_id: str | None = None
+    custom_text: str | None = None
+
+
+class PlayBranchIn(BaseModel):
+    """S65 互动推演：回溯分叉（回到指定节点重新生成候选行动）。"""
+
+    node_id: str
+
+
+class UncensorIn(BaseModel):
+    """S70：破限模式开关（书籍级，写作自由度：不设题材禁区）。"""
+
+    book_id: str = "main"
+    enabled: bool = True
 
 
 class CodexIn(BaseModel):
@@ -351,6 +387,19 @@ class ExploreCardsIn(BaseModel):
     intent_confirmed: dict[str, object]
 
 
+class PathExploreIn(BaseModel):
+    """S67 路径探索：叙事树节点之间串联（起点 A → 终点 B 的中间事件链候选）。"""
+
+    from_desc: str = ""  # 起点描述（from_node_id 传入时自动取节点内容；两者至少其一）
+    to_desc: str  # 终点描述
+    from_node_id: str | None = None  # 叙事树起点节点（内容自动带入）
+    to_node_id: str | None = None  # 叙事树终点节点
+    constraints: list[str] = []  # 补充设定约束（与项目档案约束合并）
+    book_id: str = "main"
+    n: int = 4  # 路径数（2-6）
+    archive_index: int | None = None  # 选中第几条写入叙事树（1-based，显式才落树）
+
+
 class ExploreArchiveIn(BaseModel):
     card: dict[str, object]
     parent_node_id: str | None = None  # S59：叙事树父节点（探索分叉从哪长出）
@@ -397,6 +446,17 @@ class MaterialIn(BaseModel):
 class GraphExtractIn(BaseModel):
     chapter_ref: str
     text: str
+
+
+class ReviewPanelRequest(BaseModel):
+    """S65：拟人化评审团请求。chapter_ref 与 text 二选一（ref 优先）。"""
+
+    chapter_ref: str = ""  # 章节标题（从 chapters 取正文）
+    text: str = ""  # 直接评审文本
+    book_id: str = "main"
+    reviewer_ids: list[str] = []  # 空 = 全部激活评审员
+    with_check: bool = True  # 注入 check 硬伤清单（逻辑审校用）
+    with_foreshadow: bool = True  # 注入关键点图谱（伏笔审计员用）
 
 
 class AgencyIn(BaseModel):
@@ -500,16 +560,22 @@ class SkillGenerateIn(BaseModel):
     mode: str = "writing"  # S58：writing（文风/叙事技法）/ main（类型/结构组织指导）
 
 
+class TemplateGenerateIn(BaseModel):
+    """S69：从书提炼剧情模式模板候选（人工确认后走 /api/templates/import 入库）。
+
+    与 skill 生成的区别：输出模板四要素（粒度/位置/功能/可变参数），
+    输入应为多章/全书片段（跨章结构归纳，单章提不到剧情模式）。
+    """
+
+    source_text: str  # 多章/全书片段（真实原文）
+    hint: str = ""  # 可选指引（如"侧重悬疑递进"）
+    max_items: int = 5
+
+
 class ChapterPatchIn(BaseModel):
     """S44：定点编辑操作列表。"""
 
     operations: list[dict[str, Any]]
-
-
-class ChapterUpdateIn(BaseModel):
-    """前端稿纸编辑：直接替换内容。"""
-
-    content: str
 
 
 class ImpactIn(BaseModel):
@@ -918,6 +984,14 @@ def build_app(
     # approval=等待人工。
     workflow_store = WorkflowStore(real_db)
     workflow_generator = WorkflowGenerator(model)
+    # S65 互动推演（独立扩展包 anyspark-play）：扮演角色多轮选择推进的推演树
+    # S65：拟人化评审团面板（系统评审员随包分发 + 用户自定义覆盖 data/reviewers/）
+    review_panel = ReviewPanel()
+    try:
+        review_panel.add_dir(DATA_DIR / "reviewers")
+    except Exception as _rpe:  # 用户目录损坏不影响服务启动
+        logger.warning("加载用户评审员失败: %s", _rpe)
+    play_store = PlayStore(real_db)
 
     def _wf_run_agent(ctx: RunContext, node: Any) -> NodeResult:
         """agent 节点：干净单次 LLM 调用（无对话历史/工具记录——对齐 S56 干净写作）。
@@ -1086,6 +1160,8 @@ def build_app(
         return has_pos and not has_neg
 
     workflow_engine = WorkflowEngine(workflow_store, _wf_runner, model_judge=_wf_judge)
+    # S65：play 引擎（树存储 + LLM 生成；角色卡加载复用 explore load_role_card）
+    play_engine = PlayEngine(play_store, model, workspace, graph)
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
     app.add_middleware(
@@ -1112,6 +1188,7 @@ def build_app(
         enable_domain: bool = True,
         enable_codex: bool = False,
         enable_workflow: bool = False,
+        enable_play: bool = False,
         skip_inject: set[str] | None = None,
         context_mode: str = "auto",
         model_id: str | None = None,
@@ -1147,6 +1224,10 @@ def build_app(
                 workflow_store=workflow_store,
                 workflow_engine=workflow_engine,
                 workflow_generator=workflow_generator,
+                play_engine=play_engine,
+                review_panel=review_panel,
+                # S68：探索注入真实模板库（L2+L3 合并，agent 的 explore_direction 消费）
+                templates=[f"{t.name}：{t.description}" for t in templates_external.all()[:12]],
             ),
             enable_domain=enable_domain,
             enable_codex=enable_codex,
@@ -1154,6 +1235,8 @@ def build_app(
             enable_search=enable_search,
             # S59：工作流 agent 工具（默认关，enable_workflow 点亮）
             enable_workflow=enable_workflow,
+            # S65：互动推演 agent 工具（默认关，enable_play 点亮）
+            enable_play=enable_play,
         )
         # 能动级别：显式传入 > 心智规划建议 > 已存档位（S35：档位记录，温度入档）
         # S50：心智模型=会话规划器——S62 修正：启发式档位推断**不自动应用**
@@ -1283,6 +1366,11 @@ def build_app(
             if plan_block:
                 append_blocks.append(plan_block)
 
+        # S70：破限模式（书籍级开关）——写作自由度：黑暗/暴力/敏感题材不设禁区。
+        # 注入 agent 主循环（对话/写作全路径）+ write_chapter 干净调用（工具侧另注）。
+        if workspace.is_uncensored(book_id):
+            append_blocks.append(UNCENSORED_PROMPT)
+
         full_prompt = system_prompt
         if prepend_blocks:
             full_prompt = "\n\n".join(prepend_blocks) + "\n\n" + full_prompt
@@ -1374,73 +1462,16 @@ def build_app(
     def list_conversations() -> list[dict[str, Any]]:
         """会话列表（含继承链条：parent_id/fork_point，可追溯）。"""
         convs = store.list_conversations()
-        result = []
-        for c in reversed(convs):  # 新的在前
-            # 获取 title（兼容旧数据）
-            row = store._conn.execute(
-                "SELECT title FROM conversations WHERE id = ?", (c.id,)
-            ).fetchone()
-            title = row["title"] if row and "title" in row.keys() else ""
-            result.append(
-                {
-                    "id": c.id,
-                    "created_at": c.created_at,
-                    "parent_id": c.parent_id,
-                    "fork_point": c.fork_point,
-                    "message_count": len(store.messages(c.id)),
-                    "title": title,
-                }
-            )
-        return result
-
-    @app.get("/api/conversations/{conv_id}/messages", response_model=list[dict[str, Any]])
-    def get_conversation_messages(conv_id: str) -> list[dict[str, Any]]:
-        """获取指定会话的消息历史（前端会话恢复用）。"""
-        msgs = store.messages(conv_id)
-        # 过滤不完整的工具轮次（流式请求被中断时可能出现）
-        # 两种情况：
-        # 1. assistant 有 tool_calls 但 tool 响应不完整 → 全部跳过
-        # 2. 孤立的 tool 消息（前面没有对应的 assistant tool_calls）→ 跳过
-        filtered: list[dict[str, Any]] = []
-        i = 0
-        while i < len(msgs):
-            m = msgs[i]
-            tool_calls = m.metadata.get("tool_calls", []) if m.metadata else []
-
-            if m.role == "assistant" and tool_calls:
-                # 检查后面是否有足够数量的 tool 响应
-                expected_count = len(tool_calls)
-                actual_count = 0
-                j = i + 1
-                while j < len(msgs) and msgs[j].role == "tool":
-                    actual_count += 1
-                    j += 1
-                if actual_count >= expected_count:
-                    # 完整轮次：保留 assistant + 对应的 tool 消息
-                    filtered.append(
-                        {"role": m.role, "content": m.content or "", "metadata": m.metadata}
-                    )
-                    for k in range(i + 1, i + 1 + expected_count):
-                        tm = msgs[k]
-                        filtered.append(
-                            {"role": tm.role, "content": tm.content or "", "metadata": tm.metadata}
-                        )
-                    i = i + 1 + expected_count
-                else:
-                    # 不完整：跳过 assistant 和已有的 tool 消息
-                    i = j
-                continue
-
-            if m.role == "tool":
-                # 孤立的 tool 消息 → 跳过
-                i += 1
-                continue
-
-            filtered.append(
-                {"role": m.role, "content": m.content or "", "metadata": m.metadata}
-            )
-            i += 1
-        return filtered
+        return [
+            {
+                "id": c.id,
+                "created_at": c.created_at,
+                "parent_id": c.parent_id,
+                "fork_point": c.fork_point,
+                "message_count": len(store.messages(c.id)),
+            }
+            for c in reversed(convs)  # 新的在前
+        ]
 
     @app.post("/api/conversations/{conv_id}/fork", response_model=dict[str, Any])
     def fork_conversation(conv_id: str, fork_point: str = "") -> dict[str, Any]:
@@ -1463,23 +1494,6 @@ def build_app(
             "fork_point": child.fork_point,
             "chain": chain,  # [新会话, 源, 源的源...] 继承链条
         }
-
-    @app.put("/api/conversations/{conv_id}")
-    def rename_conversation(conv_id: str, body: dict[str, str]) -> dict[str, Any]:
-        """重命名会话。"""
-        title = body.get("title", "")
-        ok = store.rename(conv_id, title)
-        if not ok:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        return {"ok": True}
-
-    @app.delete("/api/conversations/{conv_id}")
-    def delete_conversation(conv_id: str) -> dict[str, Any]:
-        """删除会话及其消息。"""
-        ok = store.delete_conversation(conv_id)
-        if not ok:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        return {"ok": True}
 
     # -----------------------------------------------------------------------
     # S47 运行时模型配置：注册表 CRUD + 激活切换（换供应商/换模型/选思考强度）
@@ -1597,6 +1611,7 @@ def build_app(
             enable_domain=req.enable_domain,
             enable_codex=req.enable_codex,
             enable_workflow=req.enable_workflow,
+            enable_play=req.enable_play,
             skip_inject=set(req.skip_inject),
             context_mode=req.context_mode,
             model_id=req.model_id,
@@ -1636,6 +1651,7 @@ def build_app(
                 "enable_domain": req.enable_domain,
                 "enable_codex": req.enable_codex,
                 "enable_workflow": req.enable_workflow,
+                "enable_play": req.enable_play,
                 "thinking": req.thinking,
                 "model_id": req.model_id,
             },
@@ -1727,13 +1743,13 @@ def build_app(
                                     (c.order_index for c in chs if c.title == title),
                                     len(chs),
                                 )
-                                line = str(wc.arguments.get("line", "main")).strip() or "main"
                                 # 后台队列处理（不阻塞 SSE 的 done 帧）
-                                _bg_queue.put(
-                                    BgTask(
-                                        kind="chapter", title=title, content=content, order=order, line=line
-                                    )
-                                )
+                                line = str(wc.arguments.get("line", "main")).strip() or "main"
+                        _bg_queue.put(
+                            BgTask(
+                                kind="chapter", title=title, content=content, order=order, line=line
+                            )
+                        )
             except Exception as exc:  # 异常转 error 帧（不中断连接）
                 logger.exception("chat/stream 执行异常: %s", exc)
                 events_queue.put(("error", {"message": f"执行失败: {exc}"}))
@@ -1757,6 +1773,7 @@ def build_app(
                 enable_domain=req.enable_domain,
                 enable_codex=req.enable_codex,
                 enable_workflow=req.enable_workflow,
+                enable_play=req.enable_play,
                 skip_inject=set(req.skip_inject),
                 context_mode=req.context_mode,
                 model_id=req.model_id,
@@ -1782,6 +1799,7 @@ def build_app(
                     "enable_domain": req.enable_domain,
                     "enable_codex": req.enable_codex,
                     "enable_workflow": req.enable_workflow,
+                    "enable_play": req.enable_play,
                     "thinking": req.thinking,
                     "model_id": req.model_id,
                 },
@@ -2055,6 +2073,8 @@ def build_app(
     def explore_cards(req: ExploreCardsIn) -> list[dict[str, object]]:
         """确认后的意图 → 方向卡 ×4（并行探索，三来源混合）。"""
         constraints = archive.constraints("main")
+        # S68：探索注入真实模板库（L2+L3 合并；template 来源探索者消费，死库接线）
+        templates = [f"{t.name}：{t.description}" for t in templates_external.all()[:12]]
         cards = run_exploration(
             model,
             req.seed,
@@ -2062,8 +2082,64 @@ def build_app(
             constraints,
             n_explorers=4,
             dimensions=dim_store.list_names(),  # S50：维度来自内容载体（可增删改）
+            templates=templates,
         )
         return [c.to_dict() for c in cards]
+
+    @app.post("/api/explore/path", response_model=dict[str, object])
+    def explore_path_route(req: PathExploreIn) -> dict[str, object]:
+        """路径探索（S67）：起点 A → 终点 B 的 N 条串联路径候选（叙事树节点之间）。
+
+        三层探索粒度的中间层：大方向 explore → 桥梁 path → 场景内 play。
+        输出作为参考（不直接写正文）；archive_index 显式传才落叙事树。
+        """
+        from anyspark.explore import explore_path
+
+        from_desc, to_desc = req.from_desc, req.to_desc
+        if req.from_node_id:
+            node = story_tree.get(req.from_node_id)
+            if node is None:
+                raise HTTPException(status_code=404, detail=f"起点节点不存在：{req.from_node_id}")
+            from_desc = node.content
+        if not from_desc.strip():
+            raise HTTPException(status_code=400, detail="需要 from_desc 或 from_node_id")
+        if req.to_node_id:
+            node = story_tree.get(req.to_node_id)
+            if node is None:
+                raise HTTPException(status_code=404, detail=f"终点节点不存在：{req.to_node_id}")
+            to_desc = node.content
+        constraints = archive.constraints(req.book_id) + req.constraints
+        result = explore_path(model, from_desc, to_desc, constraints, n=req.n)
+        if not result.paths:
+            raise HTTPException(status_code=502, detail="路径探索失败（无有效候选）")
+        paths = result.to_dict()["paths"]
+        archived: dict[str, object] | None = None
+        if req.archive_index is not None:
+            idx = req.archive_index - 1
+            if not (0 <= idx < len(paths)):
+                raise HTTPException(status_code=400, detail=f"archive_index 越界（1-{len(paths)}）")
+            if not req.from_node_id:
+                raise HTTPException(
+                    status_code=400, detail="落树需要 from_node_id（起点必须是叙事树节点）"
+                )
+            chosen = paths[idx]
+            node_ids: list[str] = []
+            cur_parent: str | None = req.from_node_id
+            for ev in chosen["events"]:
+                node = story_tree.add_node(
+                    content=ev, book_id=req.book_id, parent_id=cur_parent, kind="candidate"
+                )
+                node_ids.append(node.id)
+                cur_parent = node.id
+            archived = {"node_ids": node_ids, "path": chosen}
+        logger.info(
+            "路径探索: %s → %s × %d 条%s",
+            from_desc[:20],
+            to_desc[:20],
+            len(paths),
+            "（已落树）" if archived else "",
+        )
+        return {"paths": paths, "archived": archived}
 
     @app.get("/api/explore/dims", response_model=list[dict[str, object]])
     def list_explore_dims() -> list[dict[str, object]]:
@@ -2468,6 +2544,16 @@ def build_app(
             raise HTTPException(status_code=404, detail="设定条目不存在")
         return {"ok": True}
 
+    # S70：破限模式开关（书籍级）——GET 查 / POST 设；文件标志在每书工作区
+    @app.get("/api/uncensored", response_model=dict[str, object])
+    def get_uncensored(book_id: str = "main") -> dict[str, object]:
+        return {"book_id": book_id, "enabled": workspace.is_uncensored(book_id)}
+
+    @app.post("/api/uncensored", response_model=dict[str, object])
+    def set_uncensored(req: UncensorIn) -> dict[str, object]:
+        enabled = workspace.set_uncensored(req.book_id, req.enabled)
+        return {"book_id": req.book_id, "enabled": enabled}
+
     @app.post("/api/settings/extract", response_model=dict[str, object])
     def extract_settings(req: WorldSettingExtractIn) -> dict[str, object]:
         """S42：从图谱提炼设定草案（只含已揭示信息，LLM 生成，作者确认后入库）。
@@ -2540,6 +2626,23 @@ def build_app(
         existing_names = {s.name for s in skills.list_skills()}
         fresh = [c for c in candidates if c["name"] not in existing_names]
         return {"candidates": fresh, "existing_skills": sorted(existing_names)}
+
+    @app.post("/api/templates/generate", response_model=dict[str, object])
+    def generate_template(req: TemplateGenerateIn) -> dict[str, object]:
+        """S69：从书提炼剧情模式模板候选（人工确认后走 /api/templates/import 入库）。
+
+        输入多章/全书片段 → 跨章结构归纳 → 模板四要素候选；
+        与 /api/skills/generate 的区别：输出供探索 template 来源派生方向（S68 接线）。
+        """
+        if not req.source_text.strip():
+            raise HTTPException(status_code=400, detail="source_text 不能为空")
+        candidates = skill_generator.generate(req.source_text, req.hint, req.max_items, mode="plot")
+        if not candidates:
+            raise HTTPException(status_code=502, detail="提炼失败（无有效候选）")
+        # 去重：与现有模板库（L2+L3）名比对
+        existing_names = {t.name for t in templates_external.all()}
+        fresh = [c for c in candidates if c["name"] not in existing_names]
+        return {"candidates": fresh, "existing_templates": sorted(existing_names)}
 
     @app.get("/api/skills", response_model=list[dict[str, Any]])
     def list_skills() -> list[dict[str, Any]]:
@@ -2824,6 +2927,154 @@ def build_app(
         return result.to_dict()
 
     # -----------------------------------------------------------------------
+    # S65 互动推演（独立扩展包 anyspark-play：扮演角色多轮选择推进的推演树）
+    # -----------------------------------------------------------------------
+    @app.post("/api/play/sessions", response_model=dict[str, Any])
+    def play_create(req: PlayCreateIn) -> dict[str, Any]:
+        """创建互动推演会话（seed 切入 + 扮演 role → 根节点 scene + 候选行动）。"""
+        try:
+            return play_engine.create(
+                role=req.role,
+                seed=req.seed,
+                book_id=req.book_id,
+                title=req.title,
+                max_depth=req.max_depth,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/api/play/sessions", response_model=list[dict[str, Any]])
+    def play_list() -> list[dict[str, Any]]:
+        return play_store.list_sessions()
+
+    @app.get("/api/play/sessions/{session_id}", response_model=dict[str, Any])
+    def play_get(session_id: str) -> dict[str, Any]:
+        session = play_store.get_session(session_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail=f"推演会话不存在：{session_id}")
+        tree = play_store.session_tree(session_id)
+        current_id = session["current_node_id"] or ""
+        path = play_store.path_to(current_id)
+        return {"session": session, "tree": tree, "path": path}
+
+    @app.post("/api/play/sessions/{session_id}/choose", response_model=dict[str, Any])
+    def play_choose(session_id: str, req: PlayChooseIn) -> dict[str, Any]:
+        """选择候选行动（或自定义输入）→ 结算推进到下一场景。"""
+        try:
+            return play_engine.choose(
+                session_id, option_id=req.option_id or "", custom_text=req.custom_text or ""
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/play/sessions/{session_id}/branch", response_model=dict[str, Any])
+    def play_branch(session_id: str, req: PlayBranchIn) -> dict[str, Any]:
+        """回溯分叉：回到指定节点重新生成一批候选行动（原选项保留）。"""
+        try:
+            return play_engine.branch(session_id, req.node_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/play/sessions/{session_id}/stop", response_model=dict[str, Any])
+    def play_stop(session_id: str) -> dict[str, Any]:
+        """终止推演会话。"""
+        try:
+            return play_engine.stop(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.get("/api/play/sessions/{session_id}/export", response_model=dict[str, Any])
+    def play_export(session_id: str) -> dict[str, Any]:
+        """当前路径导出灵感卡 md（接写正文参考）。"""
+        try:
+            md = play_engine.export_markdown(session_id)
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return {"session_id": session_id, "markdown": md}
+
+    @app.get("/api/review/reviewers", response_model=list[dict[str, object]])
+    def review_reviewers_route() -> list[dict[str, object]]:
+        """S65：列出评审团评审员（含人设/维度/激活态）。激活改 YAML（内容资产）。"""
+        return review_panel.list_reviewers()
+
+    @app.post("/api/review/panel", response_model=dict[str, object])
+    async def review_panel_route(req: ReviewPanelRequest) -> dict[str, object]:
+        """S65：拟人化评审团——并发评审 + 主席汇总裁决报告。
+
+
+
+        自动组装外部上下文：check_report（规则引擎硬伤清单）+ foreshadow（关键点图谱）。
+
+        与 /api/check 的分工：check=确定性硬伤（客观）；review=人格化评价（体验）。
+
+        """
+
+        text, chapter_ref = req.text, req.chapter_ref
+
+        if not text.strip() and chapter_ref:
+            ch = next(
+                (c for c in chapters.list_by_book(req.book_id) if c.title == chapter_ref),
+                None,
+            )
+
+            if ch is None:
+                raise HTTPException(status_code=400, detail=f"章节不存在: {chapter_ref}")
+
+            text, chapter_ref = ch.content, ch.title
+
+        if not text.strip():
+            raise HTTPException(status_code=400, detail="缺少评审文本（text 或 chapter_ref）")
+
+        context: dict[str, str] = {}
+
+        if req.with_check:
+            check_report = await asyncio.to_thread(
+                run_review, model, chapter_ref or "当前章节", text[:20000]
+            )
+
+            context["check_report"] = (
+                f"规则引擎硬伤检测（{check_report.hard_count} 处硬伤，供核实）：\n"
+                f"{check_report.render()}"
+            )
+
+        if req.with_foreshadow:
+            with contextlib.suppress(Exception):  # 关键点图谱取不到不阻断评审
+                context["foreshadow"] = plots.render(
+                    req.book_id, current_order=len(chapters.list_by_book(req.book_id))
+                )
+
+        report = await review_panel.run_review(
+            model,
+            text,
+            chapter_ref=chapter_ref or "当前章节",
+            reviewer_ids=req.reviewer_ids or None,
+            context=context,
+        )
+
+        return {
+            "overall_score": report.overall_score,
+            "summary": report.summary,
+            "consensus": report.consensus,
+            "divergences": report.divergences,
+            "top_suggestions": report.top_suggestions,
+            "reviewer_count": report.reviewer_count,
+            "valid_count": report.valid_count,
+            "errors": report.errors,
+            "markdown": report.render(),
+            "compact": report.render_compact(),
+        }
+
+    # -----------------------------------------------------------------------
     # S48-P4/B 扩展工具注册表：Agent 写的工具，人工批准才生效
     # -----------------------------------------------------------------------
     @app.get("/api/tools", response_model=list[dict[str, Any]])
@@ -3088,27 +3339,6 @@ def build_app(
             "results": results,
             "chars": len(new_content),
         }
-
-    @app.put("/api/chapters/{chapter_id}")
-    def update_chapter_content(chapter_id: str, req: ChapterUpdateIn) -> ChapterOut:
-        """前端稿纸编辑：直接替换章节内容。"""
-        ch = chapters.get(chapter_id)
-        if ch is None:
-            raise HTTPException(status_code=404, detail="章节不存在")
-        updated = chapters.upsert(ch.book_id, ch.title, req.content, ch.order_index, ch.narrative_line)
-        # 双写落盘
-        try:
-            workspace.write_chapter(ch.book_id, ch.order_index, ch.title, req.content)
-        except Exception:
-            pass
-        return ChapterOut(
-            id=updated.id,
-            book_id=updated.book_id,
-            title=updated.title,
-            content=updated.content,
-            order_index=updated.order_index,
-            updated_at=updated.updated_at,
-        )
 
     @app.get("/api/chapters/{chapter_id}/export")
     def export_chapter(chapter_id: str, format: str = "txt") -> Response:

@@ -46,52 +46,6 @@ def _messages_differ(a: list[Message], b: list[Message]) -> bool:
     )
 
 
-def _filter_incomplete_tool_turns(messages: list[Message]) -> list[Message]:
-    """过滤不完整的工具轮次，保证消息序列对 API 合法。
-
-    两种情况都处理（流式请求被中断时可能出现）：
-    1. assistant 有 tool_calls 但 tool 响应不完整 → 全部跳过
-    2. 孤立的 tool 消息（前面没有对应的 assistant tool_calls）→ 跳过
-
-    避免：
-    - "tool_calls must be followed by tool messages" （情况1）
-    - "tool must be a response to a preceding message with tool_calls" （情况2）
-    """
-    filtered: list[Message] = []
-    i = 0
-    while i < len(messages):
-        m = messages[i]
-        tool_calls = m.metadata.get("tool_calls", []) if m.metadata else []
-
-        if m.role == "assistant" and tool_calls:
-            # 检查后面是否有足够数量的 tool 响应
-            expected_count = len(tool_calls)
-            actual_count = 0
-            j = i + 1
-            while j < len(messages) and messages[j].role == "tool":
-                actual_count += 1
-                j += 1
-            if actual_count >= expected_count:
-                # 完整轮次：保留 assistant + 对应的 tool 消息
-                filtered.append(m)
-                for k in range(i + 1, i + 1 + expected_count):
-                    filtered.append(messages[k])
-                i = i + 1 + expected_count
-            else:
-                # 不完整：跳过 assistant 和已有的 tool 消息
-                i = j
-            continue
-
-        if m.role == "tool":
-            # 孤立的 tool 消息（前面没有对应的 assistant tool_calls）→ 跳过
-            i += 1
-            continue
-
-        filtered.append(m)
-        i += 1
-    return filtered
-
-
 class CancellationToken:
     """协作式取消令牌（S21 移植 pi 的 AbortSignal 模式）。
 
@@ -208,8 +162,6 @@ class Agent:
                 self.events.emit(Event(type="user_text", payload={"content": m.content}))
             self.events.emit(Event(type="turn_start", payload={}))
             history = store.messages(conversation_id)
-            # 过滤不完整的工具轮次（流式请求被中断时可能出现）
-            history = _filter_incomplete_tool_turns(history)
             prompt_messages = (
                 [Message(role="system", content=system_block)] if system_block else []
             ) + history

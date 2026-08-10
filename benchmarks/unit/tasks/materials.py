@@ -15,7 +15,15 @@ def t17_material_card(api: ApiClient) -> tuple[bool, dict, str]:
         "市民称之为'雾瘴'。陈渡的搭档是法医沈青山。"
     )
     card = api.post("/api/materials", {"text": text, "title": "雾城设定", "purpose": "fact"})
-    required = ("title", "topic", "key_points", "characters", "key_settings", "terms", "graph_entities")
+    required = (
+        "title",
+        "topic",
+        "key_points",
+        "characters",
+        "key_settings",
+        "terms",
+        "graph_entities",
+    )
     missing = [k for k in required if k not in card]
     topic_ok = bool(card.get("topic"))
     chars_ok = isinstance(card.get("characters"), list) and len(card["characters"]) >= 1
@@ -23,7 +31,12 @@ def t17_material_card(api: ApiClient) -> tuple[bool, dict, str]:
     passed = not missing and topic_ok and chars_ok and points_ok
     return (
         passed,
-        {"missing_fields": missing, "topic_ok": topic_ok, "n_characters": len(card.get("characters", [])), "n_points": len(card.get("key_points", []))},
+        {
+            "missing_fields": missing,
+            "topic_ok": topic_ok,
+            "n_characters": len(card.get("characters", [])),
+            "n_points": len(card.get("key_points", [])),
+        },
         f"topic={str(card.get('topic', ''))[:60]} | points={card.get('key_points', [])[:2]}",
     )
 
@@ -52,7 +65,9 @@ def t18_material_graph_link(api: ApiClient) -> tuple[bool, dict, str]:
 # T19 关键点图谱草案（主线冲突/角色弧/伏笔 分类条目）
 # ---------------------------------------------------------------------------
 def t19_plot_draft(api: ApiClient) -> tuple[bool, dict, str]:
-    points = api.post("/api/plot", {"settings": "雨夜侦探收到一封写着自己死亡时间的信，追查写信人。"})
+    points = api.post(
+        "/api/plot", {"settings": "雨夜侦探收到一封写着自己死亡时间的信，追查写信人。"}
+    )
     if not isinstance(points, list) or not points:
         return False, {"n_points": 0}, "无关键点生成"
     categories = {p.get("category", "") for p in points}

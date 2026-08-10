@@ -56,3 +56,39 @@
 - 每个 commit 标注阶段编号（如 `S7: ...`）
 - 每阶段跑门禁：`uv run python scripts/gate.py`（ruff + mypy + pytest；本仓库无前端，tsc/eslint/build 不再执行）
 - 对设计的任何偏离/新增：先停下，向主人确认，再更新 `docs/DESIGN.md`
+
+## 并行协作纪律（多会话共享工作区，强制——S70 固化）
+
+> 背景：多个 pi 会话并行编辑同一工作区，实测踩坑（S60 app.py 被裹挟 / S64·S66 撞号 /
+> S65 play 逃 gate 检查 / S67 漏 ruff format / S65·S67 行尾污染 3 连踩）。以下纪律
+> **所有会话强制**，开工即生效。本文件由 pi 自动加载，读完即可同步工作。
+
+### 开工第一步（必做，顺序执行）
+1. `git log --oneline -5` —— 看并行会话最新提交；**撞阶段号立即让位**（如对方已用 S66，你用 S67）
+2. `grep -n "^## S6[0-9]\|^## S7[0-9]" docs/PROGRESS.md | tail` —— 确认最新阶段编号
+3. 读 `docs/PROGRESS.md`「并行声明区」—— 若有会话声明在改某文件，**避开**或等它提交
+4. 要改共享大文件（app.py/toolkit.py/pyproject.toml 等）前，**先在声明区写**：
+   `> [S6x] 正在改 app.py：<改动内容>（完成提交后删本行）`
+5. 提交前跑完整 gate（见下）+ `git status --short` 确认归属后显式 add
+
+### 提交前必跑完整门禁（不跑子集）
+- `uv run python scripts/gate.py` 全量（ruff check + format + mypy + pytest）
+- 禁止只跑 check/mypy/pytest 子集就提交——S67 实测漏 `ruff format --check` 导致遗留红
+- gate.py 已在开头输出「最近提交 + 工作区归属」核查块（S70），跑 gate 时顺便确认
+
+### 新包注册清单（6 处，逐项勾，漏一处就逃检查/跑不起来）
+```
+① pyproject.toml [tool.uv.sources]      ② packages/app/pyproject.toml dependencies
+③ pyproject.toml [tool.mypy] files+mypy_path   ④ pyproject.toml [tool.ruff] src
+⑤ scripts/gate.py py_pkgs               ⑥ pyproject.toml [tool.pytest] testpaths
+```
+（S65 漏 ④⑤ 导致 play 包逃过 ruff 检查，S67b 修复——先例勿重犯）
+
+### 行尾纪律（S70 .gitattributes 根治）
+- 仓库已配 `.gitattributes`：git 内部存 LF、checkout 转 CRLF——**行尾差异不再算内容变化**
+- 发现工作区文件被编辑器改成纯 LF 属正常（checkout/commit 自动转换），**不要手动统一行尾**
+- 历史教训：S65 手动转 CRLF 引发误删类/复制中间代码事故——已被 .gitattributes 取代
+
+### 同文件冲突救火（尽量避免：靠小步提交 + 声明区）
+- 小步提交：每个逻辑改动独立提交，工作区不累积（S65 累积改动导致 checkout 救火 3 连错）
+- 若必须救火：备份 → checkout 重建 → 恢复对方改动 → 全程验证 `git diff` 归属

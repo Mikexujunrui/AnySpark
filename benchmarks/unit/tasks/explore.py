@@ -15,12 +15,17 @@ def t10_explore_intent(api: ApiClient) -> tuple[bool, dict, str]:
     intent = api.post("/api/explore/intent", {"seed": SEED})
     # 概念卡字段（画面/基调/类型/种子位置）+ 关键歧义点
     card_ok = any(k in intent for k in ("concept", "画面", "card", "vision", "mood", "基调"))
-    questions = intent.get("questions") or intent.get("key_questions") or intent.get("ambiguities") or []
+    questions = (
+        intent.get("questions") or intent.get("key_questions") or intent.get("ambiguities") or []
+    )
     q_ok = isinstance(questions, list) and len(questions) >= 1
     passed = card_ok and q_ok
     return (
         passed,
-        {"questions": len(questions) if isinstance(questions, list) else -1, "keys": sorted(intent.keys())},
+        {
+            "questions": len(questions) if isinstance(questions, list) else -1,
+            "keys": sorted(intent.keys()),
+        },
         str(intent)[:200],
     )
 
@@ -59,9 +64,17 @@ def t12_explore_archive(api: ApiClient) -> tuple[bool, dict, str]:
     ok = archived.get("archived") is True or archived.get("id") or archived.get("ok") is True
     # 落盘可查
     listed = api.get("/api/explore/archive")
-    visible = any(c.get("title") == picked.get("title") for c in listed) if isinstance(listed, list) else False
+    visible = (
+        any(c.get("title") == picked.get("title") for c in listed)
+        if isinstance(listed, list)
+        else False
+    )
     return (
         ok and visible,
-        {"archived": ok, "visible": visible, "n_archived": len(listed) if isinstance(listed, list) else -1},
+        {
+            "archived": ok,
+            "visible": visible,
+            "n_archived": len(listed) if isinstance(listed, list) else -1,
+        },
         f"picked={picked.get('title', '')[:40]}",
     )

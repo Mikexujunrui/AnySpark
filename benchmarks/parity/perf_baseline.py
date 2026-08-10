@@ -22,7 +22,7 @@ REPORT_DIR = HERE / "report"
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "core" / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "app" / "src"))
 
-import httpx  # noqa: E402
+import httpx2 as httpx  # noqa: E402  # S66: httpx2（下一代，API 兼容）
 
 
 def run_round(client: httpx.Client, round_no: int) -> dict:
@@ -93,16 +93,25 @@ def main() -> None:
             f"| {r['round']} | {r['total_s']} | {r['ttft_s']} | {r['chars']} | "
             f"{r['delta_frames']} | {r['chars_per_s']} |"
         )
-    avg = {k: round(sum(r[k] for r in results) / len(results), 2) for k in ("total_s", "ttft_s", "chars_per_s")}
-    lines.append(f"| **平均** | **{avg['total_s']}** | **{avg['ttft_s']}** | | | **{avg['chars_per_s']}** |")
+    avg = {
+        k: round(sum(r[k] for r in results) / len(results), 2)
+        for k in ("total_s", "ttft_s", "chars_per_s")
+    }
+    lines.append(
+        f"| **平均** | **{avg['total_s']}** | **{avg['ttft_s']}** | | | **{avg['chars_per_s']}** |"
+    )
     lines.append("")
-    lines.append("**说明**：tokens/s 未直接用 API usage（流式省请求），delta 帧/字符/s 可作相对基线——")
+    lines.append(
+        "**说明**：tokens/s 未直接用 API usage（流式省请求），delta 帧/字符/s 可作相对基线——"
+    )
     lines.append("改动循环后重跑本脚本，若字符/s 显著下降或 TTFT 上升即疑似退化。")
     report.write_text("\n".join(lines), encoding="utf-8")
 
     print(f"{'轮':<4} {'总时长s':<10} {'TTFTs':<8} {'字符':<7} {'字符/s':<8}")
     for r in results:
-        print(f"{r['round']:<4} {r['total_s']:<10} {r['ttft_s']:<8} {r['chars']:<7} {r['chars_per_s']:<8}")
+        print(
+            f"{r['round']:<4} {r['total_s']:<10} {r['ttft_s']:<8} {r['chars']:<7} {r['chars_per_s']:<8}"
+        )
     print(f"平均字符/s: {avg['chars_per_s']} | 报告: {report}")
 
 

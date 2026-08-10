@@ -51,12 +51,17 @@ def run_exploration(
     constraints: list[str] | None = None,
     n_explorers: int = 4,
     dimensions: list[str] | None = None,
+    templates: list[str] | None = None,
 ) -> list[DirectionCard]:
-    """便捷入口：一次完整探索（dimensions：S50 内容化维度集，缺省默认种子）。"""
+    """便捷入口：一次完整探索（dimensions：S50 内容化维度集，缺省默认种子）。
+
+    templates（S68）：真实模板描述列表（template 来源探索者注入；缺省无注入）。
+    """
     strategy = ExplorationStrategy(
         seed=seed,
         intent_confirmed=intent_confirmed,
         constraints=constraints or [],
         dimensions=dimensions or list(DEFAULT_DIMENSIONS),
+        templates=templates or [],
     )
     return ExplorationEngine(model, n_explorers).explore(strategy)

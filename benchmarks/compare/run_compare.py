@@ -55,7 +55,7 @@ def main() -> None:
             print(f"▶ {name} ...", flush=True)
             t0 = time.time()
             results[name] = fn(api, bare, judge)
-            print(f"  ⏱ {time.time()-t0:.0f}s")
+            print(f"  ⏱ {time.time() - t0:.0f}s")
 
         _write_report(results, {"backend": base, "model": bare.model})
 
@@ -91,7 +91,8 @@ def _write_report(results: dict, env: dict) -> None:
     lines = [
         "# AnySpark benchmark · 对比层（AnySpark vs 裸 LLM）",
         "",
-        f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')} | " + " | ".join(f"{k}={v}" for k, v in env.items()),
+        f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')} | "
+        + " | ".join(f"{k}={v}" for k, v in env.items()),
         "",
         "> 同一任务、同一模型（deepseek-v4-flash）、同输入；裸 LLM = 无任何系统能力的直接调用。",
         "",
@@ -105,7 +106,9 @@ def _write_report(results: dict, env: dict) -> None:
         lines.append("|---|---|---|")
         bare, anyspark = r["bare"], r["anyspark"]
         if "violations" in bare:
-            lines.append(f"| 设定违规 | {len(bare['violations'])} | {len(anyspark['violations'])} |")
+            lines.append(
+                f"| 设定违规 | {len(bare['violations'])} | {len(anyspark['violations'])} |"
+            )
             lines.append(f"| token 消耗 | {bare['tokens']} | {anyspark['tokens']} |")
             lines += _violation_block("裸 LLM", bare["violations"])
             lines += _violation_block("AnySpark", anyspark["violations"])
@@ -121,9 +124,15 @@ def _write_report(results: dict, env: dict) -> None:
             lines += _excerpt_block("AnySpark 第1章", anyspark["chapters"][0])
             lines += _excerpt_block("AnySpark 第3章", anyspark["chapters"][2])
         elif "dash_count" in bare:
-            lines.append(f"| 破折号次数（应≈0） | {bare['dash_count']} | {anyspark['dash_count']} |")
-            lines.append(f"| 第1章（偏好明说时） | {bare.get('dash_ch1', '—')} | {anyspark.get('dash_ch1', '—')} |")
-            lines.append(f"| 第2章（偏好不再重复，测记忆） | {bare.get('dash_ch2', '—')} | {anyspark.get('dash_ch2', '—')} |")
+            lines.append(
+                f"| 破折号次数（应≈0） | {bare['dash_count']} | {anyspark['dash_count']} |"
+            )
+            lines.append(
+                f"| 第1章（偏好明说时） | {bare.get('dash_ch1', '—')} | {anyspark.get('dash_ch1', '—')} |"
+            )
+            lines.append(
+                f"| 第2章（偏好不再重复，测记忆） | {bare.get('dash_ch2', '—')} | {anyspark.get('dash_ch2', '—')} |"
+            )
             lines.append(f"| token 消耗 | {bare['tokens']} | {anyspark['tokens']} |")
             lines += _excerpt_block("裸 LLM", bare["text"])
             lines += _excerpt_block("AnySpark", anyspark["text"])
@@ -137,7 +146,7 @@ def _violation_block(side: str, violations: list) -> list[str]:
         return []
     lines = [f"**{side} 违规详情**", ""]
     for v in violations:
-        lines.append(f"- {v.get('setting','')[:60]} ← {v.get('reason','')[:80]}")
+        lines.append(f"- {v.get('setting', '')[:60]} ← {v.get('reason', '')[:80]}")
     lines.append("")
     return lines
 
@@ -155,7 +164,7 @@ def _drift_block(side: str, d: dict) -> list[str]:
     lines = [f"**{side} 漂移详情**", ""]
     for dr in d["drifts"]:
         lines.append(
-            f"- {dr.get('ch1_name','')} → {dr.get('ch3_name','')}（{dr.get('type','')}）"
+            f"- {dr.get('ch1_name', '')} → {dr.get('ch3_name', '')}（{dr.get('type', '')}）"
         )
     lines.append("")
     return lines

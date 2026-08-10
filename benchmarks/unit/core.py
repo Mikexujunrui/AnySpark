@@ -15,7 +15,7 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
 
-import httpx
+import httpx2 as httpx  # S66: httpx2（下一代，API 兼容）
 
 GOLD_DIR = Path(__file__).parent / "gold"
 REPORT_DIR = Path(__file__).resolve().parent.parent / "report"
@@ -84,7 +84,12 @@ class Reporter:
         self.results: list[TaskResult] = []
 
     def record(
-        self, task_id: str, name: str, passed: bool, metrics: dict[str, Any] | None = None, detail: str = ""
+        self,
+        task_id: str,
+        name: str,
+        passed: bool,
+        metrics: dict[str, Any] | None = None,
+        detail: str = "",
     ) -> None:
         self.results.append(TaskResult(task_id, name, passed, metrics or {}, detail))
 
@@ -92,12 +97,18 @@ class Reporter:
         REPORT_DIR.mkdir(parents=True, exist_ok=True)
         ts = time.strftime("%Y%m%d-%H%M%S")
         path = REPORT_DIR / f"{layer}-{ts}.md"
-        lines = [f"# AnySpark benchmark · {layer} 层", "", f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}"]
+        lines = [
+            f"# AnySpark benchmark · {layer} 层",
+            "",
+            f"时间：{time.strftime('%Y-%m-%d %H:%M:%S')}",
+        ]
         if env:
             lines += ["", "环境：" + " | ".join(f"{k}={v}" for k, v in env.items())]
         lines += ["", "| 结果 | 任务 | 指标 |", "|---|---|---|"]
         for r in self.results:
-            lines.append(f"| {'✅' if r.passed else '❌'} | {r.task_id} {r.name} | {r.metrics or '—'} |")
+            lines.append(
+                f"| {'✅' if r.passed else '❌'} | {r.task_id} {r.name} | {r.metrics or '—'} |"
+            )
         n_pass = sum(1 for r in self.results if r.passed)
         lines += ["", f"**合计：{n_pass}/{len(self.results)} 通过**"]
         for r in self.results:
@@ -116,7 +127,9 @@ class ApiClient:
         # trust_env=False：本地评测不走 Windows 系统代理（否则 127.0.0.1 会被代理拦成 502）
         self._client = httpx.Client(timeout=timeout, trust_env=False)
 
-    def _request(self, method: str, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(
+        self, method: str, path: str, body: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         resp = self._client.request(method, f"{self.base}{path}", json=body or {})
         resp.raise_for_status()
         return resp.json()

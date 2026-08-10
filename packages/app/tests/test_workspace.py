@@ -144,6 +144,15 @@ class _FakeModel:
         return ModelOutput(text="ok")
 
 
+class _FakeUncModel:
+    """S70 破限 API 测试用（无工具调用）。"""
+
+    model_name = "fake-unc"
+
+    def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+        return ModelOutput(text="ok")
+
+
 def test_workspace_api() -> None:
     db = Path(tempfile.mkdtemp()) / "t.db"
     ws = _ws()
@@ -172,3 +181,39 @@ def test_workspace_api() -> None:
     # 再次 import：无变化
     r2 = client.post("/api/workspace/import").json()
     assert r2["changed"] == 0
+
+
+# ---------------------------------------------------------------------------
+# S70：破限模式开关（书籍级，写作自由度）
+# ---------------------------------------------------------------------------
+def test_uncensored_flag_default_off() -> None:
+    ws = _ws()
+    assert ws.is_uncensored("main") is False
+    assert ws.is_uncensored("other_book") is False
+
+
+def test_uncensored_flag_set_and_unset() -> None:
+    ws = _ws()
+    assert ws.set_uncensored("main", True) is True
+    assert ws.is_uncensored("main") is True
+    # 书籍级隔离：其他书不受影响
+    assert ws.is_uncensored("other_book") is False
+    assert ws.set_uncensored("main", False) is False
+    assert ws.is_uncensored("main") is False
+
+
+def test_uncensored_api() -> None:
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=_FakeUncModel(), db_path=db))
+    # 默认关
+    assert client.get("/api/uncensored?book_id=main").json()["enabled"] is False
+    # 开
+    r = client.post("/api/uncensored", json={"book_id": "main", "enabled": True})
+    assert r.status_code == 200
+    assert r.json()["enabled"] is True
+    assert client.get("/api/uncensored?book_id=main").json()["enabled"] is True
+    # 书籍级隔离
+    assert client.get("/api/uncensored?book_id=other").json()["enabled"] is False
+    # 关
+    r = client.post("/api/uncensored", json={"book_id": "main", "enabled": False})
+    assert r.json()["enabled"] is False

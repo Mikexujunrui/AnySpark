@@ -23,7 +23,12 @@ def t6_conflict_detection(api: ApiClient) -> tuple[bool, dict, str]:
     messages = "; ".join(f.get("message", "")[:60] for f in hard[:5])
     return (
         passed,
-        {"planted": n_planted, "detected_hard": n_detected, "hit_rate": round(rate, 3), "total_findings": len(findings)},
+        {
+            "planted": n_planted,
+            "detected_hard": n_detected,
+            "hit_rate": round(rate, 3),
+            "total_findings": len(findings),
+        },
         messages,
     )
 
@@ -40,6 +45,10 @@ def t7_rule_compiler(api: ApiClient) -> tuple[bool, dict, str]:
     ok_neg = resp_neg.get("ok") is True and len(resp_neg.get("hits", [])) == 0
     return (
         ok_pos and ok_neg,
-        {"positive_hit": len(resp_pos.get("hits", [])), "negative_hit": len(resp_neg.get("hits", [])), "desc": resp_pos.get("description", "")},
+        {
+            "positive_hit": len(resp_pos.get("hits", [])),
+            "negative_hit": len(resp_neg.get("hits", [])),
+            "desc": resp_pos.get("description", ""),
+        },
         f"pos={resp_pos.get('hits')} neg={resp_neg.get('hits')}",
     )

@@ -34,7 +34,14 @@ REVIEW_PROMPT = (
 
 
 class ReviewEngine:
-    """多检测者并行审读引擎。"""
+    """多检测者并行审读引擎。
+
+    S71 已知重复标记：与 anyspark.review.panel.ReviewPanel 是同一机制模式
+    （并行 LLM 调用 → 宽容 JSON 解析 → 汇总报告），语义分工：本引擎=确定性
+    硬伤检测（S7 检测网），ReviewPanel=人格化评价（S64）。跨包抽公共成本 >
+    收益（core 零依赖约束不宜放编排），接受重复；若未来出现第三处并行
+    LLM 编排，再抽 core 公共组件。
+    """
 
     def __init__(self, model: object) -> None:
         self._model = model

@@ -73,10 +73,6 @@ class SqliteConversationStore(ConversationStore):
             self._conn.execute(
                 "ALTER TABLE conversations ADD COLUMN fork_point TEXT NOT NULL DEFAULT ''"
             )
-        if "title" not in cols:
-            self._conn.execute(
-                "ALTER TABLE conversations ADD COLUMN title TEXT NOT NULL DEFAULT ''"
-            )
         self._conn.commit()
 
     def close(self) -> None:
@@ -162,25 +158,6 @@ class SqliteConversationStore(ConversationStore):
             for m in self.messages(conversation_id):
                 self.append(new_conv.id, m)
         return self.get(new_conv.id)
-
-    def rename(self, conversation_id: str, title: str) -> bool:
-        """重命名会话。"""
-        with self._conn:
-            cur = self._conn.execute(
-                "UPDATE conversations SET title = ? WHERE id = ?", (title, conversation_id)
-            )
-        return cur.rowcount > 0
-
-    def delete_conversation(self, conversation_id: str) -> bool:
-        """删除会话及其消息。"""
-        with self._conn:
-            self._conn.execute(
-                "DELETE FROM messages WHERE conversation_id = ?", (conversation_id,)
-            )
-            cur = self._conn.execute(
-                "DELETE FROM conversations WHERE id = ?", (conversation_id,)
-            )
-        return cur.rowcount > 0
 
     def replace_messages(self, conversation_id: str, messages: list[Message]) -> None:
         """S26：整体替换该会话消息（压缩回写，事务内删旧插新，seq 从 0 重排）。
@@ -368,7 +345,6 @@ class ChapterStore:
         with self._lock:
             cur = self._conn.execute("DELETE FROM chapters WHERE id = ?", (chapter_id,))
             self._conn.execute("DELETE FROM chapter_versions WHERE chapter_id = ?", (chapter_id,))
-            self._conn.commit()
         return cur.rowcount > 0
 
     def close(self) -> None:

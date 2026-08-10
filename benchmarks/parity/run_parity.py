@@ -80,7 +80,9 @@ def main() -> None:
     lines: list[str] = []
     lines.append("# pi vs 本地 循环行为对照（parity）")
     lines.append("")
-    lines.append(f"> 时间：{datetime.now(timezone.utc).isoformat()} | 引擎：pi-agent-core dist/agent-loop.js vs anyspark core/loop.py | 模型：脚本化（确定性）")
+    lines.append(
+        f"> 时间：{datetime.now(timezone.utc).isoformat()} | 引擎：pi-agent-core dist/agent-loop.js vs anyspark core/loop.py | 模型：脚本化（确定性）"
+    )
     lines.append("")
     lines.append("| 场景 | 结果 |")
     lines.append("|------|------|")

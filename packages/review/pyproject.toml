@@ -1,0 +1,32 @@
+# ---------------------------------------------------------------------------
+# anyspark-review — 拟人化评审团（S64 可选增强）
+# 拟人化评审员（YAML persona + 评分维度）→ 并发评审 → 主席汇总裁决报告。
+# 设计规格：DESIGN.md §12.27（S64）。依赖：core（单向）。
+# 哲学：机制硬编码（YAML 加载/并发编排/宽容解析/汇总降级）、
+#       内容自然语言（评审员人设/评分维度/报告渲染全为内容）。
+# 与 check 的分工：check=确定性硬伤规则引擎（客观事实）；review=人格化评价（体验）。
+# marker: S64
+# ---------------------------------------------------------------------------
+[project]
+name = "anyspark-review"
+version = "0.0.1"
+description = "AnySpark v4 拟人化评审团：YAML 人设评审员 + 并发评审 + 主席汇总裁决"
+requires-python = ">=3.11"
+dependencies = [
+    "anyspark-core==0.0.1",  # workspace 成员（Model 协议/Message）
+    "pyyaml==6.0.2",        # 评审员人设 YAML 加载（内容资产可编辑）
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anyspark"]
+
+# 随包分发系统默认评审员人设（内容资产）
+[tool.hatch.build.targets.wheel.force-include]
+reviewers = "anyspark/reviewers"
+
+[tool.uv.sources]
+anyspark-core = { workspace = true }
