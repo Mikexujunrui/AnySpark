@@ -37,6 +37,8 @@ export default function StoryTreeView() {
   const [zoom, setZoom] = useState(0.9);
   const [pan, setPan] = useState<Pos>({ x: 24, y: 24 });
   // 节点手动拖拽位置（本地，不持久化）
+  // 扩展点（DESIGN §12.37）：持久化时在此接入 —— 拖拽结束回调见 onNodePointerUp，
+  // 数据即本 state（node_id → {x,y}）；方案：story_nodes 加 pos_x/pos_y 列 + PUT /api/story/layout 批量保存
   const [manualPos, setManualPos] = useState<Record<string, Pos>>({});
 
   const svgRef = useRef<SVGSVGElement>(null);

@@ -1304,3 +1304,44 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 
 - 实体改名不支持（S72 主键语义，前端表单含 name 字段但后端忽略，体验提示待前端做）
 - 前端构建产物约 616KB 单 chunk（>500KB 警告，后续可 code-split）
+
+### 12.37 画布布局持久化设计（S76 定案：暂不实现，接口与语义先行）
+
+> 背景：S76 叙事树/工作流画布完成，节点拖拽位置为本地状态（刷新回自动布局）。
+> 主人确认：**暂不持久化，但此能力确定需要**——先定方案，实现时零纠结。
+
+#### 原则（第一性）
+
+- **布局 = 表现层数据**，与内容解耦存储。节点/边的存在性与语义由内容表决定，
+  布局只记录"用户手动调整过的坐标"；自动布局结果**不写库**（写了=噪音，且与算法
+  版本耦合）。
+- **批量保存、增量读取**：拖拽结束（pointerup 且 moved）时 debounce 一次批量 PUT；
+  读取时随主数据一起返回（不额外往返）。
+- **孤儿清理**：节点/边删除时其布局记录一并删除（内容表的删除逻辑内嵌处理，
+  或布局表外键级联）。
+- **版本兼容**：老数据无布局字段 → 前端自动布局兜底（现状逻辑，天然兼容）。
+
+#### 叙事树布局
+
+- **存储**：`story_nodes` 表加 `pos_x REAL DEFAULT NULL, pos_y REAL DEFAULT NULL`
+  （NULL = 未手动调整，用自动布局）。同表同节点，无关联问题。
+- **读取**：`GET /api/story/tree` 的 node.to_dict() 增加 `pos: {x,y} | null`。
+- **保存**：新增 `PUT /api/story/layout`，body `{book_id, positions: [{node_id, x, y}]}`
+  ——一次请求批量写，前端拖拽结束后 debounce（~1.5s）发送。
+- **删除**：`DELETE /api/story/nodes/{id}` 现有删除逻辑不变，布局字段随行删。
+
+#### 工作流布局
+
+- **存储**：模板 definition JSON 增 `layout: {nodeId: {x, y}}` 字段（WorkflowDef
+  dataclass 加 `layout: dict[str, Pos]`，to_dict/from_dict 序列化；老 JSON 缺省 {}）。
+  布局跟随模板本体走（模板=定义快照，布局是其一部分，天然迁移/复制）。
+- **接口**：`POST /api/workflows` 的 WorkflowIn 增 `layout: dict[str, dict]`（可选）。
+  `GET /api/workflows/{id}` 返回含 layout。**注意**：任务快照（task.definition）
+  冻结定义时也带 layout，无副作用。
+- **前端**：保存模板时把 `manualPos` 序列化进 draft.layout；打开时若 layout 有该节点
+  坐标则用，否则自动布局。
+
+#### 前端扩展点（S76 已留）
+
+- 两个画布的拖拽结束回调已隔离（`onNodePointerUp` 内 `moved` 标志），实现时在此
+  挂 debounce 保存即可；`manualPos` state 即待持久化数据，无需重构。

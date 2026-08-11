@@ -54,6 +54,9 @@ export default function WorkflowPanel() {
   const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [placeKind, setPlaceKind] = useState<WorkflowNodeKind | null>(null);
   const [connectingFrom, setConnectingFrom] = useState<string | null>(null);
+  // 节点手动拖拽位置（本地，不持久化）
+  // 扩展点（DESIGN §12.37）：持久化时在此接入 —— 数据即本 state；方案：
+  // WorkflowDef 加 layout 字段（随模板 definition JSON 存）+ WorkflowIn 增 layout，保存模板时序列化
   const [manualPos, setManualPos] = useState<Record<string, Pos>>({});
   const [zoom, setZoom] = useState(0.85);
   const [pan, setPan] = useState<Pos>({ x: 20, y: 20 });
