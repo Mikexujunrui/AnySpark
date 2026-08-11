@@ -2,7 +2,9 @@
 
 > **用途**：后端 108 模块 / 22373 行的"导航图"——哪个机制在哪、数据怎么流、哪里可能重复/缺失。
 > **创建**：2026-08-11（S79-S81 架构收敛后，三 worker 侦察 + 主循环整合）
-> **配套**：DESIGN.md（设计规格）、PROGRESS.md（阶段台账）、DEV-AGENT.md（接入通道）
+> **配套**：DESIGN.md（设计规格）、PROGRESS.md（阶段台账）、DEV-AGENT.md（接入通道）、
+> **docs/uml/**（有向逻辑图全集：architecture 骨架 + sequence_mind/graph/constraints/chat/explore/workflow 运作流
+> + activity_tasks 后台派发 + state_agent_loop/workflow 状态机）——新 AI 接入先看 uml/README.md 阅读路径
 
 ---
 
