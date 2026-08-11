@@ -40,6 +40,7 @@ export interface WorkflowDef {
   description: string;
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  layout?: Record<string, { x: number; y: number }>; // S76 画布坐标
   created_at?: string;
 }
 

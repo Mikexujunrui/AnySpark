@@ -1,4 +1,4 @@
-import { apiGet, apiPost, apiDelete } from "./client";
+import { apiGet, apiPost, apiDelete, apiFetch } from "./client";
 
 // 叙事树节点
 export interface StoryNode {
@@ -9,6 +9,7 @@ export interface StoryNode {
   kind: "root" | "main" | "anchor" | "candidate" | "subplot" | "loop";
   chosen: boolean;
   created_at: string;
+  pos?: { x: number; y: number } | null; // S76 画布手动坐标（null=自动布局）
 }
 
 // 叙事线进度
@@ -72,6 +73,16 @@ export function anchorNode(nodeId: string): Promise<StoryNode> {
 // 删除节点（含后代）
 export function deleteNode(nodeId: string): Promise<{ ok: boolean; id: string }> {
   return apiDelete<{ ok: boolean; id: string }>(`/api/story/nodes/${nodeId}`);
+}
+
+// S76：批量保存节点手动坐标（DESIGN §12.37）
+export function saveStoryLayout(
+  positions: Array<{ node_id: string; x: number; y: number }>
+): Promise<{ updated: number }> {
+  return apiFetch<{ updated: number }>("/api/story/layout", {
+    method: "PUT",
+    body: JSON.stringify({ book_id: "main", positions }),
+  });
 }
 
 // 添加叙事线

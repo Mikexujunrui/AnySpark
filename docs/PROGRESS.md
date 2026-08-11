@@ -2441,3 +2441,17 @@ stop 确认 8000 无监听再 start（本次曾因此误判 500 是修复无效�
 
 **协作**：后端 API 全就绪，缺口按迭代由前端开发者补（文档列全端点，可照接）；
 wrapup 误判修正（已用真实 API）；stats/codex/graph 通道标注非前端必需。
+
+## S77 画布布局持久化（已完成 ✅）——DESIGN §12.37 落地
+
+**交付**：
+- **叙事树**：story_nodes 加 pos_x/pos_y 列（幂等 ALTER 兼容旧库）+ `PUT /api/story/layout`
+  批量保存（不存在节点/异 book 自动跳过）+ node.to_dict() 透传 pos；前端拖拽结束
+  debounce 1.2s 保存、加载时应用持久化坐标
+- **工作流**：WorkflowDef 加 layout 字段（随模板 definition JSON 序列化，任务快照自动携带）
+  + WorkflowIn 增 layout；前端保存模板时序列化画布坐标、打开时应用
+- **顺带修复**：S75 遗留 chatStore `.at()` 需 ES2022（target ES2020 增量缓存掩盖）→ 改索引访问；
+  删除测试时误删 _node_from_row 的 pos 读取（edit 原子失败漏改，验证时发现修复）
+
+**验证**：总闸全绿（421 pytest + 前端 typecheck/lint/build）；端到端：叙事树 PUT→GET 坐标往返、
+工作流带 layout 创建→读取、任务快照含 layout；测试模板已清理。

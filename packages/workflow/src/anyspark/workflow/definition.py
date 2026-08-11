@@ -158,6 +158,8 @@ class WorkflowDef:
     edges: list[WorkflowEdge] = field(default_factory=list)
     id: str = field(default_factory=lambda: _gen("wf"))
     created_at: str = field(default_factory=_now)
+    # S76 画布布局（DESIGN §12.37）：node_id → {x, y}；空=全部自动布局
+    layout: dict[str, dict[str, float]] = field(default_factory=dict)
 
     # ------------------------------------------------------------------
     # 校验（机制硬编码：非法定义拒绝入库/执行）
@@ -270,6 +272,7 @@ class WorkflowDef:
             edges=[WorkflowEdge.from_dict(e) for e in data.get("edges") or []],
             id=str(data.get("id") or _gen("wf")),
             created_at=str(data.get("created_at") or _now()),
+            layout=dict(data.get("layout") or {}),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -279,5 +282,6 @@ class WorkflowDef:
             "description": self.description,
             "nodes": [n.to_dict() for n in self.nodes],
             "edges": [e.to_dict() for e in self.edges],
+            "layout": self.layout,
             "created_at": self.created_at,
         }

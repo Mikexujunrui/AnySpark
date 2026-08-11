@@ -26,7 +26,7 @@ interface WorkflowState {
   error: string | null;
 
   fetchAll: () => Promise<void>;
-  openWorkflow: (id: string) => Promise<void>;
+  openWorkflow: (id: string) => Promise<WorkflowDef>;
   saveWorkflow: (wf: WorkflowDef) => Promise<void>;
   removeWorkflow: (id: string) => Promise<void>;
   aiGenerate: (goal: string) => Promise<void>;
@@ -61,13 +61,15 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
   },
 
-  openWorkflow: async (id) => {
+  openWorkflow: async (id): Promise<WorkflowDef> => {
     set({ loading: true, error: null });
     try {
       const wf = await getWorkflow(id);
       set({ current: wf, loading: false });
+      return wf;
     } catch (e) {
       set({ loading: false, error: e instanceof Error ? e.message : "加载工作流失败" });
+      throw e;
     }
   },
 

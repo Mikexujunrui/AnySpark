@@ -664,6 +664,7 @@ class WorkflowIn(BaseModel):
     description: str = ""
     nodes: list[dict[str, Any]]
     edges: list[dict[str, Any]] = []
+    layout: dict[str, dict[str, float]] = {}  # S76：画布节点坐标（可选，空=自动布局）
 
 
 class WorkflowGenerateIn(BaseModel):
@@ -684,6 +685,21 @@ class ChapterPlanIn(BaseModel):
     chapter_order: int
     title: str = ""
     content: str = ""
+
+
+class StoryLayoutPos(BaseModel):
+    """S76：叙事树单节点手动坐标。"""
+
+    node_id: str
+    x: float
+    y: float
+
+
+class StoryLayoutIn(BaseModel):
+    """S76：叙事树布局批量保存。"""
+
+    book_id: str = "main"
+    positions: list[StoryLayoutPos]
 
 
 class ChapterPlanPatch(BaseModel):
@@ -3770,6 +3786,14 @@ def build_app(
             "thread_render": story_threads.render_threads(book_id),
         }
 
+    @app.put("/api/story/layout", response_model=dict[str, int])
+    def save_story_layout(req: StoryLayoutIn) -> dict[str, int]:
+        """S76：批量保存叙事树节点手动坐标（DESIGN §12.37）。"""
+        updated = story_tree.set_positions(
+            req.book_id, [(p.node_id, p.x, p.y) for p in req.positions]
+        )
+        return {"updated": updated}
+
     @app.post("/api/story/threads", response_model=dict[str, Any])
     def add_story_thread(req: StoryThreadIn) -> dict[str, Any]:
         """声明/升级一条线（预定义或涌现后手动确认）。"""
@@ -3828,6 +3852,7 @@ def build_app(
                 "description": req.description,
                 "nodes": req.nodes,
                 "edges": req.edges,
+                "layout": req.layout,
             }
         )
         errors = wf.validate()

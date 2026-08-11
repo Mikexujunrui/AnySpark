@@ -22,6 +22,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 import threading
 import uuid
@@ -47,6 +48,9 @@ class StoryNode:
     chosen: bool = False  # 被选中走过（主线轨迹 = chosen 链）
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     created_at: str = field(default_factory=lambda: _now())
+    # S76 画布布局（DESIGN §12.37）：手动调整坐标；None=未调整用自动布局
+    pos_x: float | None = None
+    pos_y: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -57,6 +61,11 @@ class StoryNode:
             "kind": self.kind,
             "chosen": self.chosen,
             "created_at": self.created_at,
+            "pos": (
+                {"x": self.pos_x, "y": self.pos_y}
+                if self.pos_x is not None and self.pos_y is not None
+                else None
+            ),
         }
 
 
@@ -86,11 +95,17 @@ class StoryTreeStore:
                 parent_id TEXT,
                 kind TEXT NOT NULL DEFAULT 'candidate',
                 chosen INTEGER NOT NULL DEFAULT 0,
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                pos_x REAL,
+                pos_y REAL
             );
             CREATE INDEX IF NOT EXISTS idx_story_nodes_book ON story_nodes(book_id);
             """
         )
+        # S76 画布布局：补列（幂等，兼容旧库）
+        for col in ("pos_x", "pos_y"):
+            with contextlib.suppress(sqlite3.OperationalError):
+                self._conn.execute(f"ALTER TABLE story_nodes ADD COLUMN {col} REAL")
         self._conn.commit()
 
     # ------------------------------------------------------------------
@@ -114,8 +129,8 @@ class StoryTreeStore:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO story_nodes (id, book_id, content, parent_id, kind, chosen, "
-                "created_at) "
-                "VALUES (?,?,?,?,?,?,?)",
+                "created_at, pos_x, pos_y) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
                 (
                     node.id,
                     node.book_id,
@@ -124,6 +139,8 @@ class StoryTreeStore:
                     node.kind,
                     1 if node.chosen else 0,
                     node.created_at,
+                    node.pos_x,
+                    node.pos_y,
                 ),
             )
             self._conn.commit()
@@ -234,6 +251,24 @@ class StoryTreeStore:
             lines.append("支线（进行中）：" + "；".join(s.content[:30] for s in subplots[:5]))
         return "\n".join(lines)
 
+    def set_positions(self, book_id: str, positions: list[tuple[str, float, float]]) -> int:
+        """S76：批量保存节点手动坐标（DESIGN §12.37：只存用户调整过的）。
+
+        返回更新行数；不存在的节点/其他 book 自动跳过。
+        """
+        if not positions:
+            return 0
+        updated = 0
+        with self._lock:
+            for node_id, x, y in positions:
+                cur = self._conn.execute(
+                    "UPDATE story_nodes SET pos_x=?, pos_y=? WHERE id=? AND book_id=?",
+                    (x, y, node_id, book_id),
+                )
+                updated += cur.rowcount
+            self._conn.commit()
+        return updated
+
     def close(self) -> None:
         self._conn.close()
 
@@ -247,6 +282,8 @@ def _node_from_row(row: sqlite3.Row) -> StoryNode:
         kind=row["kind"],
         chosen=bool(row["chosen"]),
         created_at=row["created_at"],
+        pos_x=row["pos_x"],
+        pos_y=row["pos_y"],
     )
 
 

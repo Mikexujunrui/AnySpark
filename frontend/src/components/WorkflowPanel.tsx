@@ -378,7 +378,10 @@ export default function WorkflowPanel() {
           <button
             onClick={async () => {
               try {
-                await saveWorkflow(draft);
+                // S76：保存时把画布手动坐标序列化进模板 layout
+                const wfToSave = { ...draft, layout: manualPos };
+                await saveWorkflow(wfToSave);
+                setDraft(wfToSave);
                 setDirty(false);
                 fetchAll();
               } catch (e) {
@@ -439,6 +442,7 @@ export default function WorkflowPanel() {
                       edges: [],
                     };
                     setDraft(wf);
+                    setManualPos({});
                     setDirty(true);
                     setSelectedNodeId(null);
                   }}
@@ -455,11 +459,15 @@ export default function WorkflowPanel() {
                 templates.map((t) => (
                   <div
                     key={t.id}
-                    onClick={() => openWorkflow(t.id).then(() => {
+                    onClick={() =>
+                    openWorkflow(t.id).then((wf) => {
+                      // S76：打开模板时应用持久化布局坐标
+                      setManualPos(wf.layout ?? {});
                       setDirty(false);
                       setRunningTask(null);
                       setSelectedNodeId(null);
-                    })}
+                    })
+                  }
                     className={`px-2 py-1.5 rounded mb-0.5 cursor-pointer text-xs ${
                       draft?.id === t.id
                         ? "bg-zinc-700/60 text-zinc-100"

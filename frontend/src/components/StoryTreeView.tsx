@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useStoryStore } from "../stores/storyStore";
+import { saveStoryLayout } from "../api/story";
 import type { StoryNode } from "../api/story";
 
 /* ── 节点样式（按 kind 区分）── */
@@ -44,10 +45,47 @@ export default function StoryTreeView() {
   const svgRef = useRef<SVGSVGElement>(null);
   const dragRef = useRef<{ id: string; dx: number; dy: number; moved: boolean } | null>(null);
   const panRef = useRef<{ x0: number; y0: number; px: number; py: number } | null>(null);
+  const layoutInitRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     fetchTree();
+    return () => {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    };
   }, [fetchTree]);
+
+  // S76：首次拿到节点后应用持久化坐标（只初始化一次，后续拖拽由用户接管）
+  useEffect(() => {
+    if (nodes.length && !layoutInitRef.current) {
+      const saved: Record<string, Pos> = {};
+      for (const n of nodes) {
+        if (n.pos && typeof n.pos.x === "number") saved[n.id] = { x: n.pos.x, y: n.pos.y };
+      }
+      setManualPos(saved);
+      layoutInitRef.current = true;
+    }
+  }, [nodes]);
+
+  // S76：拖拽结束后 debounce 批量保存（DESIGN §12.37：只存用户调整过的坐标）
+  const scheduleSave = useCallback(() => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      setManualPos((prev) => {
+        const positions = Object.entries(prev).map(([node_id, p]) => ({
+          node_id,
+          x: Math.round(p.x * 100) / 100,
+          y: Math.round(p.y * 100) / 100,
+        }));
+        if (positions.length) {
+          saveStoryLayout(positions).catch((e) =>
+            console.error("保存叙事树布局失败:", e)
+          );
+        }
+        return prev;
+      });
+    }, 1200);
+  }, []);
 
   /* ── 分层布局：root=0，子节点右移一层；同层按创建序纵向排 ── */
   const layout = useMemo(() => {
@@ -119,7 +157,11 @@ export default function StoryTreeView() {
   const onNodePointerUp = (e: React.PointerEvent) => {
     if (dragRef.current) {
       const d = dragRef.current;
-      if (!d.moved) selectNode(d.id); // 未移动 = 点击选中
+      if (!d.moved) {
+        selectNode(d.id); // 未移动 = 点击选中
+      } else {
+        scheduleSave(); // S76：拖拽结束 → 持久化坐标
+      }
       dragRef.current = null;
     }
     (e.target as Element).releasePointerCapture?.(e.pointerId);
