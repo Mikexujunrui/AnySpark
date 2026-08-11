@@ -61,6 +61,7 @@ from anyspark.server.routes_agency import make_agency_router
 from anyspark.server.routes_books import make_books_router
 from anyspark.server.routes_chapters import make_chapters_router
 from anyspark.server.routes_chat import make_chat_router
+from anyspark.server.routes_check import make_check_router
 from anyspark.server.routes_conversations import make_conversations_router
 from anyspark.server.routes_explore import make_explore_router
 from anyspark.server.routes_graph import make_graph_router
@@ -171,6 +172,7 @@ def build_app(
     # ("batch_review", batch_id, ids) 批量审读（S40）。
 
     _bg_queue: queue.Queue[BgTask] = queue.Queue()  # 后台任务队列（S28/S40）
+    _batch_queue: queue.Queue[BgTask] = queue.Queue()  # S85：批量任务独立队列（用户同步等待）
     # S40 批量任务状态（内存会话级）：id → {status, done, total, results}
     _batches: dict[str, dict[str, Any]] = {}
     _batch_lock: threading.Lock = threading.Lock()
@@ -458,6 +460,7 @@ def build_app(
         active_agents=_active_agents,
         active_lock=_active_lock,
         bg_queue=_bg_queue,
+        batch_queue=_batch_queue,
         batches=_batches,
         batch_lock=_batch_lock,
         workspace=workspace,
@@ -482,6 +485,7 @@ def build_app(
     app.include_router(make_books_router(deps))
     app.include_router(make_agency_router(deps))
     app.include_router(make_chapters_router(deps))
+    app.include_router(make_check_router(deps))
     app.include_router(make_chat_router(deps))
     app.include_router(make_explore_router(deps))
     app.include_router(make_graph_router(deps))

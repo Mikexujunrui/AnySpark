@@ -130,7 +130,7 @@ def make_agency_router(deps: AppDeps) -> APIRouter:
                 "kind": "rewrite",
                 "instruction": req.instruction,
             }
-        deps.bg_queue.put(
+        deps.batch_queue.put(
             BgTask(
                 kind="batch_rewrite",
                 batch_id=bid,
@@ -154,7 +154,7 @@ def make_agency_router(deps: AppDeps) -> APIRouter:
                 "results": [],
                 "kind": "review",
             }
-        deps.bg_queue.put(BgTask(kind="batch_review", batch_id=bid, ids=req.chapter_ids))
+        deps.batch_queue.put(BgTask(kind="batch_review", batch_id=bid, ids=req.chapter_ids))
         return {"batch_id": bid, "total": len(req.chapter_ids)}
 
     @router.get("/api/batch/{batch_id}", response_model=dict[str, object])

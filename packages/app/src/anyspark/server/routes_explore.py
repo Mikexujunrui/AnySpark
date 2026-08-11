@@ -11,20 +11,16 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 
-from anyspark.align.worldsettings import constraint_texts
-from anyspark.check import compile_rule, compile_with_model, run_review
 from anyspark.explore import DirectionCard, IntentUnderstander, run_exploration
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
 from anyspark.server.schemas import (
-    CheckRequest,
     ExploreArchiveIn,
     ExploreCardsIn,
     ExploreDimIn,
     ExploreDimPatch,
     ExploreIntentIn,
     PathExploreIn,
-    RuleRequest,
 )
 
 
@@ -42,8 +38,12 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
     @router.post("/api/explore/cards", response_model=list[dict[str, object]])
     def explore_cards(req: ExploreCardsIn) -> list[dict[str, object]]:
         """确认后的意图 → 方向卡 ×4（并行探索，三来源混合）。"""
-        # S83：约束来自设定档（全局约束；情景实体子集留给 path 级探索按描述提取）
-        constraints = constraint_texts(deps.settings.list_constraints("main"))
+        # 约束 = 设定档"世界观规则"类别（全书固定规则，直接注入不匹配——模型自己判断）
+        constraints = [
+            e.content
+            for e in deps.settings.list("main")
+            if e.category == "世界观规则" and (e.content or "").strip()
+        ]
         # S68：探索注入真实模板库（L2+L3 合并；template 来源探索者消费，死库接线）
         templates = [f"{t.name}：{t.description}" for t in deps.templates_external.all()[:12]]
         cards = run_exploration(
@@ -79,17 +79,12 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
             if node is None:
                 raise HTTPException(status_code=404, detail=f"终点节点不存在：{req.to_node_id}")
             to_desc = node.content
-        # S83：约束 = 全局 + 当前情景（from/to 描述提及的实体）相关 + 请求临时
-        ctx_entities: set[str] = set()
-        for _t in (from_desc, to_desc):
-            for _e in deps.settings.list_constraints(req.book_id):
-                for _ent in (_e.entities or "").split(","):
-                    if _ent.strip() and _ent.strip() in (_t or ""):
-                        ctx_entities.add(_ent.strip())
-        constraints = (
-            constraint_texts(deps.settings.list_constraints(req.book_id), ctx_entities)
-            + req.constraints
-        )
+        # 约束 = 设定档"世界观规则"类别（全书固定规则）+ 请求临时约束（直接注入，不匹配）
+        constraints = [
+            e.content
+            for e in deps.settings.list(req.book_id)
+            if e.category == "世界观规则" and (e.content or "").strip()
+        ] + req.constraints
         result = explore_path(deps.model, from_desc, to_desc, constraints, n=req.n)
         if not result.paths:
             raise HTTPException(status_code=502, detail="路径探索失败（无有效候选）")
@@ -186,56 +181,5 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
     @router.get("/api/explore/archive", response_model=list[dict[str, object]])
     def explore_archive_list() -> list[dict[str, object]]:
         return deps.archive.directions()
-
-    @router.post("/api/check", response_model=dict[str, object])
-    def check_text_route(req: CheckRequest) -> dict[str, object]:
-        """多检测者审读正文（骨架检测项，并行）+ 图谱事实证据 + 时序校验（确定性规则）。"""
-        report = run_review(deps.model, req.target, req.text)
-        # S7：图谱事实证据——文本涉及的已知实体/关系（检测网/用户比对设定冲突）
-        evidence = deps.graph_verifier.render_evidence("main", req.text)
-        # S13：时序校验——截止当前章节时空点，提及未来才首现的实体=时空倒置
-        # S29：按叙事线比较（跨线首现不误报，多线并行时间差正常）
-        temporal = (
-            deps.graph_verifier.check_temporal("main", req.text, req.chapter_order, req.line)
-            if req.chapter_order is not None
-            else []
-        )
-        return {
-            "target": report.target,
-            "hard_count": report.hard_count,
-            "graph_evidence": evidence,
-            "temporal_warnings": temporal,
-            "findings": [
-                {
-                    "category": f.category,
-                    "severity": f.severity,
-                    "message": f.message,
-                    "evidence": f.evidence,
-                    "suggestion": f.suggestion,
-                    "source": f.source,
-                }
-                for f in report.findings
-            ],
-        }
-
-    @router.post("/api/check/rule", response_model=dict[str, object])
-    def check_rule_route(req: RuleRequest) -> dict[str, object]:
-        """规则编译：用户自然语言规则 → 检测命中（内容判断交给模型，模板 fallback）。
-
-        哲学（DESIGN §1）：用户规则"是什么意思"是内容判断 → LLM 编译；
-        检测"怎么做"是过程 → 确定性执行器硬编码。模型/模板都识别不了时
-        明确告知（不再静默丢弃）。
-        """
-        assert deps.model is not None
-        # LLM 编译（内容判断）→ 失败回退轻量模板（无 LLM 场景）
-        compiled = compile_with_model(req.rule, deps.model) or compile_rule(req.rule)
-        if compiled is None:
-            return {
-                "ok": False,
-                "description": "未能识别的规则：请用更具体的字面/结构描述（如'不要用破折号'）",
-                "hits": [],
-            }
-        hits = compiled.checker(req.text)
-        return {"ok": True, "description": compiled.description, "hits": hits}
 
     return router

@@ -16,7 +16,6 @@ anyspark.align.worldsettings — 设定档（S41：作品正典设定）。
 
 from __future__ import annotations
 
-import builtins
 import sqlite3
 import threading
 import uuid
@@ -54,10 +53,6 @@ class WorldSetting:
     order: int = 0
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     created_at: str = field(default_factory=_now)
-    # S83 约束机制：is_constraint=1 为约束条目（写作/探索时注入）；
-    # entities=逗号分隔关联实体名（空=全局约束，全场景生效）
-    is_constraint: int = 0
-    entities: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -68,8 +63,6 @@ class WorldSetting:
             "source": self.source,
             "order": self.order,
             "created_at": self.created_at,
-            "is_constraint": self.is_constraint,
-            "entities": self.entities,
         }
 
 
@@ -95,9 +88,7 @@ class WorldSettingStore:
                     content TEXT NOT NULL,
                     source TEXT NOT NULL DEFAULT 'manual',
                     order_index INTEGER NOT NULL DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    is_constraint INTEGER NOT NULL DEFAULT 0,
-                    entities TEXT NOT NULL DEFAULT ''
+                    created_at TEXT NOT NULL
                 )
                 """
             )
@@ -109,23 +100,6 @@ class WorldSettingStore:
                 self._conn.commit()
             except sqlite3.OperationalError:
                 pass  # 列已存在
-            # S83：旧库补 is_constraint/entities 列（幂等）
-            for _col, _ddl in (
-                (
-                    "is_constraint",
-                    "ALTER TABLE world_settings "
-                    "ADD COLUMN is_constraint INTEGER NOT NULL DEFAULT 0",
-                ),
-                (
-                    "entities",
-                    "ALTER TABLE world_settings ADD COLUMN entities TEXT NOT NULL DEFAULT ''",
-                ),
-            ):
-                try:
-                    self._conn.execute(_ddl)
-                    self._conn.commit()
-                except sqlite3.OperationalError:
-                    pass  # 列已存在
             # S50：设定档类别内容化（默认种子建议，可增删改——不再写死锁死）
             self._conn.execute(
                 """
@@ -209,16 +183,6 @@ class WorldSettingStore:
             ).fetchall()
         return [_from_row(r) for r in rows]
 
-    def list_constraints(self, book_id: str = "main") -> builtins.list[WorldSetting]:
-        """S83：全部约束条目（is_constraint=1），供写作/探索子集选取。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM world_settings WHERE book_id=? AND is_constraint=1 "
-                "ORDER BY order_index, rowid",
-                (book_id,),
-            ).fetchall()
-        return [_from_row(r) for r in rows]
-
     def get(self, setting_id: str) -> WorldSetting | None:
         with self._lock:
             row = self._conn.execute(
@@ -233,8 +197,6 @@ class WorldSettingStore:
         name: str = "",
         source: str = "manual",
         book_id: str = "main",
-        is_constraint: int = 0,
-        entities: str = "",
     ) -> WorldSetting:
         with self._lock:
             max_order = self._conn.execute(
@@ -247,26 +209,12 @@ class WorldSettingStore:
                 name=name,
                 source=source,
                 order=int(max_order) + 1,
-                is_constraint=is_constraint,
-                entities=entities,
             )
             self._conn.execute(
                 "INSERT INTO world_settings "
-                "(id, book_id, category, name, content, source, order_index, created_at, "
-                "is_constraint, entities) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (
-                    s.id,
-                    book_id,
-                    s.category,
-                    s.name,
-                    s.content,
-                    s.source,
-                    s.order,
-                    s.created_at,
-                    s.is_constraint,
-                    s.entities,
-                ),
+                "(id, book_id, category, name, content, source, order_index, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (s.id, book_id, s.category, s.name, s.content, s.source, s.order, s.created_at),
             )
             self._conn.commit()
         return s
@@ -277,8 +225,6 @@ class WorldSettingStore:
         content: str | None = None,
         category: str | None = None,
         name: str | None = None,
-        is_constraint: int | None = None,
-        entities: str | None = None,
     ) -> WorldSetting | None:
         with self._lock:
             row = self._conn.execute(
@@ -289,12 +235,9 @@ class WorldSettingStore:
             new_content = content if content is not None else row["content"]
             new_cat = category if category is not None else row["category"]
             new_name = name if name is not None else row["name"]
-            new_flag = is_constraint if is_constraint is not None else row["is_constraint"]
-            new_entities = entities if entities is not None else row["entities"]
             self._conn.execute(
-                "UPDATE world_settings SET content=?, category=?, name=?, "
-                "is_constraint=?, entities=? WHERE id=?",
-                (new_content, new_cat, new_name, new_flag, new_entities, setting_id),
+                "UPDATE world_settings SET content=?, category=?, name=? WHERE id=?",
+                (new_content, new_cat, new_name, setting_id),
             )
             self._conn.commit()
         return self.get(setting_id)
@@ -315,9 +258,6 @@ def _from_row(row: sqlite3.Row) -> WorldSetting:
         category=row["category"],
         name=row["name"],
         content=row["content"],
-        # 旧库兼容：is_constraint/entities 列可能缺失（S83 幂等 ALTER）
-        is_constraint=row["is_constraint"] if "is_constraint" in row.keys() else 0,  # noqa: SIM118
-        entities=row["entities"] if "entities" in row.keys() else "",  # noqa: SIM118
         source=row["source"],
         order=int(row["order_index"]),
         created_at=row["created_at"],
@@ -366,62 +306,3 @@ def render_settings_adaptive(entries: list[WorldSetting], title: str = "本书�
             snippet = e.content.replace("\n", " ").strip()[:40]
             lines.append(f"- {prefix}{snippet}…" if snippet else f"- {prefix}（空）")
     return "\n".join(lines)
-
-
-# S83：约束注入（全局 + 关联实体子集）——探索/写作共用同一选取逻辑
-def render_constraints_block(
-    entries: list[WorldSetting],
-    context_entities: set[str] | None = None,
-) -> str:
-    """渲染约束注入块：全局约束（entities 空）+ 当前情景实体相关的关联约束。
-
-    context_entities：当前情景涉及的实体名集合（探索=from/to 描述里的实体，
-    写作=当前时空点已知实体）。无匹配时只注入全局约束；全空返回空串不注入。
-    """
-    ctx = {e.strip() for e in (context_entities or set()) if e.strip()}
-    global_lines: list[str] = []
-    scoped_lines: list[str] = []
-    for e in entries:
-        if not e.is_constraint:  # 防御：只处理约束条目（调用方应传 list_constraints）
-            continue
-        text = (e.content or "").strip()
-        if not text:
-            continue
-        linked = {x.strip() for x in (e.entities or "").split(",") if x.strip()}
-        prefix = f"{e.name}：" if e.name else ""
-        line = f"- {prefix}{text}"
-        if not linked:  # 全局约束
-            global_lines.append(line)
-        elif ctx & linked:  # 关联约束：当前情景涉及该实体才注入
-            scoped_lines.append(f"- 【{next(iter(ctx & linked))}】{line[2:]}")
-    if not global_lines and not scoped_lines:
-        return ""
-    out = ["# 作品约束（必须遵守的规则）"]
-    out.extend(global_lines)
-    if scoped_lines:
-        out.append("当前情景相关约束：")
-        out.extend(scoped_lines)
-    return "\n".join(out)
-
-
-def constraint_texts(
-    entries: list[WorldSetting],
-    context_entities: set[str] | None = None,
-) -> list[str]:
-    """S83：收集约束文本列表（探索用——作为"墙"传给探索者）。
-
-    全局约束 + 当前情景实体相关的关联约束；与 render_constraints_block 同选取逻辑，
-    只是返回文本列表而非注入块（探索者消费原始句子）。
-    """
-    ctx = {e.strip() for e in (context_entities or set()) if e.strip()}
-    out: list[str] = []
-    for e in entries:
-        if not e.is_constraint:
-            continue
-        text = (e.content or "").strip()
-        if not text:
-            continue
-        linked = {x.strip() for x in (e.entities or "").split(",") if x.strip()}
-        if not linked or (ctx & linked):
-            out.append(text)
-    return out

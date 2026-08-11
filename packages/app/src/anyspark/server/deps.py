@@ -64,6 +64,7 @@ class BgTask:
     content: str = ""
     order: int = 0
     line: str = "main"
+    book_id: str = "main"  # S85：章节抽取按书隔离（手动编辑挂任务用）
     conv_id: str = ""
     batch_id: str = ""
     ids: list[str] = field(default_factory=list)
@@ -131,5 +132,8 @@ class AppDeps:
     active_agents: dict[str, Agent] = field(default_factory=dict)
     active_lock: threading.Lock = field(default_factory=threading.Lock)
     bg_queue: queue.Queue[BgTask] = field(default_factory=queue.Queue)
+    batch_queue: queue.Queue[BgTask] = field(
+        default_factory=queue.Queue
+    )  # S85：批量任务独立队列（用户同步等待，不与图谱抽取混排）
     batches: dict[str, dict[str, Any]] = field(default_factory=dict)
     batch_lock: threading.Lock = field(default_factory=threading.Lock)

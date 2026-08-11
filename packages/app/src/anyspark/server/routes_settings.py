@@ -64,28 +64,15 @@ def make_settings_router(deps: AppDeps) -> APIRouter:
 
     @router.post("/api/settings", response_model=dict[str, Any])
     def add_setting(req: WorldSettingIn) -> dict[str, Any]:
-        """新增设定条目（作者手写）；is_constraint=1 为约束条目。"""
+        """新增设定条目（作者手写）。"""
         s = deps.settings.add(
-            req.content,
-            req.category,
-            req.name,
-            source="manual",
-            book_id=req.book_id,
-            is_constraint=req.is_constraint,
-            entities=req.entities,
+            req.content, req.category, req.name, source="manual", book_id=req.book_id
         )
         return s.to_dict()
 
     @router.patch("/api/settings/{setting_id}", response_model=dict[str, Any])
     def patch_setting(setting_id: str, req: WorldSettingPatch) -> dict[str, Any]:
-        s = deps.settings.update(
-            setting_id,
-            req.content,
-            req.category,
-            req.name,
-            is_constraint=req.is_constraint,
-            entities=req.entities,
-        )
+        s = deps.settings.update(setting_id, req.content, req.category, req.name)
         if s is None:
             raise HTTPException(status_code=404, detail="设定条目不存在")
         return s.to_dict()

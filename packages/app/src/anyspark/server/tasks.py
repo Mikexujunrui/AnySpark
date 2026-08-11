@@ -90,17 +90,13 @@ def _bg_worker_inner(
         try:
             task = deps.bg_queue.get()
             if task.kind == "chapter":
-                extract_chapter(deps, "main", task.title, task.content, task.order, task.line)
+                extract_chapter(deps, task.book_id, task.title, task.content, task.order, task.line)
             elif task.kind == "refine":
                 refine_from_signals(deps)
             elif task.kind == "skill_drafts":
                 refine_skill_drafts(deps)
             elif task.kind == "summarize":
                 summarize_conversation(deps, task.conv_id)
-            elif task.kind == "batch_rewrite":
-                run_batch_rewrite(deps, task.batch_id, task.ids, task.instruction)
-            elif task.kind == "batch_review":
-                run_batch_review(deps, task.batch_id, task.ids)
             else:
                 logger.warning("后台任务未知 kind: %r", getattr(task, "kind", task))
         except Exception as exc:
@@ -269,7 +265,25 @@ def review_for_learning(deps: AppDeps, book_id: str, title: str, content: str) -
         logger.warning("学习审查失败(不影响写作): %s", exc)
 
 
+def _batch_worker_inner(deps: AppDeps) -> None:
+    """批量任务 worker（S85 独立队列：用户同步等待的批量改写/审读，不与图谱抽取串行）。"""
+    while True:
+        try:
+            task = deps.batch_queue.get()
+            if task.kind == "batch_rewrite":
+                run_batch_rewrite(deps, task.batch_id, task.ids, task.instruction)
+            elif task.kind == "batch_review":
+                run_batch_review(deps, task.batch_id, task.ids)
+            else:
+                logger.warning("批量队列未知 kind: %r", getattr(task, "kind", task))
+        except Exception as exc:
+            logger.warning("批量任务异常: %s", exc)
+        finally:
+            deps.batch_queue.task_done()
+
+
 def start_bg_worker(deps: AppDeps) -> None:
     """启动后台任务 worker 单例线程（build_app 装配时调用一次）。"""
 
     threading.Thread(target=_bg_worker_inner, args=(deps,), daemon=True).start()
+    threading.Thread(target=_batch_worker_inner, args=(deps,), daemon=True).start()

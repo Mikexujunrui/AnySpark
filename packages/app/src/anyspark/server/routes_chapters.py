@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from anyspark.core import Message
-from anyspark.server.deps import AppDeps
+from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import logger
 from anyspark.server.schemas import ChapterCreate, ChapterOut, ChapterPatchIn, ChapterUpdate
 
@@ -139,6 +139,17 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         updated = deps.chapters.get(chapter_id)
         if updated is None:
             raise HTTPException(status_code=500, detail="保存后章节读取失败")
+        # S85：手动保存也触发图谱抽取/伏笔回收（对齐 write_chapter 后台链路，防图谱漂移）
+        deps.bg_queue.put(
+            BgTask(
+                kind="chapter",
+                title=ch.title,
+                content=req.content,
+                order=ch.order_index,
+                line=ch.narrative_line,
+                book_id=ch.book_id,
+            )
+        )
         return ChapterOut(
             id=updated.id,
             book_id=updated.book_id,
@@ -173,6 +184,18 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         new_content, results = apply_patch(ch.content, req.operations)
         ok_all = all(r.get("ok") for r in results)
         deps.chapters.upsert("main", ch.title, new_content, ch.order_index, ch.narrative_line)
+        # S85：定点编辑也触发图谱抽取（防图谱漂移）
+        if ok_all and new_content != ch.content:
+            deps.bg_queue.put(
+                BgTask(
+                    kind="chapter",
+                    title=ch.title,
+                    content=new_content,
+                    order=ch.order_index,
+                    line=ch.narrative_line,
+                    book_id="main",
+                )
+            )
         return {
             "title": ch.title,
             "ok": ok_all,

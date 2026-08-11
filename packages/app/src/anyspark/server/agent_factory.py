@@ -11,10 +11,7 @@ from __future__ import annotations
 from anyspark.align.agency import build_agency_block
 from anyspark.align.plan import render_plan
 from anyspark.align.skills import render_skill_index
-from anyspark.align.worldsettings import (
-    render_constraints_block,
-    render_settings_adaptive,
-)
+from anyspark.align.worldsettings import render_settings_adaptive
 from anyspark.core import Agent, Model, RetryingModel, ToolRegistry
 from anyspark.models.deepseek import DeepSeekModel
 from anyspark.models.registry import ModelProvider
@@ -184,22 +181,6 @@ def make_agent(
         settings_block = render_settings_adaptive(deps.settings.list())
         if settings_block:
             append_blocks.append(settings_block)
-    # S83 约束注入（作品规则：全局 + 当前时空点实体相关——与已固化事实同源选取）
-    if "constraints" not in skip:
-        constraint_entries = deps.settings.list_constraints(book_id)
-        if constraint_entries:
-            # 当前情景实体 = 当前时空点已知实体（复用图谱 known_facts 选取）
-            ctx_entities: set[str] = set()
-            try:
-                facts = deps.graph.known_facts(
-                    book_id, up_to_order=None, max_entities=15, max_relations=0, max_events=0
-                )
-                ctx_entities = {e.name for e in facts["entities"]}
-            except Exception:  # 图谱读取失败不阻断约束注入（仅全局）
-                ctx_entities = set()
-            constraints_block = render_constraints_block(constraint_entries, ctx_entities)
-            if constraints_block:
-                append_blocks.append(constraints_block)
     # S53 心智指导块：文风偏好 + 习惯（渐进式披露：只列关键条目，指导性保留）
     if "manual" not in skip:
         mind_block = session_plan.mind_block()
