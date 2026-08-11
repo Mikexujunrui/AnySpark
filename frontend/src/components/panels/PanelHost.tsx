@@ -26,6 +26,7 @@ import PlayPanel from '../PlayPanel'
 import RolePanel from '../RolePanel'
 import DimsPanel from '../DimsPanel'
 import ImpactPanel from '../ImpactPanel'
+import LibraryPanel from '../LibraryPanel'
 import UploadPanel from '../UploadPanel'
 
 export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }: { panelKey: string; bookId: string; sessionId: string; onPanelClose?: () => void }) {
@@ -49,6 +50,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {panelKey === 'search' && <div className="h-full min-h-0 flex flex-col"><SearchPanel bookId={bookId} /></div>}
       {panelKey === 'review' && <div className="h-full min-h-0 flex flex-col"><ReviewPanel bookId={bookId} /></div>}
       {panelKey === 'materials' && <div className="h-full min-h-0 flex flex-col"><MaterialsPanel bookId={bookId} /></div>}
+      {panelKey === 'references' && <div className="h-full min-h-0 flex flex-col"><LibraryPanel bookId={bookId} /></div>}
 
       {/* V4 工具面板（open/onClose 签名 → 内嵌常显） */}
       {panelKey === 'brief' && <div className="h-full min-h-0 flex flex-col"><BriefPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
