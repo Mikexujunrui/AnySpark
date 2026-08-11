@@ -13,7 +13,7 @@ const SLASH_COMMANDS = [
 ];
 
 export default function ChatPanel() {
-  const { messages, streaming, streamingText, sendMessage, sendSteer, cancelStream } = useChatStore();
+  const { messages, streaming, streamingText, sendMessage, sendSteer, cancelStream, declareDirection, rewriteMessage } = useChatStore();
   const [input, setInput] = useState("");
   const [showSlashMenu, setShowSlashMenu] = useState(false);
   const [slashFilter, setSlashFilter] = useState("");
@@ -95,6 +95,17 @@ export default function ChatPanel() {
     useChatStore.getState().selectCandidate(candidate);
   };
 
+  const handleDirection = () => {
+    const text = input.trim();
+    if (!text || streaming) return;
+    declareDirection(text);
+    setInput("");
+  };
+
+  const handleRewrite = (index: number, mode: "subtle" | "balanced" | "bold") => {
+    rewriteMessage(index, mode);
+  };
+
   return (
     <div className="flex-1 flex flex-col bg-zinc-950 overflow-hidden">
       {/* 消息列表 */}
@@ -106,13 +117,14 @@ export default function ChatPanel() {
         )}
 
         {messages.map((msg, i) => (
-          <MessageBubble
+            <MessageBubble
             key={i}
             role={msg.role}
             content={msg.content}
             candidates={msg.candidates}
             loadingCandidates={msg.loadingCandidates}
             onSelectCandidate={handleSelectCandidate}
+            onRewrite={(mode) => handleRewrite(i, mode)}
           />
         ))}
 
@@ -189,13 +201,23 @@ export default function ChatPanel() {
               </button>
             </div>
           ) : (
-            <button
-              onClick={handleSend}
-              disabled={!input.trim()}
-              className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-200 text-sm rounded-lg"
-            >
-              发送
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={handleDirection}
+                disabled={!input.trim()}
+                className="px-3 py-2 bg-amber-900/40 hover:bg-amber-900/60 disabled:bg-zinc-800 disabled:text-zinc-600 text-amber-300 text-sm rounded-lg border border-amber-800/40"
+                title="AI 先声明要写什么（摩擦前置，用户确认）"
+              >
+                方向
+              </button>
+              <button
+                onClick={handleSend}
+                disabled={!input.trim()}
+                className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-200 text-sm rounded-lg"
+              >
+                发送
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -210,12 +232,14 @@ function MessageBubble({
   candidates,
   loadingCandidates,
   onSelectCandidate,
+  onRewrite,
 }: {
   role: string;
   content: string;
   candidates?: Candidate[];
   loadingCandidates?: boolean;
   onSelectCandidate: (c: Candidate) => void;
+  onRewrite?: (mode: "subtle" | "balanced" | "bold") => void;
 }) {
   if (role === "tool") {
     return (
@@ -270,13 +294,38 @@ function MessageBubble({
   return (
     <div className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
       <div
-        className={`max-w-[80%] rounded-lg px-3 py-2 ${
-          isUser
-            ? "bg-zinc-700 text-zinc-100"
-            : "bg-zinc-800/60 text-zinc-200"
-        }`}
+        className={`max-w-[80%] rounded-lg px-3 py-2 ${isUser
+          ? "bg-zinc-700 text-zinc-100"
+          : "bg-zinc-800/60 text-zinc-200"}`}
       >
         <p className="text-sm whitespace-pre-wrap">{content}</p>
+        {/* AI 消息：改写渐变条 */}
+        {!isUser && onRewrite && content && (
+          <div className="flex items-center gap-1 mt-2 pt-2 border-t border-zinc-700/50">
+            <span className="text-[10px] text-zinc-500 mr-1">改写</span>
+            <button
+              onClick={() => onRewrite("subtle")}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300"
+              title="轻微润色"
+            >
+              保原味
+            </button>
+            <button
+              onClick={() => onRewrite("balanced")}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300"
+              title="语言更生动"
+            >
+              适中
+            </button>
+            <button
+              onClick={() => onRewrite("bold")}
+              className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-700 hover:bg-zinc-600 text-zinc-300"
+              title="大胆重构"
+            >
+              大幅改
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -42,3 +42,21 @@ export function deleteManual(id: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+// S74c 心智变更通知（用户知情界面）：谁在何时改了哪条偏好
+export interface ManualNotice {
+  id: string;
+  entry_id?: string;
+  action: string; // add|update|delete
+  category?: string;
+  content?: string;
+  old_content?: string;
+  new_content?: string;
+  source?: string;
+  created_at?: string;
+  read?: boolean;
+}
+
+export function listManualNotices(limit = 20): Promise<ManualNotice[]> {
+  return apiFetch<ManualNotice[]>(`/api/manual/notices?limit=${limit}`);
+}

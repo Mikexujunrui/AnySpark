@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { streamChat, getCandidates, steerChat, type Candidate } from "../api/chat";
+import { streamChat, getCandidates, steerChat, cancelChat, getDirection, rewriteText, type Candidate } from "../api/chat";
 import { reportSignal } from "../api/signals";
 import {
   listConversations,
@@ -29,6 +29,8 @@ interface ChatState {
   sendSteer: (text: string) => void;
   requestCandidates: (prompt: string) => void;
   selectCandidate: (candidate: Candidate) => void;
+  declareDirection: (prompt: string, context?: string) => Promise<void>;
+  rewriteMessage: (index: number, mode?: "subtle" | "balanced" | "bold") => Promise<void>;
   cancelStream: () => void;
   clearMessages: () => void;
   loadConversation: (convId: string) => Promise<void>;
@@ -163,12 +165,48 @@ export const useChatStore = create<ChatState>((set, get) => ({
     get().sendMessage(candidate.text);
   },
 
+  // S41：方向声明——AI 先声明要写什么，用户确认决定走向
+  declareDirection: async (prompt: string, context = "") => {
+    try {
+      const { direction } = await getDirection(prompt, context);
+      set((state) => ({
+        messages: [...state.messages, { role: "assistant", content: direction }],
+      }));
+    } catch (err) {
+      console.error("Direction failed:", err);
+      set((state) => ({
+        messages: [
+          ...state.messages,
+          { role: "assistant", content: "[方向声明失败]" },
+        ],
+      }));
+    }
+  },
+
+  // S41：改写渐变条——替换指定 assistant 消息为改写结果
+  rewriteMessage: async (index: number, mode: "subtle" | "balanced" | "bold" = "balanced") => {
+    const target = get().messages[index];
+    if (!target || target.role !== "assistant" || !target.content) return;
+    try {
+      const { rewritten } = await rewriteText(target.content, mode);
+      set((state) => {
+        const msgs = [...state.messages];
+        msgs[index] = { role: "assistant", content: rewritten };
+        return { messages: msgs };
+      });
+    } catch (err) {
+      console.error("Rewrite failed:", err);
+    }
+  },
+
   cancelStream: () => {
     const { abortController } = get();
     if (abortController) {
       abortController();
       set({ streaming: false, abortController: null });
     }
+    // 告知后端会话态（尽力而为）
+    cancelChat(get().conversationId || undefined).catch(() => {});
   },
 
   clearMessages: () => {

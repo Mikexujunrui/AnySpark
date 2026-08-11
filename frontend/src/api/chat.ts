@@ -118,3 +118,33 @@ export function steerChat(conversationId: string, message: string): Promise<void
     body: JSON.stringify({ conversation_id: conversationId, message }),
   });
 }
+
+// 中止运行中的会话生成（S41 配套：前端停止按钮走后端，感知会话态）
+export function cancelChat(conversationId?: string): Promise<void> {
+  return apiFetch<void>("/api/chat/cancel", {
+    method: "POST",
+    body: JSON.stringify({ conversation_id: conversationId || null }),
+  });
+}
+
+// 方向声明：AI 先声明要写什么，不写正文（摩擦前置，用户确认）
+export function getDirection(
+  prompt: string,
+  context = ""
+): Promise<{ direction: string }> {
+  return apiFetch<{ direction: string }>("/api/chat/direction", {
+    method: "POST",
+    body: JSON.stringify({ prompt, context }),
+  });
+}
+
+// 改写渐变条：保原味↔大幅改（subtle|balanced|bold）
+export function rewriteText(
+  text: string,
+  mode: "subtle" | "balanced" | "bold" = "balanced"
+): Promise<{ rewritten: string; mode: string }> {
+  return apiFetch<{ rewritten: string; mode: string }>("/api/chat/rewrite", {
+    method: "POST",
+    body: JSON.stringify({ text, mode }),
+  });
+}

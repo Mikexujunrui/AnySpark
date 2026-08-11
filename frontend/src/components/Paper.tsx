@@ -9,7 +9,13 @@ export default function Paper() {
   const selectedChapter = useChapterStore((s) => s.selectedChapter);
   const saving = useChapterStore((s) => s.saving);
   const updateChapterContent = useChapterStore((s) => s.updateChapterContent);
+  const applyChapterPatch = useChapterStore((s) => s.applyChapterPatch);
   const [showExportMenu, setShowExportMenu] = useState(false);
+  const [patchOpen, setPatchOpen] = useState(false);
+  const [patchOp, setPatchOp] = useState<"insert" | "delete" | "replace">("insert");
+  const [patchAnchor, setPatchAnchor] = useState("");
+  const [patchText, setPatchText] = useState("");
+  const [patchMsg, setPatchMsg] = useState("");
 
   // 防抖定时器
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -72,6 +78,37 @@ export default function Paper() {
     };
   }, []);
 
+  const handleApplyPatch = async () => {
+    if (!patchAnchor.trim()) {
+      setPatchMsg("请输入锚点段文本");
+      return;
+    }
+    const ops: import("../api/chapters").PatchOperation[] = [
+      {
+        op: patchOp,
+        anchor: patchAnchor,
+        ...(patchOp !== "delete" ? { text: patchText } : {}),
+      },
+    ];
+    try {
+      const res = await applyChapterPatch(ops);
+      if (res) {
+        const nOk = res.results.filter((r) => r.ok).length;
+        const nBad = res.results.length - nOk;
+        setPatchMsg(
+          nBad > 0
+            ? `完成 ${nOk}/${res.results.length}（有 ${nBad} 个锚点未命中，请核实）`
+            : "✓ 定点编辑完成"
+        );
+      }
+      setPatchOpen(false);
+      setPatchAnchor("");
+      setPatchText("");
+    } catch (err) {
+      setPatchMsg("应用失败：" + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
   return (
     <div className="flex-1 flex flex-col bg-zinc-900 border-b border-zinc-800 overflow-y-auto relative">
       {/* 章节标题 + 保存状态 */}
@@ -86,6 +123,64 @@ export default function Paper() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {/* 定点编辑按钮 */}
+            <div className="relative">
+              <button
+                onClick={() => setPatchOpen(!patchOpen)}
+                className="text-xs px-2 py-1 bg-indigo-900/40 hover:bg-indigo-900/60 text-indigo-300 rounded border border-indigo-800/40"
+                title="S44 定点编辑：按锚点插入/删除/替换，不重写整章"
+              >
+                定点编辑
+              </button>
+              {patchOpen && (
+                <div className="absolute right-0 top-full mt-1 w-80 bg-zinc-800 border border-zinc-700 rounded shadow-lg z-20 p-3 space-y-2">
+                  <div className="text-xs text-zinc-400 font-medium">定点编辑（锚点定位，不重写整章）</div>
+                  <div className="flex gap-2">
+                    {(["insert", "delete", "replace"] as const).map((o) => (
+                      <button
+                        key={o}
+                        onClick={() => setPatchOp(o)}
+                        className={`text-[11px] px-2 py-1 rounded ${patchOp === o ? "bg-indigo-600 text-white" : "bg-zinc-700 text-zinc-300"}`}
+                      >
+                        {{ insert: "插入", delete: "删除", replace: "替换" }[o]}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    value={patchAnchor}
+                    onChange={(e) => setPatchAnchor(e.target.value)}
+                    placeholder={"锚点段落文本（须与正文某段完全一致）"}
+                    rows={2}
+                    className="w-full bg-zinc-900 text-zinc-200 text-xs px-2 py-1 rounded border border-zinc-600 focus:outline-none resize-none"
+                  />
+                  {patchOp !== "delete" && (
+                    <textarea
+                      value={patchText}
+                      onChange={(e) => setPatchText(e.target.value)}
+                      placeholder={patchOp === "insert" ? "在此插入的新段落（放在锚点段之后）" : "替换后的新段落"}
+                      rows={2}
+                      className="w-full bg-zinc-900 text-zinc-200 text-xs px-2 py-1 rounded border border-zinc-600 focus:outline-none resize-none"
+                    />
+                  )}
+                  <div className="flex gap-2 items-center">
+                    <button
+                      onClick={handleApplyPatch}
+                      className="text-xs px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded"
+                    >
+                      应用
+                    </button>
+                    <button
+                      onClick={() => { setPatchOpen(false); setPatchMsg(""); }}
+                      className="text-xs px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded"
+                    >
+                      取消
+                    </button>
+                  </div>
+                  {patchMsg && <p className="text-[11px] text-amber-400">{patchMsg}</p>}
+                </div>
+              )}
+            </div>
+
             {/* 导出按钮 */}
             <div className="relative">
               <button

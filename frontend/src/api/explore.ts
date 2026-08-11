@@ -74,3 +74,34 @@ export function archiveDirection(
 export function listArchived(): Promise<ArchivedDirection[]> {
   return apiGet<ArchivedDirection[]>("/api/explore/archive");
 }
+
+// S67 路径探索：起点 A → 终点 B 的 N 条串联路径候选（叙事树节点之间）
+export interface PathCandidate {
+  events: string[];
+  [k: string]: unknown;
+}
+
+export interface PathResult {
+  paths: PathCandidate[];
+  archived: { node_ids: string[]; path: PathCandidate } | null;
+}
+
+export function explorePath(params: {
+  from_desc?: string;
+  to_desc: string;
+  from_node_id?: string;
+  to_node_id?: string;
+  constraints?: string[];
+  n?: number;
+  archive_index?: number;
+}): Promise<PathResult> {
+  return apiPost<PathResult>("/api/explore/path", {
+    from_desc: params.from_desc ?? "",
+    to_desc: params.to_desc,
+    from_node_id: params.from_node_id ?? null,
+    to_node_id: params.to_node_id ?? null,
+    constraints: params.constraints ?? [],
+    n: params.n ?? 4,
+    archive_index: params.archive_index ?? null,
+  });
+}

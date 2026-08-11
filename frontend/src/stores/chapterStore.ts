@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { listChapters, getChapter, createChapter, deleteChapter, patchChapter } from "../api/chapters";
+import { listChapters, getChapter, createChapter, deleteChapter, patchChapter, patchChapterContent, type PatchOperation, type ChapterPatch } from "../api/chapters";
 import { reportSignal } from "../api/signals";
 import type { Chapter } from "../types";
 
@@ -15,6 +15,7 @@ interface ChapterState {
   addChapter: (title: string) => Promise<void>;
   removeChapter: (id: string) => Promise<void>;
   updateChapterContent: (content: string) => Promise<void>;
+  applyChapterPatch: (operations: PatchOperation[]) => Promise<ChapterPatch | null>;
 }
 
 export const useChapterStore = create<ChapterState>((set, get) => ({
@@ -110,6 +111,21 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
     } catch (error) {
       console.error("Failed to save chapter:", error);
       set({ saving: false });
+      throw error;
+    }
+  },
+
+  // S44：定点编辑——锚点段插入/删除/替换，不重写整章
+  applyChapterPatch: async (operations: PatchOperation[]) => {
+    const { selectedId } = get();
+    if (!selectedId || !operations.length) return null;
+    try {
+      const res = await patchChapterContent(selectedId, operations);
+      // 刷新本地内容（patch 端点在服务端已改库）
+      await get().selectChapter(selectedId);
+      return res;
+    } catch (error) {
+      console.error("Failed to apply patch:", error);
       throw error;
     }
   },

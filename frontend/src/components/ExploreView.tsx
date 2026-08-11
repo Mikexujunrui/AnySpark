@@ -1,8 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useExploreStore } from "../stores/exploreStore";
 import type { DirectionCard } from "../api/explore";
+import { explorePath, type PathCandidate } from "../api/explore";
 
 export default function ExploreView() {
+  const [pathMode, setPathMode] = useState(false);
   const {
     phase,
     seed,
@@ -29,10 +31,16 @@ export default function ExploreView() {
       {/* 工具条 */}
       <div className="h-8 bg-zinc-900/50 border-b border-zinc-800/50 flex items-center px-3 gap-2 shrink-0">
         <button
-          onClick={reset}
+          onClick={() => { if (pathMode) reset(); setPathMode(false); }}
           className="text-[11px] px-2 py-0.5 rounded text-zinc-500 hover:text-zinc-300 transition-colors"
         >
           新探索
+        </button>
+        <button
+          onClick={() => setPathMode(!pathMode)}
+          className={`text-[11px] px-2 py-0.5 rounded transition-colors ${pathMode ? "bg-zinc-700 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+        >
+          路径探索
         </button>
         <span className="text-[11px] text-zinc-600">|</span>
         <span className="text-[11px] text-zinc-500">
@@ -48,6 +56,10 @@ export default function ExploreView() {
 
       {/* 主内容区 */}
       <div className="flex-1 overflow-auto p-4">
+        {pathMode ? (
+          <PathExplore />
+        ) : (
+        <>
         {/* 阶段 1：种子输入 */}
         {phase === "seed" && (
           <div className="max-w-lg mx-auto">
@@ -217,6 +229,106 @@ export default function ExploreView() {
                 </div>
               ))}
             </div>
+          </div>
+        )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// S67 路径探索组件：起点 A → 终点 B 的串联路径候选
+function PathExplore() {
+  const [fromDesc, setFromDesc] = useState("");
+  const [toDesc, setToDesc] = useState("");
+  const [constraints, setConstraints] = useState("");
+  const [paths, setPaths] = useState<PathCandidate[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const run = async () => {
+    if (!toDesc.trim()) {
+      setError("请输入终点描述");
+      return;
+    }
+    setLoading(true);
+    setError("");
+    try {
+      const res = await explorePath({
+        from_desc: fromDesc.trim(),
+        to_desc: toDesc.trim(),
+        constraints: constraints
+          .split(/[\n,，]/)
+          .map((c) => c.trim())
+          .filter(Boolean),
+        n: 4,
+      });
+      setPaths(res.paths || []);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setLoading(false);
+  };
+
+  return (
+    <div className="max-w-2xl mx-auto">
+      <h3 className="text-sm font-medium text-zinc-200 mb-2">路径探索</h3>
+      <p className="text-xs text-zinc-500 mb-4">
+        起点 A → 终点 B 的串联路径候选（叙事树节点之间的桥梁）。
+      </p>
+      <div className="space-y-3">
+        <textarea
+          value={fromDesc}
+          onChange={(e) => setFromDesc(e.target.value)}
+          placeholder="起点描述（可为空）"
+          rows={2}
+          className="w-full bg-zinc-900 text-zinc-200 text-sm px-3 py-2 rounded border border-zinc-700 focus:outline-none resize-none"
+        />
+        <textarea
+          value={toDesc}
+          onChange={(e) => setToDesc(e.target.value)}
+          placeholder="终点描述（必填），例如：主角直面十年前的仇人"
+          rows={2}
+          className="w-full bg-zinc-900 text-zinc-200 text-sm px-3 py-2 rounded border border-zinc-700 focus:outline-none resize-none"
+        />
+        <input
+          value={constraints}
+          onChange={(e) => setConstraints(e.target.value)}
+          placeholder="补充设定约束（逗号分隔可选）"
+          className="w-full bg-zinc-900 text-zinc-200 text-sm px-3 py-2 rounded border border-zinc-700 focus:outline-none"
+        />
+        <div className="flex items-center gap-2">
+          <button
+            onClick={run}
+            disabled={!toDesc.trim() || loading}
+            className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 disabled:bg-zinc-800 disabled:text-zinc-600 text-zinc-200 text-sm rounded-lg transition-colors"
+          >
+            {loading ? "探索中..." : "探索路径"}
+          </button>
+          {error && <span className="text-xs text-red-400">{error}</span>}
+        </div>
+
+        {/* 结果 */}
+        {paths.length > 0 && (
+          <div className="mt-4 space-y-3">
+            <h4 className="text-xs text-zinc-500 uppercase tracking-wide">
+              候选路径（{paths.length}）
+            </h4>
+            {paths.map((p, i) => (
+              <div key={i} className="p-3 bg-zinc-900/40 rounded-lg border border-zinc-800">
+                <div className="text-[11px] text-zinc-400 mb-1">路径 {i + 1}</div>
+                <div className="space-y-1">
+                  {Array.isArray(p.events) &&
+                    p.events.map((ev, j) => (
+                      <p key={j} className="text-sm text-zinc-300 flex gap-2">
+                        <span className="text-zinc-600">{j + 1}.</span>
+                        {ev}
+                      </p>
+                    ))}
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
