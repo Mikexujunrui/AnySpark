@@ -117,6 +117,7 @@ class AppDeps:
     # --- 其他（无默认值字段必须在默认值字段前） ---
     workspace: Workspace
     recorder: RunRecorder
+    db_path: str  # 数据库文件路径（stats 等用）
 
     # --- 可选引擎（默认 None） ---
     material_digestor: MaterialDigestor | None = None
