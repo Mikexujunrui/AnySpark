@@ -1300,6 +1300,9 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
             "需要借鉴某本书/某资料的写法（句式/节奏/用词/视角）时使用——"
             "生成候选供用户确认（人工确认后生效，不自动入库）。"
             "material_id 从资料库取原文（read_material 返回的 ids），或直接传 source_text。"
+            "mode=book（拆书）：把整本书写法多维拆解（文风/节奏/结构/人设/对白/信息投放/钩子）"
+            "融合成一份「书名」skill（name=书名，一次点名拿到整本方法论）；"
+            "建议 source_text 拼接开篇+中段+高潮代表性章节（可 read_chapter 多取几章）。"
         ),
         params=[
             ParamSpec(
@@ -1312,13 +1315,22 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
                 name="source_text",
                 type="string",
                 required=False,
-                description="原文文本（与 material_id 二选一）",
+                description="原文文本（与 material_id 二选一）；拆书模式建议多章拼接",
             ),
             ParamSpec(
                 name="hint",
                 type="string",
                 required=False,
                 description="可选指引（如'侧重打斗文风'/'侧重节奏'）",
+            ),
+            ParamSpec(
+                name="mode",
+                type="string",
+                required=False,
+                description=(
+                    "writing=单维度提炼 N 条技法候选（默认）；"
+                    "book=整本书拆解融合成一份「书名」skill"
+                ),
             ),
         ],
     )
@@ -1342,17 +1354,30 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
             source_text = card.source_text.strip()
         if not source_text:
             return ToolResult(call=call, ok=False, content="需要 material_id 或 source_text。")
+        mode = str(arguments.get("mode", "writing")).strip() or "writing"
         try:
-            candidates = generator.generate(source_text, hint, 5, mode="writing")
+            if mode == "book":
+                # S78 拆书：整本书多维拆解 → 一份「书名」skill（大窗口，单条）
+                candidates = generator.generate(source_text, hint, 1, mode="book")
+                tag = "拆书 skill"
+            else:
+                candidates = generator.generate(source_text, hint, 5, mode="writing")
+                tag = "skill 候选"
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"提炼失败：{exc}")
         if not candidates:
             return ToolResult(call=call, ok=False, content="提炼失败（无有效候选）。")
-        lines = [f"【skill 候选 {len(candidates)} 条（待人工确认，不自动生效）】"]
+        lines = [f"【{tag} {len(candidates)} 条（待人工确认，不自动生效）】"]
         for i, c in enumerate(candidates, 1):
             name = c.get("name", f"候选{i}")
             desc = str(c.get("description", ""))[:60]
             lines.append(f"{i}. {name}：{desc}")
+        if mode == "book":
+            content = str(candidates[0].get("content", ""))
+            lines.append(
+                f"   （整本方法论 {len(content)} 字，分小节："
+                "文风/节奏/结构/人设/对白/信息投放/钩子）"
+            )
         lines.append("（确认后由用户走技能确认流程生效）")
         return ToolResult(call=call, ok=True, content="\n".join(lines))
 
