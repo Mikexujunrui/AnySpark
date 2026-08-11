@@ -50,7 +50,6 @@ from anyspark.check import compile_rule, compile_with_model, run_review
 from anyspark.core import (
     Agent,
     CancellationToken,
-    Conversation,
     Message,
     Model,
     RetryingModel,
@@ -64,15 +63,10 @@ from anyspark.explore import (
     run_roleplay,
 )
 from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
-from anyspark.models import DEFAULT_BASE_URL, DeepSeekModel
+from anyspark.models import DeepSeekModel
 from anyspark.models.registry import (
-    DEFAULT_CONTEXT_WINDOW,
-    DEFAULT_MAX_TOKENS,
-    DEFAULT_TEMPERATURE,
-    ModelConfig,
     ModelProvider,
     ModelRegistry,
-    slugify,
 )
 from anyspark.play import PlayEngine, PlayStore
 from anyspark.review import ReviewPanel
@@ -81,6 +75,7 @@ from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.recorder import RunRecorder
+from anyspark.server.routes_conversations import make_conversations_router
 from anyspark.server.schemas import (
     AgencyGenerateIn,
     AgencyIn,
@@ -102,7 +97,6 @@ from anyspark.server.schemas import (
     ChatResponse,
     CheckRequest,
     CodexIn,
-    ConversationRenameIn,
     DirectionIn,
     ExploreArchiveIn,
     ExploreCardsIn,
@@ -124,7 +118,6 @@ from anyspark.server.schemas import (
     ManualEntryIn,
     ManualEntryPatch,
     MaterialIn,
-    ModelIn,
     PathExploreIn,
     PlayBranchIn,
     PlayChooseIn,
@@ -565,6 +558,7 @@ def build_app(
         graph_injector=graph_injector,
         graph_verifier=graph_verifier,
         budget=budget,
+        window=_window,
         workflow_generator=workflow_generator,
         workflow_engine=workflow_engine,
         play_engine=play_engine,
@@ -590,132 +584,12 @@ def build_app(
         return review_for_learning(deps, *args, **kwargs)
 
     start_bg_worker(deps)
+    app.include_router(make_conversations_router(deps))
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
         name = getattr(model, "model_name", "unknown")
         return {"status": "ok", "model": str(name), "log": log_path()}
-
-    # -----------------------------------------------------------------------
-    # S58c 会话继承（参考 pi forkFrom：链条 parent 指针 + 复制源消息）
-    # -----------------------------------------------------------------------
-    @app.get("/api/conversations", response_model=list[dict[str, Any]])
-    def list_conversations() -> list[dict[str, Any]]:
-        """会话列表（含继承链条：parent_id/fork_point，可追溯）。"""
-        convs = store.list_conversations()
-        return [
-            {
-                "id": c.id,
-                "created_at": c.created_at,
-                "parent_id": c.parent_id,
-                "fork_point": c.fork_point,
-                "title": c.title,
-                "message_count": len(store.messages(c.id)),
-            }
-            for c in reversed(convs)  # 新的在前
-        ]
-
-    @app.post("/api/conversations/{conv_id}/fork", response_model=dict[str, Any])
-    def fork_conversation(conv_id: str, fork_point: str = "") -> dict[str, Any]:
-        """S58c 继承派生：从当前会话创建继承它的新会话（链条可追溯）。
-
-        新会话复制源会话消息（接着上次聊）+ parent_id 指向源会话；
-        前端/agent 用它实现"继承并新开会话"。源不存在 → 404。
-        """
-        child = store.fork(conv_id, fork_point=fork_point or "从会话末尾继承")
-        if child is None:
-            raise HTTPException(status_code=404, detail=f"源会话不存在: {conv_id}")
-        chain: list[str] = []
-        cur: Conversation | None = child
-        while cur is not None:
-            chain.append(cur.id)
-            cur = store.get(cur.parent_id) if cur.parent_id else None
-        return {
-            "conversation_id": child.id,
-            "parent_id": child.parent_id,
-            "fork_point": child.fork_point,
-            "chain": chain,  # [新会话, 源, 源的源...] 继承链条
-        }
-
-    @app.put("/api/conversations/{conv_id}", response_model=dict[str, bool])
-    def rename_conversation(conv_id: str, req: ConversationRenameIn) -> dict[str, bool]:
-        """重命名会话。"""
-        conv = store.get(conv_id)
-        if conv is None:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        conv.title = req.title
-        store.save(conv)
-        return {"ok": True}
-
-    @app.get("/api/conversations/{conv_id}/messages", response_model=list[dict[str, Any]])
-    def get_conversation_messages(conv_id: str) -> list[dict[str, Any]]:
-        """获取会话的全部消息（F4a：会话历史恢复）。"""
-        conv = store.get(conv_id)
-        if conv is None:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        msgs = store.messages(conv_id)
-        return [{"role": m.role, "content": m.content} for m in msgs]
-
-    @app.delete("/api/conversations/{conv_id}", response_model=dict[str, bool])
-    def delete_conversation(conv_id: str) -> dict[str, bool]:
-        """删除会话及其所有消息。"""
-        conv = store.get(conv_id)
-        if conv is None:
-            raise HTTPException(status_code=404, detail="会话不存在")
-        store.delete(conv_id)
-        return {"ok": True}
-
-    # -----------------------------------------------------------------------
-    # S47 运行时模型配置：注册表 CRUD + 激活切换（换供应商/换模型/选思考强度）
-    # -----------------------------------------------------------------------
-    @app.get("/api/models", response_model=dict[str, Any])
-    def list_models() -> dict[str, Any]:
-        cfgs = models.list()
-        active_id = next((c.id for c in cfgs if c.is_active), cfgs[0].id if cfgs else None)
-        return {"active_id": active_id, "models": [c.to_dict() for c in cfgs]}
-
-    @app.post("/api/models", response_model=dict[str, Any])
-    def upsert_model(req: ModelIn) -> dict[str, Any]:
-        """新增或更新模型配置（同 id 覆盖；id 缺省由 name 生成 slug）。"""
-        from anyspark.models import validate_thinking
-
-        try:
-            validate_thinking(req.thinking)  # 非法思考强度 → 400（尽早暴露配置错误）
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        cfg = ModelConfig(
-            id=req.id or slugify(req.name),
-            name=req.name,
-            base_url=req.base_url or DEFAULT_BASE_URL,
-            model=req.model,
-            api_key=req.api_key,
-            context_window=req.context_window or DEFAULT_CONTEXT_WINDOW,
-            max_tokens=req.max_tokens or DEFAULT_MAX_TOKENS,
-            temperature=req.temperature or DEFAULT_TEMPERATURE,
-            thinking=req.thinking,
-        )
-        saved = models.upsert(cfg)
-        return {"ok": True, "model": saved.to_dict(), "active": saved.is_active}
-
-    @app.delete("/api/models/{model_id}", response_model=dict[str, Any])
-    def delete_model(model_id: str) -> dict[str, Any]:
-        if not models.delete(model_id):
-            raise HTTPException(status_code=400, detail="无法删除：至少保留一条配置，或配置不存在")
-        return {"ok": True}
-
-    @app.post("/api/models/{model_id}/activate", response_model=dict[str, Any])
-    def activate_model(model_id: str) -> dict[str, Any]:
-        """切换当前激活模型——所有组件（Agent/抽取/检测/探索/后台）即时跟随。"""
-        cfg = models.activate(model_id)
-        if cfg is None:
-            raise HTTPException(status_code=404, detail=f"模型配置不存在: {model_id}")
-        if cfg.context_window != _window:
-            logger.warning(
-                "模型窗口 %d != token 预算窗口 %d——重启后预算按新窗口生效（S26）",
-                cfg.context_window,
-                _window,
-            )
-        return {"ok": True, "active": cfg.to_dict()}
 
     @app.post("/api/chat/cancel")
     def cancel_chat(

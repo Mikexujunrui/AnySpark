@@ -112,6 +112,7 @@ class AppDeps:
     graph_injector: GraphInjector
     graph_verifier: GraphVerifier
     budget: TokenBudget
+    window: int  # token 预算窗口（模型上下文窗口，activate_model 校验用）
 
     # --- 其他（无默认值字段必须在默认值字段前） ---
     workspace: Workspace
