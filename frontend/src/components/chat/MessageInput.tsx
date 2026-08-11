@@ -7,14 +7,11 @@ export default function MessageInput({
   setInput,
   streaming,
   uploading,
-  agentMode,
   autonomousMode,
   onAutonomousToggle,
   onSend,
   onCancel,
   onUpload,
-  onTransform,
-  onModeToggle,
   showSlash,
   setShowSlash,
   setSlashFilter,
@@ -64,30 +61,6 @@ export default function MessageInput({
       >
         <Icon name="paperclip" size={16} />
       </button>
-      <button
-        onClick={onModeToggle}
-        disabled={streaming || uploading}
-        title={agentMode === 'write' ? 'Write 模式：可提取设定、写章节、编辑知识库' : 'Plan 模式：只读，可检索浏览知识库'}
-        className={`rounded-lg px-2.5 h-7 text-[11px] font-medium transition-colors shrink-0 flex items-center gap-1 ${
-          agentMode === 'write'
-            ? 'bg-emerald-900/40 text-emerald-400 border border-emerald-800'
-            : 'bg-amber-900/40 text-amber-400 border border-amber-800'
-        }`}
-      >
-        <Icon name={agentMode === 'write' ? 'pen-tool' : 'search'} size={12} />
-        {agentMode === 'write' ? 'Write' : 'Plan'}
-      </button>
-      {onTransform && (
-        <button
-          onClick={onTransform}
-          disabled={streaming || uploading}
-          title="全书变换 — 对全书执行批量查找替换、文风调整等"
-          className="rounded-lg px-2.5 h-7 text-[11px] font-medium transition-all shrink-0 flex items-center gap-1 bg-violet-900/30 text-violet-300 border border-violet-800/60 hover:bg-violet-900/50 hover:border-violet-700 active:scale-95 disabled:opacity-40"
-        >
-          <Icon name="layers" size={12} />
-          全书变换
-        </button>
-      )}
       {onAutonomousToggle && (
         <button
           onClick={onAutonomousToggle}

@@ -201,6 +201,12 @@ export default function MessageList({
     >
       {(Array.isArray(messages) ? messages : []).map((msg, i) => (
         <div key={i} className={`flex min-w-0 gap-3 group ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+          {msg.role === 'tool' ? (
+            <div className="w-full text-center">
+              <span className="inline-block text-[10px] text-zinc-600 bg-zinc-800/40 px-2 py-0.5 rounded">{msg.text}</span>
+            </div>
+          ) : (
+          <>
           {msg.role === 'agent' && (
             <div className="w-7 h-7 rounded-lg bg-sky-900/40 border border-sky-800/60 flex items-center justify-center shrink-0 mt-0.5">
               <Icon name="lightbulb" size={13} className="text-sky-400" />
@@ -270,6 +276,8 @@ export default function MessageList({
               </button>
             )}
           </div>
+          </>
+          )}
         </div>
       ))}
       {(streaming || uploading) && (

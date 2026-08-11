@@ -26,11 +26,13 @@ export interface SSEOptions {
   autoModeEnabled: boolean
 }
 
-export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onError }: SSEOptions & SSECallbacks) {
+export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onMetrics, onError }: SSEOptions & SSECallbacks) {
   const [streaming, setStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
   const convIdRef = useRef<string | null>(null)
+  const toolNamesRef = useRef<Record<string, number>>({})
+  const toolCallsRef = useRef(0)
 
   useEffect(() => {
     mountedRef.current = true
@@ -46,6 +48,8 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
     abortRef.current = controller
     setStreaming(true)
     convIdRef.current = null
+    toolNamesRef.current = {}
+    toolCallsRef.current = 0
     let streamingStarted = false
 
     try {
@@ -88,9 +92,13 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
             }
             break
           }
-          case 'tool_call':
-            onMessage?.({ type: 'tool', text: `[工具调用: ${String((data as Record<string, unknown>)?.name || '')}]` })
+          case 'tool_call': {
+            const name = String((data as Record<string, unknown>)?.name || '')
+            toolCallsRef.current += 1
+            if (name) toolNamesRef.current[name] = (toolNamesRef.current[name] || 0) + 1
+            onMessage?.({ type: 'tool', text: `[工具调用: ${name}]` })
             break
+          }
           case 'tool_execution_start':
             onMessage?.({ type: 'tool', text: `[正在执行: ${String((data as Record<string, unknown>)?.name || '')}…]` })
             break
@@ -102,6 +110,14 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
             if (data?.conversation_id) convIdRef.current = String(data.conversation_id)
             if (mountedRef.current) {
               onProgress?.(null)
+              // 工具调用轨迹（RunLedger 展示）
+              onMetrics?.({
+                rounds: 1,
+                llm_calls: toolCallsRef.current + 1,
+                tool_calls: toolCallsRef.current,
+                tool_names: toolNamesRef.current,
+                finish_reason: 'done',
+              })
               onKnowledgeChanged?.()
             }
             break

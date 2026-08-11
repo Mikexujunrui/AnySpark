@@ -8,7 +8,6 @@ import WritingPreview from './chat/WritingPreview'
 import TaskListPanel from './chat/TaskListPanel'
 import WorkflowProgress from './chat/WorkflowProgress'
 import ConfirmModal from './ui/ConfirmModal'
-import BookTransformPanel from './BookTransformPanel'
 import RunLedger from './chat/RunLedger'
 import AutopilotConsole from './chat/AutopilotConsole'
 import { api } from "../api"
@@ -51,8 +50,6 @@ const RECOMMENDED_CONSTITUTION = `# 本书创作规则（示例模板，可按�
 
 export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transformSignal }: { bookId: string; sessionId: string; autoModeEnabled: boolean; transformSignal: number }) {
   const welcomeMsg = { role: 'agent', text: '你好！我是你的 AI 写作助手 Agent。\n\n'
-    + '**Plan 模式**: 只读 — 浏览知识库、检索数据、规划剧情\n'
-    + '**Write 模式**: 读写 — 提取设定、章节书写、编辑知识库\n\n'
     + '我会先理解你的内容类型，再自动选择最佳处理方式。\n'
     + '在输入框输入 `/` 可查看所有快捷命令和技能。\n\n'
     + '**提示**: 斜杠命令（如 `/w`、`/s`）走快速通道直达对应工具，自然语言描述走 Agent 智能路由。两者都能完成相同任务，选择你习惯的方式即可。' }
@@ -61,7 +58,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const [loaded, setLoaded] = useState(false)
   const [input, setInput] = useState('')
   const [uploading, setUploading] = useState(false)
-  const [agentMode, setAgentMode] = useState('write')
   const [progress, setProgress] = useState(null)
   const [question, setQuestion] = useState(null)
   const [plotCards, setPlotCards] = useState(null)
@@ -77,8 +73,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const [patchData, setPatchData] = useState(null)
   const [metrics, setMetrics] = useState(null)  // Agent run metrics for Run Ledger
   const [revertIdx, setRevertIdx] = useState(null)
-  const [showTransform, setShowTransform] = useState(false)
-  const [transformStyles, setTransformStyles] = useState([])
   const [autopilotState, setAutopilotState] = useState(null)
   const [autopilotBridge, setAutopilotBridge] = useState(null)
   const autopilotAbortRef = useRef(null)
@@ -117,7 +111,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const { sendMessage: sseSend, cancel: sseCancel, streaming } = useSSE({
     bookId,
     sessionId,
-    agentMode,
+    agentMode: 'write',
     autoModeEnabled,
     onMessage: (event) => {
       if (event.type === 'start') {
@@ -142,6 +136,11 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
             parts: event.parts,
             metrics: event.metrics,
           }])
+        }
+      } else if (event.type === 'tool') {
+        // V4 工具调用轨迹（精简展示：不污染正文流）
+        if (event.text) {
+          setMessages(prev => [...prev, { role: 'tool', text: event.text }])
         }
       } else if (event.type === 'attach_parts') {
         // Attach parts to the last streaming agent message
@@ -839,25 +838,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     setAutonomousMode(next)
   }
 
-  async function handleOpenTransform() {
-    try {
-      const data = await api.getStyles()
-      setTransformStyles(data.styles || [])
-    } catch {
-      setTransformStyles([])
-    }
-    setShowTransform(true)
-  }
-
-  // Open transform panel when signalled from AutopilotModal (sibling)
-  useEffect(() => {
-    if (transformSignal > 0) handleOpenTransform()
-  }, [transformSignal])
-
-  function handleTransformSend(message) {
-    setMessages(prev => [...prev, { role: 'user', text: message }])
-    sseSend(message)
-  }
 
   // ── Autopilot control handlers ──
   async function handleAutopilotPause() {
@@ -1103,12 +1083,9 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
                 setInput={setInput}
                 streaming={streaming}
                 uploading={uploading}
-                agentMode={agentMode}
                 onSend={sendMessage}
                 onCancel={handleCancel}
                 onUpload={handleUpload}
-                onTransform={handleOpenTransform}
-                onModeToggle={() => setAgentMode(agentMode === 'write' ? 'plan' : 'write')}
                 autonomousMode={autonomousMode}
                 onAutonomousToggle={handleAutonomousToggle}
                 showSlash={showSlash}
@@ -1178,13 +1155,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         </div>
         </>
       )}
-
-      <BookTransformPanel
-        open={showTransform}
-        onClose={() => setShowTransform(false)}
-        onSend={handleTransformSend}
-        styles={transformStyles}
-      />
 
       <ConfirmModal
         open={revertIdx !== null}
