@@ -170,7 +170,7 @@ export default function FullGraphView({ bookId }: { bookId: string }) {
   entities.forEach(e => { byName[e.name] = e })
 
   return (
-    <div className="h-full flex flex-col relative">
+    <div className="h-full w-full flex flex-col relative">
       {/* 工具条 */}
       <div className="h-8 bg-zinc-900/50 border-b border-zinc-800/50 flex items-center px-3 gap-1.5 shrink-0">
         <span className="text-[11px] text-zinc-500 mr-1">图谱视图</span>
