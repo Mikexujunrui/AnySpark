@@ -1,70 +1,67 @@
-import { apiFetch } from "./client";
+// Chapters / Volumes / Notes / Export / Outline / History — V4 适配层
+// 壳的多项目 → V4 的 book_id 参数化端点；大纲≈计划；版本历史降级。
+import { del, diagLog, get, post, put } from "./http";
 import type { Chapter } from "../types";
 
-// 定点编辑操作定义（S44）
-export interface PatchOperation {
-  op: "insert" | "delete" | "replace";
-  anchor: string; // 锚点文本（定位段落）
-  text?: string; // insert/replace 用
-}
+// ── Chapters（章节）──
+export const getChapters = (bookId: string): Promise<unknown[]> =>
+  get(`/api/chapters?book_id=${bookId}`);
+// 兼容旧 V4 调用（BatchPanel 等）：无参返回 main 书章节
+export const listChapters = (): Promise<Chapter[]> =>
+  get<Chapter[]>("/api/chapters?book_id=main");
+export const createChapter = (_bookId: string, data: unknown): Promise<unknown> =>
+  post("/api/chapters", { ...(data as object), book_id: _bookId });
+export const updateChapter = (_bookId: string, chapterId: string, data: unknown): Promise<unknown> =>
+  put(`/api/chapters/${chapterId}`, data);
+export const deleteChapter = (_bookId: string, chapterId: string): Promise<unknown> =>
+  del(`/api/chapters/${chapterId}`);
 
-export interface PatchResult {
-  ok: boolean;
-  op: string;
-  anchor: string;
-  error?: string;
-}
+// ── Volumes：V4 无卷概念，降级（兼容任意调用签名）──
+export const getVolumes = (..._args: unknown[]): Promise<{ volumes: unknown[] }> =>
+  Promise.resolve({ volumes: [] });
 
-export interface ChapterPatch {
-  title: string;
-  ok: boolean;
-  results: PatchResult[];
-  chars: number;
-}
+// ── Chapter reorder：V4 无重排端点，降级（本地排序由前端处理）──
+export const reorderChapters = (..._args: unknown[]): Promise<{ ok: boolean; count: number }> =>
+  Promise.resolve({ ok: true, count: 0 });
 
-// 列出所有章节
-export function listChapters(): Promise<Chapter[]> {
-  return apiFetch<Chapter[]>("/api/chapters");
-}
+// ── Notes：V4 无书笔记，降级 ──
+export const getNotes = (): Promise<unknown[]> => Promise.resolve([]);
+export const addBookNote = (): Promise<unknown> => Promise.resolve({ ok: true });
+export const deleteBookNote = (): Promise<unknown> => Promise.resolve({ ok: true });
 
-// 获取单个章节
-export function getChapter(id: string): Promise<Chapter> {
-  return apiFetch<Chapter>(`/api/chapters/${id}`);
-}
+// ── Export（导出）──
+export const exportBook = (_bookId: string, format?: string): Promise<Response> => {
+  const url = `/api/export/book?format=${format || "txt"}`;
+  diagLog.info(`GET ${url} — 导出请求`);
+  return fetch(url);
+};
 
-// 创建章节
-export function createChapter(title: string): Promise<Chapter> {
-  return apiFetch<Chapter>("/api/chapters", {
-    method: "POST",
-    body: JSON.stringify({ title, book_id: "main", content: "" }),
-  });
-}
+// ── Chapter status：V4 无 promote/demote，降级（兼容任意调用签名）──
+export const promoteChapter = (..._args: unknown[]): Promise<{ status: string }> =>
+  Promise.resolve({ status: "ok" });
+export const demoteChapter = (..._args: unknown[]): Promise<{ status: string }> =>
+  Promise.resolve({ status: "ok" });
 
-// 删除章节
-export function deleteChapter(id: string): Promise<void> {
-  return apiFetch<void>(`/api/chapters/${id}`, {
-    method: "DELETE",
-  });
-}
+// ── Outline（大纲 ≈ V4 计划）──
+export const getOutline = (bookId: string): Promise<unknown> => {
+  return get<unknown[]>("/api/plan").then((plans) => ({
+    outline: (plans as any[]).filter((p) => !p.book_id || p.book_id === bookId),
+  }));
+};
+export const getDetailedOutline = (bookId: string): Promise<unknown> => getOutline(bookId);
 
-// 更新章节内容
-export function patchChapter(
-  id: string,
-  data: { content: string }
-): Promise<Chapter> {
-  return apiFetch<Chapter>(`/api/chapters/${id}`, {
-    method: "PUT",
-    body: JSON.stringify(data),
-  });
-}
+// ── Chapter history / versions：V4 无版本历史 API，降级（兼容任意调用签名）──
+export const getChapterHistory = (..._args: unknown[]): Promise<unknown[]> => Promise.resolve([]);
+export const getChapterVersion = (..._args: unknown[]): Promise<unknown> => Promise.resolve(null);
+export const revertChapter = (..._args: unknown[]): Promise<unknown> => Promise.resolve({ ok: true });
+export const deleteChapterVersion = (..._args: unknown[]): Promise<unknown> => Promise.resolve({ ok: true });
 
-// S44：定点编辑（锚点段插入/删除/替换，不重写整章，省 token）
-export function patchChapterContent(
-  id: string,
-  operations: PatchOperation[]
-): Promise<ChapterPatch> {
-  return apiFetch<ChapterPatch>(`/api/chapters/${id}/patch`, {
-    method: "POST",
-    body: JSON.stringify({ operations }),
-  });
-}
+// ── Deep style / emotional curve：V4 无，降级 ──
+export const triggerDeepStyle = (): Promise<unknown> => Promise.resolve({});
+export const getDeepStyle = (): Promise<unknown> => Promise.resolve({});
+export const triggerEmotionalCurve = (): Promise<unknown> => Promise.resolve({});
+export const getEmotionalCurve = (): Promise<unknown> => Promise.resolve({});
+
+// ── Worldbuilding entry edit：V4 设定档用 /api/settings，映射 ──
+export const updateWorldbuildingEntry = (id: string, data: unknown): Promise<unknown> =>
+  put(`/api/settings/${id}`, data);

@@ -3421,9 +3421,72 @@ def build_app(
             },
         )
 
+    # ------------------------------------------------------------------
+    # 书架（S79 壳移植：多项目入口）——项目=book_id，工作区目录即项目
+    # ------------------------------------------------------------------
+    @app.get("/api/books", response_model=list[dict[str, Any]])
+    def list_books() -> list[dict[str, Any]]:
+        """枚举全部项目（书架）：工作区子目录 + 章节统计 + 简介摘要。"""
+        root = workspace.root
+        books: list[dict[str, Any]] = []
+        for d in sorted(root.iterdir()):
+            if not d.is_dir() or d.name.startswith(".") or d.name == "__pycache__":
+                continue
+            book_id = d.name
+            chs = chapters.list_by_book(book_id)
+            total_chars = sum(len(c.content or "") for c in chs)
+            brief = workspace.read_brief(book_id)
+            books.append(
+                {
+                    "id": book_id,
+                    "title": book_id,
+                    "chapterCount": len(chs),
+                    "totalChars": total_chars,
+                    "brief": brief[:200] if brief else "",
+                    "updatedAt": max((c.updated_at for c in chs), default=""),
+                }
+            )
+        return books
+
+    @app.post("/api/books", response_model=dict[str, Any])
+    def create_book(req: BriefIn) -> dict[str, Any]:
+        """创建项目：book_id 即项目目录（防穿越消毒）；重复返回已存在。"""
+        from anyspark.server.workspace import _safe_title
+
+        book_id = _safe_title(req.content.strip() or req.book_id)
+        if not book_id:
+            raise HTTPException(status_code=422, detail="项目名不能为空")
+        d = workspace.project_dir(book_id)
+        if list(d.iterdir()):
+            raise HTTPException(status_code=409, detail=f"项目已存在: {book_id}")
+        # 初始化 brief 占位（用户后续可在简介面板编辑）
+        workspace.write_brief(book_id, f"# {book_id}\n\n（新建项目——请填写项目简介）")
+        return {
+            "id": book_id,
+            "title": book_id,
+            "chapterCount": 0,
+            "totalChars": 0,
+            "brief": f"# {book_id}",
+            "updatedAt": "",
+        }
+
+    @app.delete("/api/books/{book_id}")
+    def delete_book(book_id: str) -> dict[str, Any]:
+        """删除项目：仅删工作区目录（库数据保留，防误删——重建同名项目可找回）。"""
+        from anyspark.server.workspace import _safe_title
+
+        safe = _safe_title(book_id)
+        d = workspace.project_dir(safe)
+        if not d.exists():
+            raise HTTPException(status_code=404, detail=f"项目不存在: {book_id}")
+        import shutil
+
+        shutil.rmtree(d, ignore_errors=True)
+        return {"ok": True, "deleted": safe}
+
     @app.get("/api/chapters", response_model=list[ChapterOut])
-    def list_chapters() -> list[ChapterOut]:
-        items = chapters.list_by_book("main")
+    def list_chapters(book_id: str = "main") -> list[ChapterOut]:
+        items = chapters.list_by_book(book_id)
         return [
             ChapterOut(
                 id=c.id,
