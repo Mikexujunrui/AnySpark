@@ -84,6 +84,15 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 固化：方向卡 → explore/archive（项目档案）；约束 → setting_constraints（⚠️断链见审计）
 ```
 
+### 2.5 拆书链路（S78：参考书 → 「书名」skill → 点名注入）
+```
+用户"拆这本书" → skill_refine(mode=book, source_text=开篇+中段+高潮拼接)
+  → GENERATE_PROMPT_BOOK 多维拆解（文风/节奏/结构/人设/对白/信息投放/钩子）
+  → 融合成一份「书名」skill 候选（name=书名，target=both，人工确认闸门）
+  → 确认后入库 skills 表
+  → 写"这本书风格"时 write_chapter 的 skills 点名「书名」→ 整本方法论注入
+```
+
 ## 3. 路由层职责表（15 router，~164 端点）
 
 | Router | 端点区 | 核心依赖 |
@@ -117,7 +126,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | setting_query | 设定档查证 | enable_domain |
 | search_chapters / read_context | 正文检索/锚点阅读 | enable_domain |
 | mind_register / mind_manage | 心智登记/管理 | enable_domain |
-| skill_refine | 技巧提炼候选 | enable_domain |
+| skill_refine | 技巧提炼候选 / 拆书（mode=book 整本书多维拆解→融合「书名」skill，S78） | enable_domain |
 | role_play | 角色推演 | enable_domain |
 | ingest_document | 资料消化（⚠️与端点重复见审计） | enable_domain |
 | register_tool | 扩展工具注册 | enable_domain |
