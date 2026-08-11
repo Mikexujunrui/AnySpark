@@ -1,6 +1,6 @@
-@startuml AnySpark v4 - Sequence: 约束机制（S83）
+@startuml AnySpark v4 - Sequence: 知识选择性注入（S85 约束归零）
 !theme plain
-title AnySpark v4 — 顺序图：约束注入（全局 + 当前情景实体子集）
+title AnySpark v4 — 顺序图：知识选择性注入（图谱/设定/技能=约束，直接注入不匹配）
 skinparam sequenceMessageAlign center
 skinparam responseMessageBelowArrow true
 
@@ -9,25 +9,28 @@ participant "routes_settings\n/routes_settings" as S
 participant "WorldSettingStore\n/align.worldsettings" as WS
 participant "agent_factory\n/agent_factory" as AF
 participant "GraphStore\n/graph.schema" as GS
+participant "WritingSkillStore\n/align.skills" as SK
 participant "Agent 循环\n/core.loop" as Agent
 participant "routes_explore\n/routes_explore" as EX
 participant "探索引擎\n/explore" as Exp
 
-== 约束写入（人工 / 提炼） ==
-User -> S: POST /api/settings（is_constraint=1, entities=雾城）
-S -> WS: add(is_constraint, entities)
-User -> S: POST /api/settings（is_constraint=1, 无 entities=全局约束）
+== 知识写入（设定=全书固定，图谱=动态事实） ==
+User -> S: POST /api/settings（世界观规则/人物卡/地点…）
+S -> WS: add(category, content)
+User -> Agent: 写作产生章节
+Agent -> GS: 章节落盘 → 后台图谱抽取（实体/关系/事件）
 
-== 写作注入（当前时空点实体子集） ==
-User -> Agent: 写涉及雾城的章节
+== 写作注入（选择性，按当前需要直接给模型） ==
+User -> Agent: 新写作任务
 Agent -> AF: make_agent → 注入块装配
-AF -> WS: list_constraints(book_id)
-AF -> GS: known_facts（当前时空点实体：雾城…）
-AF -> AF: render_constraints_block（全局 + 与情景实体交集）
-AF --> Agent: 注入块「作品约束（必须遵守的规则）」
+AF -> GS: known_facts（当前时空点已固化事实）
+AF -> WS: list（设定档，渐进式披露：超阈值索引+按需查）
+AF -> SK: render_skill_index（技巧索引常驻+skill_lookup 按需）
+AF -> AF: 注入块拼接（事实/设定/心智/技巧/倾向…）
+AF --> Agent: 完整系统提示（模型自己读、自己判断哪些适用）
 
-== 探索注入（情景描述实体子集） ==
-User -> EX: POST /api/explore/path（from=雾城钟表铺）
-EX -> WS: list_constraints + constraint_texts（from/to 提及实体）
-EX -> Exp: explore_path(constraints=全局+雾城相关+临时)
+== 探索注入（设定档规则直接作为约束墙） ==
+User -> EX: POST /api/explore/path
+EX -> WS: list（'世界观规则'类别条目，直接全量）
+EX -> Exp: explore_path(constraints=规则条目+临时)
 @enduml

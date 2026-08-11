@@ -32,7 +32,7 @@
 | [sequence_chat.puml](sequence_chat.puml) | **主对话流程**：用户 → routes_chat → Agent 循环 → 模型 → 工具 → 响应；SSE/插话/取消 |
 | [sequence_mind.puml](sequence_mind.puml) | **心智数据流**（对齐闭环）：操作 → 信号 → 后台提炼 → manual → MindPlanner → 注入 |
 | [sequence_graph.puml](sequence_graph.puml) | **图谱生命周期**：章节 → 后台抽取 → 入库 → 时空点注入/查询 → 伏笔回收 |
-| [sequence_constraints.puml](sequence_constraints.puml) | **约束机制（S83）**：约束写入 → 写作注入（全局+情景实体子集）→ 探索注入 |
+| [sequence_constraints.puml](sequence_constraints.puml) | **知识选择性注入（S85 约束归零）**：图谱/设定/技能=约束，直接注入不匹配，模型判断；探索用设定档规则作约束墙 |
 | [sequence_explore.puml](sequence_explore.puml) | **探索-判别双循环**：意图理解 → 并行 4 探索者 → 方向卡 → 判别固化 |
 | [sequence_workflow.puml](sequence_workflow.puml) | **工作流执行**：任务创建 → 顺序/分支/循环调度 → 断点恢复 → 人工确认 |
 

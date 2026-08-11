@@ -81,7 +81,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
   → DirectionCard（方向卡+维度+项目档案）
   → 判别选优（LLM 判别器 + 用户在环选择）
   → path 定向再探索（A→B 桥）/ roleplay（场景内 N 路+判别）
-固化：方向卡 → explore/archive（项目档案）；约束 → setting_constraints（⚠️断链见审计）
+固化：方向卡 → explore/archive（项目档案）；约束 = 设定档"世界观规则"类别条目直接注入（不匹配，模型判断）
 ```
 
 ### 2.5 拆书链路（S78：参考书 → 「书名」skill → 点名注入）
@@ -195,7 +195,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 
 | # | 发现 | 位置 | 建议 |
 |---|---|---|---|
-| G1 ✅ | ~~setting_constraints 表生产只读不写（断链）~~ → **约束机制落地**：约束=设定档规则类别+实体标签（S83），settings API 人工写入，探索/写作按当前情景实体取子集注入；setting_constraints 表删除 |
+| G1 ✅ | ~~setting_constraints 表生产只读不写（断链）~~ → **S85 约束归零**：约束=选择性注入的知识库本身（图谱/设定/技能都是约束），不做独立概念/匹配；探索约束=设定档"世界观规则"类别直接注入 + 请求临时约束；setting_constraints 表删除 |
 
 ### 🟡 冗余 / 混淆风险
 

@@ -2536,3 +2536,25 @@ typecheck/lint/build）。
 **审计修复**：R1 JSON 解析 8 处→core/jsonutil 共享（2 worker 并行）；R2 ingest 编排抽 server/ingest.py；Y1 review 加 run_review_panel 别名。
 
 **验证**：总闸全绿（421 pytest）+ 约束全链路（注入/跳过/探索/API）+ 解析替换测试全过。
+
+---
+
+## S85 约束归零 + 三项修复（已完成 ✅，commit af2f130）
+
+**主人定夺**：约束 = 选择性注入的知识库本身（图谱/设定/技能都是约束），**不需要独立的约束概念**，更不做字符匹配——注入后模型自己读、自己判断（符合"相信模型能力"极简哲学）。
+
+**约束归零回退**：
+- 删 S83 的 is_constraint/entities 字段、render_constraints_block/constraint_texts 匹配、constraints 注入块
+- 探索约束 = 设定档"世界观规则"类别条目直接注入 + req.constraints（不匹配）
+- setting_constraints 表保持删除（独立概念本来就不该有）
+
+**三项修复**（逻辑图审查发现，主人确认 1/4/6）：
+1. **图谱断链**：章节手动编辑（PUT/PATCH）后挂后台图谱抽取（对齐 write_chapter 链路，防图谱与正典漂移）；BgTask 加 book_id（多项目按书隔离）
+2. **后台优先级**：批量任务（batch_rewrite/review，用户同步等待）独立队列 + 独立 worker，不与图谱抽取串行混排
+3. **check 路由归类**：check/check-rule 从 routes_explore 拆出独立 routes_check.py
+
+**主人澄清的设计理解**（2/5 非问题）：
+- 心智输入依赖用户操作 = 设计本义（学习习惯后才自动，没学过就自动=垃圾）
+- 设定（全书固定）vs 图谱（动态事实）类型不同不冲突
+
+**验证**：总闸全绿（420 pytest）+ 手动编辑触发抽取（日志实证）+ 批量轮询 0 即 done
