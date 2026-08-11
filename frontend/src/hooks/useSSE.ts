@@ -59,7 +59,7 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
         body: JSON.stringify({
           message: msg,
           conversation_id: sessionId || undefined,
-          model_id: agentMode || undefined,
+          // 不传 model_id：后端用默认激活模型（避免 'write' 等假模型名）
         }),
         signal: controller.signal,
       })
