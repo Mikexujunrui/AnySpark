@@ -118,6 +118,7 @@ class UncensorIn(BaseModel):
 
     book_id: str = "main"
     enabled: bool = True
+    custom_prompt: str = ""  # S87：自定义破限提示词（空=用内置默认）
 
 
 class CodexIn(BaseModel):

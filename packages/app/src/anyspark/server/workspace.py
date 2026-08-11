@@ -112,14 +112,30 @@ class Workspace:
         """该书是否开启破限模式（写作自由度：不设题材禁区）。"""
         return self.uncensored_flag(book_id).exists()
 
-    def set_uncensored(self, book_id: str = "main", enabled: bool = True) -> bool:
-        """设置破限开关（True=开）。返回设置后的状态。"""
+    def set_uncensored(
+        self, book_id: str = "main", enabled: bool = True, custom_prompt: str | None = None
+    ) -> bool:
+        """设置破限开关（True=开）。custom_prompt 非空写入标志文件（自定义提示词）；
+        空且已存在则清空内容（回默认）；enabled=False 删标志。返回设置后的状态。"""
         f = self.uncensored_flag(book_id)
         if enabled:
-            f.touch(exist_ok=True)
+            if custom_prompt is not None and custom_prompt.strip():
+                f.write_text(custom_prompt.strip(), encoding="utf-8")
+            elif f.exists() and f.read_text(encoding="utf-8").strip():
+                f.write_text("", encoding="utf-8")  # 清空自定义 → 回默认
+            else:
+                f.touch(exist_ok=True)
         elif f.exists():
             f.unlink()
         return f.exists()
+
+    def uncensored_prompt(self, book_id: str = "main") -> str | None:
+        """自定义破限提示词（标志文件内容；空/无 = 用内置默认）。"""
+        f = self.uncensored_flag(book_id)
+        if f.exists():
+            text = f.read_text(encoding="utf-8").strip()
+            return text if text else None
+        return None
 
     # -- 章节文件操作（权威存储） --
     def list_chapter_files(self, book_id: str = "main") -> list[dict[str, Any]]:

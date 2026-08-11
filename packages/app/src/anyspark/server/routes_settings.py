@@ -87,12 +87,20 @@ def make_settings_router(deps: AppDeps) -> APIRouter:
     # S70：破限模式开关（书籍级）——GET 查 / POST 设；文件标志在每书工作区
     @router.get("/api/uncensored", response_model=dict[str, object])
     def get_uncensored(book_id: str = "main") -> dict[str, object]:
-        return {"book_id": book_id, "enabled": deps.workspace.is_uncensored(book_id)}
+        return {
+            "book_id": book_id,
+            "enabled": deps.workspace.is_uncensored(book_id),
+            "custom_prompt": deps.workspace.uncensored_prompt(book_id) or "",
+        }
 
     @router.post("/api/uncensored", response_model=dict[str, object])
     def set_uncensored(req: UncensorIn) -> dict[str, object]:
-        enabled = deps.workspace.set_uncensored(req.book_id, req.enabled)
-        return {"book_id": req.book_id, "enabled": enabled}
+        enabled = deps.workspace.set_uncensored(req.book_id, req.enabled, req.custom_prompt or None)
+        return {
+            "book_id": req.book_id,
+            "enabled": enabled,
+            "custom_prompt": deps.workspace.uncensored_prompt(req.book_id) or "",
+        }
 
     @router.post("/api/settings/extract", response_model=dict[str, object])
     def extract_settings(req: WorldSettingExtractIn) -> dict[str, object]:

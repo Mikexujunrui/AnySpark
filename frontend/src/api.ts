@@ -27,10 +27,9 @@ import * as chapters from './api/chapters'
 import * as knowledge from './api/knowledge'
 import * as tasks from './api/tasks'
 import * as settings from './api/settings'
-import * as memory from './api/memory'
 import { batchExtractKnowledge, detectChapters, importChapters, uploadDocument } from './api/import'
 
-export { books, chapters, knowledge, tasks, settings, memory, uploadDocument, detectChapters, importChapters, batchExtractKnowledge }
+export { books, chapters, knowledge, tasks, settings, uploadDocument, detectChapters, importChapters, batchExtractKnowledge }
 
 // ── 聚合对象（兼容历史消费方 `api.xxx`）──
 export const api = {
@@ -188,19 +187,5 @@ export const api = {
   // Worldbuilding entry edit
   updateWorldbuildingEntry: chapters.updateWorldbuildingEntry,
 
-  // Memory system
-  getMemoryStats: memory.getMemoryStats,
-  getProjectMemory: memory.getProjectMemory,
-  updateProjectMemory: memory.updateProjectMemory,
-  addNote: memory.addNote,
-  deleteNote: memory.deleteNote,
-  recordDecision: memory.recordDecision,
-  deleteDecision: memory.deleteDecision,
-  addProgress: memory.addProgress,
-  deleteProgress: memory.deleteProgress,
-  getPreferences: memory.getPreferences,
-  createPreference: memory.createPreference,
-  confirmPreference: memory.confirmPreference,
-  deletePreference: memory.deletePreference,
-  toggleMemory: memory.toggleMemory,
+
 }
