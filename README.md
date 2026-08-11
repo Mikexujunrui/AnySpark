@@ -16,6 +16,9 @@ cp .env.example .env
 
 # 2. 安装依赖 + 启动后端（8000）
 uv sync && uv run anyspark-server
+
+# 3. 前端创作台（S75 并入，可选——纯 API 场景可不用）
+cd frontend && npm ci && npm run dev   # http://127.0.0.1:5173（/api 代理到后端 8000）
 ```
 
 **对话 CLI（S49）**：`uv run anyspark-chat`——终端里直接对话驱动（流式/工具状态/Ctrl+C 取消/多轮延续）。领域工具默认全开（图谱查证/伏笔/计划/设定/推演/检索/skill_lookup）。
@@ -32,7 +35,7 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 |------|------|
 | [docs/DESIGN.md](docs/DESIGN.md) | **完整设计规格**（实现者的唯一主文档，覆盖全部设计，必须完整遵循；§12 为演进补记 S32-S63） |
 | [docs/AUDIT-V1.md](docs/AUDIT-V1.md) | **设计实现审计报告**（现状快照：哪些实现/哪些缺失/优先级，接手 AI 必读） |
-| [docs/PROGRESS.md](docs/PROGRESS.md) | 连续推进台账（各阶段完成情况 + 踩坑记录，最新到 S63） |
+| [docs/PROGRESS.md](docs/PROGRESS.md) | 连续推进台账（各阶段完成情况 + 踩坑记录，最新到 S75） |
 | [docs/UPGRADE-DISCUSSION.md](docs/UPGRADE-DISCUSSION.md) | 讨论纪要与推理过程（查证设计意图用） |
 | [docs/HANDOFF-L-SERIES.md](docs/HANDOFF-L-SERIES.md) | 与旧仓库 L 系列收尾的边界交接 |
 | [docs/FRONTEND-HANDOFF.md](docs/FRONTEND-HANDOFF.md) | **前端开发交接**（API 全契约/现状盘点/设计意图——前端开发智能体必读） |
@@ -40,7 +43,7 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 
 ## 当前状态
 
-- **S0~S63 全部完成**（pytest 346 全绿，总闸通过）：第一版七阶段 + 全部补缺 + 实测驱动演进 + 特化路线 P1-P5 + 架构深化（S53-S63）
+- **S0~S75 全部完成**（pytest 428 全绿，总闸通过）：第一版七阶段 + 全部补缺 + 实测驱动演进 + 特化路线 P1-P5 + 架构深化（S53-S63）
   - 智能体闭环：探索工具化（S32）/写作技巧内容化（S43，参考 pi skills）
   - 档位记录集（S35：可增删改/恢复默认/温度入档）+ **心智档位 L2/L3**（S61：AI 建议档位/自然语言生成档位，人工确认闸门）+ 活跃度衰减 + context 动态选取
   - 超长书五场景（S37-S42）：图谱高频保底注入/批量灌入/理解/续写/批量任务/设定档（正典+提炼）
@@ -67,9 +70,11 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
     - **哲学审查修复**（S62）：去垃圾补丁（正则猜内容改 LLM 判断等）
     - **S60 skill 注入瘦身**（S60/S61）：主循环只注入全部技巧索引（名字+描述）+ `skill_lookup` 按需细看 + `write_chapter` 的 `skills` 点名参数——写作调用不自行选技巧，所有注入由主循环点名决定
     - **画蛇添足清理**（S63）：死代码 mood 删除 + role_play 双通道收敛 `load_role_card` + check_text 工具退役
+    - **数据隔离审计**（S74）：book_id 贯穿上传/消化/图谱/资料 + 死数据清理 + 隔离边界定案
+    - **前端创作台整合**（S75）：合作者前端分支 f3-snapshot 并入——图谱实体双定位/会话/章节/资料/故事节点端点移植，以本地后端为准
 - **实测验证**：pi 循环行为对照 7/7；长书压力有界；哈利波特/猎手准则颗粒度矩阵；猎手准则第一卷 164 章灌入+理解+续写；单元层 benchmark 17/17 回归；**上下文形态对比（S55）+ 多章毒化实证（S58）**；工作流真实链路（AI 生成→审读发现设定冲突→改写→3 轮复检→确认）
 - **知识分层**：图谱（自动事实+weight）/设定档（作者正典）/说明书（偏好）/写作技巧（skill 式，索引+点名注入）/剧情计划（执行蓝图）/心智（会话规划器）
-- **剩余**：多模态（图片理解/OCR，未来计划）；B 真自我修复（补丁应用，按需）；httpx2 迁移（等 starlette 原生支持）；新前端创作台（他人基于后端 API 开发）
+- **剩余**：多模态（图片理解/OCR，未来计划）；B 真自我修复（补丁应用，按需）；httpx2 迁移（等 starlette 原生支持）；实体改名（S72 主键语义，前端表单待适配）
 
 ## 设计一句话
 
@@ -84,6 +89,7 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 
 ```
 ├── pyproject.toml        # uv workspace 根
+├── frontend/             # 前端创作台（React 19 + TS + Vite + Zustand，S75 并入）
 ├── packages/
 │   ├── core/             anyspark-core     内核包（不依赖任何包：Agent 循环/工具协议/存储）
 │   ├── explore/          anyspark-explore  探索包（意图理解/并行探索/角色推演）

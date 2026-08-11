@@ -28,7 +28,7 @@
 
 **复核范围**：工作流扩展包（S59）/ 叙事树+线进度（S59）/ 会话继承 fork（S58c）/ 项目简介+context_mode（S58）/ 心智完善（S61）/ skill 注入瘦身（S60）/ 哲学审查（S62）/ 画蛇添足清理（S63）——DESIGN §12.22-12.26。
 
-**结论**：全部落地，pytest 346 全绿，ruff/mypy 全绿；每阶段真实 DeepSeek 链路验证。**仓库已拆分**：本仓库为纯后端（frontend/ 已移除），前端由他人基于 API 开发。
+**结论**：全部落地，pytest 346 全绿，ruff/mypy 全绿；每阶段真实 DeepSeek 链路验证。**S75 前端并入**：合作者前端创作台（frontend/）已合回本仓库，图谱实体双定位等接口以本地后端为准（见 DESIGN §12.36）。
 
 **关键架构变化（接手者必读）**：
 1. **工作流扩展包**（S59，packages/workflow）：顺序/gate 分支/loop 循环三结构 + 断点恢复（SQLite 状态落盘）+ 失败策略 + 记账 + AI 生成（草稿→人工确认）；script 白名单（read/write/review_chapter/list/noop）+ workflow agent 工具（默认关）；模板与书解耦可迁移
