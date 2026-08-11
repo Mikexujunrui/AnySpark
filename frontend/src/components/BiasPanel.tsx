@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useBiasStore } from "../stores/biasStore";
 import ConfirmModal from "./ui/ConfirmModal";
+import Icon from "./ui/Icon";
 
 interface BiasPanelProps {
   open: boolean;
@@ -9,6 +10,9 @@ interface BiasPanelProps {
 }
 
 type Source = "ai" | "user";
+type MindView = "bias" | "memory";
+
+interface ManualEntry { id: string; content: string; category?: string; locked?: boolean; activity?: string; created_at?: string }
 
 const SOURCE_LABELS: Record<Source, string> = {
   ai: "AI 自述",
@@ -32,10 +36,35 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
   const [newContent, setNewContent] = useState("");
   const [newSource, setNewSource] = useState<Source>("ai");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  // 记忆视图（心智条目，与倾向互为对立：记忆=AI 学到的，倾向=AI 自述的）
+  const [view, setView] = useState<MindView>("bias");
+  const [manual, setManual] = useState<ManualEntry[]>([]);
+  const [manualLoading, setManualLoading] = useState(false);
 
   useEffect(() => {
     if (open) fetchBias();
   }, [open, fetchBias]);
+
+  const loadManual = async () => {
+    setManualLoading(true)
+    try {
+      const res = await fetch("/api/manual")
+      const d = await res.json()
+      setManual(Array.isArray(d) ? d : [])
+    } catch { /* 静默 */ }
+    setManualLoading(false)
+  }
+
+  useEffect(() => {
+    if (open && view === "memory") loadManual()
+  }, [open, view]);
+
+  const toggleLock = async (id: string, locked: boolean) => {
+    try {
+      await fetch(`/api/manual/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locked: !locked }) })
+      setManual(prev => prev.map(m => m.id === id ? { ...m, locked: !locked } : m))
+    } catch { /* 静默 */ }
+  }
 
   if (!open) return null;
 
@@ -69,14 +98,23 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
       <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">AI 倾向档案</h2>
+          <h2 className="text-sm font-medium text-zinc-200">心智</h2>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowAdd(!showAdd)}
-              className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded"
-            >
-              {showAdd ? "取消" : "+ 新增"}
-            </button>
+            <div className="flex bg-zinc-800 rounded-lg p-0.5">
+              {(["bias", "memory"] as MindView[]).map(v => (
+                <button key={v} onClick={() => setView(v)} className={`px-2 py-0.5 rounded text-[11px] ${view === v ? "bg-zinc-600 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}>
+                  {v === "bias" ? "AI 倾向" : "心智记忆"}
+                </button>
+              ))}
+            </div>
+            {view === "bias" && (
+              <button
+                onClick={() => setShowAdd(!showAdd)}
+                className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded"
+              >
+                {showAdd ? "取消" : "+ 新增"}
+              </button>
+            )}
             <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -85,8 +123,8 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
           </div>
         </div>
 
-        {/* 新增表单 */}
-        {showAdd && (
+        {/* 新增表单（倾向视图） */}
+        {view === "bias" && showAdd && (
           <div className="px-4 py-3 border-b border-zinc-800 space-y-2">
             <textarea
               value={newContent}
@@ -115,9 +153,38 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
           </div>
         )}
 
-        {/* 列表 */}
+        {/* 列表：双视图 */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-          {loading ? (
+          {view === "memory" ? (
+            /* ── 心智记忆（AI 学到的偏好，用户主权）── */
+            manualLoading ? (
+              <p className="text-zinc-600 text-sm text-center py-4">加载中...</p>
+            ) : manual.length === 0 ? (
+              <p className="text-zinc-600 text-sm text-center py-4">暂无记忆条目——AI 从你的写作反馈中学习</p>
+            ) : (
+              manual.map((entry) => (
+                <div key={entry.id} className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                      entry.category === "collab" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                      : entry.category === "style" ? "bg-purple-500/20 text-purple-400 border-purple-500/30"
+                      : "bg-green-500/20 text-green-400 border-green-500/30"
+                    }`}>
+                      {{ collab: "协作", style: "文风", habit: "习惯" }[entry.category as string] ?? entry.category}
+                    </span>
+                    <button onClick={() => toggleLock(entry.id, !!entry.locked)} className={`p-1 rounded ${entry.locked ? "text-yellow-500" : "text-zinc-600 hover:text-zinc-400"}`} title={entry.locked ? "已锁定" : "锁定（用户主权）"}>
+                      <Icon name={entry.locked ? "lock" : "lock"} size={12} />
+                    </button>
+                  </div>
+                  <p className="text-sm text-zinc-300 whitespace-pre-wrap">{entry.content}</p>
+                  <p className="text-[10px] text-zinc-600">
+                    {entry.activity ? `活跃度: ${entry.activity}` : ""}
+                    {entry.created_at ? ` · ${new Date(entry.created_at).toLocaleDateString()}` : ""}
+                  </p>
+                </div>
+              ))
+            )
+          ) : loading ? (
             <p className="text-zinc-600 text-sm text-center py-4">加载中...</p>
           ) : items.length === 0 ? (
             <p className="text-zinc-600 text-sm text-center py-4">暂无倾向条目</p>

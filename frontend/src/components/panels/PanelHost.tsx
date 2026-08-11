@@ -57,7 +57,6 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {panelKey === 'templates' && <div className="h-full min-h-0 flex flex-col"><TemplatePanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'tools' && <div className="h-full min-h-0 flex flex-col"><ToolsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'play' && <div className="h-full min-h-0 flex flex-col"><PlayPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
-      {panelKey === 'role' && <div className="h-full min-h-0 flex flex-col"><RolePanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'dims' && <div className="h-full min-h-0 flex flex-col"><DimsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'upload' && <div className="h-full min-h-0 flex flex-col"><UploadPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
     </div>

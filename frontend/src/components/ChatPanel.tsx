@@ -35,20 +35,6 @@ function filterAutopilotNoise(messages: { role: string; text: string; autopilot?
 
 // ── SSE chunk throttling: batch append updates to avoid per-chunk re-renders ──
 const CHUNK_FLUSH_MS = 50  // flush buffered chunks at most every 50ms
-
-// ── Project creative constitution (optional; insert as a template, never forced) ──
-const RECOMMENDED_CONSTITUTION = `# 本书创作规则（示例模板，可按需增删）
-1. 已有正文、人物事实、时间线和明确设定优先于模型的自由发挥。
-2. 不得擅自改写、删除或覆盖已经导入和已经存在的章节。
-3. 续写只从最后一个已有章节之后开始；需要修改旧章时必须先明确指出并征得我确认。
-4. 不得新增会改变主线的重要人物、能力、关系、地点或历史；确有必要时先提出建议，不直接写入正文。
-5. 严格执行我本轮给出的情节目的、人物动机、视角、语气和禁止项。
-6. 文风可以学习参考书的节奏、句式、叙事距离和用词习惯，但不得把参考书中无关作品的人物或设定带入本书。
-7. 不用空泛总结、套路转折、强行升华和解释性旁白代替具体场景。
-8. 对无法从正文或知识库确认的信息保持克制；不确定时保留空白或向我询问。
-9. 正文生成后先评审一致性与文风偏差，不得为了通过评审而偷偷重写整章。
-10. 任何修改都应保留版本历史，并向我说明修改范围。`
-
 export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transformSignal }: { bookId: string; sessionId: string; autoModeEnabled: boolean; transformSignal: number }) {
   const { setAutoMode: setGlobalAutoMode } = useApproval()
   const welcomeMsg = { role: 'agent', text: '你好！我是你的 AI 写作助手 Agent。\n\n'
@@ -83,12 +69,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const [searchOpen, setSearchOpen] = useState(false)
   const [autonomousMode, setAutonomousMode] = useState(false)
   const [showToolCalls, setShowToolCalls] = useState(true)  // toggle for tool call / thinking display
-  const [constitutionLoaded, setConstitutionLoaded] = useState(false)
-  const [constitution, setConstitution] = useState('')
-  const [constitutionDraft, setConstitutionDraft] = useState('')
-  const [constitutionEnabled, setConstitutionEnabled] = useState(true)
-  const [showConstitutionEditor, setShowConstitutionEditor] = useState(false)
-  const [savingConstitution, setSavingConstitution] = useState(false)
   const saveTimerRef = useRef(null)
   const hideTimerRef = useRef(null)
   const lastSentMsgRef = useRef('')
@@ -282,43 +262,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
   }, [streaming, sessionId])
 
-  // ── Fetch skills on mount ──
-  useEffect(() => {
-    api.getSkills().then(data => {
-      const skills = data?.skills || []
-      setSkillCommands(skills.map(sk => ({
-        name: '/' + sk.name,
-        description: sk.description,
-        usage: '/' + sk.name,
-        steps: sk.steps || [],
-      })))
-    }).catch(() => {})
-  }, [])
-
-  // ── Project creative constitution (optional, never a gate) ──
-  useEffect(() => {
-    if (!bookId) return
-    setConstitutionLoaded(false)
-    fetch(`/api/books/${bookId}`)
-      .then(async res => {
-        if (!res.ok) throw new Error('加载书籍失败')
-        return res.json()
-      })
-      .then(book => {
-        const value = String(book.creativeConstitution || '')
-        setConstitution(value)
-        setConstitutionDraft(value)
-        setConstitutionEnabled(book.constitutionEnabled !== false)
-        setShowConstitutionEditor(false)
-        setConstitutionLoaded(true)
-      })
-      .catch(() => {
-        setConstitutionDraft('')
-        setConstitutionEnabled(true)
-        setShowConstitutionEditor(false)
-        setConstitutionLoaded(true)
-      })
-  }, [bookId])
 
   // ── Autopilot detection on mount ──
   useEffect(() => {
@@ -684,75 +627,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     setSlashIdx(0)
   }
 
-  async function saveConstitution() {
-    const value = constitutionDraft.trim()
-    if (!value) return
-    setSavingConstitution(true)
-    try {
-      const res = await fetch(`/api/books/${bookId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ creativeConstitution: value, constitutionEnabled: true }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || '保存失败')
-      setConstitution(value)
-      setConstitutionEnabled(true)
-      setShowConstitutionEditor(false)
-      setMessages(prev => [...prev, {
-        role: 'agent',
-        text: '创作宪法已保存。它会同时约束普通对话、斜杠写作和 Auto 模式。',
-      }])
-    } catch (e) {
-      alert(e instanceof Error ? e.message : '创作宪法保存失败')
-    }
-    setSavingConstitution(false)
-  }
-
-  async function enableConstitution() {
-    // No saved rules yet: just open the editor — saving from it enables the
-    // constitution (saveConstitution sends constitutionEnabled: true).
-    if (!constitution.trim()) {
-      setConstitutionDraft('')
-      setShowConstitutionEditor(true)
-      return
-    }
-    setSavingConstitution(true)
-    try {
-      const res = await fetch(`/api/books/${bookId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ constitutionEnabled: true }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || '启用失败')
-      setConstitutionEnabled(true)
-      setConstitutionDraft(constitution)
-      setShowConstitutionEditor(true)
-    } catch (e) {
-      alert(e instanceof Error ? e.message : '启用创作宪法失败')
-    }
-    setSavingConstitution(false)
-  }
-
-  async function disableConstitution() {
-    setSavingConstitution(true)
-    try {
-      const res = await fetch(`/api/books/${bookId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ constitutionEnabled: false }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || '关闭失败')
-      setConstitutionEnabled(false)
-      setShowConstitutionEditor(false)
-    } catch (e) {
-      alert(e instanceof Error ? e.message : '关闭创作宪法失败')
-    }
-    setSavingConstitution(false)
-  }
-
   async function sendMessage() {
     if (!input.trim() || streaming || question || plotCards) return
     const msg = input.trim()
@@ -981,103 +855,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
               )}
             </div>
           )}
-
-          {!constitutionLoaded ? (
-            <div className="py-2 text-center text-[11px] text-zinc-500">正在加载创作宪法…</div>
-          ) : showConstitutionEditor ? (
-            <div className="space-y-2 rounded-xl border border-amber-800/50 bg-amber-950/20 p-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-amber-300">创作宪法（可选）</div>
-                  <div className="mt-0.5 text-[10px] text-zinc-500">
-                    项目级硬规则，会注入普通对话、斜杠写作和 Auto。留空保存即跳过，随时可改。
-                  </div>
-                </div>
-                <button
-                  onClick={() => setConstitutionDraft(RECOMMENDED_CONSTITUTION)}
-                  className="text-[10px] text-zinc-500 hover:text-amber-300"
-                >
-                  插入推荐模板
-                </button>
-              </div>
-              <textarea
-                value={constitutionDraft}
-                onChange={e => setConstitutionDraft(e.target.value)}
-                rows={9}
-                maxLength={20000}
-                className="w-full resize-y rounded-lg border border-zinc-700 bg-zinc-950 px-3 py-2 text-xs leading-relaxed text-zinc-200 outline-none focus:border-amber-600"
-                placeholder="写下必须遵守的人物、剧情、文风、视角、禁止项和原稿保护规则…（可不填）"
-              />
-              <div className="flex items-center justify-between">
-                <span className="text-[9px] text-zinc-600">{constitutionDraft.length}/20000</span>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => setShowConstitutionEditor(false)}
-                    className="text-[10px] text-zinc-500 hover:text-zinc-300"
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={saveConstitution}
-                    disabled={savingConstitution || !constitutionDraft.trim()}
-                    className="rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-medium text-white hover:bg-amber-500 disabled:bg-zinc-700 disabled:text-zinc-500"
-                  >
-                    {savingConstitution ? '保存中…' : '保存宪法'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              {constitutionEnabled && constitution.trim() ? (
-                <div className="flex items-center justify-between rounded-lg border border-emerald-900/50 bg-emerald-950/20 px-2.5 py-1.5">
-                  <span className="flex items-center gap-1.5 text-[10px] text-emerald-400">
-                    <Icon name="shield" size={11} /> 创作宪法已启用
-                  </span>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => {
-                        setConstitutionDraft(constitution)
-                        setShowConstitutionEditor(true)
-                      }}
-                      className="text-[10px] text-zinc-500 hover:text-zinc-300"
-                    >
-                      查看/修改
-                    </button>
-                    <button
-                      onClick={disableConstitution}
-                      disabled={savingConstitution}
-                      className="text-[10px] text-zinc-500 hover:text-amber-300 disabled:opacity-50"
-                    >
-                      关闭
-                    </button>
-                  </div>
-                </div>
-              ) : constitutionEnabled && !constitution.trim() ? (
-                <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-1.5">
-                  <span className="text-[10px] text-zinc-500">建议为本书制定创作宪法，约束 AI 不跑偏（可选）</span>
-                  <button
-                    onClick={() => {
-                      setConstitutionDraft('')
-                      setShowConstitutionEditor(true)
-                    }}
-                    className="text-[10px] text-amber-400 hover:text-amber-300"
-                  >
-                    去制定
-                  </button>
-                </div>
-              ) : (
-                <div className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 px-2.5 py-1.5">
-                  <span className="text-[10px] text-zinc-500">创作宪法未启用</span>
-                  <button
-                    onClick={enableConstitution}
-                    disabled={savingConstitution}
-                    className="text-[10px] text-amber-400 hover:text-amber-300 disabled:opacity-50"
-                  >
-                    启用并编辑
-                  </button>
-                </div>
-              )}
               <MessageInput
                 input={input}
                 setInput={setInput}
@@ -1099,8 +876,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
                 onSlashNavigate={(i) => setSlashIdx(i)}
                 onSlashClose={() => setShowSlash(false)}
               />
-            </>
-          )}
         </div>
       </div>
 

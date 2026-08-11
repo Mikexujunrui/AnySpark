@@ -5,9 +5,11 @@ import Icon from './ui/Icon'
 import Modal from './ui/Modal'
 import Toggle from './ui/Toggle'
 
-interface ModelItem { id: string; name: string; base_url?: string; model?: string; context_window?: number; is_active?: boolean }
+interface ModelItem { id: string; name: string; base_url?: string; model?: string; context_window?: number; is_active?: boolean; thinking?: string | null; temperature?: number | null }
 interface AgencyLevel { id: string; name: string; description: string; temperature: number; order: number; is_default?: boolean }
 interface ManualEntry { id: string; content: string; category?: string; locked?: boolean; activity?: string }
+
+const THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
 export default function SettingsModal({ onClose, onModeChanged, bookId }: { onClose: () => void; onModeChanged?: (mode: string) => void; bookId?: string }) {
   const [tab, setTab] = useState('models')
@@ -19,6 +21,10 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
+  // 模型注册表单
+  const [showAddModel, setShowAddModel] = useState(false)
+  const [modelForm, setModelForm] = useState({ name: '', model: '', base_url: '', api_key: '', thinking: 'medium', max_tokens: 16384 })
+  const [savingModel, setSavingModel] = useState(false)
 
   const showToast = useCallback((msg: string, _type?: string) => {
     setToast(msg)
@@ -69,6 +75,56 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
     } catch { showToast('激活失败', 'error') }
   }
 
+  // 注册/更新模型（POST /api/models，含思考强度）
+  async function registerModel() {
+    if (!modelForm.name.trim() || !modelForm.model.trim()) {
+      showToast('模型名与模型标识必填', 'error')
+      return
+    }
+    setSavingModel(true)
+    try {
+      const res = await fetch('/api/models', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: modelForm.name.trim(),
+          model: modelForm.model.trim(),
+          base_url: modelForm.base_url.trim() || undefined,
+          api_key: modelForm.api_key.trim() || undefined,
+          thinking: modelForm.thinking,
+          max_tokens: modelForm.max_tokens || undefined,
+        }),
+      })
+      if (!res.ok) {
+        const d = await res.json().catch(() => null)
+        throw new Error(d?.detail || `HTTP ${res.status}`)
+      }
+      showToast('模型已注册')
+      setModelForm({ name: '', model: '', base_url: '', api_key: '', thinking: 'medium', max_tokens: 16384 })
+      setShowAddModel(false)
+      await loadModels()
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '注册失败', 'error')
+    }
+    setSavingModel(false)
+  }
+
+  // 删除模型（DELETE /api/models/{id}；激活中的模型由后端决定是否允许）
+  async function deleteModel(id: string, name: string) {
+    if (!window.confirm(`删除模型「${name}」？此操作不可恢复。`)) return
+    try {
+      const res = await fetch(`/api/models/${encodeURIComponent(id)}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const d = await res.json().catch(() => null)
+        throw new Error(d?.detail || `HTTP ${res.status}`)
+      }
+      showToast('模型已删除')
+      await loadModels()
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '删除失败', 'error')
+    }
+  }
+
   async function setAgencyLevel(levelId: string) {
     try {
       const res = await fetch('/api/agency', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level_id: levelId }) })
@@ -88,7 +144,6 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
   const tabs = [
     { key: 'models', label: '模型', icon: 'database' },
     { key: 'agency', label: '档位', icon: 'zap' },
-    { key: 'memory', label: '记忆系统', icon: 'brain' },
     { key: 'about', label: '关于', icon: 'info' },
   ]
 
@@ -119,8 +174,36 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
           <>
             {/* ── Tab: 模型 ── */}
             {tab === 'models' && (
-              <div className="space-y-2">
-                <p className="text-xs text-zinc-500 mb-3">模型注册表（V4 多模型：1M 上下文 deepseek-v4 系列）</p>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-zinc-500">模型注册表（注册/删除/思考强度）</p>
+                  <button
+                    onClick={() => setShowAddModel(!showAddModel)}
+                    className="text-[11px] px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded"
+                  >
+                    {showAddModel ? '取消' : '+ 注册模型'}
+                  </button>
+                </div>
+
+                {/* 注册表单 */}
+                {showAddModel && (
+                  <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 space-y-2">
+                    <input value={modelForm.name} onChange={e => setModelForm({ ...modelForm, name: e.target.value })} placeholder="显示名（如：DeepSeek Pro）" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
+                    <input value={modelForm.model} onChange={e => setModelForm({ ...modelForm, model: e.target.value })} placeholder="模型标识（如：deepseek-v4-pro）" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
+                    <input value={modelForm.base_url} onChange={e => setModelForm({ ...modelForm, base_url: e.target.value })} placeholder="API 端点（可选，默认 DashScope）" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
+                    <input value={modelForm.api_key} onChange={e => setModelForm({ ...modelForm, api_key: e.target.value })} placeholder="API Key（可选，默认环境变量）" type="password" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
+                    <div className="flex items-center gap-2">
+                      <select value={modelForm.thinking} onChange={e => setModelForm({ ...modelForm, thinking: e.target.value })} className="bg-zinc-800 text-zinc-300 text-xs px-2 py-1.5 rounded border border-zinc-700">
+                        {THINKING_LEVELS.map(t => <option key={t} value={t}>{t === 'off' ? 'off（不思考）' : t}</option>)}
+                      </select>
+                      <input value={modelForm.max_tokens} onChange={e => setModelForm({ ...modelForm, max_tokens: Number(e.target.value) || 0 })} placeholder="max_tokens" type="number" className="w-28 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none" />
+                      <button onClick={registerModel} disabled={savingModel} className="ml-auto text-[11px] px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded disabled:opacity-50">
+                        {savingModel ? '注册中...' : '注册'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {models.length === 0 && <p className="text-sm text-zinc-600">暂无模型</p>}
                 {models.map(m => (
                   <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 bg-zinc-900/50 rounded-lg border border-zinc-800">
@@ -129,13 +212,20 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                         <span className="text-sm text-zinc-200 truncate">{m.name}</span>
                         {m.is_active && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-900/40 text-emerald-400 rounded">激活</span>}
                       </div>
-                      <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{m.model}{m.context_window ? ` · ${Math.round(m.context_window / 10000) / 100}M 上下文` : ''}</div>
+                      <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
+                        {m.model}{m.context_window ? ` · ${Math.round(m.context_window / 10000) / 100}M 上下文` : ''}
+                        {m.thinking ? ` · 思考:${m.thinking}` : ''}
+                        {m.temperature != null ? ` · temp:${m.temperature}` : ''}
+                      </div>
                     </div>
                     {!m.is_active && (
                       <button onClick={() => activateModel(m.id)} className="text-xs px-2.5 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded shrink-0">
                         激活
                       </button>
                     )}
+                    <button onClick={() => deleteModel(m.id, m.name)} className="text-zinc-600 hover:text-red-400 p-1 rounded shrink-0" title="删除模型">
+                      <Icon name="trash" size={13} />
+                    </button>
                   </div>
                 ))}
               </div>

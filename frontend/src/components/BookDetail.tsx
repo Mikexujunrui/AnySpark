@@ -54,7 +54,6 @@ const TAB_GROUPS: TabGroup[] = [
       { key: 'templates', label: '模板', icon: 'copy' },
       { key: 'tools', label: '扩展工具', icon: 'wrench' },
       { key: 'play', label: '互动推演', icon: 'compass' },
-      { key: 'role', label: '角色推演', icon: 'users' },
       { key: 'dims', label: '维度', icon: 'grid' },
       { key: 'upload', label: '上传', icon: 'upload' },
     ],
