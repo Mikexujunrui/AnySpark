@@ -13,12 +13,13 @@ anyspark.workflow.store — 工作流存储（SQLite，模板与执行任务分�
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from anyspark.core.db import connect as sqlite_connect
 
 from .definition import (
     NodeStatus,
@@ -84,10 +85,8 @@ class WorkflowStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.row_factory = sqlite3.Row
+        # S79：连接配置收敛到 anyspark.core.db.connect
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript(SCHEMA)

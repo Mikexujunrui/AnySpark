@@ -22,6 +22,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from anyspark.core.db import connect as sqlite_connect
+
 PLAN_STATUSES = ("planned", "done")
 
 
@@ -56,11 +58,9 @@ class StoryPlanStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # S79：连接配置收敛到 anyspark.core.db.connect
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         self._init_schema()
 
     def _init_schema(self) -> None:

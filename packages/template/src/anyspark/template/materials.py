@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from anyspark.core import Message, Model
+from anyspark.core.db import connect as sqlite_connect
 
 # 资料用途（S50：默认建议集 style/fact/both；纯类型注解无运行时校验，
 # 内容层可自由扩展——用户可写任意用途标签，不强制枚举）
@@ -78,11 +79,9 @@ class MaterialStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # S79：连接配置收敛到 anyspark.core.db.connect
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         self._conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS materials (

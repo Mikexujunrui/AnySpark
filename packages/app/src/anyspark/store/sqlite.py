@@ -8,7 +8,6 @@ anyspark.store.sqlite — SQLite 持久化存储：会话 + 章节（真实落�
 from __future__ import annotations
 
 import json
-import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from anyspark.core import Conversation, ConversationStore, Message
+from anyspark.core.db import connect as sqlite_connect
 
 
 def _now() -> str:
@@ -39,15 +39,9 @@ class SqliteConversationStore(ConversationStore):
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        parent = Path(self._db).parent
-        parent.mkdir(parents=True, exist_ok=True)
-        # check_same_thread=False：嵌入式 SQLite 供 FastAPI 多线程 endpoint 共用
-        # S75：WAL + timeout=30（前端报告并发锁：多 store 独立连接竞争；WAL 允许读写并发，
-        # busy_timeout 防 delete 未提交时其他写阻塞）
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # S79：连接配置收敛到 anyspark.core.db.connect（WAL/timeout/多线程一处定义）
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -252,12 +246,9 @@ class ChapterStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        # S75：WAL + timeout=30（同会话 store：并发锁加固）
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # S79：连接配置收敛到 anyspark.core.db.connect
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         # 复用同一 db 时与会话表共存
         self._conn.executescript(
             """

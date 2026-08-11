@@ -29,6 +29,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from anyspark.core.db import connect as sqlite_connect
+
 # S62：不再在写入时截断 skill 描述（内容主权——用户/模型写的描述不损坏）；
 # 索引渲染层对超长描述做展示省略（render_skill_index），存储永远保全文。
 
@@ -120,11 +122,9 @@ class WritingSkillStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # S79：连接配置收敛到 anyspark.core.db.connect
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         self._init_schema()
         self._seed()
 

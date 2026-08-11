@@ -7,7 +7,6 @@ anyspark.align.summarize — 摘要器（对话 → 场景记忆 → 项目档�
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -16,6 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from anyspark.core import Message
+from anyspark.core.db import connect as sqlite_connect
 
 SUMMARIZE_PROMPT = """你是小说写作协作系统的会话摘要器。把下面这段对话摘要成**场景记忆**，
 供下一轮会话续接使用。要求：
@@ -54,11 +54,9 @@ class MemoryStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # S79：连接配置收敛到 anyspark.core.db.connect
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS scene_memories (

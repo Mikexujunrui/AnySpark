@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from anyspark.core import ToolCall
+from anyspark.core.db import connect as sqlite_connect
 from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
 
 _STATUSES = ("draft", "pending", "active")
@@ -78,9 +79,9 @@ class ExtensionToolStore:
     """扩展工具注册表（SQLite 单连接 + 锁，与既有 store 一致）。"""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=30)
+        # S79：连接配置收敛到 anyspark.core.db.connect（含父目录创建）
+        self._conn = sqlite_connect(db_path)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.execute(_SCHEMA)
             self._conn.commit()

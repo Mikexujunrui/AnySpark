@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from anyspark.core import Message, ModelOutput
+from anyspark.core.db import connect as sqlite_connect
 from anyspark.core.protocol import ToolSpec
 from anyspark.models.deepseek import DEFAULT_BASE_URL, DEFAULT_MODEL, DeepSeekModel
 
@@ -116,9 +117,8 @@ class ModelRegistry:
         self._db = str(db_path)
         self._lock = threading.Lock()
         # 单连接（:memory: 库下每连接独立会丢表，必须持有单连接）
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.row_factory = sqlite3.Row
+        # S79：连接配置收敛到 anyspark.core.db.connect（WAL/timeout 一处定义）
+        self._conn = sqlite_connect(self._db)
         with self._lock:
             self._conn.execute(_SCHEMA)
             # 空库播种：从 .env 建默认 DeepSeek（旧版本升上来直接可用）

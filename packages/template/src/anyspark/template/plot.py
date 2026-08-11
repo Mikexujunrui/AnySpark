@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -19,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from anyspark.core import Message, Model
+from anyspark.core.db import connect as sqlite_connect
 
 # 关键点类别（自然语言，模型无关）
 PLOT_CATEGORIES = ("主线冲突", "角色弧", "情感核", "世界规则", "情绪峰值", "伏笔", "节奏")
@@ -84,11 +84,9 @@ class PlotStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # S79：连接配置收敛到 anyspark.core.db.connect
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         self._conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS plot_points (

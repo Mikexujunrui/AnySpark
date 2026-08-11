@@ -26,7 +26,7 @@
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63）
 - **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级）+ **S66 httpx2 迁移**（starlette 原生支持后落地，TestClient/CLI/benchmarks 全切，无回归），pytest 全量绿，总闸全绿
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
-> 当前无会话声明。
+> [S79] 正在改 packages/core/src/anyspark/core/db.py（新建共享连接 helper）+ 各包 store 连接收敛（25 处重复 sqlite3.connect → anyspark.core.db.connect）：主循环改 app 包 4 处 + worker 并行改 align 9 处 / explore+graph+play 4 处 / template+workflow 4 处。完成提交后删本行。
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 
 - **候选清单（下一步，按优先级）**：

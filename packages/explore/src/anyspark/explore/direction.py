@@ -7,13 +7,14 @@ anyspark.explore.direction — 方向卡模型 + 项目档案固化。
 
 from __future__ import annotations
 
-import sqlite3
 import threading
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
+
+from anyspark.core.db import connect as sqlite_connect
 
 # 方向来源（三来源混合场）
 Source = Literal["template", "grow", "user"]
@@ -37,11 +38,9 @@ class DimensionStore:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # S79：连接配置收敛到 anyspark.core.db.connect
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         self._init_schema()
         self._seed()
 
@@ -163,11 +162,9 @@ class ProjectArchive:
 
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
-        Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
-        self._conn.execute("PRAGMA journal_mode=WAL")
+        # S79：连接配置收敛到 anyspark.core.db.connect
+        self._conn = sqlite_connect(self._db)
         self._lock = threading.Lock()
-        self._conn.row_factory = sqlite3.Row
         self._conn.executescript(
             """
             CREATE TABLE IF NOT EXISTS archived_directions (
