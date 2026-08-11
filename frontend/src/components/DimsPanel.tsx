@@ -4,10 +4,11 @@ import { useDimStore } from "../stores/dimStore";
 interface DimsPanelProps {
   open: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 // S50 探索维度管理：探索该从哪些维度发散取决于用户与作品（可增删改/开关）
-export default function DimsPanel({ open, onClose }: DimsPanelProps) {
+export default function DimsPanel({ open, onClose, embedded = false }: DimsPanelProps) {
   const dims = useDimStore((s) => s.dims);
   const loading = useDimStore((s) => s.loading);
   const error = useDimStore((s) => s.error);
@@ -55,12 +56,12 @@ export default function DimsPanel({ open, onClose }: DimsPanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className={embedded ? "h-full flex flex-col" : "fixed inset-0 z-50 flex"}>
       {/* 遮罩 */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      {!embedded && <div className="absolute inset-0 bg-black/50" onClick={onClose} />}
 
       {/* 面板 */}
-      <div className="relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl">
+      <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-medium text-zinc-200">探索维度</h2>

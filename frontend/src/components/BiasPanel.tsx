@@ -4,6 +4,7 @@ import { useBiasStore } from "../stores/biasStore";
 interface BiasPanelProps {
   open: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 type Source = "ai" | "user";
@@ -19,7 +20,7 @@ const SOURCE_COLORS: Record<Source, string> = {
 };
 
 // AI 倾向档案面板（双向黑盒：用户应能看到 AI 的倾向）
-export default function BiasPanel({ open, onClose }: BiasPanelProps) {
+export default function BiasPanel({ open, onClose, embedded = false }: BiasPanelProps) {
   const items = useBiasStore((s) => s.items);
   const loading = useBiasStore((s) => s.loading);
   const fetchBias = useBiasStore((s) => s.fetchBias);
@@ -54,12 +55,12 @@ export default function BiasPanel({ open, onClose }: BiasPanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className={embedded ? "h-full flex flex-col" : "fixed inset-0 z-50 flex"}>
       {/* 遮罩 */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      {!embedded && <div className="absolute inset-0 bg-black/50" onClick={onClose} />}
 
       {/* 面板 */}
-      <div className="relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl">
+      <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-medium text-zinc-200">AI 倾向档案</h2>

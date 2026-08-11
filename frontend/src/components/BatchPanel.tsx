@@ -6,6 +6,7 @@ import type { Chapter } from "../types";
 interface BatchPanelProps {
   open: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -14,7 +15,7 @@ const STATUS_LABELS: Record<string, string> = {
   done: "完成",
 };
 
-export default function BatchPanel({ open, onClose }: BatchPanelProps) {
+export default function BatchPanel({ open, onClose, embedded = false }: BatchPanelProps) {
   const batchId = useBatchStore((s) => s.batchId);
   const status = useBatchStore((s) => s.status);
   const done = useBatchStore((s) => s.done);
@@ -77,12 +78,12 @@ export default function BatchPanel({ open, onClose }: BatchPanelProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className={embedded ? "h-full flex flex-col" : "fixed inset-0 z-50 flex"}>
       {/* 遮罩 */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      {!embedded && <div className="absolute inset-0 bg-black/50" onClick={onClose} />}
 
       {/* 面板 */}
-      <div className="relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl">
+      <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-medium text-zinc-200">批量操作</h2>

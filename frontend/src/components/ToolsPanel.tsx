@@ -4,9 +4,10 @@ import { useToolStore } from "../stores/toolStore";
 interface ToolsPanelProps {
   open: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
-export default function ToolsPanel({ open, onClose }: ToolsPanelProps) {
+export default function ToolsPanel({ open, onClose, embedded = false }: ToolsPanelProps) {
   const tools = useToolStore((s) => s.tools);
   const loading = useToolStore((s) => s.loading);
   const fetchTools = useToolStore((s) => s.fetchTools);
@@ -51,12 +52,12 @@ export default function ToolsPanel({ open, onClose }: ToolsPanelProps) {
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className={embedded ? "h-full flex flex-col" : "fixed inset-0 z-50 flex"}>
       {/* 遮罩 */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      {!embedded && <div className="absolute inset-0 bg-black/50" onClick={onClose} />}
 
       {/* 面板 */}
-      <div className="relative ml-auto w-[480px] h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl">
+      <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-[480px] h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-medium text-zinc-200">扩展工具</h2>

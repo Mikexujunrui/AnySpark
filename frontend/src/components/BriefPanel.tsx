@@ -4,10 +4,11 @@ import { useBriefStore } from "../stores/briefStore";
 interface BriefPanelProps {
   open: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 // 项目简介面板（S58：项目智能体简介，AI 与用户共看的协作总览）
-export default function BriefPanel({ open, onClose }: BriefPanelProps) {
+export default function BriefPanel({ open, onClose, embedded = false }: BriefPanelProps) {
   const content = useBriefStore((s) => s.content);
   const exists = useBriefStore((s) => s.exists);
   const loading = useBriefStore((s) => s.loading);
@@ -61,12 +62,12 @@ export default function BriefPanel({ open, onClose }: BriefPanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className={embedded ? "h-full flex flex-col" : "fixed inset-0 z-50 flex"}>
       {/* 遮罩 */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      {!embedded && <div className="absolute inset-0 bg-black/50" onClick={onClose} />}
 
       {/* 面板 */}
-      <div className="relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl">
+      <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-medium text-zinc-200">项目简介</h2>

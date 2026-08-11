@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
+import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { Panel, Group, Separator } from 'react-resizable-panels'
 import { storage } from "../storage"
 import { api } from "../api"
@@ -77,7 +77,9 @@ function modeConfig(mode: string): LLMMode {
 
 export default function BookDetail() {
   const { bookId } = useParams<{ bookId: string }>()
-  const { isSplit, primaryTab, secondaryTab, toggleSplit, setPrimaryTab, setSecondaryTab } = useSplitLayout(bookId!, storage.getActiveTab(bookId!))
+  const [searchParams] = useSearchParams()
+  const urlTab = searchParams.get('tab')
+  const { isSplit, primaryTab, secondaryTab, toggleSplit, setPrimaryTab, setSecondaryTab } = useSplitLayout(bookId!, urlTab || storage.getActiveTab(bookId!))
   const [book, setBook] = useState<Record<string, any> | null>(null)
   const [llmMode, setLlmMode] = useState<string>(DEFAULT_MODE.key)
   const [loadingErr, setLoadingErr] = useState('')
@@ -333,13 +335,13 @@ export default function BookDetail() {
       <div className="flex-1 overflow-hidden flex flex-col">
         <Group orientation="horizontal">
           <Panel defaultSize={isSplit ? 50 : 100} minSize={25}>
-            <PanelHost panelKey={primaryTab} bookId={bookId!} sessionId={sessionId} />
+            <PanelHost panelKey={primaryTab} bookId={bookId!} sessionId={sessionId} onPanelClose={() => switchTab('chat')} />
           </Panel>
           {isSplit && (
             <>
               <Separator className="w-1 bg-zinc-800 hover:bg-sky-600 transition-colors cursor-col-resize shrink-0" />
               <Panel defaultSize={50} minSize={25}>
-                <PanelHost panelKey={secondaryTab} bookId={bookId!} sessionId={sessionId} />
+                <PanelHost panelKey={secondaryTab} bookId={bookId!} sessionId={sessionId} onPanelClose={() => switchSecondaryTab('chat')} />
               </Panel>
             </>
           )}

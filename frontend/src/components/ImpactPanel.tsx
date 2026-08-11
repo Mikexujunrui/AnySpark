@@ -4,9 +4,10 @@ import { useImpactStore } from "../stores/impactStore";
 interface ImpactPanelProps {
   open: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
-export default function ImpactPanel({ open, onClose }: ImpactPanelProps) {
+export default function ImpactPanel({ open, onClose, embedded = false }: ImpactPanelProps) {
   const chapters = useImpactStore((s) => s.chapters);
   const impacted = useImpactStore((s) => s.impacted);
   const count = useImpactStore((s) => s.count);
@@ -44,12 +45,12 @@ export default function ImpactPanel({ open, onClose }: ImpactPanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className={embedded ? "h-full flex flex-col" : "fixed inset-0 z-50 flex"}>
       {/* 遮罩 */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      {!embedded && <div className="absolute inset-0 bg-black/50" onClick={onClose} />}
 
       {/* 面板 */}
-      <div className="relative ml-auto w-[560px] h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl">
+      <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-[560px] h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-medium text-zinc-200">影响分析</h2>

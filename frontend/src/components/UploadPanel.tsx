@@ -5,6 +5,7 @@ import type { IngestMode } from "../api/upload";
 interface UploadPanelProps {
   open: boolean;
   onClose: () => void;
+  embedded?: boolean;
 }
 
 const MODE_LABELS: Record<IngestMode, string> = {
@@ -19,7 +20,7 @@ function formatSize(size: number): string {
   return `${(size / 1024 / 1024).toFixed(2)} MB`;
 }
 
-export default function UploadPanel({ open, onClose }: UploadPanelProps) {
+export default function UploadPanel({ open, onClose, embedded = false }: UploadPanelProps) {
   const uploads = useUploadStore((s) => s.uploads);
   const loading = useUploadStore((s) => s.loading);
   const error = useUploadStore((s) => s.error);
@@ -60,12 +61,12 @@ export default function UploadPanel({ open, onClose }: UploadPanelProps) {
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex">
+    <div className={embedded ? "h-full flex flex-col" : "fixed inset-0 z-50 flex"}>
       {/* 遮罩 */}
-      <div className="absolute inset-0 bg-black/50" onClick={onClose} />
+      {!embedded && <div className="absolute inset-0 bg-black/50" onClick={onClose} />}
 
       {/* 面板 */}
-      <div className="relative ml-auto w-[560px] h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl">
+      <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-[560px] h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
           <h2 className="text-sm font-medium text-zinc-200">上传区 · 文档消化</h2>
