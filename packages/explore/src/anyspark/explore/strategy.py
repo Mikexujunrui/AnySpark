@@ -7,10 +7,10 @@ anyspark.explore.strategy — 探索策略集（主 Agent 定义差异化分派�
 
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass, field
 from typing import Any
+
+from anyspark.core.jsonutil import parse_json_object
 
 from .direction import DEFAULT_DIMENSIONS, DirectionCard, Source
 
@@ -26,20 +26,8 @@ def _explorer_source(index: int) -> Source:
 
 
 def extract_json_dict(text: str) -> dict[str, Any]:
-    """宽容地从模型输出中提取第一个 JSON 对象。"""
-    cleaned = text.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1)
-    start, end = cleaned.find("{"), cleaned.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        try:
-            parsed = json.loads(cleaned[start : end + 1])
-            if isinstance(parsed, dict):
-                return parsed
-        except json.JSONDecodeError:
-            pass
-    return {}
+    """宽容地从模型输出中提取第一个 JSON 对象（R1 收敛到 core.jsonutil）。"""
+    return parse_json_object(text) or {}
 
 
 @dataclass

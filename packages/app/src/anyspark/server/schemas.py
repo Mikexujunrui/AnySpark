@@ -431,12 +431,18 @@ class WorldSettingIn(BaseModel):
     category: str = "世界观"
     name: str = ""
     book_id: str = "main"  # S74：设定档按书隔离（正典是书级内容）
+    # S83 约束机制：is_constraint=1 为约束条目（写作/探索时注入）；
+    # entities=逗号分隔关联实体名（空=全局约束）
+    is_constraint: int = 0
+    entities: str = ""
 
 
 class WorldSettingPatch(BaseModel):
     content: str | None = None
     category: str | None = None
     name: str | None = None
+    is_constraint: int | None = None
+    entities: str | None = None
 
 
 class WorldSettingExtractIn(BaseModel):

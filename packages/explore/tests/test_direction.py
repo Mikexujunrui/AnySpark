@@ -29,13 +29,20 @@ def test_archive_direction() -> None:
         arc.close()
 
 
-def test_archive_constraints() -> None:
-    arc = _archive()
+def test_archive_constraints_moved_to_settings() -> None:
+    """S83：约束已从 ProjectArchive 移入设定档（WorldSettingStore is_constraint）。"""
+    import tempfile
+    from pathlib import Path
+
+    from anyspark.align.worldsettings import WorldSettingStore
+
+    ws = WorldSettingStore(Path(tempfile.mkdtemp()) / "test.db")
     try:
-        arc.add_constraint("女主=医者")
-        arc.add_constraint("故事发生地=雾城")
-        constraints = arc.constraints()
-        assert "女主=医者" in constraints
-        assert "雾城" in " ".join(constraints)
+        ws.add("女主=医者", is_constraint=1)
+        ws.add("故事发生地=雾城", is_constraint=1, entities="雾城")
+        ws.add("雾城是个海边小城", category="地点")  # 非约束不注入
+        cons = ws.list_constraints()
+        assert len(cons) == 2
+        assert all(c.is_constraint == 1 for c in cons)
     finally:
-        arc.close()
+        ws.close()

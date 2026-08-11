@@ -8,12 +8,11 @@ anyspark.graph.extract — 实体抽取器（章节/资料 → 实体/关系/事
 
 from __future__ import annotations
 
-import json
-import re
 from dataclasses import dataclass, field
 from typing import Any
 
 from anyspark.core import Message, Model
+from anyspark.core.jsonutil import parse_json_object
 
 # 默认实体类型（S50 内容化：GraphExtractor 可注入自定义类型集，提示词动态拼）
 VALID_TYPES = ("角色", "地点", "事件", "物件", "设定")
@@ -199,20 +198,8 @@ class GraphExtractor:
 
 
 def _parse_json_object(text: str) -> dict[str, Any]:
-    """宽容解析模型输出的 JSON 对象（去除 ``` 围栏与前后文字）。"""
-    cleaned = text.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1)
-    start, end = cleaned.find("{"), cleaned.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        try:
-            data = json.loads(cleaned[start : end + 1])
-            if isinstance(data, dict):
-                return data
-        except json.JSONDecodeError:
-            pass
-    return {}
+    """宽容解析模型输出的 JSON 对象（R1 收敛到 core.jsonutil）。"""
+    return parse_json_object(text) or {}
 
 
 def _as_dict_list(value: object) -> list[dict[str, Any]]:

@@ -15,6 +15,7 @@ from anyspark.align import (
     ManualEntry,
     build_agency_suggest_prompt,
     build_reconcile_prompt,
+    constraint_texts,
     parse_agency_suggest_result,
     parse_reconcile_result,
 )
@@ -121,7 +122,8 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
         """
         try:
             archive = deps.archive  # 原 ProjectArchive(real_db)——deps.archive 同 db 等价
-            constraints = archive.constraints(req.book_id)
+            # S83：约束已移入设定档（is_constraint 条目，全局+关联）
+            constraints = constraint_texts(deps.settings.list_constraints(req.book_id))
             directions = archive.directions(req.book_id)[:5]
             settings_items = deps.settings.list(req.book_id)
             ch_count = len(deps.chapters.list_by_book(req.book_id))

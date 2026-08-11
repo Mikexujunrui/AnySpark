@@ -8,11 +8,10 @@ anyspark.align.extract — 提炼器（对话+操作 → 偏好条目）。
 
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
 
 from anyspark.core import Message
+from anyspark.core.jsonutil import parse_json_array
 
 from .manual import Activity, ManualEntry
 from .signals import Signal
@@ -103,20 +102,8 @@ class PreferenceExtractor:
 
 
 def _parse_json_array(text: str) -> list[dict[str, Any]]:
-    """宽容解析模型输出的 JSON 数组（去除 ``` 围栏与前后文字）。"""
-    cleaned = text.strip()
-    # 去 ```json ... ``` 围栏
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1)
-    # 取第一个 [ 到最后一个 ]
-    start, end = cleaned.find("["), cleaned.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        cleaned = cleaned[start : end + 1]
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, list):
-            return [d for d in data if isinstance(d, dict)]
-    except json.JSONDecodeError:
-        pass
-    return []
+    """宽容解析模型输出的 JSON 数组（去围栏/取数组/过滤 dict，行为同旧实现）。"""
+    data = parse_json_array(text)
+    if data is None:
+        return []
+    return [d for d in data if isinstance(d, dict)]

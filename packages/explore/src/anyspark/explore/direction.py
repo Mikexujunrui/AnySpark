@@ -2,7 +2,7 @@
 anyspark.explore.direction — 方向卡模型 + 项目档案固化。
 
 方向卡：探索者产出的候选方向（带术语标注/三来源），用户判别选择。
-项目档案：固化选中方向与已固化设定约束（探索自由但不得撞墙）。
+项目档案：固化选中方向（探索自由但约束由设定档提供）。
 """
 
 from __future__ import annotations
@@ -177,12 +177,6 @@ class ProjectArchive:
                 term TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS setting_constraints (
-                id TEXT PRIMARY KEY,
-                book_id TEXT NOT NULL DEFAULT 'main',
-                content TEXT NOT NULL,  -- 一句级设定约束（如：女主=医者）
-                created_at TEXT NOT NULL
-            );
             """
         )
         self._conn.commit()
@@ -215,27 +209,6 @@ class ProjectArchive:
                 (book_id,),
             ).fetchall()
         return [dict(r) for r in rows]
-
-    # -- 设定约束固化 --
-    def add_constraint(self, content: str, book_id: str = "main") -> dict[str, Any]:
-        cid = uuid.uuid4().hex
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO setting_constraints (id, book_id, content, created_at) "
-                "VALUES (?,?,?,?)",
-                (cid, book_id, content, _now()),
-            )
-            self._conn.commit()
-        return {"id": cid, "content": content, "book_id": book_id}
-
-    def constraints(self, book_id: str = "main") -> list[str]:
-        """已固化设定约束（一句级），探索者必须避开这些墙。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT content FROM setting_constraints WHERE book_id=? ORDER BY rowid",
-                (book_id,),
-            ).fetchall()
-        return [r["content"] for r in rows]
 
     def close(self) -> None:
         self._conn.close()

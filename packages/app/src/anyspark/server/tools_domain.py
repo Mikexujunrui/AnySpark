@@ -364,62 +364,29 @@ def make_ingest_implementer(
         mode = str(arguments.get("mode", "auto")).strip() or "auto"
         if not filename:
             return ToolResult(call=call, ok=False, content="缺少参数 filename。")
-        try:
-            from anyspark.server.pipeline import chapterize, extract_text
+        # S83 R2：消化编排收敛到 ingest_pipeline（原内联实现零变化搬移）
+        from anyspark.server.ingest import ingest_pipeline
 
-            path = workspace.read_upload(book_id, filename)
-            if path is None:
-                ups = workspace.list_uploads(book_id)
-                names = "、".join(u["name"] for u in ups) or "（空）"
-                return ToolResult(
-                    call=call, ok=False, content=f"上传区无「{filename}」。现有：{names}"
-                )
-            text = extract_text(path)
-            if not text.strip():
-                return ToolResult(
-                    call=call,
-                    ok=False,
-                    content="无法提取文本（扫描件 OCR 放未来计划），可先列上传区确认文件格式。",
-                )
-            chaps = chapterize(text, fallback_title=path.stem)
-            is_card = mode == "card" or (
-                mode != "chapters" and len(chaps) == 1 and len(text) < 3000
-            )
-            if is_card:
-                from anyspark.template import MaterialDigestor
-
-                digestor = MaterialDigestor(model)
-                saved = materials.save(digestor.digest(text), book_id)
-                card_md = (
-                    f"# {saved.title}\n\n主题：{saved.topic}\n\n"
-                    + "要点："
-                    + "；".join(saved.key_points[:6])
-                    + "\n设定："
-                    + "；".join(saved.key_settings[:6])
-                    + "\n角色："
-                    + "、".join(saved.characters[:8])
-                    + "\n术语："
-                    + "、".join(saved.terms[:8])
-                )
-                f = workspace.write_card(book_id, "摘要卡", saved.title, card_md)
-                return ToolResult(
-                    call=call,
-                    ok=True,
-                    content=f"已消化「{filename}」为摘要卡《{saved.title}》（{f.name}）。"
-                    f"\n主题：{saved.topic}\n要点：{'；'.join(saved.key_points[:4])}",
-                )
-            written: list[str] = []
-            for i, ch in enumerate(chaps):
-                workspace.write_chapter(book_id, i, ch["title"], ch["content"])
-                chapters.upsert(book_id, ch["title"], ch["content"], i, "main")
-                written.append(f"{i + 1}. {ch['title']}（{len(ch['content'])}字）")
+        result = ingest_pipeline(
+            workspace, chapters, materials, model, book_id, filename, mode=mode
+        )
+        if not result.ok:
+            return ToolResult(call=call, ok=False, content=result.error)
+        if result.kind == "card":
             return ToolResult(
                 call=call,
                 ok=True,
-                content=f"已消化「{filename}」为 {len(written)} 章：\n" + "\n".join(written),
+                content=f"已消化「{filename}」为摘要卡《{result.title}》（{result.card_file}）。"
+                f"\n主题：{result.topic}\n要点：{'；'.join(result.key_points)}",
             )
-        except Exception as exc:
-            return ToolResult(call=call, ok=False, content=f"消化失败：{exc}")
+        written = [
+            f"{i + 1}. {ch['title']}（{ch['chars']}字）" for i, ch in enumerate(result.chapters)
+        ]
+        return ToolResult(
+            call=call,
+            ok=True,
+            content=f"已消化「{filename}」为 {len(written)} 章：\n" + "\n".join(written),
+        )
 
     return spec, implementer
 

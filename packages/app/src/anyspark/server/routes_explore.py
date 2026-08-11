@@ -11,6 +11,7 @@ from typing import Literal
 
 from fastapi import APIRouter, HTTPException
 
+from anyspark.align.worldsettings import constraint_texts
 from anyspark.check import compile_rule, compile_with_model, run_review
 from anyspark.explore import DirectionCard, IntentUnderstander, run_exploration
 from anyspark.server.deps import AppDeps
@@ -41,7 +42,8 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
     @router.post("/api/explore/cards", response_model=list[dict[str, object]])
     def explore_cards(req: ExploreCardsIn) -> list[dict[str, object]]:
         """确认后的意图 → 方向卡 ×4（并行探索，三来源混合）。"""
-        constraints = deps.archive.constraints("main")
+        # S83：约束来自设定档（全局约束；情景实体子集留给 path 级探索按描述提取）
+        constraints = constraint_texts(deps.settings.list_constraints("main"))
         # S68：探索注入真实模板库（L2+L3 合并；template 来源探索者消费，死库接线）
         templates = [f"{t.name}：{t.description}" for t in deps.templates_external.all()[:12]]
         cards = run_exploration(
@@ -77,7 +79,17 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
             if node is None:
                 raise HTTPException(status_code=404, detail=f"终点节点不存在：{req.to_node_id}")
             to_desc = node.content
-        constraints = deps.archive.constraints(req.book_id) + req.constraints
+        # S83：约束 = 全局 + 当前情景（from/to 描述提及的实体）相关 + 请求临时
+        ctx_entities: set[str] = set()
+        for _t in (from_desc, to_desc):
+            for _e in deps.settings.list_constraints(req.book_id):
+                for _ent in (_e.entities or "").split(","):
+                    if _ent.strip() and _ent.strip() in (_t or ""):
+                        ctx_entities.add(_ent.strip())
+        constraints = (
+            constraint_texts(deps.settings.list_constraints(req.book_id), ctx_entities)
+            + req.constraints
+        )
         result = explore_path(deps.model, from_desc, to_desc, constraints, n=req.n)
         if not result.paths:
             raise HTTPException(status_code=502, detail="路径探索失败（无有效候选）")

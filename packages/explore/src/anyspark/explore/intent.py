@@ -7,11 +7,10 @@ anyspark.explore.intent — 意图理解者（种子 → 对齐确认）。
 
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
 
 from anyspark.core import Message
+from anyspark.core.jsonutil import parse_json_object
 
 INTENT_PROMPT = """你是小说创作协作的意图理解者。用户给出写作种子/意图，请产出**对齐确认**，包含：
 1. 概念卡：把用户的话复述成清晰的概念（画面核心/情绪基调/类型直觉/种子位置）
@@ -65,20 +64,10 @@ class IntentUnderstander:
 
 
 def _parse_concept(text: str, fallback_seed: str) -> dict[str, Any]:
-    """宽容解析概念卡 JSON。"""
-    cleaned = text.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1)
-    start, end = cleaned.find("{"), cleaned.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        cleaned = cleaned[start : end + 1]
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, dict):
-            return data
-    except json.JSONDecodeError:
-        pass
+    """宽容解析概念卡 JSON（R1 收敛到 core.jsonutil）。"""
+    data = parse_json_object(text)
+    if data is not None:
+        return data
     # 解析失败回退：概念=原始种子
     return {
         "concept": {

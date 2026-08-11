@@ -15,7 +15,6 @@ from fastapi import APIRouter, HTTPException, Response
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
 from anyspark.server.schemas import CodexIn, IngestIn, ToolRegisterIn, ToolUpdateIn
-from anyspark.template import MaterialDigestor
 
 
 def make_tools_router(deps: AppDeps) -> APIRouter:
@@ -124,51 +123,41 @@ def make_tools_router(deps: AppDeps) -> APIRouter:
         原始文件原地不动（存档）；产物进格式化区（章节/ 或 卡片/）。
         多模态（扫描件 OCR/图片理解）明确不做，放未来计划。
         """
-        from anyspark.server.pipeline import chapterize, extract_text
+        # S83 R2：消化编排收敛到 ingest_pipeline（原内联实现零变化搬移）
+        from anyspark.server.ingest import INGEST_ALLOWED_EXT, ingest_pipeline
 
-        path = deps.workspace.read_upload(req.book_id, req.filename)
-        if path is None:
-            raise HTTPException(status_code=404, detail=f"上传区无此文件：{req.filename}")
-        if path.suffix.lower() not in (".txt", ".md", ".markdown", ".docx", ".pdf"):
-            raise HTTPException(
-                status_code=400, detail="仅支持 txt/md/docx/pdf 文本消化（图片放未来）"
-            )
-        text = extract_text(path)
-        if not text.strip():
-            raise HTTPException(status_code=400, detail="无法提取文本（扫描件 OCR 放未来计划）")
-        chaps = chapterize(text, fallback_title=path.stem)
-        # 判别：mode 强制 / 单章短文本 → 摘要卡；否则拆章
-        is_card = req.mode == "card" or (
-            req.mode != "chapters" and len(chaps) == 1 and len(text) < 3000
+        result = ingest_pipeline(
+            deps.workspace,
+            deps.chapters,
+            deps.materials,
+            deps.model,
+            req.book_id,
+            req.filename,
+            mode=req.mode,
+            allowed_ext=INGEST_ALLOWED_EXT,
         )
-        if is_card:
-            digestor = MaterialDigestor(deps.model)
-            card = digestor.digest(text)
-            saved = deps.materials.save(card, req.book_id)
-            card_md = (
-                f"# {saved.title}\n\n主题：{saved.topic}\n\n"
-                + "要点："
-                + "；".join(saved.key_points[:6])
-                + "\n设定："
-                + "；".join(saved.key_settings[:6])
-                + "\n角色："
-                + "、".join(saved.characters[:8])
-                + "\n术语："
-                + "、".join(saved.terms[:8])
-            )
-            f = deps.workspace.write_card(req.book_id, "摘要卡", saved.title, card_md)
+        if not result.ok:
+            if result.error_code == "not_found":
+                raise HTTPException(status_code=404, detail=f"上传区无此文件：{req.filename}")
+            if result.error_code == "bad_ext":
+                raise HTTPException(
+                    status_code=400, detail="仅支持 txt/md/docx/pdf 文本消化（图片放未来）"
+                )
+            if result.error_code == "empty":
+                raise HTTPException(status_code=400, detail="无法提取文本（扫描件 OCR 放未来计划）")
+            # unknown：原实现无 try/except，异常直接抛（FastAPI 全局 500）——恢复原行为
+            if result.exception is not None:
+                raise result.exception
+            raise HTTPException(status_code=500, detail=result.error)
+        if result.kind == "card":
             return {
                 "ok": True,
                 "kind": "card",
-                "title": saved.title,
-                "card_file": f.name,
-                "material_id": saved.id,
+                "title": result.title,
+                "card_file": result.card_file,
+                "material_id": result.material_id,
             }
-        written: list[dict[str, Any]] = []
-        for i, ch in enumerate(chaps):
-            deps.workspace.write_chapter(req.book_id, i, ch["title"], ch["content"])
-            deps.chapters.upsert(req.book_id, ch["title"], ch["content"], i, "main")
-            written.append({"order": i, "title": ch["title"], "chars": len(ch["content"])})
+        written = result.chapters
         logger.info("消化: %s → %d 章", req.filename, len(written))
         return {"ok": True, "kind": "chapters", "count": len(written), "chapters": written}
 

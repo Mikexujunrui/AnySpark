@@ -14,9 +14,13 @@
 
 from __future__ import annotations
 
-import json
-import re
 from typing import Any
+
+from anyspark.core.jsonutil import (
+    parse_json_array,
+    parse_json_object,
+    strip_fence,
+)
 
 from .agency import AgencyLevel
 from .manual import ManualEntry
@@ -114,31 +118,18 @@ def parse_agency_gen_result(raw: str) -> list[dict[str, Any]]:
 
 
 def _strip_fence(text: str) -> str:
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", text, re.DOTALL)
-    return fence.group(1) if fence else text
+    """去 ```json ... ``` 围栏（R1 收敛到 core.jsonutil）。"""
+    return strip_fence(text)
 
 
 def _parse_json_object(text: str) -> dict[str, Any] | None:
-    cleaned = _strip_fence(text.strip())
-    start, end = cleaned.find("{"), cleaned.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        cleaned = cleaned[start : end + 1]
-    try:
-        data = json.loads(cleaned)
-        return data if isinstance(data, dict) else None
-    except json.JSONDecodeError:
-        return None
+    """宽容解析 JSON 对象（R1 收敛到 core.jsonutil）。"""
+    return parse_json_object(text)
 
 
 def _parse_json_array(text: str) -> list[dict[str, Any]]:
-    cleaned = _strip_fence(text.strip())
-    start, end = cleaned.find("["), cleaned.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        cleaned = cleaned[start : end + 1]
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, list):
-            return [d for d in data if isinstance(d, dict)]
-    except json.JSONDecodeError:
-        pass
-    return []
+    """宽容解析 JSON 数组（R1 收敛到 core.jsonutil）。"""
+    data = parse_json_array(text)
+    if data is None:
+        return []
+    return [d for d in data if isinstance(d, dict)]

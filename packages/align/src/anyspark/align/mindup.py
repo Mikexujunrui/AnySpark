@@ -17,7 +17,7 @@
 
 from __future__ import annotations
 
-import re
+from anyspark.core.jsonutil import parse_json_array
 
 from .manual import ManualEntry
 from .signals import Signal
@@ -59,30 +59,18 @@ def build_reconcile_prompt(entries: list[ManualEntry], signals: list[Signal]) ->
 
 
 def parse_reconcile_result(raw: str) -> list[dict[str, str]]:
-    """宽容解析对账结果 JSON（同提炼器解析风格）。"""
-    import json
-
-    cleaned = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1)
-    start, end = cleaned.find("["), cleaned.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        cleaned = cleaned[start : end + 1]
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, list):
-            return [
-                {
-                    "entry": str(x.get("entry", "")),
-                    "verdict": str(x.get("verdict", "")),
-                    "note": str(x.get("note", "")),
-                }
-                for x in data
-                if isinstance(x, dict)
-            ]
-    except Exception:
-        pass
+    """宽容解析对账结果 JSON（R1 收敛到 core.jsonutil，行为同旧实现）。"""
+    data = parse_json_array(raw)
+    if data is not None:
+        return [
+            {
+                "entry": str(x.get("entry", "")),
+                "verdict": str(x.get("verdict", "")),
+                "note": str(x.get("note", "")),
+            }
+            for x in data
+            if isinstance(x, dict)
+        ]
     return []
 
 
@@ -119,34 +107,22 @@ def build_learning_review_prompt(entries: list[ManualEntry], content: str) -> st
 
 
 def parse_learning_review_result(raw: str) -> list[dict[str, str]]:
-    """宽容解析学习审查结果 JSON。"""
-    import json
-
-    cleaned = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1)
-    start, end = cleaned.find("["), cleaned.rfind("]")
-    if start != -1 and end != -1 and end > start:
-        cleaned = cleaned[start : end + 1]
-    try:
-        data = json.loads(cleaned)
-        if isinstance(data, list):
-            out = []
-            for x in data:
-                if not isinstance(x, dict):
-                    continue
-                category = str(x.get("category", "style"))
-                if category not in ("collab", "style", "habit"):
-                    category = "style"
-                out.append(
-                    {
-                        "content": str(x.get("content", "")),
-                        "category": category,
-                        "reason": str(x.get("reason", "")),
-                    }
-                )
-            return out
-    except Exception:
-        pass
+    """宽容解析学习审查结果 JSON（R1 收敛到 core.jsonutil）。"""
+    data = parse_json_array(raw)
+    if data is not None:
+        out = []
+        for x in data:
+            if not isinstance(x, dict):
+                continue
+            category = str(x.get("category", "style"))
+            if category not in ("collab", "style", "habit"):
+                category = "style"
+            out.append(
+                {
+                    "content": str(x.get("content", "")),
+                    "category": category,
+                    "reason": str(x.get("reason", "")),
+                }
+            )
+        return out
     return []

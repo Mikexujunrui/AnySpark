@@ -17,10 +17,8 @@ anyspark.align.skillgen — 叙事技巧生成器（S54：文风提炼 → skill
 
 from __future__ import annotations
 
-import json
-import re
-
 from anyspark.core import Message
+from anyspark.core.jsonutil import parse_json_array
 
 # 提炼提示（S54b：引导而非禁止——不强制负面，不硬禁抽象；强调可执行性）
 # S67b：借鉴 creative-writing-skills（haowjy）——①维度扩充（8 类，先识别不硬凑）
@@ -128,19 +126,9 @@ GENERATE_PROMPT_PLOT = """你是小说剧情模式提炼器。给定一部小说
 
 
 def _parse_skills(raw: str) -> list[dict[str, str]]:
-    """宽容解析模型输出的 skill JSON 数组（去围栏/取数组/过滤空）。"""
-    cleaned = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1)
-    start, end = cleaned.find("["), cleaned.rfind("]")
-    if start == -1 or end == -1 or end <= start:
-        return []
-    try:
-        data = json.loads(cleaned[start : end + 1])
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(data, list):
+    """宽容解析模型输出的 skill JSON 数组（R1 收敛到 core.jsonutil）。"""
+    data = parse_json_array(raw)
+    if data is None:
         return []
     out: list[dict[str, str]] = []
     for d in data:
@@ -173,18 +161,8 @@ def _parse_templates(raw: str) -> list[dict[str, str]]:
     与 _parse_skills 共用提取逻辑，但校验四要素：granularity/position/function
     限制在默认分类集内（防模型乱填；未知值回落默认），params 归一为逗号串。
     """
-    cleaned = raw.strip()
-    fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
-    if fence:
-        cleaned = fence.group(1)
-    start, end = cleaned.find("["), cleaned.rfind("]")
-    if start == -1 or end == -1 or end <= start:
-        return []
-    try:
-        data = json.loads(cleaned[start : end + 1])
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(data, list):
+    data = parse_json_array(raw)
+    if data is None:
         return []
     valid_gr = ("全书", "卷", "章", "场景", "段落")
     valid_pos = ("开局", "发展", "高潮", "结局")
