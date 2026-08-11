@@ -26,7 +26,7 @@
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63）
 - **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级）+ **S66 httpx2 迁移**（starlette 原生支持后落地，TestClient/CLI/benchmarks 全切，无回归），pytest 全量绿，总闸全绿
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
-> [S83] 正在改 packages/align/src/anyspark/align/worldsettings.py + packages/app/src/anyspark/server/agent_factory.py + packages/app/src/anyspark/server/routes_explore.py + packages/explore/src/anyspark/explore/direction.py：约束机制落地（约束=设定档规则类别+实体标签，探索/写作按当前情景实体取子集注入；删 setting_constraints 表）+ 并行修 R1 JSON 解析收敛 / R2 ingest 抽共享 / Y1 命名消歧。完成提交后删本行。
+> 当前无会话声明。
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 
 - **候选清单（下一步，按优先级）**：
@@ -2518,3 +2518,21 @@ typecheck/lint/build）。
 | 总闸 | 绿 | 绿（421 pytest + 前端） |
 
 **多智能体用法**：S79 3 worker 并行收敛 / S80 planner 出方案 + 4 worker 并行拆 router + reviewer 独立审查 / S80b 主循环修 worker 引入的字符串误替换。教训：worker 机械复制端点易产生重复路由——收割时路由表去重核查 + reviewer 审查兜底。
+
+---
+
+## S83 约束机制 + 审计修复（已完成 ✅，commit fb4d661）
+
+**主人设计**：约束 ≠ 探索方向（方向临时，约束固定）；约束=设定档规则类别+实体标签，探索/写作按当前情景实体取子集注入（不全量堆砌，对齐 S61/S73b 渐进披露哲学）。
+
+**约束机制**：
+- WorldSetting 加 `is_constraint`（是否约束）/`entities`（关联实体，空=全局）字段（幂等 ALTER）
+- `render_constraints_block`（写作注入块：全局+当前时空点实体子集，复用图谱 known_facts 选取）
+- `constraint_texts`（探索墙：全局+情景描述提及实体）
+- agent_factory 加 `constraints` 注入块（skip_inject 可控）
+- routes_explore/routes_mind 改读设定档约束；settings API 支持约束写入（G1 断链解决）
+- **删 setting_constraints 表**（消除"探索约束/世界观规则"双载体交叉冗余）
+
+**审计修复**：R1 JSON 解析 8 处→core/jsonutil 共享（2 worker 并行）；R2 ingest 编排抽 server/ingest.py；Y1 review 加 run_review_panel 别名。
+
+**验证**：总闸全绿（421 pytest）+ 约束全链路（注入/跳过/探索/API）+ 解析替换测试全过。

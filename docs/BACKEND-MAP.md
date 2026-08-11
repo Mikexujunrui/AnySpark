@@ -172,25 +172,25 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 
 > 三 worker 只读侦察 + 主循环交叉核对。按严重度分级，处置需主人定夺。
 
-### 🔴 重复（实质，建议修）
+### 🔴 重复（S83 已修复 ✅）
 
 | # | 发现 | 位置 | 建议 |
 |---|---|---|---|
-| R1 | **JSON 宽容解析 8 处各自实现**（围栏剥离+JSON 提取+容错逻辑雷同） | align/extract:105、mindgen:121,133、mindup:61,119、skillgen:130、explore/intent:67、explore/strategy:28、graph/extract:201 | 收敛到 core 一个 `parse_llm_json()` 工具函数（纯简化，符合 S62 去垃圾补丁精神） |
-| R2 | **ingest_document 工具 vs ingest_upload 端点重复实现同一套消化编排**（is_card 判别逐字重复） | tools_domain.py:329 vs routes_tools.py | 抽共享 `ingest_pipeline()` 到独立模块，两处调用 |
-| R3 | explore_direction 工具 vs routes_explore 端点各自组装意图+探索+维度/模板注入（轻度） | toolkit.py vs routes_explore.py | 抽共享组装函数 |
+| R1 ✅ | JSON 宽容解析 8 处各自实现 | ~~8 处~~ → core/jsonutil.py 共享 parse_json_object/parse_json_array（S83） |
+| R2 ✅ | ingest_document 工具 vs ingest_upload 端点重复消化编排 | ~~两处~~ → server/ingest.py ingest_pipeline 共享（S83） |
+| R3 | explore_direction 工具 vs routes_explore 端点重复组装（轻度，未修） | toolkit.py vs routes_explore.py | 可后续抽共享 |
 
-### 🔴 断链（功能缺失）
+### 🔴 断链（S83 已修复 ✅）
 
 | # | 发现 | 位置 | 建议 |
 |---|---|---|---|
-| G1 | **setting_constraints（探索固化约束表）生产只读不写**——add_constraint 仅测试调用，routes_explore 读它当"墙"但无生产固化入口 | explore/direction.py:224 | 补生产入口（探索结果固化 API）或删表降级为纯注入——需主人定语义 |
+| G1 ✅ | ~~setting_constraints 表生产只读不写（断链）~~ → **约束机制落地**：约束=设定档规则类别+实体标签（S83），settings API 人工写入，探索/写作按当前情景实体取子集注入；setting_constraints 表删除 |
 
 ### 🟡 冗余 / 混淆风险
 
 | # | 发现 | 建议 |
 |---|---|---|
-| Y1 | **review 包 vs check 包同名导出 run_review/ReviewReport**（S71 已标记"有意重复"：硬伤 vs 人格化，第三处才抽公共） | 低成本消歧：review 加别名导出或文档显著标注，防误 import |
+| Y1 ✅ | review vs check 同名导出 run_review/ReviewReport | review 加 run_review_panel 别名 + 文档显著标注（S83） |
 | Y2 | server/retry.py 纯 re-export 兼容层；core/tools.py（echo/add）生产从不注册 | 保留（测试用）或清理，低优先 |
 | Y3 | 无"工具清单单一真相"（23 工具名/开关/用途散落 6 文件） | 本地图 §4 已补——代码侧可后续建 `tools_manifest` 常量（非必须） |
 
