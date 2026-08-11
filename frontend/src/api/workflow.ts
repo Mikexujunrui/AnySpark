@@ -97,9 +97,10 @@ export function createWorkflow(
   name: string,
   description: string,
   nodes: WorkflowNode[],
-  edges: WorkflowEdge[]
+  edges: WorkflowEdge[],
+  layout?: Record<string, { x: number; y: number }>
 ): Promise<WorkflowDef> {
-  return apiPost<WorkflowDef>("/api/workflows", { name, description, nodes, edges });
+  return apiPost<WorkflowDef>("/api/workflows", { name, description, nodes, edges, layout: layout ?? {} });
 }
 
 export function deleteWorkflow(id: string): Promise<{ ok: boolean }> {

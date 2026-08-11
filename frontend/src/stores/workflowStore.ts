@@ -76,7 +76,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
   saveWorkflow: async (wf) => {
     set({ loading: true, error: null });
     try {
-      const saved = await createWorkflow(wf.name, wf.description, wf.nodes, wf.edges);
+      // S76：保存时携带画布坐标（layout 随模板 definition 持久化）
+      const saved = await createWorkflow(wf.name, wf.description, wf.nodes, wf.edges, wf.layout);
       const templates = [...get().templates.filter((t) => t.id !== saved.id), saved];
       set({ templates, current: saved, loading: false });
     } catch (e) {
