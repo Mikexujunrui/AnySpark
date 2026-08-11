@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { streamChat, getCandidates, steerChat, type Candidate } from "../api/chat";
+import { reportSignal } from "../api/signals";
 import {
   listConversations,
   getConversationMessages,
@@ -155,6 +156,10 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   selectCandidate: (candidate: Candidate) => {
     // 将选中的候选卡作为用户消息发送
+    // S75：上报 accepted 信号（用户接受方向 → 对齐/心智/档位闭环）
+    reportSignal("accepted", candidate.text, {
+      context: get().messages[get().messages.length - 1]?.content ?? "",
+    });
     get().sendMessage(candidate.text);
   },
 

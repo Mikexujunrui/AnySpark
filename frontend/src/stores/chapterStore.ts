@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { listChapters, getChapter, createChapter, deleteChapter, patchChapter } from "../api/chapters";
+import { reportSignal } from "../api/signals";
 import type { Chapter } from "../types";
 
 interface ChapterState {
@@ -93,6 +94,8 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
     const { selectedId, selectedChapter } = get();
     if (!selectedId || !selectedChapter) return;
 
+    // S75：手动改正文 → modified 信号（"改成这样更好"——心智提炼偏好的核心输入）
+    const prev = selectedChapter.content;
     set({ saving: true });
     try {
       const updated = await patchChapter(selectedId, { content });
@@ -101,6 +104,9 @@ export const useChapterStore = create<ChapterState>((set, get) => ({
         chapters: state.chapters.map((c) => (c.id === selectedId ? updated : c)),
         saving: false,
       }));
+      if (prev !== content) {
+        reportSignal("modified", prev, { newContent: content });
+      }
     } catch (error) {
       console.error("Failed to save chapter:", error);
       set({ saving: false });
