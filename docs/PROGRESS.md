@@ -2455,3 +2455,29 @@ wrapup 误判修正（已用真实 API）；stats/codex/graph 通道标注非前
 
 **验证**：总闸全绿（421 pytest + 前端 typecheck/lint/build）；端到端：叙事树 PUT→GET 坐标往返、
 工作流带 layout 创建→读取、任务快照含 layout；测试模板已清理。
+
+## S78 前端缺口全部补全（已完成 ✅）——P0 定点编辑 + P1 八项 + P2 七项
+
+**背景（主人指示）**：按顺序计划全部补全 FRONTEND-GAPS.md 缺口。决策：隔离项用
+多个子代理并行写独立新文件，集成层（Layout/DisplayArea 挂载 + 共享热点文件）由主
+会话独占，避免撞文件。
+
+**并行方式**：5 个 worker 子代理各建 2-3 组独立面板（只新建文件，不碰既有文件），
+主会话处理 4 个共享热点（定点编辑 Paper、chat 增强、notices、path 探索）+ 集成。
+
+**交付**（commit e1deaa3，45 文件 +4161 行，前端缺口清零）：
+
+- **P0 定点编辑**：chapters.ts `patchChapterContent` + chapterStore.applyChapterPatch +
+  Paper.tsx「定点编辑」面板（锚点插入/删除/替换，不重写整章省 token，S44 落地）
+- **P1 八项**：brief（简介可 AI 生成草案人工确认）/ bias（倾向档案双向黑盒）/ batch
+  （批量改写/审读 2s 轮询进度）/ upload+ingest（文件 base64 → 拆章/摘要卡）/ templates
+  （模式库导入）/ impact（改章影响下游）/ tools（扩展工具注册表 P5 批准闸门）
+- **P2 七项**：play（互动推演）/ role（角色推演 N 路选优）/ review（评审团）/ dims
+  （探索维度管理）/ explore path（路径探索入 ExploreView）/ notices（心智变更通知
+  入 ManualPanel 条目/通知双视图）/ chat 增强（direction 方向按钮 + 改写渐变条
+  保原味/适中/大幅改 + cancel 走后端会话态）
+
+**集成**：client.ts 补 apiPatch；Layout.tsx 顶栏「工具 ▾」下拉坞收敛 11 个面板入口。
+
+**验证**：后端 164 端点逐一 curl 探活真实数据；总闸全绿（421 pytest + 前端
+typecheck/lint/build）。
