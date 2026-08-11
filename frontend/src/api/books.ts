@@ -33,6 +33,11 @@ export const searchMaterials = (q: string, _bookId?: string): Promise<unknown[]>
 };
 export const createMaterial = (data: unknown): Promise<unknown> => post("/api/materials", data);
 export const deleteMaterial = (id: string): Promise<unknown> => del(`/api/materials/${id}`);
+// S79：双层资料库——从别的池复制（标 copy 冷藏）+ copy 转灵感
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export const importMaterial = (data: { card_id: string; from_book_id: string; to_book_id: string }): Promise<any> =>
+  post("/api/materials/import", data);
+export const promoteMaterial = (id: string): Promise<unknown> => post(`/api/materials/${id}/promote`, {});
 
 // ── Reference books / analyses：V4 无此能力，降级 ──
 export const getReferences = (): Promise<unknown> => Promise.resolve([]);

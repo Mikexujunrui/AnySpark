@@ -1399,3 +1399,44 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 
 - 后端 API 全部就绪；前端缺口按迭代补（docs/FRONTEND-GAPS.md 列全端点）
 - 前端开发者为合作者；审计记录供其参考，不阻塞后端进度
+
+### 12.39 双层资料库（S79：全局大池子 ↔ 项目小池子，kind 冷藏机制）
+
+> 背景：前端出现"全局资料库"与"书内资料库"两个入口，实为同一组件+同一 API
+> （S74 的 book_id 隔离未接 API，全落 main）。主人厘清概念后拍板：
+> **全局池保留（大池子）+ 项目池（小池子），半独立可互相导入**。
+
+#### 资料库定位（主人定案）
+
+- 资料库 = **灵感/参考冷藏库**，不是写作主循环的知识源（**不注入**，需要时检索/导入）
+- 内容分两类，可见性不同：
+  - **inspiration（灵感卡）**：随想灵感/历史文献/参考笔记——智能体**可见可检索**（read_material 命中）
+  - **copy（重叠副本）**：从全局池/设定/图谱复制的重叠内容——智能体**不可见、检索不命中**，仅前端人工查看（纯冷藏备份）
+- **导入语义 = 复制 + 溯源 + 标 copy**：导入的卡带 source_ref（global:<卡id>），
+  不自动成为智能体可见内容；用户手动「转灵感」才可见
+
+#### 数据模型（materials 表）
+
+- `book_id`：`"global"`（全局大池子）/ `<书id>`（项目小池子）——S74 字段正式接线 API
+- `kind TEXT DEFAULT 'inspiration'`：inspiration / copy
+- `source_ref TEXT DEFAULT ''`：copy 卡溯源
+- 智能体工具一律 `kind='inspiration'` 过滤：read_material（tools_extras）、skill_refine（tools_domain）
+
+#### API
+
+- `GET /api/materials?book_id=&kind=`（kind=all 显示全部）；`POST /api/materials` 带 book_id/kind
+- `POST /api/materials/import {card_id, from_book_id, to_book_id}` → 复制+溯源+标 copy
+- `POST /api/materials/{id}/promote` → copy 转 inspiration（人工闸门）
+- `GET /api/workspace?book_id=`（上传区总览按书，S48 补接线）；`GET /api/upload/{book_id}/{filename}`（素材文件访问/图片展示）
+
+#### 前端
+
+- 书架页「资料库」tab = **全局池**（book_id=global）；书内「资料」tab = **项目池** + 「从全局池导入」
+- copy 卡「冷藏」角标 + 「转灵感」按钮
+- UploadPanel 支持图片（accept 放开 + 缩略图 + 素材标记）——图片无文本消化路径，纯素材存放（未来多模态接入）
+
+#### 与 S86 参考书库（anyspark-library 包）的关系
+
+- 参考书库 = **整本参考书文件**（全局 data/library/ + 项目选书，只读检索不注入）
+- 资料库 = **摘要卡/灵感卡**（双层池，kind 控制可见性）
+- 两者互补不重叠：参考书是"书"，资料库是"卡"；skill_refine 拆书（S78）从任一来源取原文提炼方法论

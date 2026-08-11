@@ -28,7 +28,6 @@
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > 当前无会话声明。
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
-> [S79] 正在改 materials（双层资料库：kind=inspiration/copy + book_id=global/书 + 导入/转灵感；read_material/skill_refine 过滤 copy）：涉及 packages/template/materials.py、routes_plot.py、tools_extras.py、tools_domain.py、frontend MaterialsPanel/Bookshelf/BookDetail/UploadPanel——完成提交后删除本行
 
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）
@@ -2559,3 +2558,20 @@ typecheck/lint/build）。
 - 设定（全书固定）vs 图谱（动态事实）类型不同不冲突
 
 **验证**：总闸全绿（420 pytest）+ 手动编辑触发抽取（日志实证）+ 批量轮询 0 即 done
+
+
+## S79 双层资料库（已完成 ✅，DESIGN §12.39）——全局池 ↔ 项目池 + kind 冷藏机制
+
+**背景**：前端"全局资料库"与"书内资料库"实为同一组件同一 API（S74 book_id 未接 API 全落 main）。
+主人厘清：资料库 = 灵感/参考冷藏库（不注入，需要时检索/导入）；全局大池子 + 项目小池子半独立可导入。
+
+**交付**：
+- materials 加 kind（inspiration 可见 / copy 冷藏不可见）+ source_ref（溯源）+ book_id 接线 API
+- API：GET ?book_id&kind / POST 带 book_id/kind / POST import（复制+溯源+标 copy）/ POST {id}/promote（转灵感）
+- 工具过滤：read_material / skill_refine 一律 kind=inspiration（copy 智能体不可见）
+- 前端：书架页=全局池、书内=项目池+「从全局池导入」、冷藏角标+转灵感、图片素材（UploadPanel 缩略图 + /api/upload/{book}/{file} 文件端点 + workspace 按书）
+- 图片无文本消化路径，纯素材存放（未来多模态接入）
+
+**验证**：总闸全绿（423 pytest + 前端全过）；端到端——global/main 建卡、按池过滤、导入标 copy+溯源、promote 转灵感、图片上传/读回（PNG 校验）。
+
+**顺带**：修 mypy 配置（packages/library/src，并行会话 S86 新包漏注册，AGENTS 清单 ③ 先例）；FakeMaterials 适配 kind 过滤（时序问题：gate 失败时测试未适配）。

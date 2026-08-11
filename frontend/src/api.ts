@@ -52,6 +52,8 @@ export const api = {
   searchMaterials: books.searchMaterials,
   createMaterial: books.createMaterial,
   deleteMaterial: books.deleteMaterial,
+  importMaterial: books.importMaterial,
+  promoteMaterial: books.promoteMaterial,
   subscribeMaterial: books.subscribeMaterial,
   unsubscribeMaterial: books.unsubscribeMaterial,
 

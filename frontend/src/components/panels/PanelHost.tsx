@@ -48,7 +48,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {panelKey === 'workflow' && <div className="h-full min-h-0 flex flex-col"><WorkflowPanel /></div>}
       {panelKey === 'search' && <div className="h-full min-h-0 flex flex-col"><SearchPanel bookId={bookId} /></div>}
       {panelKey === 'review' && <div className="h-full min-h-0 flex flex-col"><ReviewPanel bookId={bookId} /></div>}
-      {panelKey === 'materials' && <div className="h-full min-h-0 flex flex-col"><MaterialsPanel /></div>}
+      {panelKey === 'materials' && <div className="h-full min-h-0 flex flex-col"><MaterialsPanel bookId={bookId} /></div>}
 
       {/* V4 工具面板（open/onClose 签名 → 内嵌常显） */}
       {panelKey === 'brief' && <div className="h-full min-h-0 flex flex-col"><BriefPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
@@ -58,7 +58,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {panelKey === 'tools' && <div className="h-full min-h-0 flex flex-col"><ToolsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'play' && <div className="h-full min-h-0 flex flex-col"><PlayPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'dims' && <div className="h-full min-h-0 flex flex-col"><DimsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
-      {panelKey === 'upload' && <div className="h-full min-h-0 flex flex-col"><UploadPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
+      {panelKey === 'upload' && <div className="h-full min-h-0 flex flex-col"><UploadPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
     </div>
   )
 }

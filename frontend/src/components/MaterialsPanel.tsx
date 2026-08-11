@@ -18,10 +18,13 @@ interface MaterialCard {
   purpose?: string
   source_text?: string
   graph_entities?: string[]
+  kind?: string // S79: inspiration（可见）/ copy（冷藏）
+  source_ref?: string
   created_at?: string
 }
 
-export default function MaterialsPanel() {
+export default function MaterialsPanel({ bookId = 'main' }: { bookId?: string }) {
+  const isGlobal = bookId === 'global'
   const [materials, setMaterials] = useState<MaterialCard[]>([])
   const [loading, setLoading] = useState(true)
   const [query, setQuery] = useState('')
@@ -29,16 +32,48 @@ export default function MaterialsPanel() {
   const [deleteMatId, setDeleteMatId] = useState<string | null>(null)
   const [selectedMat, setSelectedMat] = useState<MaterialCard | null>(null)
   const [form, setForm] = useState({ title: '', content: '', purpose: 'fact' })
+  // S79：从全局池导入
+  const [showImport, setShowImport] = useState(false)
+  const [globalCards, setGlobalCards] = useState<MaterialCard[]>([])
+  const [importing, setImporting] = useState<string | null>(null)
 
-  useEffect(() => { loadMaterials() }, [])
+  useEffect(() => { loadMaterials() }, [bookId])
 
   async function loadMaterials() {
     setLoading(true)
     try {
-      const data: any = await api.getMaterials('')
+      const data: any = await api.getMaterials(bookId)
       setMaterials(Array.isArray(data) ? data as MaterialCard[] : [])
     } catch (e) { showToast('加载资料失败', 'error') }
     setLoading(false)
+  }
+
+  async function openImport() {
+    setShowImport(true)
+    setImporting(null)
+    try {
+      const data: any = await api.getMaterials('global')
+      setGlobalCards(Array.isArray(data) ? data as MaterialCard[] : [])
+    } catch (e) { showToast('加载全局池失败', 'error'); setGlobalCards([]) }
+  }
+
+  async function handleImport(cardId: string) {
+    setImporting(cardId)
+    try {
+      await api.importMaterial({ card_id: cardId, from_book_id: 'global', to_book_id: bookId })
+      showToast('已导入（冷藏副本，可手动转为灵感）', 'success')
+      setShowImport(false)
+      loadMaterials()
+    } catch (e) { showToast('导入失败', 'error') }
+    setImporting(null)
+  }
+
+  async function handlePromote(id: string) {
+    try {
+      await api.promoteMaterial(id)
+      showToast('已转为灵感卡（智能体可见）', 'success')
+      loadMaterials()
+    } catch (e) { showToast('转换失败', 'error') }
   }
 
   async function handleSearch() {
@@ -46,7 +81,7 @@ export default function MaterialsPanel() {
     if (!q) { loadMaterials(); return }
     setLoading(true)
     try {
-      const data: any = await api.getMaterials('')
+      const data: any = await api.getMaterials(bookId)
       const list: MaterialCard[] = Array.isArray(data) ? data : []
       const needle = q.toLowerCase()
       const hits = list.filter(m => {
@@ -69,11 +104,12 @@ export default function MaterialsPanel() {
       return
     }
     try {
-      // V4：text=原文 → 后端 LLM 消化成摘要卡（topic/key_points/characters/terms）
+      // S79：双层池——global=全局大池子 / main=项目小池子
       await api.createMaterial({
         text: form.content,
         title: form.title,
         purpose: form.purpose,
+        book_id: bookId,
       })
       setShowAdd(false)
       setForm({ title: '', content: '', purpose: 'fact' })
@@ -117,11 +153,21 @@ export default function MaterialsPanel() {
       <header className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Icon name="folder" size={28} /> 资料库
+            <Icon name="folder" size={28} /> {isGlobal ? "全局资料池" : "项目资料池"}
           </h1>
-          <p className="text-zinc-500 mt-1 text-sm">项目研究资料池：上传原文 → AI 消化成摘要卡（要点/设定/角色/术语）</p>
+          <p className="text-zinc-500 mt-1 text-sm">
+            {isGlobal
+              ? "全局大池子：跨书素材/灵感/参考书原文；项目可从这里导入（导入为冷藏副本）"
+              : "项目小池子：灵感卡（智能体可见）+ 冷藏副本（仅人工查看）；智能体只检索灵感卡，不注入写作"}
+          </p>
         </div>
         <div className="flex gap-2">
+          {!isGlobal && (
+            <button onClick={openImport}
+              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-5 py-2.5 rounded-lg transition-colors text-sm font-medium flex items-center gap-2">
+              <Icon name="download" size={16} /> 从全局池导入
+            </button>
+          )}
           <button onClick={() => setShowAdd(true)}
             className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-5 py-2.5 rounded-lg transition-colors text-sm font-medium flex items-center gap-2">
             <Icon name="plus" size={16} /> 添加资料
@@ -169,10 +215,21 @@ export default function MaterialsPanel() {
               className="bg-zinc-900 border border-zinc-800 rounded-xl p-5 hover:border-zinc-700 cursor-pointer transition-all group hover:shadow-md">
               <div className="flex items-start justify-between mb-2">
                 <h3 className="text-zinc-200 font-semibold text-sm leading-snug flex-1 mr-2">{m.title}</h3>
-                <button onClick={(e) => { e.stopPropagation(); setDeleteMatId(m.id) }}
-                  className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 text-xs transition-all ml-1 shrink-0">
-                  <Icon name="trash" size={14} />
-                </button>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {m.kind === 'copy' && (
+                    <span title="冷藏副本：智能体不可见，仅人工查看"
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-slate-700/60 text-slate-400 border border-slate-600">冷藏</span>
+                  )}
+                  {!isGlobal && m.kind === 'copy' && (
+                    <button onClick={(e) => { e.stopPropagation(); handlePromote(m.id) }}
+                      className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-400 hover:bg-amber-900/60"
+                      title="转为灵感卡（智能体可见）">转灵感</button>
+                  )}
+                  <button onClick={(e) => { e.stopPropagation(); setDeleteMatId(m.id) }}
+                    className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 text-xs transition-all ml-1">
+                    <Icon name="trash" size={14} />
+                  </button>
+                </div>
               </div>
               {tagList(m).length > 0 && (
                 <div className="flex flex-wrap gap-1 mb-2">
@@ -233,6 +290,40 @@ export default function MaterialsPanel() {
         onConfirm={handleDelete}
         onCancel={() => setDeleteMatId(null)}
       />
+
+      {/* S79：从全局池导入 */}
+      {showImport && (
+        <Modal open onClose={() => setShowImport(false)} title="从全局池导入" size="lg">
+          <div className="p-6">
+            <h2 className="text-lg font-bold text-zinc-200 mb-1">从全局池导入</h2>
+            <p className="text-xs text-zinc-500 mb-4">
+              选中卡片将复制到本项目（带溯源标记，标为冷藏副本——智能体不可见）；
+              需要智能体可见时导入后点「转灵感」。
+            </p>
+            <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+              {globalCards.length === 0 ? (
+                <p className="text-sm text-zinc-600 py-6 text-center">全局池暂无资料</p>
+              ) : globalCards.map(g => (
+                <div key={g.id}
+                  className="flex items-center justify-between bg-zinc-800/50 border border-zinc-700 rounded-lg px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="text-sm text-zinc-200 truncate">{g.title}</p>
+                    <p className="text-[11px] text-zinc-500 truncate">{g.topic || g.key_points?.slice(0, 2).join('；')}</p>
+                  </div>
+                  <button onClick={() => handleImport(g.id)} disabled={importing === g.id}
+                    className="text-xs px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 rounded-lg shrink-0 ml-3">
+                    {importing === g.id ? '导入中...' : '导入'}
+                  </button>
+                </div>
+              ))}
+            </div>
+            <div className="flex justify-end mt-4">
+              <button onClick={() => setShowImport(false)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-4 py-2 rounded-lg transition-colors text-sm">关闭</button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Material Detail Modal */}
       {selectedMat && (

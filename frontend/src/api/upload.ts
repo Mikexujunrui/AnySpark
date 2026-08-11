@@ -55,9 +55,14 @@ export function uploadFile(
   });
 }
 
-// 工作区总览（含上传区文件列表，后端固定按 main 书）
-export function listWorkspace(): Promise<WorkspaceOverview> {
-  return apiGet<WorkspaceOverview>("/api/workspace");
+// 工作区总览（S48：上传存档 / 章节文件 / 卡片；S79 按书）
+export function listWorkspace(bookId = "main"): Promise<WorkspaceOverview> {
+  return apiGet<WorkspaceOverview>(`/api/workspace?book_id=${bookId}`);
+}
+
+// S79：上传区文件访问 URL（图片缩略图/下载）
+export function uploadFileUrl(bookId: string, name: string): string {
+  return `/api/upload/${encodeURIComponent(bookId)}/${encodeURIComponent(name)}`;
 }
 
 // 消化上传区文件：长文拆章 / 短文本摘要卡

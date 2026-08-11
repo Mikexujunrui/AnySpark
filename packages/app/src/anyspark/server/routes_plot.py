@@ -12,7 +12,14 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from anyspark.server.deps import AppDeps
-from anyspark.server.schemas import MaterialIn, PlotIn, PlotItemIn, PlotPatchIn, TemplateIn
+from anyspark.server.schemas import (
+    MaterialImportIn,
+    MaterialIn,
+    PlotIn,
+    PlotItemIn,
+    PlotPatchIn,
+    TemplateIn,
+)
 from anyspark.template import MaterialDigestor
 
 
@@ -98,22 +105,45 @@ def make_plot_router(deps: AppDeps) -> APIRouter:
         card = digestor.digest(req.text, purpose=purpose)
         if req.title:
             card.title = req.title
+        card.kind = req.kind if req.kind in ("inspiration", "copy") else "inspiration"
         # 图谱关联（机制 10 补齐）：摘要卡角色/设定/术语 → 图谱实体
         names = [*card.characters, *card.key_settings, *card.terms]
         linked = deps.graph.resolve_names("main", names)
         card.graph_entities = [e.id for e in linked]
-        deps.materials.save(card)
+        deps.materials.save(card, book_id=req.book_id)
         return card.to_dict()
 
+    @router.post("/api/materials/import", response_model=dict[str, object])
+    def import_material(req: MaterialImportIn) -> dict[str, object]:
+        """S79：从别的池复制资料卡到本池（复制+溯源+标 copy 冷藏，智能体不可见）。"""
+        new_card = deps.materials.import_card(req.card_id, req.from_book_id, req.to_book_id)
+        if new_card is None:
+            raise HTTPException(status_code=404, detail="源资料卡不存在")
+        return new_card.to_dict()
+
     @router.get("/api/materials", response_model=list[dict[str, object]])
-    def list_materials() -> list[dict[str, object]]:
-        return [m.to_dict() for m in deps.materials.list()]
+    def list_materials(book_id: str = "main", kind: str | None = None) -> list[dict[str, object]]:
+        """S79：按池（book_id）列资料卡；kind 可过滤（inspiration/copy，None=全部）。
+
+        前端传 kind='all' 等价 None（显示全部）；智能体工具走 inspiration（见 tools_extras）。
+        """
+        if kind == "all":
+            kind = None
+        return [m.to_dict() for m in deps.materials.list(book_id, kind=kind)]
 
     @router.get("/api/materials/{material_id}", response_model=dict[str, object])
     def get_material(material_id: str) -> dict[str, object]:
         card = deps.materials.get(material_id)
         if card is None:
             raise HTTPException(status_code=404, detail="材料不存在")
+        return card.to_dict()
+
+    @router.post("/api/materials/{material_id}/promote", response_model=dict[str, object])
+    def promote_material(material_id: str) -> dict[str, object]:
+        """S79：copy 冷藏卡 → inspiration（用户手动转可见，智能体才看得到）。"""
+        card = deps.materials.promote(material_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="卡片不存在或不是冷藏副本")
         return card.to_dict()
 
     @router.delete("/api/materials/{material_id}", response_model=dict[str, object])

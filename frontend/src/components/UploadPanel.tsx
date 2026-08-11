@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useUploadStore } from "../stores/uploadStore";
-import type { IngestMode } from "../api/upload";
+import { uploadFileUrl, type IngestMode } from "../api/upload";
 
 interface UploadPanelProps {
   open: boolean;
   onClose: () => void;
   embedded?: boolean;
+  bookId?: string; // S79：素材库按书（BookDetail 传当前书）
 }
 
 const MODE_LABELS: Record<IngestMode, string> = {
@@ -20,7 +21,7 @@ function formatSize(size: number): string {
   return `${(size / 1024 / 1024).toFixed(2)} MB`;
 }
 
-export default function UploadPanel({ open, onClose, embedded = false }: UploadPanelProps) {
+export default function UploadPanel({ open, onClose, embedded = false, bookId = "main" }: UploadPanelProps) {
   const uploads = useUploadStore((s) => s.uploads);
   const loading = useUploadStore((s) => s.loading);
   const error = useUploadStore((s) => s.error);
@@ -37,7 +38,7 @@ export default function UploadPanel({ open, onClose, embedded = false }: UploadP
 
   useEffect(() => {
     if (open) {
-      fetchUploads();
+      fetchUploads(bookId);
       clearMsg();
       setFile(null);
       setMode("auto");
@@ -50,15 +51,20 @@ export default function UploadPanel({ open, onClose, embedded = false }: UploadP
   const handleUpload = async () => {
     if (!file) return;
     setBusyName(file.name);
-    await uploadAndIngest(file, mode);
+    await uploadAndIngest(file, mode, bookId);
     setBusyName(null);
   };
 
   const handleIngest = async (name: string, m: IngestMode) => {
     setBusyName(name);
-    await ingest(name, m);
+    await ingest(name, m, bookId);
     setBusyName(null);
   };
+
+  // S79：图片类型判断（素材库缩略图）
+  function isImage(name: string): boolean {
+    return /\.(png|jpe?g|gif|webp|bmp)$/i.test(name);
+  }
 
   return (
     <div className={embedded ? "h-full flex flex-col" : "fixed inset-0 z-50 flex"}>
@@ -83,7 +89,7 @@ export default function UploadPanel({ open, onClose, embedded = false }: UploadP
             <input
               ref={fileInputRef}
               type="file"
-              accept=".txt,.md,.markdown,.docx,.pdf"
+              accept=".txt,.md,.markdown,.docx,.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp"
               onChange={(e) => setFile(e.target.files?.[0] || null)}
               className="text-xs text-zinc-400 file:mr-2 file:px-2 file:py-1 file:rounded file:border-0 file:bg-zinc-700 file:text-zinc-200 file:text-xs hover:file:bg-zinc-600"
             />
@@ -106,7 +112,7 @@ export default function UploadPanel({ open, onClose, embedded = false }: UploadP
             </button>
           </div>
           <p className="text-[11px] text-zinc-600">
-            支持 txt / md / docx / pdf（≤20MB）。上传后按模式消化：长文拆章入库、短文本生成摘要卡。
+            支持 txt / md / docx / pdf + 图片（≤20MB）。文本按模式消化：长文拆章、短文本摘要卡；图片作为素材存放（未来多模态接入）。
           </p>
         </div>
 
@@ -137,9 +143,21 @@ export default function UploadPanel({ open, onClose, embedded = false }: UploadP
                 key={u.name}
                 className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-3 flex items-center justify-between gap-3"
               >
+                {isImage(u.name) ? (
+                  <img
+                    src={uploadFileUrl(bookId, u.name)}
+                    alt={u.name}
+                    className="w-14 h-14 rounded object-cover bg-zinc-900 shrink-0"
+                    title={u.name}
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0 text-zinc-600">
+                    <span className="text-[9px] px-1 truncate max-w-full">{(u.name.split(".").pop() || "file").toUpperCase()}</span>
+                  </div>
+                )}
                 <div className="min-w-0">
                   <p className="text-sm text-zinc-200 truncate" title={u.name}>{u.name}</p>
-                  <p className="text-[11px] text-zinc-500">{formatSize(u.size)}</p>
+                  <p className="text-[11px] text-zinc-500">{formatSize(u.size)}{isImage(u.name) ? " · 图片素材" : ""}</p>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <select

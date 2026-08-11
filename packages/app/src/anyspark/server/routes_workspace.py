@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import FileResponse
 
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
@@ -21,9 +22,9 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/workspace", response_model=dict[str, Any])
-    def workspace_overview() -> dict[str, Any]:
-        """项目工作区结构总览：上传存档 / 章节文件 / 卡片。"""
-        return deps.workspace.describe("main")
+    def workspace_overview(book_id: str = "main") -> dict[str, Any]:
+        """项目工作区结构总览：上传存档 / 章节文件 / 卡片（按书）。"""
+        return deps.workspace.describe(book_id)
 
     @router.post("/api/workspace/import", response_model=dict[str, Any])
     def workspace_import_chapters() -> dict[str, Any]:
@@ -70,5 +71,13 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
         dest = deps.workspace.save_upload(req.book_id, req.filename, data)
         logger.info("上传存档: %s -> %s", req.filename, dest.name)
         return {"ok": True, "name": dest.name, "path": str(dest), "size": len(data)}
+
+    @router.get("/api/upload/{book_id}/{filename}")
+    def get_upload_file(book_id: str, filename: str) -> FileResponse:
+        """S79：读取上传区文件（前端展示图片/下载素材用；文件名消毒防穿越）。"""
+        p = deps.workspace.read_upload(book_id, filename)
+        if p is None:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        return FileResponse(p)
 
     return router

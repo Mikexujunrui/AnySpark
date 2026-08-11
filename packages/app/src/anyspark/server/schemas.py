@@ -366,6 +366,16 @@ class MaterialIn(BaseModel):
     text: str
     title: str = ""
     purpose: str = "fact"  # style|fact|both
+    book_id: str = "main"  # S79：全局池用 "global"，项目池用 <书id>
+    kind: str = "inspiration"  # S79：inspiration（智能体可见）/ copy（冷藏）
+
+
+class MaterialImportIn(BaseModel):
+    """S79：从别的池复制资料卡（复制 + 溯源 + 标 copy 冷藏）。"""
+
+    card_id: str
+    from_book_id: str
+    to_book_id: str
 
 
 class GraphExtractIn(BaseModel):

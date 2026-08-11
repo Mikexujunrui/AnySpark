@@ -140,7 +140,8 @@ def make_read_material_implementer(materials: Any, book_id: str = "main") -> tup
     def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec_.name, arguments=arguments)
         q = str(arguments.get("title", "")).strip()
-        cards = materials.list()
+        # S79：只读 inspiration 灵感卡（copy 冷藏副本智能体不可见/不检索）
+        cards = materials.list(book_id=book_id, kind="inspiration")
         if not q:
             if not cards:
                 return ToolResult(call=call, ok=True, content="资料库为空。")

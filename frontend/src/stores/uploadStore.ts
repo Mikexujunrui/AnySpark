@@ -29,9 +29,9 @@ interface UploadState {
   // 消化结果消息（成功/失败提示）
   ingestMsg: string | null;
 
-  fetchUploads: () => Promise<void>;
-  uploadAndIngest: (file: File, mode: IngestMode) => Promise<void>;
-  ingest: (filename: string, mode: IngestMode) => Promise<void>;
+  fetchUploads: (bookId?: string) => Promise<void>;
+  uploadAndIngest: (file: File, mode: IngestMode, bookId?: string) => Promise<void>;
+  ingest: (filename: string, mode: IngestMode, bookId?: string) => Promise<void>;
   clearMsg: () => void;
 }
 
@@ -41,26 +41,26 @@ export const useUploadStore = create<UploadState>((set, get) => ({
   error: null,
   ingestMsg: null,
 
-  fetchUploads: async () => {
+  fetchUploads: async (bookId = "main") => {
     set({ loading: true, error: null });
     try {
-      const ws = await listWorkspace();
+      const ws = await listWorkspace(bookId);
       set({ uploads: ws.uploads, loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });
     }
   },
 
-  uploadAndIngest: async (file, mode) => {
+  uploadAndIngest: async (file, mode, bookId = "main") => {
     set({ loading: true, error: null, ingestMsg: null });
     try {
       if (file.size > 20 * 1024 * 1024) {
         throw new Error("文件超过 20MB 上限");
       }
       const dataB64 = await fileToBase64(file);
-      const up = await uploadFile(file.name, dataB64);
-      // 上传成功后立即按所选模式消化
-      const result = await ingestFile(up.name, mode);
+      const up = await uploadFile(file.name, dataB64, bookId);
+      // 上传成功后立即按所选模式消化（图片等非文本文件无消化路径，仅存档）
+      const result = await ingestFile(up.name, mode, bookId);
       const msg = formatIngestMsg(result);
       set({ ingestMsg: msg, loading: false });
       await get().fetchUploads();
@@ -69,10 +69,10 @@ export const useUploadStore = create<UploadState>((set, get) => ({
     }
   },
 
-  ingest: async (filename, mode) => {
+  ingest: async (filename, mode, bookId = "main") => {
     set({ loading: true, error: null, ingestMsg: null });
     try {
-      const result = await ingestFile(filename, mode);
+      const result = await ingestFile(filename, mode, bookId);
       set({ ingestMsg: formatIngestMsg(result), loading: false });
     } catch (e) {
       set({ error: (e as Error).message, loading: false });

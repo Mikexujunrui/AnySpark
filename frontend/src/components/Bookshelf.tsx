@@ -214,7 +214,7 @@ export default function Bookshelf() {
       ) : tab === 'workflows' ? (
         <WorkflowPoolPanel />
       ) : tab === 'materials' ? (
-        <MaterialsPanel />
+        <MaterialsPanel bookId="global" />
       ) : (
         <div className="max-w-6xl mx-auto px-6 py-10">
           <header className="flex items-center justify-between mb-8">

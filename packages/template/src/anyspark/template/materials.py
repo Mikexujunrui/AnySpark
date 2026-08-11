@@ -9,6 +9,7 @@ anyspark.template.materials — 资料消化（机制 10）。
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 import threading
 import uuid
@@ -27,7 +28,12 @@ Purpose = Literal["style", "fact", "both"]
 
 @dataclass
 class MaterialCard:
-    """材料摘要卡（核心：入库压缩，写作注入摘要卡而非原文）。"""
+    """材料摘要卡（核心：入库压缩，写作注入摘要卡而非原文）。
+
+    S79 双层资料库：kind=inspiration（灵感卡，智能体可见/可检索）| copy（重叠副本，
+    智能体不可见、不检索，仅人工查看——冷藏备份）；source_ref 记录 copy 卡的溯源
+    （如 global:<卡id> / setting:<id> / graph:<实体id>）。
+    """
 
     title: str
     topic: str  # 主题
@@ -38,6 +44,8 @@ class MaterialCard:
     purpose: Purpose = "fact"
     source_text: str = ""  # 原文（保留可查全文）
     graph_entities: list[str] = field(default_factory=list)  # 关联图谱实体 id（机制 10）
+    kind: str = "inspiration"  # S79：inspiration（可见）/ copy（冷藏副本）
+    source_ref: str = ""  # S79：copy 卡溯源（如 global:<卡id>）
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
     created_at: str = field(default_factory=lambda: _now())
 
@@ -53,6 +61,8 @@ class MaterialCard:
             "purpose": self.purpose,
             "source_text": self.source_text,
             "graph_entities": self.graph_entities,
+            "kind": self.kind,
+            "source_ref": self.source_ref,
             "created_at": self.created_at,
         }
 
@@ -96,26 +106,21 @@ class MaterialStore:
                 purpose TEXT NOT NULL DEFAULT 'fact',
                 source_text TEXT NOT NULL DEFAULT '',
                 graph_entities TEXT NOT NULL DEFAULT '[]',
+                kind TEXT NOT NULL DEFAULT 'inspiration',
+                source_ref TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL
             );
             """
         )
         # 旧库兼容：已存在的 materials 表补列（幂等）
-        try:
-            self._conn.execute(
-                "ALTER TABLE materials ADD COLUMN graph_entities TEXT NOT NULL DEFAULT '[]'"
-            )
-            self._conn.commit()
-        except sqlite3.OperationalError:
-            pass  # 列已存在
-        # S74：补 book_id 列（幂等）
-        try:
-            self._conn.execute(
-                "ALTER TABLE materials ADD COLUMN book_id TEXT NOT NULL DEFAULT 'main'"
-            )
-            self._conn.commit()
-        except sqlite3.OperationalError:
-            pass  # 列已存在
+        for col_sql in (
+            "ALTER TABLE materials ADD COLUMN graph_entities TEXT NOT NULL DEFAULT '[]'",
+            "ALTER TABLE materials ADD COLUMN book_id TEXT NOT NULL DEFAULT 'main'",
+            "ALTER TABLE materials ADD COLUMN kind TEXT NOT NULL DEFAULT 'inspiration'",
+            "ALTER TABLE materials ADD COLUMN source_ref TEXT NOT NULL DEFAULT ''",
+        ):
+            with contextlib.suppress(sqlite3.OperationalError):
+                self._conn.execute(col_sql)
         self._conn.commit()
 
     def save(self, card: MaterialCard, book_id: str = "main") -> MaterialCard:
@@ -124,8 +129,9 @@ class MaterialStore:
         with self._lock:
             self._conn.execute(
                 "INSERT INTO materials (id, book_id, title, topic, key_points, key_settings, "
-                "characters, terms, purpose, source_text, graph_entities, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "characters, terms, purpose, source_text, graph_entities, kind, source_ref, "
+                "created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     card.id,
                     book_id,
@@ -138,19 +144,31 @@ class MaterialStore:
                     card.purpose,
                     card.source_text,
                     json.dumps(card.graph_entities, ensure_ascii=False),
+                    card.kind,
+                    card.source_ref,
                     card.created_at,
                 ),
             )
             self._conn.commit()
         return card
 
-    def list(self, book_id: str = "main") -> list[MaterialCard]:
+    def list(self, book_id: str = "main", kind: str | None = None) -> list[MaterialCard]:
+        """列资料卡；kind 过滤（'inspiration'/'copy'，None=全部）。
+
+        S79：智能体工具一律 kind='inspiration'（copy 冷藏不可见）。
+        """
         import json
 
         with self._lock:
-            rows = self._conn.execute(
-                "SELECT * FROM materials WHERE book_id=? ORDER BY rowid DESC", (book_id,)
-            ).fetchall()
+            if kind is None:
+                rows = self._conn.execute(
+                    "SELECT * FROM materials WHERE book_id=? ORDER BY rowid DESC", (book_id,)
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT * FROM materials WHERE book_id=? AND kind=? ORDER BY rowid DESC",
+                    (book_id, kind),
+                ).fetchall()
         return [
             MaterialCard(
                 id=r["id"],
@@ -163,6 +181,8 @@ class MaterialStore:
                 purpose=r["purpose"],
                 source_text=r["source_text"],
                 graph_entities=json.loads(r["graph_entities"] or "[]"),
+                kind=r["kind"],
+                source_ref=r["source_ref"],
                 created_at=r["created_at"],
             )
             for r in rows
@@ -188,6 +208,8 @@ class MaterialStore:
             purpose=row["purpose"],
             source_text=row["source_text"],
             graph_entities=json.loads(row["graph_entities"] or "[]"),
+            kind=row["kind"],
+            source_ref=row["source_ref"],
             created_at=row["created_at"],
         )
 
@@ -197,6 +219,42 @@ class MaterialStore:
             cur = self._conn.execute("DELETE FROM materials WHERE id=?", (material_id,))
             self._conn.commit()
         return cur.rowcount > 0
+
+    def import_card(self, card_id: str, from_book_id: str, to_book_id: str) -> MaterialCard | None:
+        """S79：从别的池复制资料卡到本池（复制 + 溯源 + 标 copy 冷藏）。
+
+        源卡不存在返回 None。复制卡带 source_ref（global:<卡id> 或 <书>:<卡id>），
+        kind=copy（智能体不可见）；用户可手动 promote 转 inspiration。
+        """
+
+        src = self.get(card_id)
+        if src is None:
+            return None
+        new_card = MaterialCard(
+            title=src.title,
+            topic=src.topic,
+            key_points=src.key_points,
+            key_settings=src.key_settings,
+            characters=src.characters,
+            terms=src.terms,
+            purpose=src.purpose,
+            source_text=src.source_text,
+            graph_entities=src.graph_entities,
+            kind="copy",
+            source_ref=f"{from_book_id}:{src.id}",
+        )
+        self.save(new_card, book_id=to_book_id)
+        return new_card
+
+    def promote(self, material_id: str) -> MaterialCard | None:
+        """S79：copy 冷藏卡 → inspiration（用户手动转可见，智能体才看得到）。"""
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE materials SET kind='inspiration' WHERE id=? AND kind='copy'",
+                (material_id,),
+            )
+            self._conn.commit()
+        return self.get(material_id) if cur.rowcount else None
 
     def close(self) -> None:
         self._conn.close()
