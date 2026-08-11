@@ -42,7 +42,10 @@ class SqliteConversationStore(ConversationStore):
         parent = Path(self._db).parent
         parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False：嵌入式 SQLite 供 FastAPI 多线程 endpoint 共用
-        self._conn = sqlite3.connect(self._db, check_same_thread=False)
+        # S75：WAL + timeout=30（前端报告并发锁：多 store 独立连接竞争；WAL 允许读写并发，
+        # busy_timeout 防 delete 未提交时其他写阻塞）
+        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._lock = threading.Lock()
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
@@ -250,7 +253,9 @@ class ChapterStore:
     def __init__(self, db_path: str | Path) -> None:
         self._db = str(db_path)
         Path(self._db).parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self._db, check_same_thread=False)
+        # S75：WAL + timeout=30（同会话 store：并发锁加固）
+        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._lock = threading.Lock()
         self._conn.row_factory = sqlite3.Row
         # 复用同一 db 时与会话表共存
@@ -370,10 +375,15 @@ class ChapterStore:
         ]
 
     def delete(self, chapter_id: str) -> bool:
-        """删除章节及其版本历史（前端章节树管理用；md 文件删除由调用方负责）。"""
+        """删除章节及其版本历史（前端章节树管理用；md 文件删除由调用方负责）。
+
+        S75：补 commit（前端报告并发锁根因——DELETE 事务不提交则锁持续持有，
+        后续写请求 500 database is locked）。
+        """
         with self._lock:
             cur = self._conn.execute("DELETE FROM chapters WHERE id = ?", (chapter_id,))
             self._conn.execute("DELETE FROM chapter_versions WHERE chapter_id = ?", (chapter_id,))
+            self._conn.commit()
         return cur.rowcount > 0
 
     def close(self) -> None:

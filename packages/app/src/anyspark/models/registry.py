@@ -116,7 +116,8 @@ class ModelRegistry:
         self._db = str(db_path)
         self._lock = threading.Lock()
         # 单连接（:memory: 库下每连接独立会丢表，必须持有单连接）
-        self._conn = sqlite3.connect(self._db, check_same_thread=False)
+        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.row_factory = sqlite3.Row
         with self._lock:
             self._conn.execute(_SCHEMA)

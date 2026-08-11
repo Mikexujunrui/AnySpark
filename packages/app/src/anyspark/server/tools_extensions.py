@@ -78,7 +78,7 @@ class ExtensionToolStore:
     """扩展工具注册表（SQLite 单连接 + 锁，与既有 store 一致）。"""
 
     def __init__(self, db_path: str | Path) -> None:
-        self._conn = sqlite3.connect(str(db_path), check_same_thread=False)
+        self._conn = sqlite3.connect(str(db_path), check_same_thread=False, timeout=30)
         self._lock = threading.Lock()
         self._conn.row_factory = sqlite3.Row
         with self._lock:

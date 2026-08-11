@@ -1345,3 +1345,33 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 
 - 两个画布的拖拽结束回调已隔离（`onNodePointerUp` 内 `moved` 标志），实现时在此
   挂 debounce 保存即可；`manualPos` state 即待持久化数据，无需重构。
+
+### 12.36 SQLite 并发锁修复（S75：前端报告 + 全仓加固）
+
+> 背景（前端开发者报告）：删除章节后立即对话 → 500 `database is locked`，前端
+> "死机"。前端分支 docs/BACKEND-ISSUES.md 有完整错误分析（根因推断），后端核对
+> 后确认：**分析正确，后端此前未修复**。
+
+#### 根因（核实前端分析）
+
+1. **ChapterStore.delete() 缺 commit**（sqlite.py）：`with self._lock:` 内执行 DELETE
+   无 commit → 事务保持打开、锁持续持有 → 后续任何写请求（chat 的 decay_stale
+   UPDATE 等）500 locked。**这是锁的直接根因**。
+2. **无 WAL + 默认 timeout=5**：15+ store 各自独立 connect 同一 db，rollback journal
+   模式读写互斥，高并发脆弱（放大问题）。
+
+#### 修复（最小修复 + 全仓加固）
+
+1. **ChapterStore.delete 补 commit**（核心）
+2. **全部 store connect 加 `timeout=30` + `PRAGMA journal_mode=WAL`**（18 个 store 文件
+   统一：align 9 + app 2 + explore 1 + graph 1 + play 1 + template 3 + workflow 1；
+   WAL 允许读并发 + busy_timeout 30s 宽容写竞争）——防任何 store 再缺 commit 时
+   锁死整个系统
+
+#### 验证
+
+- 真实链路（新进程）：删章→立即对话 ✓ / 连续删 3 章→对话 ✓（旧进程复现 500，
+  换新代码后消失）
+- 测试：ChapterStore.delete 后立即写 ✓；WAL 模式存在 ✓
+- AST 全仓扫描确认无其他缺 commit 的写方法（graph/storytree/registry 均正常，
+  SqliteConversationStore 用 with self._conn 上下文事务）

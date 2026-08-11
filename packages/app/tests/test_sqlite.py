@@ -53,3 +53,32 @@ def test_chapter_list_ordered() -> None:
         assert titles == ["第一章", "第二章"]
     finally:
         store.close()
+
+
+def test_chapter_delete_commits() -> None:
+    """S75：ChapterStore.delete 必须提交事务（前端报告并发锁根因——
+    缺 commit 则 DELETE 事务保持打开、锁持续持有，后续写请求 500 locked）。"""
+    import tempfile
+    from pathlib import Path
+
+    from anyspark.store import ChapterStore
+
+    store = ChapterStore(Path(tempfile.mkdtemp()) / "t.db")
+    ch = store.upsert("main", "锁测试章", "内容", 1)
+    assert store.delete(ch.id) is True
+    # 删除后立即写（之前：缺 commit → 事务未提交 → 立即写报 locked）
+    ch2 = store.upsert("main", "新章", "内容", 2)
+    assert ch2.title == "新章"
+    assert store.get(ch.id) is None
+
+
+def test_store_wal_enabled() -> None:
+    """S75：WAL 模式（多 store 独立连接并发加固）+ timeout=30。"""
+    import tempfile
+    from pathlib import Path
+
+    from anyspark.store import ChapterStore
+
+    store = ChapterStore(Path(tempfile.mkdtemp()) / "t.db")
+    mode = store._conn.execute("PRAGMA journal_mode").fetchone()[0]
+    assert mode == "wal"

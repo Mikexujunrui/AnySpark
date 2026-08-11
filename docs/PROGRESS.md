@@ -2405,3 +2405,24 @@ uvicorn 多 worker 或请求超时配置次之；规划/推演环保持（质量
 
 **说明**：测试数据（4 个叙事树节点 + 冒烟工作流模板 + 1 个已完成任务）留在 data/（不入库），
 用于打开页面直接查看画布效果；不需要可删除。
+
+## S75 SQLite 并发锁修复（已完成 ✅，DESIGN §12.36）——前端报告核实 + 全仓加固
+
+**背景（前端开发者报告）**：删章后立即对话 → 500 database is locked，前端死机。
+前端分支 docs/BACKEND-ISSUES.md 有 AI 错误分析。后端核对：**分析正确，此前未修复**
+（我们的进度超前但此问题在前端测试才暴露）。
+
+**根因**：ChapterStore.delete() 缺 commit（DELETE 事务保持打开→锁持有→后续写请求
+locked）；无 WAL + timeout=5（15+ store 独立连接竞争放大）。
+
+**修复**：
+- ChapterStore.delete 补 commit（核心）
+- 全部 18 个 store connect 加 timeout=30 + PRAGMA journal_mode=WAL（防任何 store
+  再缺 commit 锁死系统；WAL 读并发 + busy_timeout 宽容）
+
+**验证**：真实链路新进程——删章→立即对话 ✓、连续删 3 章→对话 ✓（旧进程复现 500
+确认是旧代码）；测试 2 个新增（delete 后立即写、WAL 模式）；AST 全仓扫描无其他
+缺 commit 写方法。
+
+**坑**：anyspark_server start 若显示"已在运行"=旧进程未死，修复代码不生效——必须
+stop 确认 8000 无监听再 start（本次曾因此误判 500 是修复无效）。

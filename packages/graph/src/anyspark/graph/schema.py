@@ -152,7 +152,8 @@ class GraphStore:
         self._db = str(db_path)
         Path(self._db).parent.mkdir(parents=True, exist_ok=True)
         # check_same_thread=False：嵌入式 SQLite 供 FastAPI 多线程 endpoint 共用
-        self._conn = sqlite3.connect(self._db, check_same_thread=False)
+        self._conn = sqlite3.connect(self._db, check_same_thread=False, timeout=30)
+        self._conn.execute("PRAGMA journal_mode=WAL")
         self._lock = threading.Lock()
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
