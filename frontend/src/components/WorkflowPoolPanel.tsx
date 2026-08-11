@@ -1,6 +1,7 @@
 // WorkflowPoolPanel — 书架工作流池（V4 适配版：/api/workflows 列表）
 import { useState, useEffect } from 'react'
 import Icon from './ui/Icon'
+import ConfirmModal from './ui/ConfirmModal'
 import { showToast } from './ui/toast-utils'
 
 interface WfSummary { id: string; name: string; description?: string; created_at?: string }
@@ -8,6 +9,7 @@ interface WfSummary { id: string; name: string; description?: string; created_at
 export default function WorkflowPoolPanel() {
   const [workflows, setWorkflows] = useState<WfSummary[]>([])
   const [loading, setLoading] = useState(true)
+  const [pendingDelete, setPendingDelete] = useState<WfSummary | null>(null)
 
   useEffect(() => { load() }, [])
 
@@ -21,12 +23,18 @@ export default function WorkflowPoolPanel() {
     setLoading(false)
   }
 
-  async function handleDelete(id: string, name: string) {
-    if (!confirm(`删除工作流「${name}」？`)) return
+  function handleDelete(id: string, name: string) {
+    setPendingDelete({ id, name })
+  }
+
+  async function confirmDelete() {
+    if (!pendingDelete) return
+    const { id, name } = pendingDelete
+    setPendingDelete(null)
     try {
       await fetch(`/api/workflows/${id}`, { method: 'DELETE', headers: { 'X-Confirm-Delete': 'true' } })
       setWorkflows(prev => prev.filter(w => w.id !== id))
-      showToast('已删除', 'success')
+      showToast(`已删除「${name}」`, 'success')
     } catch { showToast('删除失败', 'error') }
   }
 
@@ -72,6 +80,16 @@ export default function WorkflowPoolPanel() {
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="删除工作流"
+        message={`确定删除工作流「${pendingDelete?.name || ''}」？此操作不可恢复。`}
+        confirmText="删除"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   )
 }

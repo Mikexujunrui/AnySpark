@@ -7,6 +7,7 @@ import type {
   WorkflowNodeKind,
   WorkflowTask,
 } from "../api/workflow";
+import ConfirmModal from "./ui/ConfirmModal";
 
 /* ── 节点样式 ── */
 const KIND_META: Record<
@@ -63,6 +64,7 @@ export default function WorkflowPanel() {
   const [goalInput, setGoalInput] = useState("");
   const [showGenerate, setShowGenerate] = useState(false);
   const [dirty, setDirty] = useState(false);
+  const [pendingDeleteWf, setPendingDeleteWf] = useState<string | null>(null);
 
   // 运行状态
   const [runningTask, setRunningTask] = useState<WorkflowTask | null>(null);
@@ -494,7 +496,7 @@ export default function WorkflowPanel() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (window.confirm(`删除模板「${t.name}」？`)) removeWorkflow(t.id);
+                          setPendingDeleteWf(t.id);
                         }}
                         className="text-[10px] text-red-500 hover:text-red-400"
                       >
@@ -796,6 +798,20 @@ export default function WorkflowPanel() {
           )}
         </div>
       </div>
+
+      {/* 删除工作流模板确认 */}
+      <ConfirmModal
+        open={!!pendingDeleteWf}
+        title="删除工作流模板"
+        message="确定删除此模板？此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={() => {
+          if (pendingDeleteWf) removeWorkflow(pendingDeleteWf);
+          setPendingDeleteWf(null);
+        }}
+        onCancel={() => setPendingDeleteWf(null)}
+      />
     </div>
   );
 }

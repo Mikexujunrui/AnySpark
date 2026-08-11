@@ -4,6 +4,7 @@
  */
 
 import ChatPanel from '../ChatPanel'
+import ExploreView from '../ExploreView'
 import ChaptersPanel from '../ChaptersPanel'
 import KnowledgePanel from '../KnowledgePanel'
 import OutlinePanel from '../OutlinePanel'
@@ -38,6 +39,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       </div>
 
       {panelKey === 'chapters' && <div className="h-full min-h-0 flex flex-col"><ChaptersPanel bookId={bookId} /></div>}
+      {panelKey === 'explore' && <div className="h-full min-h-0 flex flex-col"><ExploreView /></div>}
       {panelKey === 'knowledge' && <div className="h-full min-h-0 flex flex-col"><KnowledgePanel bookId={bookId} /></div>}
       {panelKey === 'outline' && <div className="h-full min-h-0 flex flex-col"><OutlinePanel bookId={bookId} /></div>}
       {panelKey === 'foreshadows' && <div className="h-full min-h-0 flex flex-col"><PlotPanel /></div>}

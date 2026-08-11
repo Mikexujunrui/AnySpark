@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useTemplateStore } from "../stores/templateStore";
+import ConfirmModal from "./ui/ConfirmModal";
 
 interface TemplatePanelProps {
   open: boolean;
@@ -26,6 +27,7 @@ export default function TemplatePanel({ open, onClose, embedded = false }: Templ
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [error, setError] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<{ name: string; layer?: string } | null>(null);
 
   useEffect(() => {
     if (open) fetchTemplates();
@@ -56,9 +58,14 @@ export default function TemplatePanel({ open, onClose, embedded = false }: Templ
   const handleDelete = async (name: string, layer?: string) => {
     // L2 默认库不可删（后端仅删 external）
     if (layer === "default") return;
-    if (confirm(`确定删除模板「${name}」？`)) {
-      await removeTemplate(name);
-    }
+    setPendingDelete({ name, layer });
+  };
+
+  const confirmDelete = async () => {
+    if (!pendingDelete) return;
+    const { name } = pendingDelete;
+    setPendingDelete(null);
+    await removeTemplate(name);
   };
 
   if (!open) return null;
@@ -222,6 +229,16 @@ export default function TemplatePanel({ open, onClose, embedded = false }: Templ
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="删除模板"
+        message={`确定删除模板「${pendingDelete?.name || ''}」？此操作不可恢复。`}
+        confirmText="删除"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

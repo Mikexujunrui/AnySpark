@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { usePlayStore } from "../stores/playStore";
 import { playExport } from "../api/play";
+import ConfirmModal from "./ui/ConfirmModal";
 
 interface PlayPanelProps {
   open: boolean;
@@ -28,6 +29,8 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
   const [customText, setCustomText] = useState("");
   const [exportMd, setExportMd] = useState("");
   const [error, setError] = useState("");
+  const [pendingStopId, setPendingStopId] = useState<string | null>(null);
+  const [pendingBranch, setPendingBranch] = useState<{ nodeId: string; step: number } | null>(null);
 
   useEffect(() => {
     if (open) listSessions();
@@ -182,9 +185,7 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
                     </button>
                     {session.status === "running" && (
                       <button
-                        onClick={() => {
-                          if (confirm("确定终止该推演会话？")) stop(session.id);
-                        }}
+                        onClick={() => setPendingStopId(session.id)}
                         className="text-xs px-2 py-1 text-zinc-500 hover:text-red-400 rounded"
                       >
                         终止
@@ -264,9 +265,7 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
                       {path.slice(0, -1).map((step, i) => (
                         <button
                           key={i}
-                          onClick={() => {
-                            if (confirm(`回到第 ${i + 1} 步重新推演？`)) branch(String(step.node.id));
-                          }}
+                          onClick={() => setPendingBranch({ nodeId: String(step.node.id), step: i + 1 })}
                           className="text-[11px] px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded"
                           title={String(step.node.scene ?? "").slice(0, 40)}
                         >
@@ -299,6 +298,33 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
           </div>
         </div>
       </div>
+
+      {/* 终止推演确认 */}
+      <ConfirmModal
+        open={!!pendingStopId}
+        title="终止推演"
+        message="确定终止该推演会话？当前推演树将保留，但会话停止推进。"
+        confirmText="终止"
+        danger
+        onConfirm={() => {
+          if (pendingStopId) stop(pendingStopId);
+          setPendingStopId(null);
+        }}
+        onCancel={() => setPendingStopId(null)}
+      />
+
+      {/* 回溯分叉确认（导航，非删除） */}
+      <ConfirmModal
+        open={!!pendingBranch}
+        title="回溯分叉"
+        message={pendingBranch ? `回到第 ${pendingBranch.step} 步重新推演？原选项保留，将从该节点重新生成候选行动。` : ""}
+        confirmText="回溯"
+        onConfirm={() => {
+          if (pendingBranch) branch(pendingBranch.nodeId);
+          setPendingBranch(null);
+        }}
+        onCancel={() => setPendingBranch(null)}
+      />
     </div>
   );
 }

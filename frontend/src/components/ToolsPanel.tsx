@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useToolStore } from "../stores/toolStore";
+import ConfirmModal from "./ui/ConfirmModal";
 
 interface ToolsPanelProps {
   open: boolean;
@@ -22,6 +23,12 @@ export default function ToolsPanel({ open, onClose, embedded = false }: ToolsPan
   const [paramsJson, setParamsJson] = useState("[]");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<any | null>(null);
+
+  const confirmDelete = () => {
+    if (pendingDelete) remove(pendingDelete.id);
+    setPendingDelete(null);
+  };
 
   useEffect(() => {
     if (open) fetchTools();
@@ -161,9 +168,7 @@ export default function ToolsPanel({ open, onClose, embedded = false }: ToolsPan
                       </button>
                     )}
                     <button
-                      onClick={() => {
-                        if (confirm(`确定删除工具「${tool.name}」？`)) remove(tool.id);
-                      }}
+                      onClick={() => setPendingDelete(tool)}
                       className="text-xs px-2 py-1 text-zinc-500 hover:text-red-400 rounded"
                     >
                       删除
@@ -181,6 +186,16 @@ export default function ToolsPanel({ open, onClose, embedded = false }: ToolsPan
           )}
         </div>
       </div>
+
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="删除扩展工具"
+        message={`确定删除工具「${pendingDelete?.name || ''}」？删除后需重新注册。`}
+        confirmText="删除"
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useBiasStore } from "../stores/biasStore";
+import ConfirmModal from "./ui/ConfirmModal";
 
 interface BiasPanelProps {
   open: boolean;
@@ -30,6 +31,7 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
   const [showAdd, setShowAdd] = useState(false);
   const [newContent, setNewContent] = useState("");
   const [newSource, setNewSource] = useState<Source>("ai");
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) fetchBias();
@@ -49,9 +51,13 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm("确定删除这条倾向条目？")) {
-      await remove(id);
-    }
+    setPendingDelete(id);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!pendingDelete) return;
+    await remove(pendingDelete);
+    setPendingDelete(null);
   };
 
   return (
@@ -147,6 +153,17 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
           )}
         </div>
       </div>
+
+      {/* 删除确认 */}
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="删除倾向条目"
+        message="确定删除这条倾向条目？此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

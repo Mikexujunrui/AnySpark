@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useDimStore } from "../stores/dimStore";
+import ConfirmModal from "./ui/ConfirmModal";
 
 interface DimsPanelProps {
   open: boolean;
@@ -19,6 +20,7 @@ export default function DimsPanel({ open, onClose, embedded = false }: DimsPanel
 
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) fetchDims();
@@ -46,13 +48,17 @@ export default function DimsPanel({ open, onClose, embedded = false }: DimsPanel
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm("确定删除这个探索维度？")) {
-      try {
-        await remove(id);
-      } catch (e) {
-        alert(String(e));
-      }
+    setPendingDelete(id);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!pendingDelete) return;
+    try {
+      await remove(pendingDelete);
+    } catch (e) {
+      alert(String(e));
     }
+    setPendingDelete(null);
   };
 
   return (
@@ -148,6 +154,17 @@ export default function DimsPanel({ open, onClose, embedded = false }: DimsPanel
           )}
         </div>
       </div>
+
+      {/* 删除确认 */}
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="删除探索维度"
+        message="确定删除这个探索维度？此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

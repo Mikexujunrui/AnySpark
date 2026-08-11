@@ -68,6 +68,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const [slashIdx, setSlashIdx] = useState(0)
   const [skillCommands, setSkillCommands] = useState([])
   const [contextUsage, setContextUsage] = useState(null)
+  const [showAutopilotCancel, setShowAutopilotCancel] = useState(false)
   const [writingState, setWritingState] = useState(null)
   const [sidePanelWidth, setSidePanelWidth] = useState(45)
   const [taskList, setTaskList] = useState(null)
@@ -843,9 +844,13 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     if (!autopilotState?.taskId) return
     try { await api.resumeTask(bookId, autopilotState.taskId); setAutopilotState(prev => ({ ...prev, status: 'running' })) } catch (e) { alert(e.message) }
   }
-  async function handleAutopilotCancel() {
+  function handleAutopilotCancel() {
+    // 弹确认窗（原 confirm）——确认后执行真实取消
+    setShowAutopilotCancel(true)
+  }
+  async function doAutopilotCancel() {
+    setShowAutopilotCancel(false)
     if (!autopilotState?.taskId) return
-    if (!confirm('确认取消 Autopilot？')) return
     try {
       await api.cancelTask(bookId, autopilotState.taskId)
       cleanupAutopilot()
@@ -1158,6 +1163,17 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         danger
         onConfirm={confirmRevert}
         onCancel={() => setRevertIdx(null)}
+      />
+
+      {/* 取消 Autopilot 确认 */}
+      <ConfirmModal
+        open={showAutopilotCancel}
+        title="取消 Autopilot"
+        message="确认取消 Autopilot 自主写作？当前运行中的任务将终止。"
+        confirmText="取消"
+        danger
+        onConfirm={doAutopilotCancel}
+        onCancel={() => setShowAutopilotCancel(false)}
       />
     </div>
   )

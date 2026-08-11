@@ -6,6 +6,7 @@ import Icon from './ui/Icon'
 import EmptyState from './ui/EmptyState'
 import LoadingState from './ui/Skeleton'
 import { showToast } from './ui/toast-utils'
+import ConfirmModal from './ui/ConfirmModal'
 import { useRefreshKey } from "../store"
 
 interface PlanItem {
@@ -40,6 +41,7 @@ export default function OutlinePanel({ bookId }: { bookId: string }) {
   const [editTitle, setEditTitle] = useState('')
   const [editContent, setEditContent] = useState('')
   const [editStatus, setEditStatus] = useState('planned')
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null)
 
   async function loadPlans() {
     setLoading(true)
@@ -82,12 +84,17 @@ export default function OutlinePanel({ bookId }: { bookId: string }) {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm('删除这条章节计划？')) return
+    setPendingDelete(id)
+  }
+
+  async function handleDeleteConfirm() {
+    if (!pendingDelete) return
     try {
-      await fetch(`/api/plan/${id}`, { method: 'DELETE', headers: { 'X-Confirm-Delete': 'true' } })
+      await fetch(`/api/plan/${pendingDelete}`, { method: 'DELETE', headers: { 'X-Confirm-Delete': 'true' } })
       showToast('已删除', 'success')
       loadPlans()
     } catch (e) { showToast('删除失败', 'error') }
+    setPendingDelete(null)
   }
 
   const sorted = [...plans].sort((a, b) => (a.chapter_order ?? 0) - (b.chapter_order ?? 0))
@@ -244,6 +251,17 @@ export default function OutlinePanel({ bookId }: { bookId: string }) {
           })}
         </div>
       </div>
+
+      {/* 删除确认 */}
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="删除章节计划"
+        message="确定删除这条章节计划？此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   )
 }

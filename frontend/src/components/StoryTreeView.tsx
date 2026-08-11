@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useStoryStore } from "../stores/storyStore";
 import { saveStoryLayout } from "../api/story";
 import type { StoryNode } from "../api/story";
+import ConfirmModal from "./ui/ConfirmModal";
 
 /* ── 节点样式（按 kind 区分）── */
 const KIND_STYLES: Record<
@@ -33,6 +34,7 @@ export default function StoryTreeView() {
   const [newContent, setNewContent] = useState("");
   const [parentId, setParentId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingRemoveId, setPendingRemoveId] = useState<string | null>(null);
 
   // 画布变换（缩放/平移）
   const [zoom, setZoom] = useState(0.9);
@@ -214,8 +216,14 @@ export default function StoryTreeView() {
       setError((e as Error).message);
     }
   };
-  const handleRemove = async (id: string) => {
-    if (!window.confirm("删除该节点及其所有后代节点？")) return;
+  const handleRemove = (id: string) => {
+    setPendingRemoveId(id);
+  };
+
+  const confirmRemove = async () => {
+    if (!pendingRemoveId) return;
+    const id = pendingRemoveId;
+    setPendingRemoveId(null);
     try {
       await removeNode(id);
       setError(null);
@@ -500,6 +508,16 @@ export default function StoryTreeView() {
           </div>
         )}
       </div>
+
+      <ConfirmModal
+        open={!!pendingRemoveId}
+        title="删除节点"
+        message="确定删除该节点及其所有后代节点？此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={confirmRemove}
+        onCancel={() => setPendingRemoveId(null)}
+      />
     </div>
   );
 }

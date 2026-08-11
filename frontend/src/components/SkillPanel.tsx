@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useSkillStore } from "../stores/skillStore";
+import ConfirmModal from "./ui/ConfirmModal";
 
 interface SkillPanelProps {
   open: boolean;
@@ -25,6 +26,7 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
   const [editContent, setEditContent] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editTarget, setEditTarget] = useState("");
+  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) fetchSkills();
@@ -65,9 +67,13 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
   };
 
   const handleDelete = async (id: string) => {
-    if (confirm("确定删除这个技巧？")) {
-      await removeSkill(id);
-    }
+    setPendingDelete(id);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!pendingDelete) return;
+    await removeSkill(pendingDelete);
+    setPendingDelete(null);
   };
 
   if (!open) return null;
@@ -103,8 +109,18 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
             ))
           )}
         </div>
+        {/* 删除确认 */}
+        <ConfirmModal
+          open={!!pendingDelete}
+          title="删除技巧"
+          message="确定删除这个技巧？此操作不可恢复。"
+          confirmText="删除"
+          danger
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setPendingDelete(null)}
+        />
       </div>
-    );
+  );
   }
 
   return (
@@ -202,6 +218,17 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
           )}
         </div>
       </div>
+
+      {/* 删除确认 */}
+      <ConfirmModal
+        open={!!pendingDelete}
+        title="删除技巧"
+        message="确定删除这个技巧？此操作不可恢复。"
+        confirmText="删除"
+        danger
+        onConfirm={handleDeleteConfirm}
+        onCancel={() => setPendingDelete(null)}
+      />
     </div>
   );
 }

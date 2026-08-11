@@ -22,6 +22,7 @@ const TAB_GROUPS: TabGroup[] = [
     label: '写作',
     tabs: [
       { key: 'chat', label: '对话', icon: 'message-circle' },
+      { key: 'explore', label: '探索', icon: 'compass' },
       { key: 'chapters', label: '章节', icon: 'file-text' },
       { key: 'storytree', label: '叙事树', icon: 'git-branch' },
       { key: 'workflow', label: '工作流', icon: 'settings' },
