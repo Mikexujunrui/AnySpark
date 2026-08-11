@@ -78,12 +78,13 @@ export default function Bookshelf() {
 
   async function handleCreate(bookData) {
     try {
-      await api.createBook(bookData)
+      // 新建项目：title → api.createBook（POST /api/books）
+      await api.createBook({ title: bookData.title || bookData })
       setShowCreate(false)
       loadBooks()
       showToast('项目创建成功', 'success')
     } catch (e) {
-      showToast('创建失败', 'error')
+      showToast(e instanceof Error ? e.message : '创建失败', 'error')
     }
   }
 
