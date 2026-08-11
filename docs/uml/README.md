@@ -1,6 +1,10 @@
-# AnySpark v4 — UML 图索引
+# AnySpark v4 — UML 图索引（有向逻辑图全集）
 
 > 基于源码分析生成的 UML 图（PlantUML 格式）+ 接口提取。
+> **S83 补全**：新增架构总览/心智数据流/图谱生命周期/后台任务/约束机制 5 张图；
+> 旧 3 张顺序图 participant 已更新（/app.py → routes_*）。
+> 新 AI 接入：**先看 architecture（骨架）→ 各 sequence（运作流）→ 状态机（循环）**，
+> 配 docs/BACKEND-MAP.md（职责表）+ docs/DESIGN.md（设计意图）。
 > 
 > 渲染方式：安装 PlantUML（`brew install plantuml` / `apt install plantuml`），然后 `plantuml -tpng *.puml`。
 > 或使用 VS Code PlantUML 插件 / 在线渲染 https://www.plantuml.com/plantuml/uml/
@@ -21,13 +25,23 @@
 - **template**：`Template` + `ExternalLibrary` + `MaterialStore` + `PlotStore`
 - **workflow**：`WorkflowDef` / `WorkflowNode` / `WorkflowEdge` + `WorkflowEngine` + `NodeRunner`（协议）
 
-## 顺序图（Sequence Diagrams）
+## 顺序图（Sequence Diagrams）——系统怎么运作
 
 | 文件 | 内容 |
 |------|------|
-| [sequence_chat.puml](sequence_chat.puml) | **主对话流程**：用户 → API → Agent 循环 → 模型 → 工具执行 → 响应；含 SSE 流式 / 插话 / 取消 |
+| [sequence_chat.puml](sequence_chat.puml) | **主对话流程**：用户 → routes_chat → Agent 循环 → 模型 → 工具 → 响应；SSE/插话/取消 |
+| [sequence_mind.puml](sequence_mind.puml) | **心智数据流**（对齐闭环）：操作 → 信号 → 后台提炼 → manual → MindPlanner → 注入 |
+| [sequence_graph.puml](sequence_graph.puml) | **图谱生命周期**：章节 → 后台抽取 → 入库 → 时空点注入/查询 → 伏笔回收 |
+| [sequence_constraints.puml](sequence_constraints.puml) | **约束机制（S83）**：约束写入 → 写作注入（全局+情景实体子集）→ 探索注入 |
 | [sequence_explore.puml](sequence_explore.puml) | **探索-判别双循环**：意图理解 → 并行 4 探索者 → 方向卡 → 判别固化 |
 | [sequence_workflow.puml](sequence_workflow.puml) | **工作流执行**：任务创建 → 顺序/分支/循环调度 → 断点恢复 → 人工确认 |
+
+## 组件/活动图
+
+| 文件 | 内容 |
+|------|------|
+| [architecture.puml](architecture.puml) | **后端分层架构（S80 后）**：core ← 领域包 ← app（AppDeps）← 15 router ← 工具层；单向依赖无环 |
+| [activity_tasks.puml](activity_tasks.puml) | **后台任务派发**：bg_queue → 7 种任务（chapter/refine/skill_drafts/summarize/batch_rewrite/batch_review）|
 
 ## 状态机图（State Machine Diagrams）
 

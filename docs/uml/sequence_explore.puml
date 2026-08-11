@@ -4,7 +4,7 @@ title AnySpark v4 — 顺序图：探索-判别双循环（Exploration Flow）
 skinparam sequenceMessageAlign center
 
 actor User
-participant "FastAPI\n/app.py" as API
+participant "routes_explore\n/routes_explore" as API
 participant "IntentUnderstander\n/explore.intent" as Intent
 participant "ExplorationEngine\n/explore.explorers" as Engine
 participant "ExplorationStrategy\n/explore.strategy" as Strategy

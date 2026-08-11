@@ -1,0 +1,33 @@
+@startuml AnySpark v4 - Sequence: 约束机制（S83）
+!theme plain
+title AnySpark v4 — 顺序图：约束注入（全局 + 当前情景实体子集）
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor User
+participant "routes_settings\n/routes_settings" as S
+participant "WorldSettingStore\n/align.worldsettings" as WS
+participant "agent_factory\n/agent_factory" as AF
+participant "GraphStore\n/graph.schema" as GS
+participant "Agent 循环\n/core.loop" as Agent
+participant "routes_explore\n/routes_explore" as EX
+participant "探索引擎\n/explore" as Exp
+
+== 约束写入（人工 / 提炼） ==
+User -> S: POST /api/settings（is_constraint=1, entities=雾城）
+S -> WS: add(is_constraint, entities)
+User -> S: POST /api/settings（is_constraint=1, 无 entities=全局约束）
+
+== 写作注入（当前时空点实体子集） ==
+User -> Agent: 写涉及雾城的章节
+Agent -> AF: make_agent → 注入块装配
+AF -> WS: list_constraints(book_id)
+AF -> GS: known_facts（当前时空点实体：雾城…）
+AF -> AF: render_constraints_block（全局 + 与情景实体交集）
+AF --> Agent: 注入块「作品约束（必须遵守的规则）」
+
+== 探索注入（情景描述实体子集） ==
+User -> EX: POST /api/explore/path（from=雾城钟表铺）
+EX -> WS: list_constraints + constraint_texts（from/to 提及实体）
+EX -> Exp: explore_path(constraints=全局+雾城相关+临时)
+@enduml

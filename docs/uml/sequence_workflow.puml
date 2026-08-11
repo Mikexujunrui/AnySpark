@@ -4,7 +4,7 @@ title AnySpark v4 — 顺序图：工作流执行（Workflow Execution）
 skinparam sequenceMessageAlign center
 
 actor User
-participant "FastAPI\n/app.py" as API
+participant "routes_workflow\n/routes_workflow" as API
 participant "WorkflowEngine\n/workflow.engine" as Engine
 participant "WorkflowStore\n/workflow.store" as Store
 participant "NodeRunner\n(注入闭包)" as Runner

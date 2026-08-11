@@ -1,0 +1,42 @@
+@startuml AnySpark v4 - Sequence: 图谱生命周期（知识如何长出）
+!theme plain
+title AnySpark v4 — 顺序图：图谱生命周期（章节 → 抽取 → 入库 → 注入）
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor User
+participant "Agent 循环\n/core.loop" as Agent
+participant "写作工具\n/tools_domain" as Tools
+participant "routes_chat\n/routes_chat" as Chat
+participant "后台 Worker\n/tasks" as BG
+participant "GraphExtractor\n/graph.extract" as GX
+participant "GraphStore\n/graph.schema" as GS
+participant "PlotResolver\n/template.plot" as PR
+participant "routes_graph\n/routes_graph" as GR
+participant "GraphInjector\n/graph.inject" as GI
+
+== 章节落盘（写作主链路） ==
+User -> Agent: 写第 N 章
+Agent -> Tools: write_chapter(title, content)
+Tools --> Chat: 章节已保存
+Chat -> BG: _bg_queue.put(BgTask(kind="chapter"))
+
+== 后台抽取（不阻塞响应） ==
+BG -> GX: extract_chapter(deps)
+GX -> GS: list_entities（已有实体做去重）
+GX -> GX: GraphExtractor.extract（LLM 提实体/关系/事件）
+GX -> GS: ingest_chapter（合并入库，含类型集）
+GX -> PR: plot_resolver.resolve（伏笔自动回收）
+PR --> GX: 回收的伏笔清单
+BG -> Manual: review_for_learning（本章偏好/雷区 → 心智）
+
+== 消费（注入/查询） ==
+User -> Chat: 写第 N+1 章
+Chat -> GI: make_agent → 当前时空点已知事实
+GI -> GS: known_facts(up_to_order=N+1, 最近实体/关系/事件)
+GS --> GI: 事实摘要（15 实体/20 关系/8 事件）
+GI --> Chat: 注入块「已固化事实（知识图谱）」
+Agent --> User: 写作基于已知事实，不冲突
+User -> GR: 图谱面板查看/编辑
+GR -> GS: entities/relations/events CRUD
+@enduml

@@ -1,0 +1,29 @@
+@startuml AnySpark v4 - Activity: 后台任务派发
+!theme plain
+title AnySpark v4 — 活动图：后台任务队列（7 种任务，单 worker 串行）
+skinparam activityDiamondFontSize 12
+
+start
+:任务入队\n(bg_queue.put)|
+repeat
+  :worker 取队（阻塞 get）|
+  switch (task.kind)
+  case ( chapter )
+    :图谱抽取 + 伏笔回收 + 学习审查|
+  case ( refine )
+    :信号 → 偏好提炼\n(PreferenceExtractor → merge_add)|
+  case ( skill_drafts )
+    :心智联动 + 信号 → skill 候选草稿|
+  case ( summarize )
+    :会话 → 场景记忆归档|
+  case ( batch_rewrite )
+    :逐章 LLM 改写 → upsert 版本历史|
+  case ( batch_review )
+    :逐章检测网审读 → 汇总报告|
+  case ( 未知 )
+    :记 warning 日志|
+  endswitch
+  :task_done|
+repeat while (队列非空)
+stop
+@enduml

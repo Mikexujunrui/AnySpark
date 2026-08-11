@@ -1,0 +1,114 @@
+@startuml AnySpark v4 - Component: 后端分层架构（S80 后）
+!theme plain
+title AnySpark v4 — 组件图：后端分层（装配 → 路由 → 工具 → 领域 → 内核）
+skinparam componentStyle rectangle
+
+[core\n内核：Agent 循环/工具协议/事件/存储接口/连接/jsonutil] as CORE
+
+package "领域包（单向依赖 core）" {
+  [align\n心智/偏好/能动性/技巧/叙事树/设定档] as ALIGN
+  [explore\n探索-判别/方向/路径] as EXPLORE
+  [graph\n图谱 schema/抽取/注入/校验] as GRAPH
+  [template\n模式库/伏笔/资料] as TEMPLATE
+  [workflow\n结构化流程] as WORKFLOW
+  [play\n互动推演] as PLAY
+  [review\n拟人化评审] as REVIEW
+  [check\n检测网] as CHECK
+}
+
+package "app 装配层" {
+  [app.py\n组合根：建 store/engine → AppDeps → 挂 15 router\n→ start_bg_worker → shutdown 关连接] as APP
+  [deps.py\nAppDeps 契约（22 store+16 engine+共享状态）] as DEPS
+  [agent_factory.py\nmake_agent：注入块装配] as AF
+  [tasks.py\n后台 7 任务 + worker 线程] as TASKS
+  [schemas.py\n82 Pydantic 模型] as SCHEMAS
+}
+
+package "路由层（15 router，工厂注入 deps）" {
+  [routes_chat\nchat/stream/cancel/steer] as RCHAT
+  [routes_mind\nmanual/brief/signals/mind] as RMIND
+  [routes_explore\nintent/cards/path/dims/check] as REX
+  [routes_graph\n图谱 CRUD/impact/extract] as RGRAPH
+  [routes_chapters\n章节 CRUD/patch/export] as RCH
+  [routes_story\n计划/叙事树/线程] as RSTORY
+  [routes_workflow\n模板/草稿/任务/run] as RWF
+  [routes_play\n推演/评审团] as RPLAY
+  [routes_settings\n设定档/约束/uncensored] as RSET
+  [routes_skills\n技巧/倾向/草稿] as RSKILL
+  [routes_agency\n能动性/批量改写审读] as RAG
+  [routes_plot\n模式库/伏笔/资料] as RPLOT
+  [routes_tools\n扩展工具/codex/ingest/export] as RTOOL
+  [routes_books\n书架] as RBOOK
+  [routes_conversations\n会话/模型] as RCONV
+}
+
+package "工具层（Agent 可调用，enable_* 开关）" {
+  [tools_writing\n读/写章节] as TW
+  [tools_domain\n图谱/心智/设定/计划/检索/消化] as TD
+  [tools_extras\nexplore_direction/read_material] as TX
+  [toolkit.py\n注册表：23 工具按 6 开关装配] as TK
+}
+
+CORE <-- ALIGN
+CORE <-- EXPLORE
+CORE <-- GRAPH
+CORE <-- TEMPLATE
+CORE <-- WORKFLOW
+CORE <-- PLAY
+CORE <-- REVIEW
+CORE <-- CHECK
+
+ALIGN <-- APP
+EXPLORE <-- APP
+GRAPH <-- APP
+TEMPLATE <-- APP
+WORKFLOW <-- APP
+PLAY <-- APP
+REVIEW <-- APP
+CHECK <-- APP
+
+APP --> DEPS
+APP --> AF
+APP --> TASKS
+APP --> SCHEMAS
+APP --> RCHAT
+APP --> RMIND
+APP --> REX
+APP --> RGRAPH
+APP --> RCH
+APP --> RSTORY
+APP --> RWF
+APP --> RPLAY
+APP --> RSET
+APP --> RSKILL
+APP --> RAG
+APP --> RPLOT
+APP --> RTOOL
+APP --> RBOOK
+APP --> RCONV
+
+DEPS --> RCHAT
+DEPS --> RMIND
+DEPS --> REX
+DEPS --> RGRAPH
+DEPS --> RCH
+DEPS --> RSTORY
+DEPS --> RWF
+DEPS --> RPLAY
+DEPS --> RSET
+DEPS --> RSKILL
+DEPS --> RAG
+DEPS --> RPLOT
+DEPS --> RTOOL
+DEPS --> RBOOK
+DEPS --> RCONV
+
+AF --> TW
+AF --> TD
+AF --> TX
+AF --> TK
+TASKS --> TD
+TASKS --> ALIGN
+TASKS --> GRAPH
+
+@enduml

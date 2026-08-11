@@ -5,7 +5,7 @@ skinparam sequenceMessageAlign center
 skinparam responseMessageBelowArrow true
 
 actor User
-participant "FastAPI\n/app.py" as API
+participant "routes_chat\n/routes_chat" as API
 participant "Agent\n/core.loop" as Agent
 participant "ModelProvider\n/models.registry" as MP
 participant "DeepSeekModel\n/models.deepseek" as DSM

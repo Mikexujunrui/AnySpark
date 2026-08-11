@@ -1,0 +1,39 @@
+@startuml AnySpark v4 - Sequence: 心智数据流（对齐闭环）
+!theme plain
+title AnySpark v4 — 顺序图：心智数据流（操作 → 信号 → 提炼 → 注入）
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor User
+participant "Agent 循环\n/core.loop" as Agent
+participant "写作工具\n/tools_domain" as Tools
+participant "routes_chat\n/routes_chat" as Chat
+participant "routes_mind\n/routes_mind" as Mind
+participant "SignalStore\n/align.signals" as Sig
+participant "后台 Worker\n/tasks" as BG
+participant "PreferenceExtractor\n/align.extract" as Ext
+participant "ManualStore\n/align.manual" as Manual
+participant "MindPlanner\n/align.mind" as Plan
+
+== 用户操作信号采集（隐式对齐） ==
+User -> Agent: 写作/编辑/接受/拒绝
+Agent -> Tools: 工具调用（write_chapter 等）
+Tools --> Chat: 工具结果
+Chat -> Sig: POST /api/signals（accept/modified/delete）
+Chat -> BG: _bg_queue.put(refine)
+
+== 后台信号提炼（不阻塞主链路） ==
+BG -> Ext: refine_from_signals(deps)
+Ext -> Sig: recent(20)
+Ext -> Ext: PreferenceExtractor.extract（对话+信号 → 偏好条目）
+Ext -> Manual: merge_add（关键词重叠≥3 合并，防碎片）
+BG -> Manual: review_for_learning（章节落盘 → LLM 审偏好/雷区 → merge_add）
+
+== 心智注入（下轮对话生效） ==
+User -> Chat: 新消息
+Chat -> Plan: make_agent → MindPlanner.plan(book_id, context)
+Plan -> Manual: 读取全部类别条目
+Plan --> Chat: SessionPlan（collab/style/habit + 渐进式披露）
+Chat -> Agent: 注入块装配（心智指导块/协作约定/变更通知）
+Agent --> User: 回应（遵循新偏好）
+@enduml
