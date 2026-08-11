@@ -12,7 +12,7 @@ interface Command {
   shortcut?: string
 }
 
-export default function CommandPalette({ open, onClose }) {
+export default function CommandPalette({ open, onClose, onSwitchTab }: { open: boolean; onClose: () => void; onSwitchTab?: (tab: string) => void }) {
   const [query, setQuery] = useState('')
   const [selectedIdx, setSelectedIdx] = useState(0)
   const inputRef = useRef(null)
@@ -38,20 +38,27 @@ export default function CommandPalette({ open, onClose }) {
 
   const commands: Command[] = useMemo(() => [
     { id: 'bookshelf', label: '书架', category: '导航', icon: 'home', action: () => navigate('/') },
-    { id: 'chat', label: '对话面板', category: '面板', icon: 'message-circle', action: () => {}, shortcut: 'Ctrl+1' },
-    { id: 'chapters', label: '章节面板', category: '面板', icon: 'file-text', action: () => {}, shortcut: 'Ctrl+2' },
-    { id: 'characters', label: '角色面板', category: '面板', icon: 'users', action: () => {}, shortcut: 'Ctrl+5' },
-    { id: 'outline', label: '大纲面板', category: '面板', icon: 'list', action: () => {}, shortcut: 'Ctrl+9' },
-    { id: 'knowledge', label: '知识库', category: '面板', icon: 'database', action: () => {}, shortcut: 'Ctrl+8' },
-    { id: 'review', label: '评审团', category: '面板', icon: 'clipboard-list', action: () => {}, shortcut: 'Ctrl+14' },
-    { id: 'settings', label: 'API 设置', category: '设置', icon: 'settings', action: () => {} },
-    { id: 'autopilot', label: 'Autopilot 自主写作', category: '写作', icon: 'bot', action: () => {} },
-    { id: 'transform', label: '全书变换', category: '写作', icon: 'layers', action: () => {} },
-    { id: 'export', label: '导出全书', category: '写作', icon: 'download', action: () => {} },
-    { id: 'import', label: '导入小说', category: '写作', icon: 'upload', action: () => {} },
-    { id: 'search', label: '全文搜索', category: '工具', icon: 'search', action: () => {} },
-    { id: 'stats', label: '写作统计', category: '工具', icon: 'bar-chart', action: () => navigate('/') },
-  ], [navigate])
+    { id: 'chat', label: '对话', category: '写作', icon: 'message-circle', action: () => onSwitchTab?.('chat'), shortcut: 'Ctrl+1' },
+    { id: 'chapters', label: '章节', category: '写作', icon: 'file-text', action: () => onSwitchTab?.('chapters'), shortcut: 'Ctrl+2' },
+    { id: 'storytree', label: '叙事树', category: '写作', icon: 'git-branch', action: () => onSwitchTab?.('storytree'), shortcut: 'Ctrl+3' },
+    { id: 'workflow', label: '工作流', category: '写作', icon: 'settings', action: () => onSwitchTab?.('workflow'), shortcut: 'Ctrl+4' },
+    { id: 'search', label: '搜索', category: '写作', icon: 'search', action: () => onSwitchTab?.('search') },
+    { id: 'knowledge', label: '知识库', category: '设定', icon: 'database', action: () => onSwitchTab?.('knowledge'), shortcut: 'Ctrl+5' },
+    { id: 'outline', label: '大纲', category: '设定', icon: 'list', action: () => onSwitchTab?.('outline'), shortcut: 'Ctrl+6' },
+    { id: 'materials', label: '资料', category: '设定', icon: 'book-open', action: () => onSwitchTab?.('materials') },
+    { id: 'review', label: '评审团', category: '辅助', icon: 'clipboard-list', action: () => onSwitchTab?.('review'), shortcut: 'Ctrl+7' },
+    { id: 'brief', label: '项目简介', category: '辅助', icon: 'file-text', action: () => onSwitchTab?.('brief') },
+    { id: 'bias', label: 'AI 倾向', category: '辅助', icon: 'brain', action: () => onSwitchTab?.('bias') },
+    { id: 'batch', label: '批量操作', category: '工具', icon: 'layers', action: () => onSwitchTab?.('batch') },
+    { id: 'templates', label: '模板库', category: '工具', icon: 'copy', action: () => onSwitchTab?.('templates') },
+    { id: 'tools', label: '扩展工具', category: '工具', icon: 'wrench', action: () => onSwitchTab?.('tools') },
+    { id: 'play', label: '互动推演', category: '工具', icon: 'compass', action: () => onSwitchTab?.('play') },
+    { id: 'role', label: '角色推演', category: '工具', icon: 'users', action: () => onSwitchTab?.('role') },
+    { id: 'dims', label: '探索维度', category: '工具', icon: 'grid', action: () => onSwitchTab?.('dims') },
+    { id: 'impact', label: '影响分析', category: '工具', icon: 'zap', action: () => onSwitchTab?.('impact') },
+    { id: 'upload', label: '上传消化', category: '工具', icon: 'upload', action: () => onSwitchTab?.('upload') },
+    { id: 'export', label: '导出全书', category: '工具', icon: 'download', action: () => {} },
+  ], [navigate, onSwitchTab])
 
   const filtered = useMemo(() => {
     if (!query) return commands

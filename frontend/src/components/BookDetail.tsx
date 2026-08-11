@@ -22,6 +22,8 @@ const TAB_GROUPS: TabGroup[] = [
     tabs: [
       { key: 'chat', label: '对话', icon: 'message-circle' },
       { key: 'chapters', label: '章节', icon: 'file-text' },
+      { key: 'storytree', label: '叙事树', icon: 'git-branch' },
+      { key: 'workflow', label: '工作流', icon: 'settings' },
       { key: 'search', label: '搜索', icon: 'search' },
     ],
   },
@@ -344,7 +346,7 @@ export default function BookDetail() {
 
       <ConfirmModal open={!!deleteSessionId} title="删除会话" message="删除此会话？消息历史将永久删除。" confirmText="删除" danger onConfirm={handleDeleteSession} onCancel={() => setDeleteSessionId(null)} />
       {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onModeChanged={(mode: string) => setLlmMode(mode)} bookId={bookId} />}
-      <CommandPalette open={showCommandPalette} onClose={() => setShowCommandPalette(false)} />
+      <CommandPalette open={showCommandPalette} onClose={() => setShowCommandPalette(false)} onSwitchTab={(tab) => { switchTab(tab); setShowCommandPalette(false) }} />
     </div>
   )
 }
