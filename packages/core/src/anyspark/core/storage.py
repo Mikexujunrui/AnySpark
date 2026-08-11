@@ -29,6 +29,7 @@ class Conversation:
     # S58c 继承链条：parent_id=源会话（继承自谁）；fork_point=继承来源描述
     parent_id: str | None = None
     fork_point: str = ""
+    title: str = ""  # 会话标题（用户可自定义）
 
 
 def _now() -> str:

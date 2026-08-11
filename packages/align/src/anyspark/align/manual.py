@@ -315,7 +315,8 @@ class ManualStore:
         if entry.locked:
             return entry
         changed = (content is not None and content != entry.content) or (
-            category is not None and category in ("collab", "style", "habit")
+            category is not None
+            and category in ("collab", "style", "habit")
             and category != entry.category
         )
         with self._lock:
@@ -393,8 +394,7 @@ class ManualStore:
         """未读变更通知（会话注入渲染用）。"""
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM manual_notices WHERE book_id=? AND read=0"
-                " ORDER BY created_at",
+                "SELECT * FROM manual_notices WHERE book_id=? AND read=0 ORDER BY created_at",
                 (book_id,),
             ).fetchall()
         return [dict(r) for r in rows]

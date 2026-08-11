@@ -24,11 +24,14 @@ def _now() -> str:
 
 
 def _conversation_from_row(row: tuple[Any, ...]) -> Conversation:
-    # 兼容旧库：可能只有 (id, created_at)，也可能是 (id, created_at, parent_id, fork_point)
+    # 兼容旧库：可能只有 (id, created_at)，也可能是 (id, created_at, parent_id, fork_point, title)
     cid, created_at = row[0], row[1]
     parent_id = row[2] if len(row) > 2 else None
     fork_point = row[3] if len(row) > 3 else ""
-    return Conversation(id=cid, created_at=created_at, parent_id=parent_id, fork_point=fork_point)
+    title = row[4] if len(row) > 4 else ""
+    return Conversation(
+        id=cid, created_at=created_at, parent_id=parent_id, fork_point=fork_point, title=title
+    )
 
 
 class SqliteConversationStore(ConversationStore):
@@ -51,7 +54,8 @@ class SqliteConversationStore(ConversationStore):
                 id TEXT PRIMARY KEY,
                 created_at TEXT NOT NULL,
                 parent_id TEXT,  -- S58c 继承链条：源会话 id（继承自谁）
-                fork_point TEXT NOT NULL DEFAULT ''  -- S58c 继承来源描述（自然语言）
+                fork_point TEXT NOT NULL DEFAULT '',  -- S58c 继承来源描述（自然语言）
+                title TEXT NOT NULL DEFAULT ''  -- 会话标题
             );
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -73,6 +77,10 @@ class SqliteConversationStore(ConversationStore):
             self._conn.execute(
                 "ALTER TABLE conversations ADD COLUMN fork_point TEXT NOT NULL DEFAULT ''"
             )
+        if "title" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN title TEXT NOT NULL DEFAULT ''"
+            )
         self._conn.commit()
 
     def close(self) -> None:
@@ -90,16 +98,37 @@ class SqliteConversationStore(ConversationStore):
 
     def get(self, conversation_id: str) -> Conversation | None:
         row = self._conn.execute(
-            "SELECT id, created_at, parent_id, fork_point FROM conversations WHERE id = ?",
+            "SELECT id, created_at, parent_id, fork_point, title FROM conversations WHERE id = ?",
             (conversation_id,),
         ).fetchone()
         return _conversation_from_row(row) if row else None
 
     def list_conversations(self) -> list[Conversation]:
         rows = self._conn.execute(
-            "SELECT id, created_at, parent_id, fork_point FROM conversations ORDER BY created_at"
+            "SELECT id, created_at, parent_id, fork_point, title "
+            "FROM conversations ORDER BY created_at"
         ).fetchall()
         return [_conversation_from_row(row) for row in rows]
+
+    def save(self, conversation: Conversation) -> None:
+        """更新会话元信息（title/parent_id/fork_point）。"""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE conversations SET title=?, parent_id=?, fork_point=? WHERE id=?",
+                (
+                    conversation.title,
+                    conversation.parent_id,
+                    conversation.fork_point,
+                    conversation.id,
+                ),
+            )
+
+    def delete(self, conversation_id: str) -> bool:
+        """删除会话及其所有消息。"""
+        with self._conn:
+            self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+            cur = self._conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
+        return cur.rowcount > 0
 
     def append(self, conversation_id: str, message: Message) -> None:
         # 确保会话存在

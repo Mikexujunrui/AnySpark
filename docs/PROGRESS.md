@@ -2350,7 +2350,27 @@ uvicorn 多 worker 或请求超时配置次之；规划/推演环保持（质量
 **测试章已清理**（md+库记录+版本历史+图谱无痕迹）；复盘验证了心智偏好（无破折号）
 与工具链（path_explore 自动带约束）在真实写作中的生效。
 
-## S74f 审查定位定案（已完成 ✅，DESIGN §12.35）——按需，不做默认环节
+## S75 合并合作者前端分支 f3-snapshot（已完成 ✅）——以本地后端为准，移植+适配
+
+**背景**：合作者在 f3-snapshot 分支完成了全新前端（frontend/ 约 1.2 万行 React+TS+zustand），
+但其后端基于旧 merge-base，落后本地 15 个提交。本地按主人拍板“以本地为准”整合。
+
+**做法**：新建 integrate-f3 分支（=本地 main S74f）推送远程 → merge f3-snapshot → 解决冲突：
+- app.py：删 f3 重复图谱 CRUD 路由（保留本地 S72 按 name+book_id 版本），保留 f3 独有端点
+  （会话重命名/删除/消息 GET、章节 PUT 保存、资料 DELETE、故事节点 DELETE）
+- schema.py：删 f3 重复的 create/update/delete 系列（同名方法会覆盖本地实现），恢复与 main 原版一致
+- materials.py：本地 book_id 隔离 + f3 的 delete() 并存；sqlite.py/storytree.py/storage.py 并入 f3 增量
+
+**关键适配（接口以本地为准）**：
+- 图谱实体 PATCH/DELETE 改双定位（{name_or_id}：先按 name 后按内部 id）——f3 前端按 id 操作
+- 前端 vite 代理 8002→8000（本地后端端口）
+- /api/check findings 透传 severity（前端排序需要，后端本有该字段）
+- 前端 TS 6 处修复（未使用变量/类型）
+
+**验证**：后端 gate 全绿（ruff+mypy+428 pytest）+ 前端 build（tsc+vite）+ 端到端冒烟
+（图谱 CRUD 双定位、会话/章节/资料/故事节点增删改查）+ 前端 dev 代理连通后端。
+
+**遗留（非缺陷）**：实体改名不支持（S72 语义：主键=name，改名请删建）；文档 uml/ 为 f3 快照自带。
 
 **背景（主人第一性原理纠偏）**：复盘发现 /api/check 长文慢（37s~120s），我建议优化
 审查环——主人纠正：**审查不该是创作主链默认环节，用户要求时才审查**。

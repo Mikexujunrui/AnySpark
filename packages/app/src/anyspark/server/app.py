@@ -197,6 +197,12 @@ class ModelIn(BaseModel):
     thinking: str | None = None  # off/low/medium/high/xhigh/max（None=交模型默认）
 
 
+class ConversationRenameIn(BaseModel):
+    """会话重命名请求。"""
+
+    title: str
+
+
 class RoleCardIn(BaseModel):
     """S48-P4 角色卡（卡片/角色卡-{name}.md）。"""
 
@@ -311,6 +317,12 @@ class ChapterCreate(BaseModel):
     title: str
     book_id: str = "main"
     content: str = ""
+
+
+class ChapterUpdate(BaseModel):
+    """F2a：稿纸编辑器保存章节内容。"""
+
+    content: str
 
 
 class ManualEntryIn(BaseModel):
@@ -489,6 +501,8 @@ class GraphEventIn(BaseModel):
 class GraphEventPatch(BaseModel):
     time_point: str | None = None
     label: str | None = None
+    chapter_ref: str | None = None
+    chapter_order: int | None = None
     description: str | None = None
     involved: list[str] | None = None
 
@@ -1543,6 +1557,7 @@ def build_app(
                 "created_at": c.created_at,
                 "parent_id": c.parent_id,
                 "fork_point": c.fork_point,
+                "title": c.title,
                 "message_count": len(store.messages(c.id)),
             }
             for c in reversed(convs)  # 新的在前
@@ -1569,6 +1584,34 @@ def build_app(
             "fork_point": child.fork_point,
             "chain": chain,  # [新会话, 源, 源的源...] 继承链条
         }
+
+    @app.put("/api/conversations/{conv_id}", response_model=dict[str, bool])
+    def rename_conversation(conv_id: str, req: ConversationRenameIn) -> dict[str, bool]:
+        """重命名会话。"""
+        conv = store.get(conv_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        conv.title = req.title
+        store.save(conv)
+        return {"ok": True}
+
+    @app.get("/api/conversations/{conv_id}/messages", response_model=list[dict[str, Any]])
+    def get_conversation_messages(conv_id: str) -> list[dict[str, Any]]:
+        """获取会话的全部消息（F4a：会话历史恢复）。"""
+        conv = store.get(conv_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        msgs = store.messages(conv_id)
+        return [{"role": m.role, "content": m.content} for m in msgs]
+
+    @app.delete("/api/conversations/{conv_id}", response_model=dict[str, bool])
+    def delete_conversation(conv_id: str) -> dict[str, bool]:
+        """删除会话及其所有消息。"""
+        conv = store.get(conv_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        store.delete(conv_id)
+        return {"ok": True}
 
     # -----------------------------------------------------------------------
     # S47 运行时模型配置：注册表 CRUD + 激活切换（换供应商/换模型/选思考强度）
@@ -2435,6 +2478,14 @@ def build_app(
         if card is None:
             raise HTTPException(status_code=404, detail="材料不存在")
         return card.to_dict()
+
+    @app.delete("/api/materials/{material_id}", response_model=dict[str, object])
+    def delete_material(material_id: str) -> dict[str, object]:
+        """删除资料。"""
+        ok = materials.delete(material_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="材料不存在")
+        return {"ok": True, "id": material_id}
 
     @app.get("/api/agency", response_model=dict[str, object])
     def get_agency() -> dict[str, object]:
@@ -3402,6 +3453,25 @@ def build_app(
             updated_at=ch.updated_at,
         )
 
+    @app.put("/api/chapters/{chapter_id}", response_model=ChapterOut)
+    def update_chapter(chapter_id: str, req: ChapterUpdate) -> ChapterOut:
+        """F2a：稿纸编辑器保存章节内容。"""
+        ch = chapters.get(chapter_id)
+        if ch is None:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        chapters.upsert(ch.book_id, ch.title, req.content, ch.order_index, ch.narrative_line)
+        updated = chapters.get(chapter_id)
+        if updated is None:
+            raise HTTPException(status_code=500, detail="保存后章节读取失败")
+        return ChapterOut(
+            id=updated.id,
+            book_id=updated.book_id,
+            title=updated.title,
+            content=updated.content,
+            order_index=updated.order_index,
+            updated_at=updated.updated_at,
+        )
+
     @app.delete("/api/chapters/{chapter_id}", response_model=dict[str, object])
     def delete_chapter(chapter_id: str) -> dict[str, object]:
         """F1：删除章节（库 + md 双写删除）。前端章节树管理需要，属章节 CRUD 补全。"""
@@ -3530,19 +3600,30 @@ def build_app(
         assert ent is not None
         return ent.to_dict()
 
-    @app.patch("/api/graph/entities/{name}", response_model=dict[str, Any])
-    def patch_graph_entity(name: str, req: GraphEntityPatch) -> dict[str, Any]:
-        """S72：局部编辑实体字段。"""
-        ent = graph.update_entity_fields("main", name, **req.model_dump(exclude_none=True))
+    @app.patch("/api/graph/entities/{name_or_id}", response_model=dict[str, Any])
+    def patch_graph_entity(name_or_id: str, req: GraphEntityPatch) -> dict[str, Any]:
+        """S72：局部编辑实体字段（name 或 id 定位——兼容前端传内部 id）。"""
+        ent = graph.get_entity("main", name_or_id)
         if ent is None:
-            raise HTTPException(status_code=404, detail=f"实体不存在: {name}")
+            ent = graph._entity_by_id(name_or_id)  # 前端按 id 操作时回退
+        if ent is None:
+            raise HTTPException(status_code=404, detail=f"实体不存在: {name_or_id}")
+        data = req.model_dump(exclude_none=True)
+        data.pop("name", None)  # S72 语义：实体主键为 name，改名请删建
+        ent = graph.update_entity_fields("main", ent.name, **data)
+        assert ent is not None
         return ent.to_dict()
 
-    @app.delete("/api/graph/entities/{name}", response_model=dict[str, bool])
-    def delete_graph_entity(name: str) -> dict[str, bool]:
-        """S72：删除实体及其关联关系。"""
-        if not graph.delete_entity("main", name):
-            raise HTTPException(status_code=404, detail=f"实体不存在: {name}")
+    @app.delete("/api/graph/entities/{name_or_id}", response_model=dict[str, bool])
+    def delete_graph_entity(name_or_id: str) -> dict[str, bool]:
+        """S72：删除实体及其关联关系（name 或 id 定位）。"""
+        ent = graph.get_entity("main", name_or_id)
+        if ent is None:
+            ent = graph._entity_by_id(name_or_id)  # 前端按 id 操作时回退
+        if ent is None:
+            raise HTTPException(status_code=404, detail=f"实体不存在: {name_or_id}")
+        if not graph.delete_entity("main", ent.name):
+            raise HTTPException(status_code=404, detail=f"实体不存在: {name_or_id}")
         return {"ok": True}
 
     @app.post("/api/graph/relations", response_model=dict[str, Any])
@@ -3670,6 +3751,14 @@ def build_app(
         if n is None:
             raise HTTPException(status_code=404, detail="节点不存在")
         return n.to_dict()
+
+    @app.delete("/api/story/nodes/{node_id}", response_model=dict[str, Any])
+    def delete_story_node(node_id: str) -> dict[str, Any]:
+        """删除叙事节点（含所有后代）。"""
+        ok = story_tree.delete_node(node_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="节点不存在")
+        return {"ok": True, "id": node_id}
 
     @app.get("/api/story/tree", response_model=dict[str, Any])
     def story_tree_view(book_id: str = "main") -> dict[str, Any]:

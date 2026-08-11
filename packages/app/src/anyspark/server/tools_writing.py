@@ -412,7 +412,10 @@ _WRITING_SPECS: list[ToolSpec] = [
                 name="skills",
                 type="string",
                 required=False,
-                description="（意图模式可选）本次写作要运用的叙事技巧名，逗号分隔（如'节奏控制,对白机锋'）——主循环从技巧索引点名；不传则不注入技巧（干净写作，对齐 S61 删自动匹配）",
+                description=(
+                    "（意图模式可选）本次写作要运用的叙事技巧名，逗号分隔（如'节奏控制,对白机锋'）"
+                    "——主循环从技巧索引点名；不传则不注入技巧（干净写作，对齐 S61 删自动匹配）"
+                ),
             ),
             ParamSpec(
                 name="line",

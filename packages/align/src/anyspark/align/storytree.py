@@ -170,6 +170,28 @@ class StoryTreeStore:
             self._conn.commit()
         return self.get(node_id)
 
+    def delete_node(self, node_id: str) -> bool:
+        """删除节点及其所有后代节点（递归）。"""
+        node = self.get(node_id)
+        if node is None:
+            return False
+        with self._lock:
+            # 递归删除所有后代节点
+            self._delete_descendants(node_id)
+            # 删除节点本身
+            self._conn.execute("DELETE FROM story_nodes WHERE id=?", (node_id,))
+            self._conn.commit()
+        return True
+
+    def _delete_descendants(self, parent_id: str) -> None:
+        """递归删除指定节点的所有后代（内部方法，需在锁内调用）。"""
+        children = self._conn.execute(
+            "SELECT id FROM story_nodes WHERE parent_id=?", (parent_id,)
+        ).fetchall()
+        for child in children:
+            self._delete_descendants(child["id"])
+            self._conn.execute("DELETE FROM story_nodes WHERE id=?", (child["id"],))
+
     # ------------------------------------------------------------------
     # 树视图（注入用）
     # ------------------------------------------------------------------

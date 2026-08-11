@@ -1473,9 +1473,9 @@ def make_mind_manage_implementer(manual: Any, book_id: str = "main") -> tuple[li
                 call=call,
                 ok=False,
                 content=(
-                f"条目已锁定（用户主权不可改）：[{entry.category}] {entry.content}"
-                "；先解锁再修改"
-            ),
+                    f"条目已锁定（用户主权不可改）：[{entry.category}] {entry.content}"
+                    "；先解锁再修改"
+                ),
             )
         updated = manual.update(
             entry.id,

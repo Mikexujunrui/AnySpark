@@ -1,0 +1,101 @@
+@startuml AnySpark v4 - Sequence: Workflow Execution
+!theme plain
+title AnySpark v4 — 顺序图：工作流执行（Workflow Execution）
+skinparam sequenceMessageAlign center
+
+actor User
+participant "FastAPI\n/app.py" as API
+participant "WorkflowEngine\n/workflow.engine" as Engine
+participant "WorkflowStore\n/workflow.store" as Store
+participant "NodeRunner\n(注入闭包)" as Runner
+participant "Model (LLM)" as LLM
+
+== 任务创建 ==
+User -> API: POST /api/workflow/tasks\n{definition, book_id}
+API -> Store: create_task(definition, book_id)
+Store --> API: task_id
+API --> User: {task_id, status: "queued"}
+
+== 任务执行 ==
+User -> API: POST /api/workflow/tasks/{id}/run
+API -> Engine: run_task(task_id)
+
+Engine -> Store: get_task(task_id)
+Store --> Engine: task{definition, results}
+Engine -> Store: update_task_status("running")
+
+loop 沿 DAG 推进（顺序/分支/循环）
+  Engine -> Engine: _execute_node(ctx, node)
+
+  alt node.kind == "gate"（条件分支）
+    Engine -> Engine: _eval_condition(edge.condition, ctx)
+    alt type == "rule"
+      Engine -> Engine: evaluate_rule(expression, results)
+    else type == "model"
+      Engine -> LLM: judge(prompt, ctx)
+      LLM --> Engine: bool
+    end
+    Engine -> Store: update_node_state("done", output=target)
+    Engine -> Engine: _advance_to(ctx, target_id)
+
+  else node.kind == "loop"（循环）
+    loop max_iterations 次
+      loop body 内每个节点
+        Engine -> Runner: __call__(ctx, body_node)
+        Runner -> LLM: respond(prompt)
+        LLM --> Runner: ModelOutput
+        Runner --> Engine: NodeResult
+        Engine -> Store: update_node_state("done", output)
+      end
+      Engine -> Engine: 评估 continue_condition
+    end
+    Engine -> Store: update_node_state("done", output={iterations})
+
+  else node.kind == "agent" / "script"
+    Engine -> Store: update_node_state("running")
+    Engine -> Runner: __call__(ctx, node)
+    Runner -> LLM: respond(prompt)
+    LLM --> Runner: ModelOutput
+    Runner --> Engine: NodeResult
+
+    alt 成功
+      Engine -> Store: append_result(output)
+      Engine -> Store: update_node_state("done")
+      Engine -> Engine: _advance(ctx, node)
+    else 失败 + 有重试配额
+      Engine -> Engine: _should_retry(node, attempts)
+      Engine -> Engine: sleep(interval)
+      Engine -> Engine: _execute_node(ctx, node) 递归重试
+    else 失败 + fail_auto_skip
+      Engine -> Store: update_node_state("skipped")
+      Engine -> Engine: _advance(ctx, node)
+    else 失败 + 无策略
+      Engine -> Store: update_task_status("failed")
+      Engine --> API: error
+    end
+
+  else node.kind == "approval"
+    Engine -> Runner: __call__(ctx, node)
+    Runner -> Runner: wait_approval()
+    Runner --> Engine: _WaitApproval
+    Engine -> Store: update_task_status("waiting_approval")
+    Engine --> API: {status: "waiting_approval"}
+
+    == 人工确认 ==
+    User -> API: POST /api/workflow/tasks/{id}/approve\n{decision}
+    API -> Engine: approve(task_id, decision)
+    alt decision == "ok"
+      Engine -> Store: update_node_state("done")
+      Engine -> Engine: run_task() 续跑
+    else decision == "reject"
+      Engine -> Store: update_node_state("failed")
+      Engine -> Store: update_task_status("failed")
+    end
+  end
+end
+
+Engine -> Store: update_task_status("done")
+Engine --> API: final_task
+API --> User: {status: "done", results}
+
+@enduml

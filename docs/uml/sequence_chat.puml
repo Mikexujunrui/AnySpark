@@ -1,0 +1,96 @@
+@startuml AnySpark v4 - Sequence: Chat Flow
+!theme plain
+title AnySpark v4 — 顺序图：主对话流程（Chat Flow）
+skinparam sequenceMessageAlign center
+skinparam responseMessageBelowArrow true
+
+actor User
+participant "FastAPI\n/app.py" as API
+participant "Agent\n/core.loop" as Agent
+participant "ModelProvider\n/models.registry" as MP
+participant "DeepSeekModel\n/models.deepseek" as DSM
+participant "ToolRegistry\n/core.protocol" as TR
+participant "SqliteConversationStore\n/store.sqlite" as Store
+participant "EventEmitter\n/core.events" as EE
+participant "TokenBudget\n/server.context" as TB
+
+== 用户发起对话 ==
+User -> API: POST /api/chat\n{message, conversation_id?}
+API -> Store: get(conversation_id)\n或 create()
+Store --> API: Conversation
+
+API -> Agent: Agent.run(user_prompt, conversation_id)
+
+== Agent 循环开始 ==
+loop 每轮迭代（max_tool_iterations 次）
+  Agent -> Store: append(user_msg)
+  Agent -> EE: emit(user_text)
+
+  Agent -> Store: messages(conversation_id)
+  Store --> Agent: history
+
+  opt 上下文压缩
+    Agent -> TB: compress(prompt_messages)
+    TB --> Agent: compressed_messages
+  end
+
+  Agent -> MP: respond(prompt_messages, tools)
+  MP -> DSM: build().respond(...)
+  DSM -> DSM: OpenAI API 调用
+  DSM --> MP: ModelOutput
+  MP --> Agent: ModelOutput{text, tool_calls}
+
+  alt 无工具调用（终答）
+    Agent -> Store: append(assistant_msg)
+    Agent -> EE: emit(text)
+    Agent -> EE: emit(done)
+    Agent --> API: Turn{text}
+  else 有工具调用
+    Agent -> Store: append(assistant_msg\nwith tool_calls metadata)
+    Agent -> EE: emit(tool_call)
+
+    loop 每个工具调用（并行/串行）
+      Agent -> EE: emit(tool_execution_start)
+      Agent -> TR: execute(registry, call)
+      TR -> TR: validate + implementer()
+      TR --> Agent: ToolResult
+      Agent -> Store: append(tool_result_msg)
+      Agent -> EE: emit(tool_execution_end)
+      Agent -> EE: emit(tool_result)
+    end
+
+    opt 全部 terminate=True
+      Agent -> Store: append(终止消息)
+      Agent -> EE: emit(done)
+      Agent --> API: Turn{终止}
+    end
+  end
+end
+
+API --> User: ChatResponse\n{text, conversation_id}
+
+== SSE 流式变体 ==
+User -> API: POST /api/chat/stream
+API -> Agent: Agent.run() (in thread)
+loop 事件循环
+  Agent -> EE: emit(text_delta / toolcall_delta)
+  EE --> API: SSE frame
+  API --> User: text/event-stream\ndata: {...}
+end
+
+== 运行中插话 ==
+User -> API: POST /api/chat/steer\n{text}
+API -> Agent: agent.steer(text)
+Agent -> Agent: steer_queue.put(msg)
+note right: 在当前轮工具结果后、\n下一轮 LLM 前注入
+
+== 取消 ==
+User -> API: POST /api/chat/cancel
+API -> Agent: token.cancel()
+Agent -> Agent: 检查 is_cancelled()
+Agent -> Store: append(abort_msg)
+Agent -> EE: emit(aborted)
+Agent -> EE: emit(done)
+Agent --> API: Turn{已中断}
+
+@enduml
