@@ -116,3 +116,18 @@ uv run anyspark-chat --reset         # 清会话
 - 前端（创作台）不在本通道覆盖范围；前端回归走 `anyspark_gate`（tsc/eslint/build）
 - 冒烟脚本 `scripts/*_smoke.py` 仍可用（直连包级，不走 HTTP）
 - 多模态（图片理解/OCR）明确未做，放未来计划；图片只支持上传存档 + md 引用 + EPUB 导出携带
+
+## 3. 后端结构速览（S79-S81 架构收敛后）
+
+> **先读 `docs/BACKEND-MAP.md`**（业务逻辑地图：分层架构/核心业务流/15 router 职责/23 工具清单/数据载体/审计结论）。
+
+```
+app.py（601 行，装配）→ AppDeps → 15 router（routes_*.py）
+                              → agent_factory.make_agent（注入块装配）
+                              → tasks.start_bg_worker（后台 7 任务）
+                              → core/db.connect（连接一处）
+```
+
+- 改端点：找对应 routes_*.py（见地图 §3）
+- 改 agent 工具：tools_domain.py 建 implementer → toolkit.py 注册（见地图 §4）
+- 改存储：core/db.connect 拿连接 → 对应 store（见地图 §5）
