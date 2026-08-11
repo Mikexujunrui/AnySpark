@@ -50,6 +50,7 @@ class ToolContext:
     review_panel: Any = None  # S64 拟人化评审团面板（panel_review 工具用）
     skill_generator: Any = None  # S72 文风参考 → skill 提炼工具（skill_refine）
     templates: list[str] = None  # type: ignore[assignment]  # S68 模板描述列表（explore_direction 注入）
+    library: Any = None  # S86 参考书库（reference_lookup 工具：不注入，按需检索）
     book_id: str = "main"  # S74：当前项目 id——工具层多书隔离（此前各 implementer 硬编码 main）
 
 
@@ -107,6 +108,7 @@ def build_toolkit(
             make_plan_implementer,
             make_plot_implementer,
             make_read_context_implementer,
+            make_reference_lookup_implementer,
             make_register_tool_implementer,
             make_roleplay_implementer,
             make_search_chapters_implementer,
@@ -149,6 +151,12 @@ def build_toolkit(
         registry.register(px_spec, px_impl)
         sc_spec, sc_impl = make_search_chapters_implementer(ctx.chapters, book_id=ctx.book_id)
         registry.register(sc_spec, sc_impl)
+        # S86：参考书检索（不注入，按需翻书——只读参考书库/其他项目）
+        if ctx.library is not None:
+            rl_spec, rl_impl = make_reference_lookup_implementer(
+                ctx.library, ctx.chapters, book_id=ctx.book_id
+            )
+            registry.register(rl_spec, rl_impl)
         rc_spec, rc_impl = make_read_context_implementer(ctx.chapters, book_id=ctx.book_id)
         registry.register(rc_spec, rc_impl)
         rt_spec, rt_impl = make_register_tool_implementer(ctx.ext_tools)

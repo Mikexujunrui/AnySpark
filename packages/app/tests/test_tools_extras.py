@@ -90,7 +90,10 @@ class FakeMaterials:
     def __init__(self, cards: list[object]) -> None:
         self._cards = cards
 
-    def list(self) -> list[object]:
+    def list(self, book_id: str = "main", kind: str | None = None) -> list[object]:
+        """S79 适配：真实 MaterialStore.list 支持 book_id/kind 过滤。"""
+        if kind is not None:
+            return [c for c in self._cards if getattr(c, "kind", "inspiration") == kind]
         return self._cards
 
 

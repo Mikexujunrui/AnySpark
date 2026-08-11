@@ -1,0 +1,74 @@
+"""
+anyspark.server.routes_library — 参考书库路由（S86）。
+
+书库 CRUD（data/library/ 文件区）+ 项目-参考书关联（GET/PUT）。
+参考书不注入任何信息；检索走 agent 工具 reference_lookup（只读）。
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+
+from anyspark.server.deps import AppDeps
+from anyspark.server.schemas import (
+    LibraryBookIn,
+    LibraryImportIn,
+    LibraryRefsIn,
+)
+
+
+def make_library_router(deps: AppDeps) -> APIRouter:
+    """参考书库路由（依赖：deps.library / deps.workspace / deps.chapters）。"""
+    router = APIRouter()
+
+    # -- 书库 --
+    @router.get("/api/library", response_model=list[dict[str, Any]])
+    def list_library() -> list[dict[str, Any]]:
+        """全部书库书（全局库）。"""
+        return deps.library.list_books()
+
+    @router.post("/api/library", response_model=dict[str, Any])
+    def add_library_book(req: LibraryBookIn) -> dict[str, Any]:
+        """新建书库书（空目录，待导入）。"""
+        return deps.library.add_book(req.name)
+
+    @router.post("/api/library/import", response_model=dict[str, Any])
+    def import_library_text(req: LibraryImportIn) -> dict[str, Any]:
+        """导入文本到书库书（按章节标题拆章，或整体一章）。"""
+        from anyspark.server.pipeline import chapterize
+
+        text = req.content.strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="内容为空")
+        book = deps.library.get_book(req.book_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail=f"书库无此书: {req.book_id}")
+        chaps = chapterize(text, fallback_title=req.title or book["name"])
+        count = 0
+        for i, ch in enumerate(chaps):
+            deps.library.import_chapter(req.book_id, ch["title"], ch["content"], i)
+            count += 1
+        return {"ok": True, "book_id": req.book_id, "chapters": count}
+
+    @router.delete("/api/library/{book_id}", response_model=dict[str, bool])
+    def delete_library_book(book_id: str) -> dict[str, bool]:
+        ok = deps.library.delete_book(book_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="书不存在")
+        return {"ok": True}
+
+    # -- 项目-参考书关联 --
+    @router.get("/api/books/{book_id}/references", response_model=list[dict[str, Any]])
+    def get_references(book_id: str) -> list[dict[str, Any]]:
+        """项目的参考书（书库的书 + 工作区其他项目）。"""
+        return deps.library.get_references(book_id)
+
+    @router.put("/api/books/{book_id}/references", response_model=dict[str, Any])
+    def set_references(book_id: str, req: LibraryRefsIn) -> dict[str, Any]:
+        """设置项目参考书（全量替换）：refs=[{type: library|project, id: ...}]。"""
+        deps.library.set_references(book_id, req.refs)
+        return {"ok": True, "book_id": book_id, "refs": deps.library.get_references(book_id)}
+
+    return router

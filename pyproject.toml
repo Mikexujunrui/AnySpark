@@ -18,6 +18,7 @@ dependencies = [
     "anyspark-graph",    # 工作区成员：知识图谱（AI 事实源）
     "anyspark-workflow", # 工作区成员：工作流（S59 可选增强：顺序/分支/循环 + 断点恢复）
     "anyspark-review",   # 工作区成员：拟人化评审团（S64 可选增强：YAML 人设 + 并发评审 + 主席汇总）
+    "anyspark-library", # 工作区成员：参考书库（S86 可选增强：全局书库 + 项目选参考书 + 只读检索）
     "anyspark-desktop",  # 工作区成员：桌面壳
 ]
 
@@ -38,6 +39,7 @@ anyspark-play = { workspace = true }
 anyspark-workflow = { workspace = true }
 anyspark-review = { workspace = true }
 anyspark-desktop = { workspace = true }
+anyspark-library = { workspace = true }
 
 
 # 门禁工具版本（pin）
@@ -66,6 +68,7 @@ src = [
     "packages/workflow",
     "packages/review",
     "packages/play",
+    "packages/library",
     "scripts",
 ]
 
@@ -110,6 +113,7 @@ files = [
     "packages/workflow",
     "packages/play",
     "packages/review",
+    "packages/library/src",
 ]
 mypy_path = [
     "packages/core/src",
@@ -122,6 +126,7 @@ mypy_path = [
     "packages/workflow/src",
     "packages/play/src",
     "packages/review/src",
+    "packages/library/src",
 ]
 explicit_package_bases = true
 
@@ -136,5 +141,6 @@ testpaths = [
     "packages/graph/tests",
     "packages/workflow/tests",
     "packages/review/tests",
+    "packages/library/tests",
 ]
 addopts = "-q"

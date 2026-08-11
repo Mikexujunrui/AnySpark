@@ -16,6 +16,7 @@ dependencies = [
     "anyspark-explore==0.0.1",  # workspace 成员：探索引擎
     "anyspark-template==0.0.1",  # workspace 成员：模式库/资料/伏笔
     "anyspark-workflow==0.0.1",  # workspace 成员：工作流扩展包
+    "anyspark-library==0.0.1",  # workspace 成员：参考书库（S86）
     "anyspark-play==0.0.1",  # workspace 成员：互动推演扩展包
     "fastapi==0.141.1",
     "uvicorn==0.52.1",

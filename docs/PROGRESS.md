@@ -28,6 +28,7 @@
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > 当前无会话声明。
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
+> [S79] 正在改 materials（双层资料库：kind=inspiration/copy + book_id=global/书 + 导入/转灵感；read_material/skill_refine 过滤 copy）：涉及 packages/template/materials.py、routes_plot.py、tools_extras.py、tools_domain.py、frontend MaterialsPanel/Bookshelf/BookDetail/UploadPanel——完成提交后删除本行
 
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）

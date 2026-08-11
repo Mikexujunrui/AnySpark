@@ -47,6 +47,7 @@ from anyspark.explore import (
     ProjectArchive,
 )
 from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
+from anyspark.library import LibraryStore
 from anyspark.models.registry import (
     ModelProvider,
     ModelRegistry,
@@ -65,6 +66,7 @@ from anyspark.server.routes_check import make_check_router
 from anyspark.server.routes_conversations import make_conversations_router
 from anyspark.server.routes_explore import make_explore_router
 from anyspark.server.routes_graph import make_graph_router
+from anyspark.server.routes_library import make_library_router
 from anyspark.server.routes_mind import make_mind_router
 from anyspark.server.routes_play import make_play_router
 from anyspark.server.routes_plot import make_plot_router
@@ -227,6 +229,8 @@ def build_app(
     except Exception as _rpe:  # 用户目录损坏不影响服务启动
         logger.warning("加载用户评审员失败: %s", _rpe)
     play_store = PlayStore(real_db)
+    # S86 参考书库（全局文件区 data/library/ + 关联表）
+    library = LibraryStore(real_db)
 
     def _wf_run_agent(ctx: RunContext, node: Any) -> NodeResult:
         """agent 节点：干净单次 LLM 调用（无对话历史/工具记录——对齐 S56 干净写作）。
@@ -437,6 +441,7 @@ def build_app(
         plans=plans,
         workflow_store=workflow_store,
         play_store=play_store,
+        library=library,
         mind_planner=mind_planner,
         signal_collector=signal_collector,
         provider=provider,
@@ -490,6 +495,7 @@ def build_app(
     app.include_router(make_explore_router(deps))
     app.include_router(make_graph_router(deps))
     app.include_router(make_mind_router(deps))
+    app.include_router(make_library_router(deps))
     app.include_router(make_play_router(deps))
     app.include_router(make_plot_router(deps))
     app.include_router(make_settings_router(deps))

@@ -667,3 +667,20 @@ def _sse_frame(event: str, data: dict[str, Any]) -> str:
 def _now_iso_rec() -> str:
 
     return datetime.now(UTC).isoformat()
+
+
+# S86 参考书库
+class LibraryBookIn(BaseModel):
+    name: str = Field(..., min_length=1, description="书名")
+
+
+class LibraryImportIn(BaseModel):
+    book_id: str
+    content: str
+    title: str = ""  # 缺省用书名
+
+
+class LibraryRefsIn(BaseModel):
+    refs: list[dict[str, str]] = Field(
+        default_factory=list, description="[{type: library|project, id: ...}]"
+    )

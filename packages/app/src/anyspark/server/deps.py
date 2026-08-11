@@ -37,6 +37,7 @@ from anyspark.align import (
 from anyspark.core import Agent, CancellationToken, Model
 from anyspark.explore import DimensionStore, ProjectArchive
 from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
+from anyspark.library import LibraryStore
 from anyspark.models.registry import ModelProvider, ModelRegistry
 from anyspark.play import PlayEngine, PlayStore
 from anyspark.review import ReviewPanel
@@ -98,6 +99,7 @@ class AppDeps:
     plans: StoryPlanStore
     workflow_store: WorkflowStore
     play_store: PlayStore
+    library: LibraryStore
 
     # --- engines / generators ---
     mind_planner: MindPlanner

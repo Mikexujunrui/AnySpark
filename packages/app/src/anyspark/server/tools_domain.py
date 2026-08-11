@@ -1347,6 +1347,11 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
                 return ToolResult(call=call, ok=False, content=f"读取资料失败：{exc}")
             if card is None:
                 return ToolResult(call=call, ok=False, content=f"资料不存在：{material_id}")
+            if card.kind == "copy":
+                # S79：copy 冷藏副本智能体不可见（备份不提炼）
+                return ToolResult(
+                    call=call, ok=False, content=f"资料 {material_id} 为冷藏副本，不可用于提炼"
+                )
             if not (card.source_text or "").strip():
                 return ToolResult(
                     call=call, ok=False, content=f"资料无原文（{card.title}），无法提炼"
@@ -1523,3 +1528,78 @@ def make_mind_manage_implementer(manual: Any, book_id: str = "main") -> tuple[li
         )
 
     return [update_spec, delete_spec], [update, delete]
+
+
+def make_reference_lookup_implementer(
+    library_store: Any, chapters: Any, book_id: str = "main"
+) -> tuple[Any, Any]:
+    """参考书检索工具（S86）：搜当前项目已选的参考书（书库的书 + 其他项目）。
+
+    参考书不注入任何信息——需要借鉴某本书的写法/设定/氛围时主动检索原文片段。
+    """
+
+    spec = ToolSpec(
+        name="reference_lookup",
+        description=(
+            "检索本项目已选的参考书（书库的书或其他项目），按关键词返回原文片段"
+            "（含书名/章节）。需要借鉴某本参考书的写法、设定细节、氛围、结构时使用——"
+            "如模仿某书的群像描写、确认同世界观旧作的人物设定、参考同题材书的"
+            "官职/礼法细节。注意：参考书是借鉴来源，不是本项目正典——检索到后"
+            "对照自身剧情判断是否适用，不要照搬设定。"
+        ),
+        params=[
+            ParamSpec(
+                name="keyword",
+                type="string",
+                required=True,
+                description="检索关键词/短语（独特词效果好，如'钟表铺'而非'门'）",
+            ),
+            ParamSpec(
+                name="max_per_book",
+                type="string",
+                required=False,
+                description="每本书最多返回几段（缺省 3）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        keyword = str(arguments.get("keyword", "")).strip()
+        if not keyword:
+            return ToolResult(call=call, ok=False, content="缺少参数 keyword。")
+        try:
+            max_per = max(1, min(5, int(str(arguments.get("max_per_book", "3")) or 3)))
+        except ValueError:
+            max_per = 3
+
+        def _project_files(ref_book_id: str) -> str:
+            """工作区其他项目：读章节内容拼文本（参考书只读检索）。"""
+            if chapters is None:
+                return ""
+            parts = []
+            for ch in chapters.list_by_book(ref_book_id):
+                parts.append(f"【{ch.title}】\n{ch.content}")
+            return "\n\n".join(parts)
+
+        from anyspark.library.search import search_reference_books
+
+        res = search_reference_books(
+            library_store, book_id, keyword, project_files=_project_files, max_per_book=max_per
+        )
+        if not res["results"]:
+            refs = library_store.get_references(book_id) if library_store else []
+            names = "、".join(r.get("name", r.get("id", "?")) for r in refs) or "（未选参考书）"
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=f"参考书「{names}」中未命中「{keyword}」。",
+            )
+        lines = [f"参考书命中「{keyword}」共 {res['total_hits']} 段："]
+        for r in res["results"]:
+            lines.append(f"——{r['ref_name']}——")
+            for h in r["hits"]:
+                lines.append(f"({h['count']}次) {h['snippet']}")
+        return ToolResult(call=call, ok=True, content="\n\n".join(lines))
+
+    return spec, implementer

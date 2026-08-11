@@ -61,6 +61,7 @@ def main() -> int:
         "packages/workflow",
         "packages/review",
         "packages/play",
+        "packages/library",
         "scripts",
     ]
     failed = False
