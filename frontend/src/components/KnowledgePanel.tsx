@@ -86,6 +86,7 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
   const [addForm, setAddForm] = useState({ name: '', entity_type: '角色', aliases: '', description: '', state: '' })
   const [addSaving, setAddSaving] = useState(false)
   const [viewMode, setViewMode] = useState<'graph' | 'list'>('list')
+  const [typeFilter, setTypeFilter] = useState<string>('全部')
 
   useEffect(() => { loadSummary() }, [bookId, refreshKey])
 
@@ -180,10 +181,17 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
   }, [entities])
 
   const filteredGroups = useMemo(() => {
-    if (!searchQuery.trim()) return groupedEntities
+    // 类型过滤（角色/地点/物件/设定 子视图）
+    let base = groupedEntities
+    if (typeFilter !== '全部') {
+      base = Object.fromEntries(
+        Object.entries(groupedEntities).filter(([t]) => t === typeFilter)
+      )
+    }
+    if (!searchQuery.trim()) return base
     const q = searchQuery.toLowerCase()
     const out: Record<string, V4Entity[]> = {}
-    for (const [t, list] of Object.entries(groupedEntities)) {
+    for (const [t, list] of Object.entries(base)) {
       const filtered = list.filter(e =>
         e.name.toLowerCase().includes(q) ||
         (e.aliases || []).some(a => a.toLowerCase().includes(q)) ||
@@ -193,7 +201,7 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
       if (filtered.length > 0) out[t] = filtered
     }
     return out
-  }, [groupedEntities, searchQuery])
+  }, [groupedEntities, searchQuery, typeFilter])
 
   const totalFiltered = Object.values(filteredGroups).reduce((s, l) => s + l.length, 0)
 
@@ -250,6 +258,18 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* 类型子视图：全部/角色/地点/物件/设定 */}
+            <div className="flex bg-zinc-800 rounded-lg p-0.5">
+              {['全部', '角色', '地点', '物件', '设定', '事件', '组织'].map(t => (
+                <button
+                  key={t}
+                  onClick={() => setTypeFilter(t)}
+                  className={`px-2 py-1 rounded text-[10px] transition-colors ${typeFilter === t ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
             <div className="flex bg-zinc-800 rounded-lg p-0.5">
               <button
                 onClick={() => setViewMode('graph')}

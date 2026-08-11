@@ -10,6 +10,7 @@ import { useAutoSave } from '../hooks/useAutoSave'
 import { useTabs, openTab, closeTab, setActiveTab, clearTabsForBook } from "../stores/tabStore"
 import { api } from '../api'
 import ChapterHistoryPanel from './ChapterHistoryPanel'
+import ImpactPanel from './ImpactPanel'
 import ChapterFindReplace from './ChapterFindReplace'
 import ChapterOutlinePanel from './ChapterOutlinePanel'
 import ChapterSidebar from './ChapterSidebar'
@@ -26,6 +27,7 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [showHistory, setShowHistory] = useState(false)
+  const [showImpact, setShowImpact] = useState(false)
   const [history, setHistory] = useState([])
   const [historyLoading, setHistoryLoading] = useState(false)
   const [showChapterOutline, setShowChapterOutline] = useState(false)
@@ -689,6 +691,14 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
                     className="text-xs bg-zinc-200 text-zinc-900 rounded-lg px-4 py-1.5 font-medium hover:bg-white transition-colors disabled:opacity-40 flex items-center gap-1">
                     <Icon name="save" size={12} /> {saving ? '保存中...' : '保存'}
                   </button>
+                  {/* 影响分析：改章可能波及下游时按需触发（S45） */}
+                  <button
+                    onClick={() => setShowImpact(true)}
+                    className="text-xs px-2.5 py-1.5 rounded-lg font-medium transition-colors bg-amber-900/30 text-amber-300 border border-amber-800/40 hover:bg-amber-800/40 flex items-center gap-1"
+                    title="影响分析：修改本章（涉及实体）会影响哪些下游章节"
+                  >
+                    <Icon name="zap" size={12} /> 影响
+                  </button>
                 </>
               ) : (
                  <>
@@ -790,6 +800,21 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
                 onRevert={closeHistory}
                 onVersionSelect={handleVersionSelect}
               />
+            )}
+
+            {/* 影响分析（改章按需触发，非独立页面） */}
+            {showImpact && (
+              <div className="absolute inset-0 z-30 flex items-start justify-end">
+                <div className="absolute inset-0 bg-black/40" onClick={() => setShowImpact(false)} />
+                <div className="relative w-96 h-full bg-zinc-900 border-l border-zinc-800 shadow-2xl overflow-y-auto">
+                  <ImpactPanel
+                    open
+                    onClose={() => setShowImpact(false)}
+                    embedded
+                    initialOrder={chapters.find((c: any) => c.id === selectedId)?.order_index}
+                  />
+                </div>
+              </div>
             )}
 
             {/* Editor / Viewer / Version Preview */}

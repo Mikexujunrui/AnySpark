@@ -5,9 +5,10 @@ interface ImpactPanelProps {
   open: boolean;
   onClose: () => void;
   embedded?: boolean;
+  initialOrder?: number;
 }
 
-export default function ImpactPanel({ open, onClose, embedded = false }: ImpactPanelProps) {
+export default function ImpactPanel({ open, onClose, embedded = false, initialOrder }: ImpactPanelProps) {
   const chapters = useImpactStore((s) => s.chapters);
   const impacted = useImpactStore((s) => s.impacted);
   const count = useImpactStore((s) => s.count);
@@ -25,8 +26,14 @@ export default function ImpactPanel({ open, onClose, embedded = false }: ImpactP
     if (open) {
       fetchChapters();
       setEntitiesText("");
+      // 预选当前编辑章节（写作时按需触发）
+      if (initialOrder != null) {
+        setSelectedOrder(initialOrder);
+      } else {
+        setSelectedOrder(0);
+      }
     }
-  }, [open, fetchChapters]);
+  }, [open, fetchChapters, initialOrder]);
 
   if (!open) return null;
 
