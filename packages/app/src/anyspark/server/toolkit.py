@@ -102,6 +102,7 @@ def build_toolkit(
             make_graph_query_implementer,
             make_graph_register_implementer,
             make_ingest_implementer,
+            make_material_register_implementer,
             make_mind_manage_implementer,
             make_mind_register_implementer,
             make_path_explore_implementer,
@@ -130,6 +131,12 @@ def build_toolkit(
         if ctx.skill_generator is not None and ctx.materials is not None:
             sr_spec, sr_impl = make_skill_refine_implementer(ctx.skill_generator, ctx.materials)
             registry.register(sr_spec, sr_impl)
+        # S80：灵感登记（资料库 = 灵感冷藏库；AI 可写 inspiration，copy 仅人工/导入）
+        if ctx.materials is not None:
+            mr_spec, mr_impl = make_material_register_implementer(
+                ctx.materials, book_id=ctx.book_id
+            )
+            registry.register(mr_spec, mr_impl)
         ig_spec, ig_impl = make_ingest_implementer(
             ctx.workspace, ctx.chapters, ctx.materials, ctx.model, book_id=ctx.book_id
         )

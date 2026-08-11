@@ -2575,3 +2575,17 @@ typecheck/lint/build）。
 **验证**：总闸全绿（423 pytest + 前端全过）；端到端——global/main 建卡、按池过滤、导入标 copy+溯源、promote 转灵感、图片上传/读回（PNG 校验）。
 
 **顺带**：修 mypy 配置（packages/library/src，并行会话 S86 新包漏注册，AGENTS 清单 ③ 先例）；FakeMaterials 适配 kind 过滤（时序问题：gate 失败时测试未适配）。
+
+
+## S80 资料库写入通道补全（已完成 ✅，DESIGN §12.40）
+
+**背景**：S79 后资料库仅"先有原文→消化"3 条写入路径，无 AI 灵感登记、卡不可编辑。
+
+**交付**：
+- **material_register 工具**（enable_domain）：AI/用户对话"记一下"→ 直接写 inspiration 卡
+  （source_text=原文、title 可选、不强制消化；只写 inspiration，copy 仅人工/导入）
+- **PATCH /api/materials/{id}**：局部编辑（title/topic/key_points/key_settings/characters/terms/purpose；
+  kind/source_ref 保护不可改）+ 前端卡片编辑弹层（铅笔按钮，list 字段分隔符编辑）
+
+**验证**：总闸全绿（423 pytest + 前端全过）；端到端——PATCH 编辑 key_points/characters 生效、
+material_register 记录灵感卡入库（inspiration 可见）。

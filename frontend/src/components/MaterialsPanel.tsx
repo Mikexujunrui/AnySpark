@@ -32,6 +32,9 @@ export default function MaterialsPanel({ bookId = 'main' }: { bookId?: string })
   const [deleteMatId, setDeleteMatId] = useState<string | null>(null)
   const [selectedMat, setSelectedMat] = useState<MaterialCard | null>(null)
   const [form, setForm] = useState({ title: '', content: '', purpose: 'fact' })
+  // S80：卡编辑
+  const [editMat, setEditMat] = useState<MaterialCard | null>(null)
+  const [editForm, setEditForm] = useState({ title: '', topic: '', key_points: '', key_settings: '', characters: '', terms: '', purpose: 'fact' })
   // S79：从全局池导入
   const [showImport, setShowImport] = useState(false)
   const [globalCards, setGlobalCards] = useState<MaterialCard[]>([])
@@ -74,6 +77,39 @@ export default function MaterialsPanel({ bookId = 'main' }: { bookId?: string })
       showToast('已转为灵感卡（智能体可见）', 'success')
       loadMaterials()
     } catch (e) { showToast('转换失败', 'error') }
+  }
+
+  // S80：打开编辑弹层（字段预填；list 字段逗号分隔编辑）
+  function openEdit(m: MaterialCard) {
+    setEditMat(m)
+    setEditForm({
+      title: m.title || '',
+      topic: m.topic || '',
+      key_points: (m.key_points || []).join('；'),
+      key_settings: (m.key_settings || []).join('；'),
+      characters: (m.characters || []).join('、'),
+      terms: (m.terms || []).join('、'),
+      purpose: m.purpose || 'fact',
+    })
+  }
+
+  async function handleSaveEdit() {
+    if (!editMat) return
+    const split = (s: string) => s.split(/[；;、,，\n]/).map(x => x.trim()).filter(Boolean)
+    try {
+      await api.patchMaterial(editMat.id, {
+        title: editForm.title.trim(),
+        topic: editForm.topic.trim(),
+        key_points: split(editForm.key_points),
+        key_settings: split(editForm.key_settings),
+        characters: split(editForm.characters),
+        terms: split(editForm.terms),
+        purpose: editForm.purpose,
+      })
+      setEditMat(null)
+      showToast('已保存', 'success')
+      loadMaterials()
+    } catch (e) { showToast('保存失败', 'error') }
   }
 
   async function handleSearch() {
@@ -225,6 +261,11 @@ export default function MaterialsPanel({ bookId = 'main' }: { bookId?: string })
                       className="text-[10px] px-1.5 py-0.5 rounded bg-amber-900/40 text-amber-400 hover:bg-amber-900/60"
                       title="转为灵感卡（智能体可见）">转灵感</button>
                   )}
+                  <button onClick={(e) => { e.stopPropagation(); openEdit(m) }}
+                    className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-zinc-300 text-xs transition-all"
+                    title="编辑卡片">
+                    <Icon name="pencil" size={14} />
+                  </button>
                   <button onClick={(e) => { e.stopPropagation(); setDeleteMatId(m.id) }}
                     className="opacity-0 group-hover:opacity-100 text-zinc-600 hover:text-red-400 text-xs transition-all ml-1">
                     <Icon name="trash" size={14} />
@@ -406,6 +447,71 @@ export default function MaterialsPanel({ bookId = 'main' }: { bookId?: string })
             )}
 
             <p className="text-[10px] text-zinc-600 mt-4 font-mono truncate">ID: {selectedMat.id}{selectedMat.created_at ? ` · ${selectedMat.created_at.slice(0, 10)}` : ''}</p>
+          </div>
+        </Modal>
+      )}
+
+      {/* S80：编辑资料卡 */}
+      {editMat && (
+        <Modal open onClose={() => setEditMat(null)} title="编辑资料卡" size="lg">
+          <div className="p-6">
+            <h2 className="text-lg font-bold text-zinc-200 mb-4">编辑资料卡</h2>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">标题</label>
+                <input value={editForm.title}
+                  onChange={e => setEditForm({ ...editForm, title: e.target.value })}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">主题</label>
+                <input value={editForm.topic}
+                  onChange={e => setEditForm({ ...editForm, topic: e.target.value })}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500" />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">要点（；或换行分隔）</label>
+                <textarea value={editForm.key_points} rows={2}
+                  onChange={e => setEditForm({ ...editForm, key_points: e.target.value })}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 resize-none" />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">关键设定（；或换行分隔）</label>
+                <textarea value={editForm.key_settings} rows={2}
+                  onChange={e => setEditForm({ ...editForm, key_settings: e.target.value })}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 resize-none" />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">涉及角色（、或换行分隔）</label>
+                  <textarea value={editForm.characters} rows={2}
+                    onChange={e => setEditForm({ ...editForm, characters: e.target.value })}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 resize-none" />
+                </div>
+                <div>
+                  <label className="block text-xs text-zinc-500 mb-1">术语（、或换行分隔）</label>
+                  <textarea value={editForm.terms} rows={2}
+                    onChange={e => setEditForm({ ...editForm, terms: e.target.value })}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 resize-none" />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">用途</label>
+                <select value={editForm.purpose}
+                  onChange={e => setEditForm({ ...editForm, purpose: e.target.value })}
+                  className="bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none">
+                  <option value="fact">事实/设定（fact）</option>
+                  <option value="style">文风参考（style）</option>
+                  <option value="both">两者兼顾（both）</option>
+                </select>
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5 justify-end">
+              <button onClick={() => setEditMat(null)}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-400 px-4 py-2 rounded-lg transition-colors text-sm">取消</button>
+              <button onClick={handleSaveEdit}
+                className="bg-zinc-200 hover:bg-white text-zinc-900 px-5 py-2 rounded-lg transition-colors text-sm font-medium">保存</button>
+            </div>
           </div>
         </Modal>
       )}

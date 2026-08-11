@@ -256,6 +256,34 @@ class MaterialStore:
             self._conn.commit()
         return self.get(material_id) if cur.rowcount else None
 
+    def update(self, material_id: str, fields: dict[str, Any]) -> MaterialCard | None:
+        """S80：局部编辑资料卡字段（只更新传入字段）。
+
+        fields 可含：title/topic/key_points/key_settings/characters/terms/purpose
+        （list 字段自动 JSON 序列化）；kind/source_ref 不可经此改（冷藏语义）。
+        """
+        import json
+
+        allowed = {"title", "topic", "key_points", "key_settings", "characters", "terms", "purpose"}
+        sets: list[str] = []
+        args: list[Any] = []
+        for k, v in fields.items():
+            if k not in allowed or v is None:
+                continue
+            if isinstance(v, list):
+                sets.append(f"{k}=?")
+                args.append(json.dumps(v, ensure_ascii=False))
+            else:
+                sets.append(f"{k}=?")
+                args.append(str(v))
+        if not sets:
+            return self.get(material_id)
+        args.append(material_id)
+        with self._lock:
+            self._conn.execute(f"UPDATE materials SET {', '.join(sets)} WHERE id=?", args)
+            self._conn.commit()
+        return self.get(material_id)
+
     def close(self) -> None:
         self._conn.close()
 

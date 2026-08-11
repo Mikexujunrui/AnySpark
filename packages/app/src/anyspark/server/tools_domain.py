@@ -953,6 +953,80 @@ def make_mind_register_implementer(manual: Any, book_id: str = "main") -> tuple[
     return spec, implementer
 
 
+def make_material_register_implementer(materials: Any, book_id: str = "main") -> tuple[Any, Any]:
+    """S80：灵感登记工具——把灵感/参考内容写进资料库（inspiration 卡）。
+
+    资料库 = 灵感冷藏库（DESIGN §12.39）：inspiration 卡智能体可见可检索（read_material），
+    不注入写作；copy 冷藏副本不可见（仅人工/导入产生，本工具不写 copy）。
+    随手记不强制 LLM 消化（快）；AI 可用 title 组织，原文保留在 source_text。
+    """
+
+    spec = ToolSpec(
+        name="material_register",
+        description=(
+            "把灵感/参考内容登记进资料库（灵感卡，智能体可见可检索，不注入写作）。"
+            "用户说'记一下这个灵感/这段参考'，或写作中发现值得留存的素材时使用——"
+            "如历史文献摘录、人设灵感、场景点子。purpose=fact(事实/设定)/style(文风参考)/both。"
+            "随手记不强制消化，原文保留；需要结构化摘要时可后续走资料消化。"
+        ),
+        params=[
+            ParamSpec(
+                name="content",
+                type="string",
+                required=True,
+                description="灵感/参考内容（自然语言）",
+            ),
+            ParamSpec(
+                name="title",
+                type="string",
+                required=False,
+                description="可选标题（缺省用内容前 30 字）",
+            ),
+            ParamSpec(
+                name="purpose",
+                type="string",
+                required=False,
+                description="fact/style/both（缺省 fact）",
+            ),
+        ],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        content = str(arguments.get("content", "")).strip()
+        title = str(arguments.get("title", "")).strip()
+        purpose = str(arguments.get("purpose", "fact")).strip() or "fact"
+        if not content:
+            return ToolResult(call=call, ok=False, content="缺少参数 content。")
+        if purpose not in ("style", "fact", "both"):
+            purpose = "fact"
+        try:
+            from anyspark.template import MaterialCard
+
+            card = MaterialCard(
+                title=title or content[:30],
+                topic="",
+                key_points=[],
+                key_settings=[],
+                characters=[],
+                terms=[],
+                purpose=purpose,  # type: ignore[arg-type]
+                source_text=content,
+                kind="inspiration",
+            )
+            materials.save(card, book_id=book_id)
+            return ToolResult(
+                call=call,
+                ok=True,
+                content=f"已记录灵感《{card.title}》到资料库（purpose={purpose}）。",
+                data={"material_id": card.id},
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"记录失败：{exc}")
+
+    return spec, implementer
+
+
 def make_graph_register_implementer(graph: Any, book_id: str = "main") -> tuple[Any, Any]:
     """S72：图谱登记工具——对话中"把XX记进图谱"→ 立即登记实体（+可选关系）。
 

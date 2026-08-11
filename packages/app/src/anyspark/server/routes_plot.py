@@ -15,6 +15,7 @@ from anyspark.server.deps import AppDeps
 from anyspark.server.schemas import (
     MaterialImportIn,
     MaterialIn,
+    MaterialPatchIn,
     PlotIn,
     PlotItemIn,
     PlotPatchIn,
@@ -144,6 +145,14 @@ def make_plot_router(deps: AppDeps) -> APIRouter:
         card = deps.materials.promote(material_id)
         if card is None:
             raise HTTPException(status_code=404, detail="卡片不存在或不是冷藏副本")
+        return card.to_dict()
+
+    @router.patch("/api/materials/{material_id}", response_model=dict[str, object])
+    def patch_material(material_id: str, req: MaterialPatchIn) -> dict[str, object]:
+        """S80：局部编辑资料卡（只改传入字段；kind/source_ref 不可改）。"""
+        card = deps.materials.update(material_id, req.model_dump(exclude_none=True))
+        if card is None:
+            raise HTTPException(status_code=404, detail="材料不存在")
         return card.to_dict()
 
     @router.delete("/api/materials/{material_id}", response_model=dict[str, object])

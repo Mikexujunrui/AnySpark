@@ -1,6 +1,6 @@
 // Books / Sessions / Materials — V4 适配层（壳调用 → V4 端点）
 // 壳的多项目结构映射到 V4 的 book_id 参数化端点；会话≈对话会话。
-import { del, get, post, put } from "./http";
+import { del, get, patch, post, put } from "./http";
 import type { BookData } from "./types";
 
 // ── Books（书架：V4 新增 /api/books 端点）──
@@ -33,6 +33,8 @@ export const searchMaterials = (q: string, _bookId?: string): Promise<unknown[]>
 };
 export const createMaterial = (data: unknown): Promise<unknown> => post("/api/materials", data);
 export const deleteMaterial = (id: string): Promise<unknown> => del(`/api/materials/${id}`);
+// S80：局部编辑资料卡（只改传入字段）
+export const patchMaterial = (id: string, data: unknown): Promise<unknown> => patch(`/api/materials/${id}`, data);
 // S79：双层资料库——从别的池复制（标 copy 冷藏）+ copy 转灵感
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const importMaterial = (data: { card_id: string; from_book_id: string; to_book_id: string }): Promise<any> =>

@@ -378,6 +378,18 @@ class MaterialImportIn(BaseModel):
     to_book_id: str
 
 
+class MaterialPatchIn(BaseModel):
+    """S80：局部编辑资料卡字段（只改传入字段；kind/source_ref 不可改）。"""
+
+    title: str | None = None
+    topic: str | None = None
+    key_points: list[str] | None = None
+    key_settings: list[str] | None = None
+    characters: list[str] | None = None
+    terms: list[str] | None = None
+    purpose: str | None = None
+
+
 class GraphExtractIn(BaseModel):
     chapter_ref: str
     text: str

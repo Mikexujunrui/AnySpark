@@ -54,6 +54,7 @@ export const api = {
   deleteMaterial: books.deleteMaterial,
   importMaterial: books.importMaterial,
   promoteMaterial: books.promoteMaterial,
+  patchMaterial: books.patchMaterial,
   subscribeMaterial: books.subscribeMaterial,
   unsubscribeMaterial: books.unsubscribeMaterial,
 

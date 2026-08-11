@@ -1440,3 +1440,22 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 - 参考书库 = **整本参考书文件**（全局 data/library/ + 项目选书，只读检索不注入）
 - 资料库 = **摘要卡/灵感卡**（双层池，kind 控制可见性）
 - 两者互补不重叠：参考书是"书"，资料库是"卡"；skill_refine 拆书（S78）从任一来源取原文提炼方法论
+
+
+### 12.40 资料库写入通道补全（S80：AI 灵感登记 + 卡编辑）——DESIGN §12.39 的能力收尾
+
+> 背景：§12.39 后资料库只有 3 条写入路径（手动添加/上传消化/agent 触发消化），
+> 均需"先有原文"，且卡创建后不可编辑。补两块能力。
+
+#### material_register 工具（AI 灵感登记）
+
+- 用户说"记一下这个灵感/这段参考"或写作中发现值得留存的素材 → 直接写 inspiration 卡
+- 随手记不强制 LLM 消化（快）：source_text=原文，title 可选（缺省内容前 30 字）
+- **边界**：只写 inspiration（copy 冷藏仅人工/导入产生，工具不可写）——冷藏语义不破
+- 注册于 enable_domain 组（对齐 mind_register 模式）
+
+#### PATCH /api/materials/{id}（卡编辑）
+
+- 可改 title/topic/key_points/key_settings/characters/terms/purpose（局部更新，list 自动序列化）
+- **kind/source_ref 不可经此改**（冷藏语义保护）；前端卡片 hover 铅笔按钮 → 编辑弹层
+- 底层 materials.update（仅更新传入字段，无需删建）
