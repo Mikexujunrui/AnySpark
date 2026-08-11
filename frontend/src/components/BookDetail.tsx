@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { Panel, Group, Separator } from 'react-resizable-panels'
+import { ApprovalProvider } from './approval/ApprovalContext'
 import { storage } from "../storage"
 import { api } from "../api"
 import { showToast } from './ui/toast-utils'
@@ -74,7 +75,16 @@ function modeConfig(mode: string): LLMMode {
   return LLM_MODES.find(m => m.key === mode) || DEFAULT_MODE
 }
 
-export default function BookDetail() {
+// 审批节点宿主：全局 ApprovalProvider（自主模式联动，不耦合业务）
+export default function BookDetailWrapper() {
+  return (
+    <ApprovalProvider>
+      <BookDetail />
+    </ApprovalProvider>
+  )
+}
+
+function BookDetail() {
   const { bookId } = useParams<{ bookId: string }>()
   const [searchParams] = useSearchParams()
   const urlTab = searchParams.get('tab')

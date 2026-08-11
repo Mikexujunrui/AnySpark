@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import Icon from './ui/Icon'
 import LoadingState from './ui/Skeleton'
 import { useRefreshKey } from '../store'
+import { useApproval } from './approval/ApprovalContext'
 import { showToast } from './ui/toast-utils'
 
 const AVATAR_MAP = {
@@ -173,6 +174,7 @@ function ReviewReport({ report, onClose }) {
 const HISTORY_KEY = 'v4_review_history'
 
 export default function ReviewPanel({ bookId }) {
+  const { requestApproval } = useApproval()
   const refreshKey = useRefreshKey()
   const [reviewers, setReviewers] = useState([])
   const [chapters, setChapters] = useState([])
@@ -219,6 +221,14 @@ export default function ReviewPanel({ bookId }) {
       showToast('请先选择章节（或评审员后直接发起）', 'error')
       return
     }
+    // 高负载：并发评审 + 主席汇总（LLM 约 45s）→ 先审批
+    const ok = await requestApproval({
+      title: '评审团评审',
+      desc: `拟人化评审团并发评审 + 汇总裁决，约 45 秒。`, 
+      estSeconds: 45,
+      cost: 'high',
+    })
+    if (!ok) return
     const chapter = chapters.find(c => c.id === selectedChapterId || c.title === selectedChapterId)
     setRunning(true)
     try {

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useRoleStore } from "../stores/roleStore";
+import { useApproval } from "./approval/ApprovalContext";
 
 interface RolePanelProps {
   open: boolean;
@@ -9,6 +10,7 @@ interface RolePanelProps {
 
 // S48-P4 角色推演：角色卡 + 场景 → N 路隔离推演 → 判别选优
 export default function RolePanel({ open, onClose, embedded = false }: RolePanelProps) {
+  const { requestApproval } = useApproval()
   const candidates = useRoleStore((s) => s.candidates);
   const best = useRoleStore((s) => s.best);
   const scoreReason = useRoleStore((s) => s.scoreReason);
@@ -41,7 +43,14 @@ export default function RolePanel({ open, onClose, embedded = false }: RolePanel
 
   const handlePlay = async () => {
     if (!role.trim() || !scenario.trim()) return;
-    await runPlay(role.trim(), scenario.trim(), n);
+    // 高负载：N 路隔离推演（LLM 多路约 18s）→ 先审批
+    const ok = await requestApproval({
+      title: '角色推演',
+      desc: `${role.trim()} 在「${scenario.trim().slice(0, 30)}…」场景下 ${n} 路推演选优，约 18 秒。`, 
+      estSeconds: 18,
+      cost: 'high',
+    })
+    if (ok) await runPlay(role.trim(), scenario.trim(), n);
   };
 
   return (

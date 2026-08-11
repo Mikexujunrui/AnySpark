@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Icon from './ui/Icon'
+import { useApproval } from './approval/ApprovalContext'
 import { useSSE } from "../hooks/useSSE"
 import MessageList from './chat/MessageList'
 import MessageInput from './chat/MessageInput'
@@ -49,6 +50,7 @@ const RECOMMENDED_CONSTITUTION = `# 本书创作规则（示例模板，可按�
 10. 任何修改都应保留版本历史，并向我说明修改范围。`
 
 export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transformSignal }: { bookId: string; sessionId: string; autoModeEnabled: boolean; transformSignal: number }) {
+  const { setAutoMode: setGlobalAutoMode } = useApproval()
   const welcomeMsg = { role: 'agent', text: '你好！我是你的 AI 写作助手 Agent。\n\n'
     + '我会先理解你的内容类型，再自动选择最佳处理方式。\n'
     + '在输入框输入 `/` 可查看所有快捷命令和技能。\n\n'
@@ -826,15 +828,8 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
 
   async function handleAutonomousToggle() {
     const next = !autonomousMode
-    try {
-      await fetch(`/api/books/${bookId}/sessions/${sessionId}/autonomous`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: next }),
-      })
-    } catch (e) {
-      console.error(`${DIAG_PREFIX} ChatPanel — 自主模式切换失败: %s`, e.message)
-    }
+    // 接入全局审批节点：自主模式开启 → 审批自动同意（不再调对端端点）
+    setGlobalAutoMode(next)
     setAutonomousMode(next)
   }
 

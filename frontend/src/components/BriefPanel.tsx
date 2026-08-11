@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { useBriefStore } from "../stores/briefStore";
+import { useApproval } from "./approval/ApprovalContext";
 
 interface BriefPanelProps {
   open: boolean;
@@ -20,6 +21,18 @@ export default function BriefPanel({ open, onClose, embedded = false }: BriefPan
   const generate = useBriefStore((s) => s.generate);
   const setDraft = useBriefStore((s) => s.setDraft);
   const clearDraft = useBriefStore((s) => s.clearDraft);
+  const { requestApproval } = useApproval()
+
+  // 高负载：AI 生成草案（LLM 约 14s）→ 先审批，同意才执行
+  const handleGenerate = async () => {
+    const ok = await requestApproval({
+      title: 'AI 生成项目简介草案',
+      desc: '从现有项目数据（设定/方向/进展）提炼总览，约 14 秒。生成后需人工确认才保存生效。',
+      estSeconds: 14,
+      cost: 'medium',
+    })
+    if (ok) generate()
+  }
 
   const [editing, setEditing] = useState(false);
   const [editText, setEditText] = useState("");
@@ -95,7 +108,7 @@ export default function BriefPanel({ open, onClose, embedded = false }: BriefPan
         {/* 操作条：AI 生成草案 */}
         <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800">
           <button
-            onClick={generate}
+            onClick={handleGenerate}
             disabled={generating}
             className="text-xs px-3 py-1 bg-purple-600 hover:bg-purple-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded"
           >
