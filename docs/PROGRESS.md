@@ -2426,3 +2426,18 @@ locked）；无 WAL + timeout=5（15+ store 独立连接竞争放大）。
 
 **坑**：anyspark_server start 若显示"已在运行"=旧进程未死，修复代码不生效——必须
 stop 确认 8000 无监听再 start（本次曾因此误判 500 是修复无效）。
+
+## S75b 前后端对账审计（已完成 ✅，DESIGN §12.38）——缺口清单 + 信号闭环补全
+
+**背景（主人指示）**：检查前端是否完整实现设计需要、后端未展示的功能。
+对账：后端 ~110 端点 vs 前端 ~34 路径。
+
+**发现**：P0 闭环断点（前端不报操作信号→对齐闭环空转）+ 定点编辑未用（PUT 全量
+替代 PATCH）；P1 八项（brief/bias/批量/ingest/upload/模板/impact/tools）；P2 七项
+（play/path/role/review/dims/notices/chat 增强）——**完整清单 docs/FRONTEND-GAPS.md**。
+
+**已补**：前端信号上报（选候选 accepted + 编辑保存 modified，old→new，失败静默）
+——后端对齐/心智/档位闭环恢复运作。
+
+**协作**：后端 API 全就绪，缺口按迭代由前端开发者补（文档列全端点，可照接）；
+wrapup 误判修正（已用真实 API）；stats/codex/graph 通道标注非前端必需。

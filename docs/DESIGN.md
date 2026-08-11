@@ -1375,3 +1375,27 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 - 测试：ChapterStore.delete 后立即写 ✓；WAL 模式存在 ✓
 - AST 全仓扫描确认无其他缺 commit 的写方法（graph/storytree/registry 均正常，
   SqliteConversationStore 用 with self._conn 上下文事务）
+
+### 12.38 前后端对账审计（S75b：缺口清单 + 信号闭环补全）
+
+> 背景（主人指示）：检查前端是否完整实现设计需要、后端功能是否有前端未展示的。
+> 对账方法：后端 API 全清单（~110 端点）vs 前端实际调用（~34 路径）逐项比对。
+
+#### 发现
+
+- **P0 闭环断点**：前端不向 /api/signals 上报操作 → 后端对齐闭环（S28 偏好提炼/
+  S73d 心智吸收/档位调节）全部空转——**最关键缺口**
+- **P0 优化项**：定点编辑（PATCH /api/chapters/{id}/patch）未用（前端 PUT 全量替代）
+- **P1 八项**：brief/bias/批量/ingest/upload/模板库/impact/tools 前端未展示
+- **P2 七项**：play/path/role/review/dims/manual-notices/chat 增强（S6x 新功能前端未跟上）
+- 误判修正：wrapup 已用真实 API；stats/codex/graph 工具通道非前端必需
+
+#### 已补（S75b）
+
+- **操作信号上报**（前端）：选候选→accepted、编辑保存→modified（old→new），
+  失败静默；详见 docs/FRONTEND-GAPS.md（缺口清单全文）
+
+#### 协作方式
+
+- 后端 API 全部就绪；前端缺口按迭代补（docs/FRONTEND-GAPS.md 列全端点）
+- 前端开发者为合作者；审计记录供其参考，不阻塞后端进度
