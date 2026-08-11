@@ -13,7 +13,6 @@ import json
 import queue
 import threading
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal, cast
 
@@ -21,7 +20,6 @@ from dotenv import load_dotenv
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel, Field
 
 from anyspark.align import (
     AgencyStore,
@@ -40,19 +38,13 @@ from anyspark.align import (
     StoryTreeStore,
     WorldSettingStore,
     WritingSkillStore,
-    build_agency_block,
     build_agency_gen_prompt,
     build_agency_suggest_prompt,
-    build_learning_review_prompt,
     build_reconcile_prompt,
     parse_agency_declaration,
     parse_agency_gen_result,
     parse_agency_suggest_result,
-    parse_learning_review_result,
     parse_reconcile_result,
-    render_plan,
-    render_settings_adaptive,
-    render_skill_index,
 )
 from anyspark.check import compile_rule, compile_with_model, run_review
 from anyspark.core import (
@@ -62,7 +54,6 @@ from anyspark.core import (
     Message,
     Model,
     RetryingModel,
-    ToolRegistry,
 )
 from anyspark.explore import (
     DimensionStore,
@@ -85,15 +76,100 @@ from anyspark.models.registry import (
 )
 from anyspark.play import PlayEngine, PlayStore
 from anyspark.review import ReviewPanel
+from anyspark.server.agent_factory import make_agent
 from anyspark.server.context import TokenBudget, make_summarizer
+from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import log_path, logger, setup_logging
 from anyspark.server.recorder import RunRecorder
+from anyspark.server.schemas import (
+    AgencyGenerateIn,
+    AgencyIn,
+    AgencyLevelIn,
+    BatchReviewIn,
+    BatchRewriteIn,
+    BiasIn,
+    BriefGenerateIn,
+    BriefIn,
+    CancelIn,
+    CandidatesIn,
+    ChapterCreate,
+    ChapterOut,
+    ChapterPatchIn,
+    ChapterPlanIn,
+    ChapterPlanPatch,
+    ChapterUpdate,
+    ChatRequest,
+    ChatResponse,
+    CheckRequest,
+    CodexIn,
+    ConversationRenameIn,
+    DirectionIn,
+    ExploreArchiveIn,
+    ExploreCardsIn,
+    ExploreDimIn,
+    ExploreDimPatch,
+    ExploreIntentIn,
+    GraphEntityIn,
+    GraphEntityPatch,
+    GraphEventIn,
+    GraphEventPatch,
+    GraphExtractIn,
+    GraphRelationIn,
+    GraphRelationPatch,
+    GraphTypeIn,
+    GraphTypePatch,
+    ImpactIn,
+    IngestIn,
+    ManualDecayIn,
+    ManualEntryIn,
+    ManualEntryPatch,
+    MaterialIn,
+    ModelIn,
+    PathExploreIn,
+    PlayBranchIn,
+    PlayChooseIn,
+    PlayCreateIn,
+    PlotIn,
+    PlotItemIn,
+    PlotPatchIn,
+    ReconcileIn,
+    ReviewPanelRequest,
+    RewriteIn,
+    RoleCardIn,
+    RolePlayIn,
+    RuleRequest,
+    SettingCategoryIn,
+    SettingCategoryPatch,
+    SignalIn,
+    SkillGenerateIn,
+    SteerIn,
+    StoryLayoutIn,
+    StoryNodeIn,
+    StoryThreadIn,
+    StoryThreadPatch,
+    TemplateGenerateIn,
+    TemplateIn,
+    ToolEvent,
+    ToolRegisterIn,
+    ToolUpdateIn,
+    UncensorIn,
+    UploadIn,
+    WorkflowGenerateIn,
+    WorkflowIn,
+    WorkflowRunIn,
+    WorldSettingExtractIn,
+    WorldSettingIn,
+    WorldSettingPatch,
+    WritingSkillIn,
+    WritingSkillPatch,
+    _now_iso_rec,
+    _sse_frame,
+)
 from anyspark.server.stats import compute_stats
-from anyspark.server.toolkit import ToolContext, build_toolkit
+from anyspark.server.tasks import extract_chapter, review_for_learning, start_bg_worker
 from anyspark.server.tools_extensions import (
     ExtensionToolStore,
 )
-from anyspark.server.tools_writing import UNCENSORED_PROMPT
 from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import (
@@ -121,7 +197,6 @@ DB_PATH = DATA_DIR / "anyspark.db"
 
 # S55 #3 注入块分层缓存：stable 块（跨请求不变）按签名缓存，volatile 块每次组装。
 # 签名=底层数据内容（任何增删改 → 签名变 → 缓存失效），避免长会话重复渲染。
-_skill_cache: dict[str, str] = {}  # 签名 → 索引块（S60：只存索引，内容靠 skill_lookup 按需）
 
 # 默认写作系统提示（真实写作指令）
 DEFAULT_SYSTEM = (
@@ -151,636 +226,8 @@ DEFAULT_SYSTEM = (
 )
 
 
-def _sse_frame(event: str, data: dict[str, Any]) -> str:
-    """SSE 帧：event: <type>\ndata: <json>\n\n（core 事件协议 → 传输层）。"""
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
-
-
-# ---------------------------------------------------------------------------
-# Pydantic 请求/响应模型
-# ---------------------------------------------------------------------------
-class ChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="用户输入")
-    conversation_id: str | None = None
-    book_id: str = "main"  # 项目 id（叙事树/简介/设定档按项目隔离）
-    system_prompt: str | None = None
-    temperature: float = 0.7
-    agency_level: int | None = None  # 能动级别 0-4（覆盖当前档位；缺省用已存档位）
-    # 增强按需装配（S15："你要什么再装什么"——默认关的增强，点亮才挂）
-    enable_search: bool = False  # 网络搜索工具按需注册（默认关：写作主链路不背考据能力）
-    enable_extras: bool = False  # S32 扩展工具（read_material）按需点亮；S63 check_text 退役
-    enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认开
-    enable_codex: bool = False  # S48-P5 代码扩展 run_code（沙箱，默认关：安全按需点亮）
-    enable_workflow: bool = False  # S59 工作流 agent 工具（list/run/status/generate）默认关
-    enable_play: bool = False  # S65 互动推演 agent 工具（play_start/choose/status/export）默认关
-    extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
-    skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/plot 子集
-    # S58b 上下文模式：auto(默认=干净,不继承场景记忆)/continue(显式继承场景记忆+计划)/fresh(同auto)
-    # 主人偏好：默认不继承——新任务/探索不受上次对话干扰；跨会话续写时显式 continue
-    context_mode: str = "auto"  # auto | continue | fresh
-    # S47 运行时模型选择：缺省用注册表当前激活模型；thinking 覆盖该模型默认思考强度
-    model_id: str | None = None  # 指定用哪个已配置模型（未配置/不存在 → 400）
-    thinking: str | None = None  # 思考强度覆盖：off/low/medium/high/xhigh/max（None=用模型配置）
-
-
-class ModelIn(BaseModel):
-    """S47 模型配置写入（新增或更新；id 缺省由 name 生成 slug）。"""
-
-    id: str | None = None
-    name: str
-    base_url: str | None = None  # 缺省用 env 默认端点（DEEPSEEK_BASE_URL）
-    model: str  # 模型名（如 deepseek-v4-flash / deepseek-v4-pro）
-    api_key: str | None = None  # 缺省用 env DEEPSEEK_API_KEY
-    context_window: int | None = None
-    max_tokens: int | None = None
-    temperature: float | None = None
-    thinking: str | None = None  # off/low/medium/high/xhigh/max（None=交模型默认）
-
-
-class ConversationRenameIn(BaseModel):
-    """会话重命名请求。"""
-
-    title: str
-
-
-class RoleCardIn(BaseModel):
-    """S48-P4 角色卡（卡片/角色卡-{name}.md）。"""
-
-    name: str
-    content: str
-
-
-class ToolUpdateIn(BaseModel):
-    """S49 扩展工具更新（改后自动回 draft 重新批准）。"""
-
-    name: str | None = None
-    description: str | None = None
-    params_json: str | None = None
-    code: str | None = None
-
-
-class ToolRegisterIn(BaseModel):
-    """S48-P4/B 扩展工具登记（Agent 或用户提交，人工批准后生效）。"""
-
-    name: str  # 工具名（唯一，agent 可见）
-    description: str  # 工具描述（agent 判断何时调用用）
-    params_json: str = "[]"  # 参数定义 JSON 数组
-    code: str  # Python 代码：def run(args: dict) -> str
-
-
-class RolePlayIn(BaseModel):
-    """S48-P4 角色推演请求。"""
-
-    role: str  # 角色名（角色卡文件名 + 图谱实体）
-    scenario: str  # 推演场景（自然语言）
-    n: int = 4  # 推演路数（2-6）
-
-
-class PlayCreateIn(BaseModel):
-    """S65 互动推演：创建会话（扮演角色从场景切入）。"""
-
-    role: str  # 扮演的角色（须有角色卡）
-    seed: str  # 切入场景（自然语言）
-    book_id: str = "main"
-    title: str = ""
-    max_depth: int = 20  # 最大推演深度（默认 20）
-
-
-class PlayChooseIn(BaseModel):
-    """S65 互动推演：选择候选行动（option_id 与 custom_text 二选一）。"""
-
-    option_id: str | None = None
-    custom_text: str | None = None
-
-
-class PlayBranchIn(BaseModel):
-    """S65 互动推演：回溯分叉（回到指定节点重新生成候选行动）。"""
-
-    node_id: str
-
-
-class UncensorIn(BaseModel):
-    """S70：破限模式开关（书籍级，写作自由度：不设题材禁区）。"""
-
-    book_id: str = "main"
-    enabled: bool = True
-
-
-class CodexIn(BaseModel):
-    """S48-P5 代码执行请求（沙箱安全）。"""
-
-    code: str
-    timeout: float = 10.0
-
-
-class IngestIn(BaseModel):
-    """S48-P3 消化上传区文件。mode：auto（自动判别）/ chapters（强制拆章）/ card（强制摘要卡）。"""
-
-    filename: str
-    mode: str = "auto"
-    book_id: str = "main"  # S74：上传/消化按书隔离
-
-
-class UploadIn(BaseModel):
-    """S48 上传存档（base64 JSON，零新依赖）。"""
-
-    filename: str
-    data_b64: str
-    book_id: str = "main"  # S74：上传区按书隔离  # base64 编码的文件内容
-
-
-class ToolEvent(BaseModel):
-    type: str
-    payload: dict[str, Any]
-
-
-class ChatResponse(BaseModel):
-    conversation_id: str
-    text: str
-    turns: list[dict[str, Any]]
-    events: list[ToolEvent]
-    agency_declared: int | None = None  # AI 声明的档位（用户点选确认）
-
-
-class ChapterOut(BaseModel):
-    id: str
-    book_id: str
-    title: str
-    content: str
-    order_index: int
-    updated_at: str
-
-
-class ChapterCreate(BaseModel):
-    """F1：手动新建章节（空正文，order_index=末尾+1）。"""
-
-    title: str
-    book_id: str = "main"
-    content: str = ""
-
-
-class ChapterUpdate(BaseModel):
-    """F2a：稿纸编辑器保存章节内容。"""
-
-    content: str
-
-
-class ManualEntryIn(BaseModel):
-    content: str
-    confidence: float = 0.5
-    scope: str = "project"
-    category: str = "style"  # S50：collab(协作)/style(文风)/habit(习惯)
-
-
-class ManualEntryPatch(BaseModel):
-    content: str | None = None
-    locked: bool | None = None
-    category: str | None = None
-
-
-class BriefIn(BaseModel):
-    """S58 项目智能体简介（给 AI 和用户看的项目总览，非读者简介）。"""
-
-    content: str
-    book_id: str = "main"
-
-
-class BriefGenerateIn(BaseModel):
-    """S58 从现有项目数据自动生成简介草案（人工确认后生效）。"""
-
-    book_id: str = "main"
-
-
-class StoryNodeIn(BaseModel):
-    """S59 叙事树节点。"""
-
-    content: str
-    book_id: str = "main"
-    parent_id: str | None = None
-    kind: Literal["root", "main", "anchor", "candidate", "subplot", "loop"] = "candidate"
-    chosen: bool = False
-
-
-class StoryThreadIn(BaseModel):
-    """S59 线进度（声明/升级一条线）。"""
-
-    name: str
-    book_id: str = "main"
-    content: str = ""
-    progress: str = ""
-    role: str = "main"  # main/subplot/parallel
-    node_id: str | None = None
-
-
-class StoryThreadPatch(BaseModel):
-    """S59 更新线进度/完成。"""
-
-    progress: str | None = None
-    status: str | None = None  # active/done
-
-
-class SignalIn(BaseModel):
-    kind: str  # accepted|modified|deleted|rejected|custom|negative
-    content: str
-    new_content: str | None = None
-    context: str = ""
-
-
-class ReconcileIn(BaseModel):
-    """S53c 跨会话对账请求（可选限定书）。"""
-
-    book_id: str = "main"
-
-
-class ExploreIntentIn(BaseModel):
-    seed: str
-
-
-class ExploreCardsIn(BaseModel):
-    seed: str
-    intent_confirmed: dict[str, object]
-
-
-class PathExploreIn(BaseModel):
-    """S67 路径探索：叙事树节点之间串联（起点 A → 终点 B 的中间事件链候选）。"""
-
-    from_desc: str = ""  # 起点描述（from_node_id 传入时自动取节点内容；两者至少其一）
-    to_desc: str  # 终点描述
-    from_node_id: str | None = None  # 叙事树起点节点（内容自动带入）
-    to_node_id: str | None = None  # 叙事树终点节点
-    constraints: list[str] = []  # 补充设定约束（与项目档案约束合并）
-    book_id: str = "main"
-    n: int = 4  # 路径数（2-6）
-    archive_index: int | None = None  # 选中第几条写入叙事树（1-based，显式才落树）
-
-
-class ExploreArchiveIn(BaseModel):
-    card: dict[str, object]
-    parent_node_id: str | None = None  # S59：叙事树父节点（探索分叉从哪长出）
-
-
-class ExploreDimIn(BaseModel):
-    """S50：探索维度（内容化，可增删改）。"""
-
-    name: str
-
-
-class ExploreDimPatch(BaseModel):
-    enabled: bool
-
-
-class CheckRequest(BaseModel):
-    text: str
-    target: str = "当前章节"
-    chapter_order: int | None = None  # 时序校验：当前章节序号（校验时空倒置）
-    line: str = "main"  # S29 多线叙事：当前写作的叙事线（时序校验按线比较）
-
-
-class RuleRequest(BaseModel):
-    rule: str
-    text: str
-
-
-class GraphTypeIn(BaseModel):
-    """S50：实体类型（内容化，可增删改）。"""
-
-    name: str
-
-
-class GraphTypePatch(BaseModel):
-    enabled: bool
-
-
-class GraphEntityIn(BaseModel):
-    """S72：手动登记/覆盖实体（幂等：同名实体字段全量覆盖，不动自动统计）。"""
-
-    name: str
-    entity_type: str = "设定"
-    aliases: list[str] = []
-    description: str = ""
-    state: str = ""
-    book_id: str = "main"
-
-
-class GraphEntityPatch(BaseModel):
-    """S72：局部编辑实体字段（只改传入字段，不改自动统计）。"""
-
-    aliases: list[str] | None = None
-    description: str | None = None
-    state: str | None = None
-    entity_type: str | None = None
-
-
-class GraphRelationIn(BaseModel):
-    """S72：手动登记关系（两端实体须存在）。"""
-
-    from_name: str
-    to_name: str
-    rel_type: str
-    description: str = ""
-    book_id: str = "main"
-
-
-class GraphRelationPatch(BaseModel):
-    rel_type: str | None = None
-    description: str | None = None
-
-
-class GraphEventIn(BaseModel):
-    """S72：手动登记事件。"""
-
-    chapter_ref: str
-    chapter_order: int = 0
-    time_point: str
-    label: str
-    description: str = ""
-    involved: list[str] = []
-    book_id: str = "main"
-
-
-class GraphEventPatch(BaseModel):
-    time_point: str | None = None
-    label: str | None = None
-    chapter_ref: str | None = None
-    chapter_order: int | None = None
-    description: str | None = None
-    involved: list[str] | None = None
-
-
-class MaterialIn(BaseModel):
-    text: str
-    title: str = ""
-    purpose: str = "fact"  # style|fact|both
-
-
-class GraphExtractIn(BaseModel):
-    chapter_ref: str
-    text: str
-
-
-class ReviewPanelRequest(BaseModel):
-    """S65：拟人化评审团请求。chapter_ref 与 text 二选一（ref 优先）。"""
-
-    chapter_ref: str = ""  # 章节标题（从 chapters 取正文）
-    text: str = ""  # 直接评审文本
-    book_id: str = "main"
-    reviewer_ids: list[str] = []  # 空 = 全部激活评审员
-    with_check: bool = True  # 注入 check 硬伤清单（逻辑审校用）
-    with_foreshadow: bool = True  # 注入关键点图谱（伏笔审计员用）
-
-
-class AgencyIn(BaseModel):
-    level: int | None = None  # 兼容旧调用：排序位数字（0 起）
-    level_id: str | None = None  # S35：档位记录 id（优先）
-
-
-class AgencyLevelIn(BaseModel):
-    """S35：新增/修改自定义档位。"""
-
-    name: str
-    description: str = ""
-    temperature: float = 0.7
-
-
-class AgencyGenerateIn(BaseModel):
-    """S61 L3：自然语言描述 → 档位候选（人工确认后 /api/agency/add 生效）。"""
-
-    description: str
-    n: int = 3
-
-
-class ManualDecayIn(BaseModel):
-    """S61：活跃度衰减参数（DESIGN §12.18 元数据收敛）。"""
-
-    days_high: int = 30  # high → medium 阈值（天）
-    days_medium: int = 90  # medium → low 阈值（天）
-
-
-class BatchRewriteIn(BaseModel):
-    """S40：批量改写（全书变换）——多章统一指令改写。"""
-
-    chapter_ids: list[str]
-    instruction: str
-
-
-class BatchReviewIn(BaseModel):
-    """S40：批量审读——多章检测网审读。"""
-
-    chapter_ids: list[str]
-
-
-class WorldSettingIn(BaseModel):
-    """S41：设定档条目。"""
-
-    content: str
-    category: str = "世界观"
-    name: str = ""
-    book_id: str = "main"  # S74：设定档按书隔离（正典是书级内容）
-
-
-class WorldSettingPatch(BaseModel):
-    content: str | None = None
-    category: str | None = None
-    name: str | None = None
-
-
-class WorldSettingExtractIn(BaseModel):
-    """S42：从图谱提炼设定草案（LLM 生成候选，作者逐条确认）。"""
-
-    book_id: str = "main"
-
-
-class SettingCategoryIn(BaseModel):
-    """S50：设定档类别（内容化，可增删改）。"""
-
-    name: str
-
-
-class SettingCategoryPatch(BaseModel):
-    enabled: bool
-
-
-class WritingSkillIn(BaseModel):
-    """S50：叙事技巧（skill 式内容载体）。"""
-
-    name: str
-    description: str = ""
-    content: str
-    example: str = ""  # 具体情形案例（提升文笔：样例比抽象指令有效）
-    tags: str = ""  # 场景标签（逗号分隔，支撑按需选取）
-    target: str = "writing"  # S57：writing(写作调用)/main(主循环)/both
-    enabled: bool = True
-
-
-class WritingSkillPatch(BaseModel):
-    name: str | None = None
-    description: str | None = None
-    content: str | None = None
-    example: str | None = None
-    tags: str | None = None
-    target: str | None = None
-    enabled: bool | None = None
-
-
-class SkillGenerateIn(BaseModel):
-    """S54/S58：生成 skill 候选（人工确认后入库）。"""
-
-    source_text: str = ""  # 待提炼正文（导入的小说/片段，真实原文；与 material_id 二选一）
-    material_id: str | None = None  # S72：从资料库取原文（文风参考书 → skill 提炼链路）
-    hint: str = ""  # 可选指引（如"侧重打斗文风"/"侧重爽文节奏"）
-    max_items: int = 5
-    mode: str = "writing"  # S58：writing（文风/叙事技法）/ main（类型/结构组织指导）
-
-
-class TemplateGenerateIn(BaseModel):
-    """S69：从书提炼剧情模式模板候选（人工确认后走 /api/templates/import 入库）。
-
-    与 skill 生成的区别：输出模板四要素（粒度/位置/功能/可变参数），
-    输入应为多章/全书片段（跨章结构归纳，单章提不到剧情模式）。
-    """
-
-    source_text: str  # 多章/全书片段（真实原文）
-    hint: str = ""  # 可选指引（如"侧重悬疑递进"）
-    max_items: int = 5
-
-
-class ChapterPatchIn(BaseModel):
-    """S44：定点编辑操作列表。"""
-
-    operations: list[dict[str, Any]]
-
-
-class ImpactIn(BaseModel):
-    """S45：影响分析（连锁修改）——改某章（涉及实体）→ 受影响下游章节。"""
-
-    chapter_order: int
-    entities: list[str] | None = None
-
-
-class WorkflowIn(BaseModel):
-    """S59：工作流定义写入（模板入库）。模块级（S13 坑：函数内定义 ForwardRef 失败）。"""
-
-    name: str
-    description: str = ""
-    nodes: list[dict[str, Any]]
-    edges: list[dict[str, Any]] = []
-    layout: dict[str, dict[str, float]] = {}  # S76：画布节点坐标（可选，空=自动布局）
-
-
-class WorkflowGenerateIn(BaseModel):
-    """S59：AI 生成工作流（描述目标 → 草稿，人工确认转正）。"""
-
-    goal: str
-
-
-class WorkflowRunIn(BaseModel):
-    """S59：运行工作流（绑定书，快照冻结）。"""
-
-    book_id: str = "main"
-
-
-class ChapterPlanIn(BaseModel):
-    """S46：剧情计划条目。"""
-
-    chapter_order: int
-    title: str = ""
-    content: str = ""
-
-
-class StoryLayoutPos(BaseModel):
-    """S76：叙事树单节点手动坐标。"""
-
-    node_id: str
-    x: float
-    y: float
-
-
-class StoryLayoutIn(BaseModel):
-    """S76：叙事树布局批量保存。"""
-
-    book_id: str = "main"
-    positions: list[StoryLayoutPos]
-
-
-class ChapterPlanPatch(BaseModel):
-    title: str | None = None
-    content: str | None = None
-    status: str | None = None
-
-
-class BiasIn(BaseModel):
-    content: str
-    source: str = "ai"
-
-
-class DirectionIn(BaseModel):
-    prompt: str
-    context: str = ""  # 可选：章节摘要/设定约束
-
-
-class CandidatesIn(BaseModel):
-    prompt: str
-    context: str = ""
-    n: int = 3
-
-
-class RewriteIn(BaseModel):
-    text: str
-    mode: str = "balanced"  # subtle|balanced|bold
-
-
-class WrapupIn(BaseModel):
-    chapter_id: str
-
-
-class TemplateIn(BaseModel):
-    name: str
-    description: str
-    granularity: str = "章"
-    position: str = "发展"
-    function: str = "主线"
-    params: list[str] = []
-
-
-class PlotIn(BaseModel):
-    settings: str = ""  # 作品设定/种子（可选，缺省用已写章节）
-
-
-class PlotPatchIn(BaseModel):
-    status: str | None = None  # open|resolved
-    attention: str | None = None  # care|ignore（用户标注在意/不需要）
-    priority: str | None = None  # S31: must（剧情钩子，必须回收）| soft（细节线索）
-    resolved_chapter: str | None = None  # S31: 回收章节
-
-
-class PlotItemIn(BaseModel):
-    """S31：主动登记一个关键点/伏笔（作者/AI 声明，非 LLM 生成）。"""
-
-    content: str = Field(..., min_length=1)
-    category: str = "伏笔"
-    chapter_ref: str = ""
-    priority: str = "soft"  # must=剧情钩子（作者承诺必须回收）/ soft=细节线索
-    planted_order: int = 0  # S31 老龄化：登记时的章节序号（开放时长 = 当前章 - planted_order）
-
-
-class CancelIn(BaseModel):
-    conversation_id: str | None = None  # 空=取消最近活跃会话（新会话 id 客户端未知）
-
-
-class SteerIn(BaseModel):
-    conversation_id: str  # 目标会话（必须正在运行才能插话）
-    message: str = Field(..., min_length=1)
-
-
-# ---------------------------------------------------------------------------
 # 应用装配
 # ---------------------------------------------------------------------------
-def _now_iso_rec() -> str:
-    from datetime import UTC, datetime
-
-    return datetime.now(UTC).isoformat()
-
-
 def build_app(
     model: Model | None = None,
     db_path: str | Path | None = None,
@@ -839,196 +286,11 @@ def build_app(
     # 任务负载类型（S28 扩展）：("chapter", title, content, order) 图谱抽取/伏笔回收；
     # ("refine",) 信号→说明书提炼；("batch_rewrite", batch_id, ids, instruction) 批量改写；
     # ("batch_review", batch_id, ids) 批量审读（S40）。
-    @dataclass
-    class BgTask:
-        """后台任务（S62：取代元组魔法派发——kind 字段 + 类型化负载，新增任务类型只加一条）。"""
-
-        kind: str  # chapter|refine|skill_drafts|summarize|batch_rewrite|batch_review
-        title: str = ""
-        content: str = ""
-        order: int = 0
-        line: str = "main"
-        conv_id: str = ""
-        batch_id: str = ""
-        ids: list[str] = field(default_factory=list)
-        instruction: str = ""
 
     _bg_queue: queue.Queue[BgTask] = queue.Queue()  # 后台任务队列（S28/S40）
     # S40 批量任务状态（内存会话级）：id → {status, done, total, results}
     _batches: dict[str, dict[str, Any]] = {}
     _batch_lock: threading.Lock = threading.Lock()
-
-    def _run_batch_rewrite(batch_id: str, chapter_ids: list[str], instruction: str) -> None:
-        """批量改写：逐章 LLM 按指令改写 → upsert（覆盖前旧版进版本历史）。"""
-        batch = _batches.get(batch_id)
-        if not batch:
-            return
-        for cid in chapter_ids:
-            try:
-                assert model is not None  # 真实装配必有模型
-                ch = chapters.get(cid)
-                if ch is None:
-                    batch["results"].append({"id": cid, "ok": False, "error": "章节不存在"})
-                else:
-                    prompt = (
-                        "按用户指令改写以下章节。保持剧情走向/人物/设定/时间线一致，"
-                        "只按指令调整（风格/情节/表达）。直接输出改写后的完整正文。\n"
-                        f"【指令】{instruction}\n【原章】\n{ch.content}\n【改写后正文】"
-                    )
-                    out = model.respond([Message(role="user", content=prompt)], [])
-                    new_text = (out.text or "").strip()
-                    if new_text:
-                        chapters.upsert(
-                            "main", ch.title, new_text, ch.order_index, ch.narrative_line
-                        )
-                        batch["results"].append(
-                            {"id": cid, "title": ch.title, "ok": True, "chars": len(new_text)}
-                        )
-                    else:
-                        batch["results"].append(
-                            {"id": cid, "title": ch.title, "ok": False, "error": "空输出"}
-                        )
-            except Exception as exc:
-                batch["results"].append({"id": cid, "ok": False, "error": str(exc)[:150]})
-            batch["done"] += 1
-        batch["status"] = "done"
-
-    def _run_batch_review(batch_id: str, chapter_ids: list[str]) -> None:
-        """批量审读：逐章检测网审读，汇总报告。"""
-        batch = _batches.get(batch_id)
-        if not batch:
-            return
-        for cid in chapter_ids:
-            try:
-                ch = chapters.get(cid)
-                if ch is None:
-                    batch["results"].append({"id": cid, "ok": False, "error": "章节不存在"})
-                else:
-                    report = run_review(model, ch.title, ch.content[:20000])
-                    batch["results"].append(
-                        {
-                            "id": cid,
-                            "title": ch.title,
-                            "ok": True,
-                            "hard": report.hard_count,
-                            "report": report.render(),
-                        }
-                    )
-            except Exception as exc:
-                batch["results"].append({"id": cid, "ok": False, "error": str(exc)[:150]})
-            batch["done"] += 1
-        batch["status"] = "done"
-
-    def _bg_worker() -> None:
-        while True:
-            try:
-                task = _bg_queue.get()
-                if task.kind == "chapter":
-                    _extract_chapter("main", task.title, task.content, task.order, task.line)
-                elif task.kind == "refine":
-                    _refine_from_signals()
-                elif task.kind == "skill_drafts":
-                    _refine_skill_drafts()
-                elif task.kind == "summarize":
-                    _summarize_conversation(task.conv_id)
-                elif task.kind == "batch_rewrite":
-                    _run_batch_rewrite(task.batch_id, task.ids, task.instruction)
-                elif task.kind == "batch_review":
-                    _run_batch_review(task.batch_id, task.ids)
-                else:
-                    logger.warning("后台任务未知 kind: %r", getattr(task, "kind", task))
-            except Exception as exc:
-                logger.warning("后台任务异常: %s", exc)
-            finally:
-                _bg_queue.task_done()
-
-    threading.Thread(target=_bg_worker, daemon=True).start()
-
-    def _refine_from_signals() -> None:
-        """S28：信号 → 偏好提炼 → 说明书（后台异步，不阻塞用户操作）。
-
-        修复对齐闭环缺口：此前 /api/signals 只记录信号，说明书永不自动更新
-        （PreferenceExtractor 存在但从未在 API 层接线）——用户操作无法变成
-        写作约束，T7"修改率↓/说明书累积"的机制前提缺失。
-        """
-        try:
-            recent = signals.recent(limit=20)
-            if not recent:
-                return
-            # 最近对话（任意会话，取最近 10 条）作为提炼上下文
-            dialogue = store.recent_messages(10)
-            entries = preference_extractor.extract(dialogue, recent, max_items=3)
-            existing = {e.content for e in manual.list("project", "main")}
-            added = 0
-            for e in entries:
-                if e.content in existing:
-                    continue
-                # S55 合并式新增：同主题条目合并（治碎片），不重复堆窄条目
-                _, did_merge = manual.merge_add(e)
-                if not did_merge:
-                    added += 1
-            if added:
-                logger.info("信号提炼: +%d 条新说明书条目", added)
-        except Exception as exc:
-            logger.warning("信号提炼失败(不影响主链路): %s", exc)
-
-    def _refine_skill_drafts() -> None:
-        """S54 B/C：心智联动 + 信号驱动 → 生成 skill 候选草稿（人工确认生效）。
-
-        B 心智联动：manual 有 style 偏好（如"喜欢白话文风"）但没有对应 skill →
-          用偏好作 hint 调 SkillGenerator 生成候选草稿。
-        C 信号驱动：信号/对话里体现的稳定写法 → 提炼成候选草稿。
-
-        产出只进 skill_drafts（未生效），人工确认后转正进 writing_skills——
-        对齐 tools_extensions 的"人工批准生效"哲学（S32 实证：错误内容进上下文污染主链路）。
-        """
-        try:
-            # 素材：style 偏好条目 + 最近修改/接受信号（体现用户认可写法）
-            manual_entries = manual.list("project", "main")
-            style_prefs = [e.content for e in manual_entries if e.category == "style"][:3]
-            recent = signals.recent(limit=20)
-            signal_texts = [s.content for s in recent if s.kind in ("accepted", "modified")][:5]
-            source_material = "\n".join(style_prefs + signal_texts).strip()
-            if not source_material:
-                return
-            hint = ""
-            if style_prefs:
-                hint = f"用户文风偏好：{'；'.join(style_prefs)}"
-            candidates = skill_generator.generate(source_material, hint, max_items=3)
-            added = 0
-            for c in candidates:
-                r = skills.add_draft(
-                    name=c["name"],
-                    description=c["description"],
-                    content=c["content"],
-                    example=c["example"],
-                    tags=c["tags"],
-                    target=c.get("target", "writing"),  # S57
-                    source="mental",  # mental(心智联动) 或 signal(信号驱动) 统一落草稿
-                )
-                if r:
-                    added += 1
-            if added:
-                logger.info("skill 草稿提炼: +%d 条（待确认）", added)
-        except Exception as exc:
-            logger.warning("skill 草稿提炼失败(不影响主链路): %s", exc)
-
-    def _summarize_conversation(conv_id: str) -> None:
-        """S53c ② 归档后分析：会话结束后台把对话摘要成场景记忆（双轨提炼之摘要器轨）。
-
-        承担跨会话延续性（进行到哪/做过哪些决定），供下轮会话开头展示（④）。
-        仅对"有实质内容的会话"归档（用户消息累计 ≥40 字），避免短测试/琐碎对话
-        烧 token；失败不阻塞主链路。
-        """
-        try:
-            msgs = store.messages(conv_id)
-            user_chars = sum(len(m.content or "") for m in msgs if m.role == "user")
-            if len(msgs) < 3 or user_chars < 40:  # 空会话/琐碎对话不归档
-                return
-            summarizer.summarize(msgs, book_id="main")
-            logger.info("会话归档摘要: conv=%s 消息%d 条", conv_id, len(msgs))
-        except Exception as exc:
-            logger.warning("会话归档摘要失败(不影响主链路): %s", exc)
 
     mind_planner = MindPlanner(manual)  # S50 心智模型=会话规划器（不从写作循环注入）
     signal_collector = SignalCollector(signals)
@@ -1266,294 +528,68 @@ def build_app(
         logger.exception("未捕获异常: %s %s", request.method, request.url.path, exc_info=exc)
         return Response(status_code=500, content="Internal Server Error")
 
-    def _make_agent(
-        system_prompt: str,
-        temperature: float,
-        book_id: str = "main",
-        agency_level: int | None = None,
-        enable_search: bool = False,
-        enable_extras: bool = False,
-        enable_domain: bool = True,
-        enable_codex: bool = False,
-        enable_workflow: bool = False,
-        enable_play: bool = False,
-        skip_inject: set[str] | None = None,
-        context_mode: str = "auto",
-        model_id: str | None = None,
-        thinking: str | None = None,
-        context: str = "",
-    ) -> Agent:
-        # 心智规划提前（S56 C 架构）：style_prefs 供写作工具意图模式选文笔 skill
-        # S61：context=本轮用户意图，心智块渐进式披露按相关动态选取
-        if agency_level is None:
-            session_plan = mind_planner.plan(
-                book_id, base_agency=agency.get_current(book_id).order, context=context
-            )
-        else:
-            session_plan = mind_planner.plan(book_id, context=context)
-        # 工具装配（S52 抽出为独立模块 toolkit.build_toolkit——组合根接口化，
-        # 与 HTTP 编排解耦；S62：依赖收敛为 ToolContext 单对象，签名稳定）
-        registry = build_toolkit(
-            ToolRegistry(),
-            ToolContext(
-                chapters=chapters,
-                workspace=workspace,
-                model=model,
-                graph=graph,
-                plots=plots,
-                plans=plans,
-                settings=settings,
-                materials=materials,
-                ext_tools=ext_tools,
-                dim_store=dim_store,
-                manual=manual,
-                skills_store=skills,
-                style_prefs=session_plan.style_prefs,
-                workflow_store=workflow_store,
-                workflow_engine=workflow_engine,
-                workflow_generator=workflow_generator,
-                play_engine=play_engine,
-                review_panel=review_panel,
-                skill_generator=skill_generator,
-                # S68：探索注入真实模板库（L2+L3 合并，agent 的 explore_direction 消费）
-                templates=[f"{t.name}：{t.description}" for t in templates_external.all()[:12]],
-            ),
-            enable_domain=enable_domain,
-            enable_codex=enable_codex,
-            enable_extras=enable_extras,
-            enable_search=enable_search,
-            # S59：工作流 agent 工具（默认关，enable_workflow 点亮）
-            enable_workflow=enable_workflow,
-            # S65：互动推演 agent 工具（默认关，enable_play 点亮）
-            enable_play=enable_play,
-        )
-        # 能动级别：显式传入 > 心智规划建议 > 已存档位（S35：档位记录，温度入档）
-        # S50：心智模型=会话规划器——S62 修正：启发式档位推断**不自动应用**
-        # （对齐 S61"建议不自动应用，用户主权"；启发式关键词猜意图会误判，
-        # 见 S61 实测"不要反复确认"的"确认"抵消"直接写"）。用户未显式指定时
-        # 一律用已存档位；推断结果只经 /api/mind/agency-suggest 呈现供用户采纳。
-        if agency_level is None:
-            current = agency.get_current(book_id)
-        else:
-            levels = agency.list_levels()
-            current = next(
-                (lv for lv in levels if lv.order == int(agency_level)),
-                agency.get_level(f"default-{int(agency_level)}") or agency.get_current(book_id),
-            )
-        eff_temp = current.temperature if temperature == 0.7 else temperature
-        # S21 流式核心：不再构造 stream 模型——Agent 循环内部检测 respond_stream 流式；
-        # 温度映射时重建模型（档位低=精确执行温度低）；测试 fake 走共享 model
-        base_model = getattr(model, "inner", model)
-        m: Model
-        if model_id:
-            # S47 请求级指定模型：按该配置构造（显式指定 > 当前激活）
-            cfg = models.get(model_id)
-            if cfg is None:
-                raise ValueError(f"模型配置不存在: {model_id}")
-            m = RetryingModel(
-                DeepSeekModel(
-                    base_url=cfg.base_url,
-                    api_key=cfg.resolved_api_key(),
-                    model=cfg.model,
-                    temperature=eff_temp,
-                    max_tokens=cfg.max_tokens,
-                    context_window=cfg.context_window,
-                    thinking=cfg.thinking if thinking is None else thinking,
-                )
-            )
-        elif isinstance(base_model, ModelProvider):
-            # S47 运行时模型：按当前激活配置 + 档位温度 + 思考强度覆盖构造
-            m = RetryingModel(base_model.build(temperature=eff_temp, thinking=thinking))
-        elif isinstance(base_model, DeepSeekModel) and eff_temp != 0.7:
-            # 真实模型 + 能动性温度映射（档位低=精确执行温度低）
-            m = RetryingModel(DeepSeekModel(temperature=eff_temp))
-        else:
-            m = model  # 共享 model（测试注入或默认真实）；温度由构造决定
-        # 注入块装配：核心注入默认全开，skip_inject 可细粒度关闭（S15 增强按需）
-        skip = skip_inject or set()
-        # S58b context_mode（主人偏好：默认不继承场景记忆）：
-        # - auto/fresh（默认干净）：不注入场景记忆/剧情计划——新任务/探索不被上次对话绑架
-        # - continue（显式继承）：注入场景记忆 + 剧情计划——跨会话续写时显式打开
-        # 心智习惯/世界事实（简介/设定档）始终保留（行为底线，非进程状态）。
-        if context_mode != "continue":
-            skip = skip | {"memory", "plan"}
-        # 注入块装配（S62：表驱动重构——块定义收敛为 (key, 位置, 内容)，
-        # 顺序/去留/优先级从 90 行 if 链变成可读数据；语义不变：
-        # prepend 块（brief/collab 协作约定）置顶，其余按声明顺序追加）
-        prepend_blocks: list[str] = []
-        append_blocks: list[str] = []
+    # S80b：组合根依赖契约（AppDeps 单例；router 拆分后各 make_xxx_router(deps) 注入）
+    deps = AppDeps(
+        store=store,
+        chapters=chapters,
+        ext_tools=ext_tools,
+        manual=manual,
+        signals=signals,
+        archive=archive,
+        dim_store=dim_store,
+        materials=materials,
+        templates_external=templates_external,
+        plots=plots,
+        models=models,
+        memory_store=memory_store,
+        story_tree=story_tree,
+        story_threads=story_threads,
+        graph=graph,
+        agency=agency,
+        bias=bias,
+        settings=settings,
+        skills=skills,
+        plans=plans,
+        workflow_store=workflow_store,
+        play_store=play_store,
+        mind_planner=mind_planner,
+        signal_collector=signal_collector,
+        provider=provider,
+        model=model,
+        summarizer=summarizer,
+        plot_generator=plot_generator,
+        plot_resolver=plot_resolver,
+        preference_extractor=preference_extractor,
+        skill_generator=skill_generator,
+        graph_extractor=graph_extractor,
+        graph_injector=graph_injector,
+        graph_verifier=graph_verifier,
+        budget=budget,
+        workflow_generator=workflow_generator,
+        workflow_engine=workflow_engine,
+        play_engine=play_engine,
+        review_panel=review_panel,
+        active_tokens=_active_tokens,
+        active_agents=_active_agents,
+        active_lock=_active_lock,
+        bg_queue=_bg_queue,
+        batches=_batches,
+        batch_lock=_batch_lock,
+        workspace=workspace,
+        recorder=recorder,
+    )
 
-        # 置顶块：项目简介（定调）→ 协作约定（怎么配合我）
-        if "brief" not in skip:
-            brief_block = workspace.read_brief(book_id)
-            if brief_block:
-                prepend_blocks.append(f"# 项目简介\n{brief_block}")
-        if "manual" not in skip:
-            collab_block = session_plan.collab_block()
-            if collab_block:
-                prepend_blocks.append(collab_block)
+    # 兼容薄包装：端点仍按原闭包名调用（router 拆分后移除）
+    def _make_agent(*args: Any, **kwargs: Any) -> Agent:
+        return make_agent(deps, *args, **kwargs)
 
-        # 追加块（按声明顺序 = 优先级）
-        if "story" not in skip:
-            tree_block = story_tree.render_tree(book_id)
-            thread_block = story_threads.render_threads(book_id)
-            nav = "\n\n".join(x for x in (tree_block, thread_block) if x)
-            if nav:
-                append_blocks.append(nav)
-        # 能动性注入：当前档位（机制 2；职责边界：档位只管能动性，心智模型独立系统）
-        if "agency" not in skip:
-            agency_block = build_agency_block(current)
-            if agency_block:
-                append_blocks.append(agency_block)
-        # AI 倾向档案注入（双向黑盒解法）
-        if "bias" not in skip:
-            bias_block = bias.render()
-            if bias_block:
-                append_blocks.append(bias_block)
-        # 关键点图谱注入（T2 阶段 3：当前推进状态——哪些伏笔还开着/刚回收）
-        # S31：注入时传当前章节数（老龄化：must 钩子标"已开放 N 章"，中性事实）
-        if "plot" not in skip:
-            plot_block = plots.render(book_id, current_order=len(chapters.list_by_book(book_id)))
-            if plot_block:
-                append_blocks.append(plot_block)
-        # 设定档注入（S41 作者正典：人物卡/能力体系/世界观规则——与图谱互补）
-        if "settings" not in skip:
-            settings_block = render_settings_adaptive(settings.list())
-            if settings_block:
-                append_blocks.append(settings_block)
-        # S53 心智指导块：文风偏好 + 习惯（渐进式披露：只列关键条目，指导性保留）
-        if "manual" not in skip:
-            mind_block = session_plan.mind_block()
-            if mind_block:
-                append_blocks.append(mind_block)
-        # S74c 心智变更通知（未读）：agent 读到应告知用户（知情），用户可要求改回（指导权）
-        if "manual" not in skip:
-            notices = manual.unread_notices(book_id)
-            if notices:
-                nlines = ["# 心智变更通知（请在本轮回复中告知用户；用户可要求改回/纠正）"]
-                for n in notices:
-                    if n["action"] == "update":
-                        nlines.append(
-                            f"- 修改了偏好：「{n['old_content']}」→「{n['new_content']}」"
-                        )
-                    elif n["action"] == "delete":
-                        nlines.append(f"- 删除了偏好：「{n['old_content']}」")
-                    else:
-                        nlines.append(f"- 新增偏好：「{n['new_content']}」")
-                append_blocks.append("\n".join(nlines))
-                manual.mark_notices_read(book_id)
-        # S53c ④ 下轮展示学到：上次会话的场景记忆（跨会话延续性，归档过才注入）
-        if "memory" not in skip:
-            last_memory = memory_store.latest(book_id)
-            if last_memory is not None:
-                append_blocks.append("# 上次会话的延续（场景记忆）\n" + last_memory.content)
-        # 叙事技巧注入（S50：索引常驻+内容按需；S55 #3 按 skills 内容签名缓存）
-        # S60：主循环只注入全部技巧索引（target 不限——决策者需要看到全部可用
-        # 技巧才能点名给写作调用）；完整内容靠 skill_lookup 按需 / write_chapter
-        # 的 skills 参数点名（对齐图谱：内容按需查）。
-        if "skills" not in skip:
-            skill_sig = skills.revision()
-            cached = _skill_cache.get(skill_sig)
-            if cached is not None:
-                skill_block = cached
-            else:
-                skill_block = render_skill_index(skills.list_skills(), target="")
-                _skill_cache[skill_sig] = skill_block
-                # 缓存防膨胀：超过 16 个签名清理最旧（长会话/多书场景安全阀）
-                if len(_skill_cache) > 16:
-                    oldest = next(iter(_skill_cache))
-                    _skill_cache.pop(oldest, None)
-            if skill_block:
-                append_blocks.append(skill_block)
-        # 剧情计划注入（S46：当前章+后续计划——AI 知道接下来写什么）
-        if "plan" not in skip:
-            plan_block = render_plan(plans.list())
-            if plan_block:
-                append_blocks.append(plan_block)
+    def _extract_chapter(*args: Any, **kwargs: Any) -> None:
+        return extract_chapter(deps, *args, **kwargs)
 
-        # S70：破限模式（书籍级开关）——写作自由度：黑暗/暴力/敏感题材不设禁区。
-        # 注入 agent 主循环（对话/写作全路径）+ write_chapter 干净调用（工具侧另注）。
-        if workspace.is_uncensored(book_id):
-            append_blocks.append(UNCENSORED_PROMPT)
+    def _review_for_learning(*args: Any, **kwargs: Any) -> None:
+        return review_for_learning(deps, *args, **kwargs)
 
-        full_prompt = system_prompt
-        if prepend_blocks:
-            full_prompt = "\n\n".join(prepend_blocks) + "\n\n" + full_prompt
-        if append_blocks:
-            full_prompt = full_prompt + "\n\n" + "\n\n".join(append_blocks)
-        return Agent(
-            model=m,
-            registry=registry,
-            store=store,
-            system_prompt=full_prompt,
-            context_compressor=budget.compress,  # token 预算两阶段压缩（S8）
-            persist_compression=True,  # S26：压缩结果回写 store（pi compaction entry 语义）
-        )
-
-    def _extract_chapter(
-        book_id: str, title: str, content: str, order: int, line: str = "main"
-    ) -> None:
-        """章节落盘后自动：图谱抽取 + 伏笔自动回收（后台任务）。失败只记日志，绝不阻断写作。"""
-        try:
-            existing = [e.to_dict() for e in graph.list_entities(book_id)]
-            ext = graph_extractor.extract(title, content, existing)
-            graph.ingest_chapter(book_id, title, order, ext, line)
-            logger.info(
-                "图谱抽取完成: 《%s》 实体%d 关系%d 事件%d",
-                title,
-                len(ext.entities),
-                len(ext.relations),
-                len(ext.events),
-            )
-        except Exception as exc:  # 抽取失败不影响写作主链路
-            logger.warning("图谱抽取失败(不影响写作): %s", exc)
-        # 伏笔自动回收：本章揭开了哪些进行中的关键点（S17，独立 try 互不影响）
-        try:
-            resolved = plot_resolver.resolve(book_id, title, content, plots)
-            if resolved:
-                logger.info("伏笔自动回收: 《%s》 %s", title, "、".join(resolved))
-        except Exception as exc:
-            logger.warning("伏笔回收失败(不影响写作): %s", exc)
-        # S55 #2 后台学习审查：本章揭示了什么新偏好/习惯 → 更新心智（轻量，失败不影响）
-        try:
-            _review_for_learning(book_id, title, content)
-        except Exception as exc:
-            logger.warning("学习审查失败(不影响写作): %s", exc)
-
-    def _review_for_learning(book_id: str, title: str, content: str) -> None:
-        """S55 #2 后台学习审查（借鉴 Hermes background_review）：
-
-        章节落盘后，轻量 LLM 审查本章是否揭示了用户新偏好/习惯/雷区，
-        有则 merge_add 进心智条目（合并式新增，治碎片）。隔离：只读快照，
-        不碰主对话；失败不影响写作主链路。
-        """
-        try:
-            entries = manual.list("project", book_id)
-            prompt = build_learning_review_prompt(entries, f"章节：{title}\n\n{content[:1200]}")
-            output = model.respond([Message(role="system", content=prompt)], [])
-            found = parse_learning_review_result(output.text)
-            added = 0
-            for item in found:
-                text = str(item.get("content", "")).strip()
-                if not text:
-                    continue
-                _, did_merge = manual.merge_add(
-                    ManualEntry(
-                        content=text,
-                        source="auto",
-                        confidence=0.6,
-                        activity="medium",
-                        scope="project",
-                        book_id=book_id,
-                        category=item["category"],  # type: ignore[arg-type]
-                    )
-                )
-                if not did_merge:
-                    added += 1
-            if found:
-                logger.info("学习审查: 《%s》 提炼%d 条 合并/新增", title, len(found))
-        except Exception as exc:
-            logger.warning("学习审查失败(不影响写作): %s", exc)
+    start_bg_worker(deps)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
@@ -3231,6 +2267,8 @@ def build_app(
             "reviewer_count": report.reviewer_count,
             "valid_count": report.valid_count,
             "errors": report.errors,
+            "individual_reviews": report.individual_reviews,
+            "timestamp": report.timestamp,
             "markdown": report.render(),
             "compact": report.render_compact(),
         }

@@ -146,7 +146,7 @@ def make_agent(
         brief_block = deps.workspace.read_brief(book_id)
         if brief_block:
             prepend_blocks.append(f"# 项目简介\n{brief_block}")
-    if "deps.manual" not in skip:
+    if "manual" not in skip:
         collab_block = session_plan.collab_block()
         if collab_block:
             prepend_blocks.append(collab_block)
@@ -159,12 +159,12 @@ def make_agent(
         if nav:
             append_blocks.append(nav)
     # 能动性注入：当前档位（机制 2；职责边界：档位只管能动性，心智模型独立系统）
-    if "deps.agency" not in skip:
+    if "agency" not in skip:
         agency_block = build_agency_block(current)
         if agency_block:
             append_blocks.append(agency_block)
     # AI 倾向档案注入（双向黑盒解法）
-    if "deps.bias" not in skip:
+    if "bias" not in skip:
         bias_block = deps.bias.render()
         if bias_block:
             append_blocks.append(bias_block)
@@ -177,17 +177,17 @@ def make_agent(
         if plot_block:
             append_blocks.append(plot_block)
     # 设定档注入（S41 作者正典：人物卡/能力体系/世界观规则——与图谱互补）
-    if "deps.settings" not in skip:
+    if "settings" not in skip:
         settings_block = render_settings_adaptive(deps.settings.list())
         if settings_block:
             append_blocks.append(settings_block)
     # S53 心智指导块：文风偏好 + 习惯（渐进式披露：只列关键条目，指导性保留）
-    if "deps.manual" not in skip:
+    if "manual" not in skip:
         mind_block = session_plan.mind_block()
         if mind_block:
             append_blocks.append(mind_block)
     # S74c 心智变更通知（未读）：agent 读到应告知用户（知情），用户可要求改回（指导权）
-    if "deps.manual" not in skip:
+    if "manual" not in skip:
         notices = deps.manual.unread_notices(book_id)
         if notices:
             nlines = ["# 心智变更通知（请在本轮回复中告知用户；用户可要求改回/纠正）"]
@@ -209,7 +209,7 @@ def make_agent(
     # S60：主循环只注入全部技巧索引（target 不限——决策者需要看到全部可用
     # 技巧才能点名给写作调用）；完整内容靠 skill_lookup 按需 / write_chapter
     # 的 deps.skills 参数点名（对齐图谱：内容按需查）。
-    if "deps.skills" not in skip:
+    if "skills" not in skip:
         skill_sig = deps.skills.revision()
         cached = _skill_cache.get(skill_sig)
         if cached is not None:
