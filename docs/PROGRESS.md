@@ -2481,3 +2481,40 @@ wrapup 误判修正（已用真实 API）；stats/codex/graph 通道标注非前
 
 **验证**：后端 164 端点逐一 curl 探活真实数据；总闸全绿（421 pytest + 前端
 typecheck/lint/build）。
+
+---
+
+## S79-S81 后端架构收敛（已完成 ✅）——SQLite 连接收敛 + app.py 按领域拆 router
+
+**主人指示**：前端有人并行工作，对后端做优化；先评估哲学与设计问题再动手（S79-S81 全程不碰前端）。
+**哲学校准**：不是"用最低级方法"，而是"不用复杂方法实现简单问题，保持架构简洁易读"。
+
+### S79 SQLite 连接收敛（commit b8c2d2e）
+- **问题**：25 处 store 各自重复 "mkdir + sqlite3.connect + PRAGMA WAL" 五行样板，WAL/timeout 靠"每处记得写"维持（约定优于配置，S75 只是打补丁）
+- **方案**：core 新增 `anyspark.core.db.connect()`（自动 mkdir + WAL + timeout=30 + check_same_thread=False + row_factory）——连接配置一处硬编码
+- **执行**：主循环改 app 包 4 处为样本 + **3 worker 并行**改外围 21 处（align 9/explore 2/graph 1/play 1/template 3/workflow 1）；import sqlite3 按 ruff F401 判定保留/删除（sqlite3.Row 注解/OperationalError 仍用者保留）
+- **验证**：总闸全绿（421 pytest）+ 19 store 模块导入冒烟
+
+### S80 app.py 按领域拆 router（S80a-S80d，commits 386c67b/004ae6e/eec5ef7/2ffb55a）
+- **问题**：app.py 4006 行"上帝文件"（164 端点全在 build_app 闭包）
+- **方案**（planner 出拆分方案）：4 基建文件 + 15 领域 router，统一 `make_xxx_router(deps: AppDeps)` 工厂
+- **基建**（S80a）：schemas.py（82 模型+SSE/时间辅助）/ deps.py（AppDeps 组合根契约 22 store+16 engine+6 共享状态）/ tasks.py（7 后台任务+start_bg_worker 单例线程）/ agent_factory.py（make_agent 224 行参数化）
+- **接线**（S80b）：app.py 删模型/辅助函数，AppDeps 装配 + 薄包装过渡，**4006 → 3044 行**
+- **router**（S80c 样本 + S80d 全量）：routes_chat 主循环亲写（依赖最重），其余 13 个 **4 worker 并行**建新文件（不动 app.py），主循环统一收割（include + 删端点）；**app.py 最终 601 行**
+- **关键 bug**：字符串字面量误替换（skip_inject 的 "agency"→"deps.agency" 导致跳过失效，测试抓出）；收割误删 `return app`；重复路由（role/play 等 worker 端点重叠复制，reviewer 审查抓出）
+- **协作**：并行会话（壳移植）改 app.py 期间按纪律让位等提交；其 delete_book mypy 错误经主人批准修复；其补的 routes_books.py 同款错误顺手修
+
+### S81 连接关闭钩子 + 审查修复（commit 19eed50）
+- `@app.on_event("shutdown")` 统一 close 各 store 连接（WAL 优雅收尾）
+- reviewer 独立审查抓出的重复路由清理（role/card+play、impact）+ 薄包装移除
+
+### 最终效果
+| 指标 | 前 | 后 |
+|---|---|---|
+| app.py 行数 | 4006 | **601** |
+| 重复 connect 样板 | 25 处 | 1 处（core helper） |
+| 路由组织 | 单文件 164 端点 | **15 领域 router** |
+| 后台任务/Agent 构造 | build_app 闭包 | tasks/agent_factory 独立模块 |
+| 总闸 | 绿 | 绿（421 pytest + 前端） |
+
+**多智能体用法**：S79 3 worker 并行收敛 / S80 planner 出方案 + 4 worker 并行拆 router + reviewer 独立审查 / S80b 主循环修 worker 引入的字符串误替换。教训：worker 机械复制端点易产生重复路由——收割时路由表去重核查 + reviewer 审查兜底。
