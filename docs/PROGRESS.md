@@ -26,7 +26,7 @@
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63）
 - **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级）+ **S66 httpx2 迁移**（starlette 原生支持后落地，TestClient/CLI/benchmarks 全切，无回归），pytest 全量绿，总闸全绿
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
-> [S80] 正在改 packages/app/src/anyspark/server/app.py：app.py 按领域拆分接线——模型/辅助函数搬入 schemas/deps/tasks/agent_factory（S80a 已提交基建），端点改引 deps；随后拆 14 个 router。并行会话书架已提交（5fb43aa）。完成提交后删本行。
+> 当前无会话声明。
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 
 - **候选清单（下一步，按优先级）**：

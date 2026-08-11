@@ -53,7 +53,6 @@ from anyspark.models.registry import (
 )
 from anyspark.play import PlayEngine, PlayStore
 from anyspark.review import ReviewPanel
-from anyspark.server.agent_factory import make_agent
 from anyspark.server.context import TokenBudget, make_summarizer
 from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import log_path, logger, setup_logging
@@ -77,7 +76,7 @@ from anyspark.server.routes_workspace import make_workspace_router
 from anyspark.server.schemas import (
     DEFAULT_SYSTEM as DEFAULT_SYSTEM,  # re-export（test_recorder 兼容）
 )
-from anyspark.server.tasks import extract_chapter, review_for_learning, start_bg_worker
+from anyspark.server.tasks import start_bg_worker
 from anyspark.server.tools_extensions import (
     ExtensionToolStore,
 )
@@ -110,6 +109,8 @@ DB_PATH = DATA_DIR / "anyspark.db"
 
 # 应用装配
 # ---------------------------------------------------------------------------
+
+
 def build_app(
     model: Model | None = None,
     db_path: str | Path | None = None,
@@ -463,16 +464,19 @@ def build_app(
         recorder=recorder,
     )
 
-    # 兼容薄包装：端点仍按原闭包名调用（router 拆分后移除）
-    def _make_agent(*args: Any, **kwargs: Any) -> Agent:
-        return make_agent(deps, *args, **kwargs)
+    # S81：shutdown 时统一 close 各 store 连接（WAL 优雅收尾；防连接泄漏）
+    @app.on_event("shutdown")
+    def _close_stores() -> None:
+        for name in deps.__dataclass_fields__:
+            obj = getattr(deps, name)
+            close = getattr(obj, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except Exception as exc:  # 单个失败不阻断其余
+                    logger.warning("关闭 %s 失败: %s", name, exc)
 
-    def _extract_chapter(*args: Any, **kwargs: Any) -> None:
-        return extract_chapter(deps, *args, **kwargs)
-
-    def _review_for_learning(*args: Any, **kwargs: Any) -> None:
-        return review_for_learning(deps, *args, **kwargs)
-
+    # S80d：router 拆分后薄包装已移除——端点直接调 make_agent(deps, ...) / extract_chapter(deps, ...)
     start_bg_worker(deps)
     app.include_router(make_conversations_router(deps))
     app.include_router(make_books_router(deps))

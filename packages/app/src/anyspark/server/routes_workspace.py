@@ -11,10 +11,9 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from anyspark.explore import load_role_card, run_roleplay
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
-from anyspark.server.schemas import RoleCardIn, RolePlayIn, UploadIn
+from anyspark.server.schemas import UploadIn
 
 
 def make_workspace_router(deps: AppDeps) -> APIRouter:
@@ -71,31 +70,5 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
         dest = deps.workspace.save_upload(req.book_id, req.filename, data)
         logger.info("上传存档: %s -> %s", req.filename, dest.name)
         return {"ok": True, "name": dest.name, "path": str(dest), "size": len(data)}
-
-    @router.post("/api/role/card", response_model=dict[str, Any])
-    def role_card_upsert(req: RoleCardIn) -> dict[str, Any]:
-        """创建/更新角色卡（卡片/角色卡-{name}.md）。"""
-        f = deps.workspace.write_card("main", "角色卡", req.name, req.content)
-        return {"ok": True, "name": req.name, "file": f.name}
-
-    @router.post("/api/role/play", response_model=dict[str, Any])
-    def role_play(req: RolePlayIn) -> dict[str, Any]:
-        """角色推演：角色卡 + 当前状态 + 场景 → N 路隔离推演 → 判别选优（作为参考）。"""
-        # 角色卡：文件优先，缺省从图谱实体描述兜底（S63 收敛到 load_role_card 共享）
-        role_card, state = load_role_card(deps.workspace, deps.graph, req.role)
-        if not role_card.strip():
-            raise HTTPException(
-                status_code=404, detail=f"角色卡不存在（可先 POST /api/role/card 创建）：{req.role}"
-            )
-        result = run_roleplay(deps.model, role_card, state=state, scenario=req.scenario, n=req.n)
-        if not result.candidates:
-            raise HTTPException(status_code=502, detail="推演失败（无有效候选）")
-        logger.info(
-            "角色推演: %s × %d 路 → best=%s",
-            req.role,
-            len(result.candidates),
-            result.best.strategy if result.best else "?",
-        )
-        return result.to_dict()
 
     return router

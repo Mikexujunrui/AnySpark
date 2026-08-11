@@ -15,7 +15,6 @@ from anyspark.server.deps import AppDeps
 from anyspark.server.schemas import (
     ChapterPlanIn,
     ChapterPlanPatch,
-    ImpactIn,
     StoryLayoutIn,
     StoryNodeIn,
     StoryThreadIn,
@@ -27,15 +26,6 @@ def make_story_router(deps: AppDeps) -> APIRouter:
     """叙事路由（依赖：deps.graph / deps.plans / deps.story_tree / deps.story_threads）。"""
     router = APIRouter()
 
-    @router.post("/api/impact", response_model=dict[str, object])
-    def impact_route(req: ImpactIn) -> dict[str, object]:
-        """S45：影响分析——改第 N 章（涉及实体）→ 后续受影响章节（连锁修改依据）。"""
-        hits = deps.graph.impact_chapters("main", req.chapter_order, req.entities)
-        return {"changed_order": req.chapter_order, "impacted": hits, "count": len(hits)}
-
-    # ------------------------------------------------------------------
-    # S46 剧情计划（计划→执行：固化章节计划，写作注入，推进标记）
-    # ------------------------------------------------------------------
     @router.get("/api/plan", response_model=list[dict[str, Any]])
     def list_plan() -> list[dict[str, Any]]:
         """全部章节计划（按 chapter_order）。"""
