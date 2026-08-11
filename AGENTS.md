@@ -9,6 +9,15 @@
 3. `docs/PROGRESS.md` —— 连续推进台账（各阶段交付 commit + 踩坑记录 + 补缺计划）。
 4. 需要理解"为什么这样设计"时，再查 `docs/UPGRADE-DISCUSSION.md`（讨论纪要与推理过程，不是实现依据）。
 5. `docs/HANDOFF-L-SERIES.md` —— 与旧仓库的边界（v4 专用文件别人不碰，你也不碰旧仓库）。
+6. `docs/BACKEND-MAP.md` + `docs/uml/`（有向逻辑图全集，索引见 `docs/uml/README.md`）—— **系统运作地图**。
+   看懂"系统现在怎么跑"最快路径：先看 architecture（骨架）→ 各 sequence（运作流）→ 状态机，
+   配 BACKEND-MAP（分层/核心业务流/15 router/工具/数据载体/审计）。
+
+> **⚠️ 地图更新纪律（S78 固化）**：`BACKEND-MAP.md` 和 `docs/uml/` 是后来 AI 的"眼睛"——
+> 改后端结构、新增/删除/重命名端点或 agent 工具、改数据流拓扑时，**必须同步更新**
+> BACKEND-MAP（路由表/工具表/链路描述）+ 相关 uml 图 + `docs/uml/README.md` 索引；
+> 能力扩展（如某工具加 mode）至少要更新工具表/链路描述。地图过期 = 误导后来者，
+> 与改代码不同步的地图等同不存在。
 
 ## 当前状态与任务
 
