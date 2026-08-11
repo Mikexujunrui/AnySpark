@@ -57,10 +57,9 @@ echo       前端依赖就绪
 echo.
 
 rem ---- 4. 启动后端（.venv 里的程序）----
-echo  [3/4] 启动后端 127.0.0.1:8000 ...
+echo  [3/4] 启动后端 127.0.0.1:8000 ...
 echo        日志文件: data\logs\anyspark.log
 
-echo        日志文件: data\logsnyspark.log
 if exist ".venv\Scripts\anyspark-server.exe" (
     start "AnySpark-Backend" cmd /k "cd /d %~dp0 && .venv\Scripts\anyspark-server.exe --port 8000"
 ) else (
@@ -102,3 +101,4 @@ for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":%1 " ^| findstr "LISTENING"
     taskkill /F /PID %%p >nul 2>&1
 )
 goto :eof
+
