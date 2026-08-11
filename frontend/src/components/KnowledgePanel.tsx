@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { api } from "../api"
 import Icon from './ui/Icon'
 import Modal from './ui/Modal'
@@ -7,104 +7,83 @@ import LoadingState from './ui/Skeleton'
 import { useRefreshKey, triggerRefresh } from "../store"
 import FullGraphView from './FullGraphView'
 
-/**
- * 将任意值转换为可显示的字符串
- * 处理嵌套对象避免显示 [object Object]
- */
+// ──────────────────────────────────────────────────────────────────────────
+// V4 图谱数据结构适配
+//   entities:  [{ id, name, entity_type(中文), aliases[], description, state,
+//                 first_chapter, last_chapter }]
+//   relations: [{ id, from_name, to_name, rel_type, description }]
+//   events:    [{ id, chapter_ref, time_point, label, description, involved[] }]
+//   foreshadows: /api/plot → [{ id, content, category, priority, status, chapter_ref }]
+// ──────────────────────────────────────────────────────────────────────────
+
+// 中文 entity_type → 展示元数据（V4 无固定类型集，按值兜底）
+const TYPE_META: Record<string, { icon: string; label: string }> = {
+  角色: { icon: 'user', label: '角色' },
+  地点: { icon: 'map-pin', label: '地点' },
+  物件: { icon: 'sword', label: '物品' },
+  设定: { icon: 'lightbulb', label: '设定' },
+  组织: { icon: 'building', label: '组织' },
+  种族: { icon: 'users', label: '种族' },
+  事件: { icon: 'calendar', label: '事件' },
+}
+
+const FALLBACK_TYPE: { icon: string; label: string } = { icon: 'tag', label: '其他' }
+
+function typeMeta(t: string): { icon: string; label: string } {
+  return TYPE_META[t] || FALLBACK_TYPE
+}
+
 function formatDisplayValue(val: unknown): string {
   if (val === null || val === undefined) return ''
   if (typeof val === 'string') return val
-  if (Array.isArray(val)) {
-    return val.map(item => {
-      if (typeof item === 'object' && item !== null) {
-        return JSON.stringify(item, null, 0)
-      }
-      return String(item)
-    }).join('、')
-  }
-  if (typeof val === 'object') {
-    // 将嵌套对象格式化为可读的键值对
-    const entries = Object.entries(val as Record<string, unknown>)
-    if (entries.length === 0) return ''
-    return entries
-      .filter(([, v]) => v !== null && v !== undefined && v !== '')
-      .map(([k, v]) => {
-        if (typeof v === 'object' && v !== null) {
-          return `${k}: ${JSON.stringify(v, null, 0)}`
-        }
-        return `${k}: ${String(v)}`
-      })
-      .join('\n')
-  }
+  if (Array.isArray(val)) return val.map(v => (typeof v === 'object' && v !== null ? JSON.stringify(v) : String(v))).join('、')
+  if (typeof val === 'object') return JSON.stringify(val, null, 2)
   return String(val)
 }
 
-const TYPE_LABELS = {
-  character: { icon: 'user', label: '人物' },
-  location: { icon: 'map-pin', label: '地点' },
-  item: { icon: 'sword', label: '物品' },
-  skill: { icon: 'zap', label: '技能/功法' },
-  organization: { icon: 'building', label: '组织' },
-  race: { icon: 'users', label: '种族' },
-  concept: { icon: 'lightbulb', label: '概念' },
-  event: { icon: 'calendar', label: '事件' },
+interface V4Entity {
+  id: string
+  name: string
+  entity_type?: string
+  aliases?: string[]
+  description?: string
+  state?: string
+  first_chapter?: string
+  last_chapter?: string
+  [k: string]: unknown
 }
-const TYPE_ORDER = ['character', 'location', 'item', 'skill', 'organization', 'race', 'concept', 'event']
 
-const FIELD_SECTIONS = {
-  character: [
-    { key: '基本', label: '基本信息', fields: ['name', 'aliases', 'age', 'gender', 'species'] },
-    { key: '外貌', label: '外貌特征', fields: ['appearance', 'hair', 'eyes', 'height', 'build', 'clothing', 'distinctive_marks'] },
-    { key: '性格', label: '性格', fields: ['personality', 'temperament', 'inner_conflict', 'motivation', 'fears', 'quirks', 'likes', 'dislikes'] },
-    { key: '能力', label: '能力/功法', fields: ['cultivation_level', 'cultivation_method', 'techniques', 'powers', 'special_items', 'combat_style'] },
-    { key: '背景', label: '背景经历', fields: ['origin', 'background', 'key_experiences', 'secrets', 'traumas', 'goals', 'regrets', 'identity'] },
-    { key: '状态', label: '当前状态', fields: ['current_location', 'current_condition', 'social_standing', 'reputation'] },
-  ],
-  location: [
-    { key: '基本', label: '基本信息', fields: ['name', 'aliases', 'location_type'] },
-    { key: '地理', label: '地理环境', fields: ['region', 'parent_location', 'climate', 'terrain', 'landmarks', 'resources'] },
-    { key: '社会', label: '社会人文', fields: ['population', 'ruler', 'economy', 'culture', 'factions', 'atmosphere'] },
-    { key: '叙事', label: '叙事信息', fields: ['description', 'first_appearance', 'significance', 'current_status'] },
-  ],
-  item: [
-    { key: '基本', label: '基本信息', fields: ['name', 'aliases', 'item_type', 'rarity'] },
-    { key: '属性', label: '物品属性', fields: ['appearance', 'material', 'origin', 'special_ability', 'limitation', 'current_state'] },
-    { key: '归属', label: '归属信息', fields: ['owner', 'previous_owners', 'acquisition_method'] },
-    { key: '叙事', label: '叙事信息', fields: ['description', 'first_appearance', 'significance'] },
-  ],
-  organization: [
-    { key: '基本', label: '基本信息', fields: ['name', 'aliases', 'org_type', 'alignment'] },
-    { key: '结构', label: '组织结构', fields: ['leader', 'key_members', 'hierarchy', 'headquarters', 'sub_orgs'] },
-    { key: '属性', label: '组织属性', fields: ['purpose', 'influence', 'history', 'strength', 'secrets'] },
-    { key: '叙事', label: '叙事信息', fields: ['description', 'first_appearance', 'significance', 'current_status'] },
-  ],
-  concept: [
-    { key: '基本', label: '基本信息', fields: ['name', 'aliases', 'concept_type'] },
-    { key: '规则', label: '规则说明', fields: ['mechanism', 'rules', 'levels_or_stages', 'limitations', 'exceptions'] },
-    { key: '范围', label: '作用范围', fields: ['affected_by', 'region', 'requirements'] },
-    { key: '叙事', label: '叙事信息', fields: ['description', 'source', 'significance'] },
-  ],
-  event: [
-    { key: '基本', label: '基本信息', fields: ['name', 'aliases', 'event_type'] },
-    { key: '时间', label: '时间信息', fields: ['time_point', 'duration', 'chronology_order'] },
-    { key: '参与者', label: '参与方', fields: ['characters', 'organizations', 'locations'] },
-    { key: '叙事', label: '叙事信息', fields: ['description', 'cause', 'consequence', 'significance', 'is_foreshadow'] },
-  ],
+interface V4Relation {
+  id: string
+  from_name: string
+  to_name: string
+  rel_type?: string
+  description?: string
+}
+
+interface V4Plot {
+  id: string
+  content?: string
+  category?: string
+  priority?: string
+  status?: string
+  chapter_ref?: string
+  resolved?: boolean
+  [k: string]: unknown
 }
 
 export default function KnowledgePanel({ bookId }: { bookId: string }) {
   const refreshKey = useRefreshKey()
-  const [summary, setSummary] = useState(null)
+  const [summary, setSummary] = useState<Record<string, any> | null>(null)
   const [loading, setLoading] = useState(true)
-  const [expandedEntity, setExpandedEntity] = useState(null)
-  const [deleteEntityId, setDeleteEntityId] = useState(null)
-  const [editingEntity, setEditingEntity] = useState(null)  // the entity being edited
-  const [editForm, setEditForm] = useState({ name: '', aliases: '', data: {} })
+  const [expandedEntity, setExpandedEntity] = useState<string | null>(null)
+  const [deleteEntityId, setDeleteEntityId] = useState<string | null>(null)
+  const [editingEntity, setEditingEntity] = useState<V4Entity | null>(null)
+  const [editForm, setEditForm] = useState({ name: '', entity_type: '', aliases: '', description: '', state: '' })
   const [editSaving, setEditSaving] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [showAddEntity, setShowAddEntity] = useState(false)
-  const [addType, setAddType] = useState('character')
-  const [addForm, setAddForm] = useState({ name: '', aliases: '', data: {} })
+  const [addForm, setAddForm] = useState({ name: '', entity_type: '角色', aliases: '', description: '', state: '' })
   const [addSaving, setAddSaving] = useState(false)
   const [viewMode, setViewMode] = useState<'graph' | 'list'>('list')
 
@@ -114,176 +93,149 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
     setLoading(true)
     try {
       const data = await api.getSummary(bookId)
-      setSummary(data)
+      setSummary(data as Record<string, any>)
     } catch (e) { console.error(e) }
     setLoading(false)
   }
 
-  async function handleDelete(entityId) {
+  async function handleDelete(entityId: string) {
     setDeleteEntityId(entityId)
   }
 
   async function confirmDelete() {
-    await api.deleteEntity(bookId, deleteEntityId)
-    setDeleteEntityId(null)
-    if (expandedEntity === deleteEntityId) setExpandedEntity(null)
-    triggerRefresh()
-    loadSummary()
+    if (!deleteEntityId) return
+    try {
+      await api.deleteEntity(bookId, deleteEntityId)
+      setDeleteEntityId(null)
+      if (expandedEntity === deleteEntityId) setExpandedEntity(null)
+      triggerRefresh()
+      loadSummary()
+    } catch (e) { console.error(e) }
   }
 
-  function openEditEntity(entity) {
+  function openEditEntity(entity: V4Entity) {
     setEditingEntity(entity)
     setEditForm({
       name: entity.name || '',
+      entity_type: entity.entity_type || '角色',
       aliases: (entity.aliases || []).join(', '),
-      data: { ...(entity.data || {}) },
+      description: entity.description || '',
+      state: entity.state || '',
     })
-  }
-
-  function updateEditDataField(key, value) {
-    setEditForm(prev => ({ ...prev, data: { ...prev.data, [key]: value } }))
-  }
-
-  function removeEditDataField(key) {
-    setEditForm(prev => {
-      const next = { ...prev.data }
-      delete next[key]
-      return { ...prev, data: next }
-    })
-  }
-
-  function addEditDataField(key, value) {
-    if (!key.trim()) return
-    updateEditDataField(key.trim(), value || '')
   }
 
   async function saveEdit() {
     if (!editForm.name.trim()) return
     setEditSaving(true)
     try {
-      const aliases = editForm.aliases
-        .split(',')
-        .map(a => a.trim())
-        .filter(Boolean)
-      await api.updateEntity(bookId, editingEntity.id, {
-        name: editForm.name.trim(),
+      const aliases = editForm.aliases.split(',').map(a => a.trim()).filter(Boolean)
+      // V4 PATCH：实体主键为 name，改名请删建；只传可编辑字段
+      await api.updateEntity(bookId, editingEntity!.id, {
+        entity_type: editForm.entity_type,
         aliases,
-        data: editForm.data,
+        description: editForm.description,
+        state: editForm.state,
       })
       setEditingEntity(null)
       triggerRefresh()
       loadSummary()
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setEditSaving(false)
-    }
-  }
-
-  function openAddEntity(type) {
-    setAddType(type)
-    setShowAddEntity(true)
-    setAddForm({ name: '', aliases: '', data: {} })
+    } catch (e) { console.error(e) }
+    finally { setEditSaving(false) }
   }
 
   async function saveAdd() {
     if (!addForm.name.trim()) return
     setAddSaving(true)
     try {
-      // 通过 extract_knowledge 风格写入：复用 update_entity 创建一条实体。
-      // 后端 update_entity 要求 entity_id，这里用 POST 风格模拟创建：生成临时 id 后写一条空实体再更新。
-      // 简单做法：前端直接调 update_entity 创建新 entity 会 404。所以这里用另一种方式：
-      // 通过 chat 触发 extract，或者直接调一个新建实体的端点。
-      // 目前后端没有 create_entity，所以这里用 POST /books/add_entity 不存在，改为用
-      // update_entity 前先调 /validate 创建。实际最简做法: 临时用 fetch 调一个新建端点.
-      // 为了简化: 直接走 POST /books/{bookId}/knowledge/entity 创建 (新端点).
       const aliases = addForm.aliases.split(',').map(a => a.trim()).filter(Boolean)
-      await fetch(`/api/books/${bookId}/knowledge/entity`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          type: addType,
-          name: addForm.name.trim(),
-          aliases,
-          data: addForm.data,
-        }),
+      await api.createEntity({
+        name: addForm.name.trim(),
+        entity_type: addForm.entity_type,
+        aliases,
+        description: addForm.description,
+        state: addForm.state,
+        book_id: bookId || 'main',
       })
       setShowAddEntity(false)
-      setAddForm({ name: '', aliases: '', data: {} })
+      setAddForm({ name: '', entity_type: '角色', aliases: '', description: '', state: '' })
       triggerRefresh()
       loadSummary()
-    } catch (e) {
-      console.error(e)
-    } finally {
-      setAddSaving(false)
-    }
+    } catch (e) { console.error(e) }
+    finally { setAddSaving(false) }
   }
 
-  function renderEntitySections(entity) {
-    const sections = FIELD_SECTIONS[entity.type]
-    if (!sections) {
-      return Object.entries(entity.data || {}).map(([k, v]) => (
-        <div key={k} className="flex gap-2 text-sm">
-          <span className="text-zinc-500 shrink-0 min-w-[60px]">{k}：</span>
-          <span className="text-zinc-300 whitespace-pre-wrap">{formatDisplayValue(v)}</span>
-        </div>
-      ))
+  // ── 数据派生（V4 扁平数组 → 展示结构）──
+  const entities: V4Entity[] = (summary?.entities || []) as V4Entity[]
+  const relations: V4Relation[] = (summary?.relations || []) as V4Relation[]
+  const foreshadows: V4Plot[] = (summary?.foreshadows || []) as V4Plot[]
+
+  const groupedEntities = useMemo(() => {
+    const groups: Record<string, V4Entity[]> = {}
+    for (const e of entities) {
+      const t = e.entity_type || '其他'
+      if (!groups[t]) groups[t] = []
+      groups[t].push(e)
     }
+    return groups
+  }, [entities])
 
-    return sections.map(section => {
-      const hasContent = section.fields.some(f => entity.data?.[f])
-      if (!hasContent) return null
-
-      return (
-        <div key={section.key} className="mb-3 last:mb-0">
-          <h4 className="text-[11px] font-semibold text-zinc-500 uppercase tracking-wider mb-1.5 border-b border-zinc-800 pb-1">
-            {section.label}
-          </h4>
-          <div className="space-y-1">
-            {section.fields.filter(f => entity.data?.[f]).map(f => {
-              const val = entity.data[f]
-              if (val === undefined || val === null || val === '') return null
-              const displayVal = formatDisplayValue(val)
-              return (
-                <div key={f} className="flex gap-2 text-sm">
-                  <span className="text-zinc-500 shrink-0 min-w-[70px]">{f}：</span>
-                  <span className="text-zinc-300 whitespace-pre-wrap">{displayVal}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
+  const filteredGroups = useMemo(() => {
+    if (!searchQuery.trim()) return groupedEntities
+    const q = searchQuery.toLowerCase()
+    const out: Record<string, V4Entity[]> = {}
+    for (const [t, list] of Object.entries(groupedEntities)) {
+      const filtered = list.filter(e =>
+        e.name.toLowerCase().includes(q) ||
+        (e.aliases || []).some(a => a.toLowerCase().includes(q)) ||
+        (e.entity_type || '').toLowerCase().includes(q) ||
+        (e.description || '').toLowerCase().includes(q)
       )
-    })
-  }
+      if (filtered.length > 0) out[t] = filtered
+    }
+    return out
+  }, [groupedEntities, searchQuery])
 
-  if (loading) return <LoadingState text="加载知识库..." />
-  if (!summary || summary.totalEntities === 0) {
+  const totalFiltered = Object.values(filteredGroups).reduce((s, l) => s + l.length, 0)
+
+  function renderEntityDetail(e: V4Entity) {
+    const rows: { label: string; value: string }[] = []
+    if (e.entity_type) rows.push({ label: '类型', value: e.entity_type })
+    if (e.aliases && e.aliases.length > 0) rows.push({ label: '别名', value: e.aliases.join('、') })
+    if (e.description) rows.push({ label: '描述', value: e.description })
+    if (e.state) rows.push({ label: '状态', value: e.state })
+    if (e.first_chapter) rows.push({ label: '首次出场', value: e.first_chapter })
+    if (e.last_chapter) rows.push({ label: '最近出场', value: e.last_chapter })
+    // 额外字段（未知 key 兜底展示）
+    const known = new Set(['id', 'name', 'entity_type', 'aliases', 'description', 'state', 'first_chapter', 'last_chapter', 'book_id', 'first_order', 'last_order', 'weight', 'lines'])
+    for (const [k, v] of Object.entries(e)) {
+      if (known.has(k)) continue
+      const val = formatDisplayValue(v)
+      if (val) rows.push({ label: k, value: val })
+    }
+    if (rows.length === 0) {
+      return <p className="text-xs text-zinc-600 mt-2">无详细数据</p>
+    }
     return (
-      <div className="flex flex-col items-center justify-center h-full text-zinc-600">
-        <Icon name="book-open" size={36} className="text-zinc-700 mb-3" />
-        <p className="text-base mb-1">知识库为空</p>
-        <p className="text-sm">在对话中发送 /s + 设定文本来添加知识</p>
+      <div className="space-y-2 mt-3">
+        {rows.map(r => (
+          <div key={r.label} className="flex gap-2 text-sm">
+            <span className="text-zinc-500 shrink-0 min-w-[70px]">{r.label}：</span>
+            <span className="text-zinc-300 whitespace-pre-wrap">{r.value}</span>
+          </div>
+        ))}
       </div>
     )
   }
 
-  // Filter entities by search query
-  const filteredEntities = {}
-  let totalFiltered = 0
-  for (const type of TYPE_ORDER) {
-    const entities = summary.entities[type]
-    if (!entities) continue
-    const filtered = searchQuery
-      ? entities.filter(e =>
-          e.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (e.aliases && e.aliases.some(a => a.toLowerCase().includes(searchQuery.toLowerCase())))
-        )
-      : entities
-    if (filtered.length > 0) {
-      filteredEntities[type] = filtered
-      totalFiltered += filtered.length
-    }
+  if (loading) return <LoadingState text="加载知识库..." />
+  if (!summary || entities.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full text-zinc-600">
+        <Icon name="book-open" size={36} className="text-zinc-700 mb-3" />
+        <p className="text-base mb-1">知识库为空</p>
+        <p className="text-sm">在对话中让 AI 提取设定，或点「新建实体」手动登记</p>
+      </div>
+    )
   }
 
   return (
@@ -292,13 +244,12 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
         <div className="flex items-center justify-between gap-4 text-sm text-zinc-400">
           <div className="flex items-center gap-3">
             <div className="flex gap-4">
-              <span>实体 {summary.totalEntities}</span>
-              <span>关系 {summary.totalRelations}</span>
-              <span>伏笔 {summary.totalForeshadows}</span>
+              <span>实体 {entities.length}</span>
+              <span>关系 {relations.length}</span>
+              <span>伏笔 {foreshadows.length}</span>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* View mode toggle */}
             <div className="flex bg-zinc-800 rounded-lg p-0.5">
               <button
                 onClick={() => setViewMode('graph')}
@@ -310,7 +261,7 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
               ><Icon name="list" size={12} className="inline mr-1" />列表</button>
             </div>
             <button
-              onClick={() => openAddEntity('character')}
+              onClick={() => setShowAddEntity(true)}
               className="flex items-center gap-1.5 text-xs text-zinc-300 hover:text-white bg-accent/80 hover:bg-accent px-3 py-1.5 rounded-md transition-colors"
               title="新建实体"
             >
@@ -325,36 +276,21 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="搜索实体名称或别名..."
+              placeholder="搜索实体名称/别名/类型/描述..."
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg pl-9 pr-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-zinc-500"
             />
           </div>
         )}
       </div>
 
-      {/* 4D Map: Master graph identity banner */}
-      <div className="px-6 py-2.5 bg-gradient-to-r from-blue-950/30 to-purple-950/20 border-b border-blue-900/30">
-        <div className="flex items-center gap-3 text-[10px]">
-          <span className="text-blue-400 font-medium flex items-center gap-1"><Icon name="layout-grid" size={12} /> 4D 全书图谱</span>
-          <span className="text-zinc-600">|</span>
-          <span className="text-zinc-500">本页为全书复杂图主视图，以下为图谱的三个侧面：</span>
-          <span className="text-zinc-600">|</span>
-          <span className="text-violet-400 flex items-center gap-1"><Icon name="user" size={10} /> 角色</span>
-          <span className="text-emerald-400 flex items-center gap-1"><Icon name="map-pin" size={10} /> 地图</span>
-          <span className="text-cyan-400 flex items-center gap-1"><Icon name="clock" size={10} /> 时间线</span>
-          <span className="text-zinc-600">|</span>
-          <span className="text-amber-400/70 flex items-center gap-1"><Icon name="globe" size={10} /> 世界观为全局标量，独立于图谱</span>
-        </div>
-      </div>
-
-      {/* Graph view (default) */}
+      {/* 图谱视图（FullGraphView 为 stub，暂空；列表为默认） */}
       {viewMode === 'graph' && (
         <div className="flex-1 overflow-hidden flex">
           <FullGraphView bookId={bookId} />
         </div>
       )}
 
-      {/* List view */}
+      {/* 列表视图 */}
       {viewMode === 'list' && (
         <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
         {totalFiltered === 0 && searchQuery ? (
@@ -366,16 +302,15 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
             </button>
           </div>
         ) : (
-          TYPE_ORDER.map(type => {
-            const entities = filteredEntities[type]
-            if (!entities || entities.length === 0) return null
+          Object.entries(filteredGroups).map(([type, list]) => {
+            const meta = typeMeta(type)
             return (
               <div key={type}>
                 <h3 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5">
-                  {TYPE_LABELS[type] ? <><Icon name={TYPE_LABELS[type].icon} size={14} /> {TYPE_LABELS[type].label}</> : type} ({entities.length})
+                  <Icon name={meta.icon} size={14} /> {meta.label} ({list.length})
                 </h3>
                 <div className="space-y-2">
-                  {entities.map(entity => (
+                  {list.map(entity => (
                     <div key={entity.id} className="bg-zinc-800/40 border border-zinc-800 rounded-lg">
                       <button
                         onClick={() => setExpandedEntity(expandedEntity === entity.id ? null : entity.id)}
@@ -383,17 +318,14 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
                       >
                         <span className="font-medium text-zinc-200 min-w-0 truncate">{entity.name}</span>
                         <div className="flex items-center gap-2 shrink-0 ml-2">
-                          {entity.aliases?.length > 0 && (
+                          {entity.aliases && entity.aliases.length > 0 && (
                             <span className="text-xs text-zinc-500 truncate max-w-[200px]">{entity.aliases.join(', ')}</span>
                           )}
-                          <span className={`text-xs transition-transform ${expandedEntity === entity.id ? 'rotate-180' : ''}`}>
-                            ▼
-                          </span>
+                          <span className={`text-xs transition-transform ${expandedEntity === entity.id ? 'rotate-180' : ''}`}>▼</span>
                         </div>
                       </button>
                       {expandedEntity === entity.id && (
                         <div className="px-4 pb-3 border-t border-zinc-800">
-                          {/* 顶部：编辑 + 删除按钮 */}
                           <div className="flex items-center justify-end gap-2 pt-3 pb-1 border-b border-zinc-800 mb-3">
                             <button
                               onClick={() => openEditEntity(entity)}
@@ -408,12 +340,7 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
                               <Icon name="trash" size={12} /> 删除
                             </button>
                           </div>
-                          <div className="mt-3">
-                            {renderEntitySections(entity)}
-                          </div>
-                          {(!entity.data || Object.keys(entity.data).length === 0) && (
-                            <p className="text-xs text-zinc-600 mt-2">无详细数据</p>
-                          )}
+                          {renderEntityDetail(entity)}
                         </div>
                       )}
                     </div>
@@ -424,36 +351,39 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
           })
         )}
 
-        {summary.relations?.length > 0 && (
+        {relations.length > 0 && (
           <div>
-            <h3 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="link" size={14} /> 关系 ({summary.relations.length})</h3>
+            <h3 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="link" size={14} /> 关系 ({relations.length})</h3>
             <div className="space-y-1">
-              {summary.relations.map(r => (
+              {relations.map(r => (
                 <div key={r.id} className="text-xs text-zinc-500 bg-zinc-800/30 border border-zinc-800 rounded px-3 py-1.5">
-                  {r.from} <span className="text-zinc-400">[{r.type}]</span> {r.to}
+                  {r.from_name} <span className="text-zinc-400">[{r.rel_type || '关系'}]</span> {r.to_name}
+                  {r.description && <span className="text-zinc-600 ml-2">— {r.description}</span>}
                 </div>
               ))}
             </div>
           </div>
         )}
 
-        {summary.foreshadows?.length > 0 && (
+        {foreshadows.length > 0 && (
           <div>
-            <h3 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="target" size={14} /> 伏笔</h3>
+            <h3 className="text-sm font-semibold text-zinc-300 mb-2 flex items-center gap-1.5"><Icon name="target" size={14} /> 伏笔 ({foreshadows.length})</h3>
             <div className="space-y-2">
-              {summary.foreshadows.map(f => (
-                <div key={f.id} className={`text-xs p-2.5 rounded-lg border ${
-                  f.resolved
-                    ? 'border-emerald-800 bg-emerald-900/20 text-emerald-400'
-                    : 'border-amber-800 bg-amber-900/20 text-amber-400'
-                }`}>
-                  <p className="font-medium">{f.text}</p>
-                  <p className="text-zinc-500 mt-1">→ {f.hint}</p>
-                  {f.resolved && f.resolution && (
-                    <p className="text-emerald-600 mt-1 flex items-center gap-1"><Icon name="check-circle" size={12} /> {f.resolution}</p>
-                  )}
-                </div>
-              ))}
+              {foreshadows.map(f => {
+                const resolved = f.status === 'resolved' || f.resolved
+                return (
+                  <div key={f.id} className={`text-xs p-2.5 rounded-lg border ${
+                    resolved ? 'border-emerald-800 bg-emerald-900/20 text-emerald-400' : 'border-amber-800 bg-amber-900/20 text-amber-400'
+                  }`}>
+                    <div className="flex items-center gap-2">
+                      {f.priority === 'must' && <span className="text-[9px] px-1 py-0.5 bg-red-900/50 text-red-300 rounded">钩子</span>}
+                      {f.category && <span className="text-[9px] px-1 py-0.5 bg-zinc-700/50 text-zinc-300 rounded">{f.category}</span>}
+                    </div>
+                    <p className="font-medium mt-1">{String(f.content || f.text || '')}</p>
+                    {f.chapter_ref && <p className="text-zinc-500 mt-1">章节：{f.chapter_ref}</p>}
+                  </div>
+                )
+              })}
             </div>
           </div>
         )}
@@ -463,7 +393,7 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
       <ConfirmModal
         open={!!deleteEntityId}
         title="删除实体"
-        message="确定删除此实体？相关关系和引用可能影响。"
+        message="确定删除此实体？相关关系和引用可能受影响。"
         danger
         onConfirm={confirmDelete}
         onCancel={() => setDeleteEntityId(null)}
@@ -477,15 +407,11 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
           onCancel={() => setEditingEntity(null)}
           onSave={saveEdit}
           saving={editSaving}
-          onUpdateData={updateEditDataField}
-          onRemoveData={removeEditDataField}
         />
       )}
 
       {showAddEntity && (
         <AddEntityModal
-          defaultType={addType}
-          onTypeChange={setAddType}
           form={addForm}
           setForm={setAddForm}
           onCancel={() => setShowAddEntity(false)}
@@ -497,133 +423,41 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
   )
 }
 
-
 // ──────────────────────────────────────────────────────────────────────────
-// Shared form block for editing data dict fields
-// ──────────────────────────────────────────────────────────────────────────
-
-function EntityDataForm({ data, onUpdate, onRemove }) {
-  const [newKey, setNewKey] = useState('')
-  const [newValue, setNewValue] = useState('')
-
-  function handleAdd() {
-    if (!newKey.trim()) return
-    onUpdate(newKey.trim(), newValue)
-    setNewKey('')
-    setNewValue('')
-  }
-
-  const entries = Object.entries(data || {}).filter(([k]) => k && k !== 'name' && k !== 'aliases')
-
-  // 将值转换为可编辑的字符串形式
-  function getEditValue(v: unknown): string {
-    if (v === null || v === undefined) return ''
-    if (typeof v === 'string') return v
-    if (typeof v === 'object') return JSON.stringify(v, null, 2)
-    return String(v)
-  }
-
-  // 解析编辑后的值，尝试还原 JSON 对象
-  function parseEditValue(raw: string): unknown {
-    const trimmed = raw.trim()
-    if (!trimmed) return ''
-    // 尝试解析为 JSON
-    if ((trimmed.startsWith('{') && trimmed.endsWith('}')) ||
-        (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-      try {
-        return JSON.parse(trimmed)
-      } catch {
-        return raw
-      }
-    }
-    return raw
-  }
-
-  return (
-    <div className="space-y-2">
-      <label className="text-[10px] text-zinc-400 uppercase tracking-wider">属性字段</label>
-      {entries.map(([k, v]) => {
-        const editVal = getEditValue(v)
-        const isLong = editVal.length > 60 || typeof v === 'object'
-        return (
-          <div key={k} className="flex gap-2 items-start">
-            <input
-              value={k}
-              onChange={(e) => {
-                const newK = e.target.value
-                if (newK !== k) {
-                  onRemove(k)
-                  onUpdate(newK, v)
-                }
-              }}
-              className="w-28 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 shrink-0"
-            />
-            {isLong ? (
-              <textarea
-                value={editVal}
-                onChange={(e) => onUpdate(k, parseEditValue(e.target.value))}
-                rows={typeof v === 'object' ? 5 : 3}
-                className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300 resize-none font-mono"
-              />
-            ) : (
-              <input
-                value={editVal}
-                onChange={(e) => onUpdate(k, parseEditValue(e.target.value))}
-                className="flex-1 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-300"
-              />
-            )}
-            <button
-              onClick={() => onRemove(k)}
-              className="text-zinc-600 hover:text-red-400 px-2 py-1.5 text-xs shrink-0"
-              aria-label="移除字段"
-            >
-              <Icon name="x" size={12} />
-            </button>
-          </div>
-        )
-      })}
-      <div className="flex gap-2 items-start pt-2 border-t border-zinc-800">
-        <input
-          value={newKey}
-          onChange={e => setNewKey(e.target.value)}
-          placeholder="字段名..."
-          className="w-28 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 shrink-0"
-        />
-        <input
-          value={newValue}
-          onChange={e => setNewValue(e.target.value)}
-          placeholder="字段值..."
-          onKeyDown={e => e.key === 'Enter' && (e.preventDefault(), handleAdd())}
-          className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200"
-        />
-        <button
-          onClick={handleAdd}
-          disabled={!newKey.trim()}
-          className="text-accent hover:text-accent-hover px-2 py-1.5 text-xs shrink-0 disabled:opacity-40"
-        >
-          + 添加
-        </button>
-      </div>
-    </div>
-  )
-}
-
-
-// ──────────────────────────────────────────────────────────────────────────
-// Edit entity modal
+// 编辑实体 Modal（V4 字段：entity_type/aliases/description/state）
 // ──────────────────────────────────────────────────────────────────────────
 
-function EditEntityModal({ entity, form, setForm, onSave, onCancel, saving, onUpdateData, onRemoveData }) {
+const TYPE_OPTIONS = ['角色', '地点', '物件', '设定', '组织', '种族', '事件', '其他']
+
+function EditEntityModal({ entity, form, setForm, onSave, onCancel, saving }: {
+  entity: V4Entity
+  form: { name: string; entity_type: string; aliases: string; description: string; state: string }
+  setForm: (fn: (prev: any) => any) => void
+  onSave: () => void
+  onCancel: () => void
+  saving: boolean
+}) {
   return (
     <Modal open onClose={onCancel} title={`编辑: ${entity.name}`} size="lg">
       <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
-        <div>
-          <label className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1 block">名称 <span className="text-red-400">*</span></label>
-          <input
-            value={form.name}
-            onChange={e => setForm(prev => ({ ...prev, name: e.target.value }))}
-            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent"
-          />
+        <p className="text-[11px] text-zinc-500 bg-zinc-800/40 border border-zinc-800 rounded px-3 py-2">
+          实体主键为名称（改名请先删除再新建）；此处可编辑类型/别名/描述/状态。
+        </p>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1 block">类型</label>
+            <select
+              value={form.entity_type}
+              onChange={e => setForm(prev => ({ ...prev, entity_type: e.target.value }))}
+              className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200"
+            >
+              {TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1 block">名称（只读）</label>
+            <input value={form.name} disabled className="w-full bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-2 text-sm text-zinc-500" />
+          </div>
         </div>
         <div>
           <label className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1 block">别名（逗号分隔）</label>
@@ -634,19 +468,30 @@ function EditEntityModal({ entity, form, setForm, onSave, onCancel, saving, onUp
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent"
           />
         </div>
-        <EntityDataForm
-          data={form.data}
-          onUpdate={onUpdateData}
-          onRemove={onRemoveData}
-        />
+        <div>
+          <label className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1 block">描述</label>
+          <textarea
+            value={form.description}
+            onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))}
+            rows={3}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent resize-none"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1 block">当前状态</label>
+          <textarea
+            value={form.state}
+            onChange={e => setForm(prev => ({ ...prev, state: e.target.value }))}
+            rows={2}
+            placeholder="如：受伤昏迷 / 已抵达雾城码头..."
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent resize-none"
+          />
+        </div>
         <div className="flex gap-2 justify-end pt-3 border-t border-zinc-800">
-          <button
-            onClick={onCancel}
-            className="text-xs text-zinc-400 hover:text-zinc-200 px-3 py-1.5"
-          >取消</button>
+          <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-200 px-3 py-1.5">取消</button>
           <button
             onClick={onSave}
-            disabled={saving || !form.name.trim()}
+            disabled={saving}
             className="text-xs bg-accent text-white rounded-lg px-4 py-1.5 font-medium hover:bg-accent-hover disabled:opacity-50"
           >
             {saving ? '保存中...' : '保存修改'}
@@ -657,42 +502,17 @@ function EditEntityModal({ entity, form, setForm, onSave, onCancel, saving, onUp
   )
 }
 
-
 // ──────────────────────────────────────────────────────────────────────────
-// Add entity modal
+// 新建实体 Modal（V4 POST /api/graph/entities）
 // ──────────────────────────────────────────────────────────────────────────
 
-const ENTITY_TYPES = [
-  { value: 'character', label: '人物' },
-  { value: 'location', label: '地点' },
-  { value: 'item', label: '物品' },
-  { value: 'organization', label: '组织' },
-  { value: 'concept', label: '概念' },
-  { value: 'event', label: '事件' },
-]
-
-function AddEntityModal({ defaultType, onTypeChange, form, setForm, onSave, onCancel, saving }) {
-  const [newFieldKey, setNewFieldKey] = useState('')
-  const [newFieldValue, setNewFieldValue] = useState('')
-
-  function handleAddField() {
-    if (!newFieldKey.trim()) return
-    setForm(prev => ({
-      ...prev,
-      data: { ...prev.data, [newFieldKey.trim()]: newFieldValue },
-    }))
-    setNewFieldKey('')
-    setNewFieldValue('')
-  }
-
-  function handleRemoveField(key) {
-    setForm(prev => {
-      const next = { ...prev.data }
-      delete next[key]
-      return { ...prev, data: next }
-    })
-  }
-
+function AddEntityModal({ form, setForm, onSave, onCancel, saving }: {
+  form: { name: string; entity_type: string; aliases: string; description: string; state: string }
+  setForm: (fn: (prev: any) => any) => void
+  onSave: () => void
+  onCancel: () => void
+  saving: boolean
+}) {
   return (
     <Modal open onClose={onCancel} title="新建实体" size="lg">
       <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
@@ -700,13 +520,11 @@ function AddEntityModal({ defaultType, onTypeChange, form, setForm, onSave, onCa
           <div>
             <label className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1 block">类型</label>
             <select
-              value={defaultType}
-              onChange={e => onTypeChange(e.target.value)}
+              value={form.entity_type}
+              onChange={e => setForm(prev => ({ ...prev, entity_type: e.target.value }))}
               className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200"
             >
-              {ENTITY_TYPES.map(t => (
-                <option key={t.value} value={t.value}>{t.label}</option>
-              ))}
+              {TYPE_OPTIONS.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div>
@@ -728,16 +546,27 @@ function AddEntityModal({ defaultType, onTypeChange, form, setForm, onSave, onCa
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent"
           />
         </div>
-        <EntityDataForm
-          data={form.data}
-          onUpdate={(k, v) => setForm(prev => ({ ...prev, data: { ...prev.data, [k]: v } }))}
-          onRemove={handleRemoveField}
-        />
+        <div>
+          <label className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1 block">描述</label>
+          <textarea
+            value={form.description}
+            onChange={e => setForm(prev => ({ ...prev, description: e.target.value }))}
+            rows={3}
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent resize-none"
+          />
+        </div>
+        <div>
+          <label className="text-[10px] text-zinc-400 uppercase tracking-wider mb-1 block">当前状态</label>
+          <textarea
+            value={form.state}
+            onChange={e => setForm(prev => ({ ...prev, state: e.target.value }))}
+            rows={2}
+            placeholder="如：受伤昏迷 / 已抵达雾城码头..."
+            className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-accent resize-none"
+          />
+        </div>
         <div className="flex gap-2 justify-end pt-3 border-t border-zinc-800">
-          <button
-            onClick={onCancel}
-            className="text-xs text-zinc-400 hover:text-zinc-200 px-3 py-1.5"
-          >取消</button>
+          <button onClick={onCancel} className="text-xs text-zinc-400 hover:text-zinc-200 px-3 py-1.5">取消</button>
           <button
             onClick={onSave}
             disabled={saving || !form.name.trim()}

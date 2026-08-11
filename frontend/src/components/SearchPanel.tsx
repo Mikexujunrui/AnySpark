@@ -4,12 +4,53 @@ import Icon from './ui/Icon'
 import { openTab } from '../stores/tabStore'
 import { triggerRefresh } from '../store'
 
+// V4 适配版 SearchPanel：前端本地搜索
+// 章节：GET /api/chapters?book_id=main 全量 → 关键词过滤 title/content（命中片段高亮）
+// 实体：GET /api/graph/entities 全量 → 关键词过滤 name/entity_type/description
+interface ChapterHit {
+  id: string
+  title: string
+  content?: string
+  order_index?: number
+  snippet?: string
+}
+interface EntityHit {
+  id: string
+  name: string
+  entity_type?: string
+  description?: string
+  snippet?: string
+}
+
+// 高亮命中词（简单包裹 <mark>，避免 dangerouslySetInnerHTML 的 XSS 风险用转义）
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
+function highlight(text: string, needle: string, maxLen = 160): string {
+  const lower = text.toLowerCase()
+  const q = needle.toLowerCase()
+  const idx = lower.indexOf(q)
+  if (idx === -1) return escapeHtml(text.slice(0, maxLen))
+  const start = Math.max(0, idx - 40)
+  const end = Math.min(text.length, idx + q.length + 80)
+  const before = start > 0 ? '…' : ''
+  const after = end < text.length ? '…' : ''
+  const seg = text.slice(start, end)
+  const esc = escapeHtml(seg)
+  const escQ = escapeHtml(needle)
+  // 不区分大小写替换命中段
+  const re = new RegExp(escQ.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')
+  const highlighted = esc.replace(re, m => `<mark class="bg-amber-500/30 text-amber-200 rounded px-0.5">${m}</mark>`)
+  return before + highlighted + after
+}
+
 export default function SearchPanel({ bookId, onClose }: { bookId: string; onClose?: () => void }) {
   const [query, setQuery] = useState('')
-  const [results, setResults] = useState(null)
+  const [results, setResults] = useState<{ chapters: ChapterHit[]; entities: EntityHit[] } | null>(null)
   const [loading, setLoading] = useState(false)
   const [activeGroup, setActiveGroup] = useState('all')
-  const inputRef = useRef(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     inputRef.current?.focus()
@@ -17,29 +58,62 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
 
   const doSearch = useCallback(async () => {
     const q = query.trim()
-    if (!q || q.length < 1) {
+    if (!q) {
       setResults(null)
       return
     }
     setLoading(true)
     try {
       const [chaptersRes, entitiesRes] = await Promise.all([
-        fetch(`/api/books/${bookId}/search/chapters?q=${encodeURIComponent(q)}&limit=20`),
-        fetch(`/api/books/${bookId}/search/entities?q=${encodeURIComponent(q)}&limit=20`),
+        fetch(`/api/chapters?book_id=${encodeURIComponent(bookId)}`),
+        fetch(`/api/graph/entities?book_id=${encodeURIComponent(bookId)}`),
       ])
-      const chapters = await chaptersRes.json()
-      const entities = await entitiesRes.json()
+      const chapters: any[] = await chaptersRes.json()
+      const entities: any[] = await entitiesRes.json()
 
-      const chapterResults = Array.isArray(chapters) ? chapters : (chapters.results || [])
-      const entityResults = Array.isArray(entities) ? entities : (entities.results || [])
+      const needle = q.toLowerCase()
+      const chapterHits: ChapterHit[] = (Array.isArray(chapters) ? chapters : [])
+        .filter(ch => (ch.title || '').toLowerCase().includes(needle) || (ch.content || '').toLowerCase().includes(needle))
+        .slice(0, 20)
+        .map(ch => {
+          const content = ch.content || ''
+          const idx = content.toLowerCase().indexOf(needle)
+          const snippet = idx === -1
+            ? ''
+            : content.slice(Math.max(0, idx - 40), idx + q.length + 80)
+          return {
+            id: ch.id,
+            title: ch.title || '无标题',
+            content,
+            order_index: ch.order_index,
+            snippet: snippet ? highlight(snippet, q) : undefined,
+          }
+        })
 
-      setResults({
-        chapters: chapterResults,
-        entities: entityResults,
-        total: chapterResults.length + entityResults.length,
-      })
+      const entityHits: EntityHit[] = (Array.isArray(entities) ? entities : [])
+        .filter(ent => {
+          const hay = [ent.name, ent.entity_type, ent.description, ...(ent.aliases || [])].filter(Boolean).join(' ').toLowerCase()
+          return hay.includes(needle)
+        })
+        .slice(0, 20)
+        .map(ent => {
+          const desc = ent.description || ''
+          const idx = desc.toLowerCase().indexOf(needle)
+          const snippet = idx === -1
+            ? ''
+            : desc.slice(Math.max(0, idx - 40), idx + q.length + 80)
+          return {
+            id: ent.id,
+            name: ent.name || '未命名',
+            entity_type: ent.entity_type,
+            description: desc,
+            snippet: snippet ? highlight(snippet, q) : undefined,
+          }
+        })
 
-      if (chapterResults.length === 0 && entityResults.length === 0) {
+      setResults({ chapters: chapterHits, entities: entityHits })
+
+      if (chapterHits.length === 0 && entityHits.length === 0) {
         showToast('未找到匹配结果', 'info')
       }
     } catch (e) {
@@ -53,7 +127,7 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
     return () => clearTimeout(timer)
   }, [query, doSearch])
 
-  function handleKeyDown(e) {
+  function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === 'Escape') {
       onClose?.()
     }
@@ -62,12 +136,13 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
     }
   }
 
-  function handleChapterClick(ch) {
-    openTab(ch.id || ch.chapter_id, ch.title || '章节', bookId)
+  function handleChapterClick(ch: ChapterHit) {
+    openTab(ch.id, ch.title, bookId)
     onClose?.()
   }
 
-  function handleEntityClick(entity) {
+  function handleEntityClick(entity: EntityHit) {
+    // 实体点击：切到知识库面板由用户细看（本面板仅搜索展示）
     triggerRefresh()
     onClose?.()
   }
@@ -76,7 +151,7 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
   const entities = results?.entities || []
   const hasChapters = chapters.length > 0
   const hasEntities = entities.length > 0
-  const total = results?.total || 0
+  const total = chapters.length + entities.length
 
   return (
     <div className="flex flex-col h-full bg-zinc-950">
@@ -137,7 +212,7 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
           <div className="flex flex-col items-center justify-center h-48 text-zinc-600 gap-2">
             <Icon name="search" size={24} className="text-zinc-700" />
             <p className="text-xs">输入关键词搜索</p>
-            <p className="text-[10px] text-zinc-700">支持搜索章节内容、角色名、地点等</p>
+            <p className="text-[10px] text-zinc-700">支持搜索章节内容、角色名、地点等（本地检索）</p>
           </div>
         )}
 
@@ -159,15 +234,18 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
             {activeGroup === 'all' && <GroupHeader icon="file-text" label="章节" count={chapters.length} />}
             {chapters.map((ch, i) => (
               <button
-                key={ch.id || ch.chapter_id || i}
+                key={ch.id || i}
                 onClick={() => handleChapterClick(ch)}
                 className="w-full text-left px-4 py-2.5 hover:bg-zinc-800/50 transition-colors border-b border-zinc-800/50"
               >
                 <div className="flex items-center gap-2">
                   <Icon name="file-text" size={12} className="text-zinc-600 shrink-0" />
                   <span className="text-xs font-medium text-zinc-300 truncate">
-                    {ch.title || ch.chapter_title || '无标题'}
+                    {ch.title}
                   </span>
+                  {ch.order_index != null && (
+                    <span className="text-[10px] text-zinc-600 shrink-0">第 {ch.order_index + 1} 章</span>
+                  )}
                 </div>
                 {ch.snippet && (
                   <p className="text-[10px] text-zinc-500 mt-0.5 line-clamp-2 ml-5"
@@ -183,18 +261,18 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
             {activeGroup === 'all' && <GroupHeader icon="users" label="实体" count={entities.length} />}
             {entities.map((ent, i) => (
               <button
-                key={ent.id || ent.entity_id || i}
+                key={ent.id || i}
                 onClick={() => handleEntityClick(ent)}
                 className="w-full text-left px-4 py-2.5 hover:bg-zinc-800/50 transition-colors border-b border-zinc-800/50"
               >
                 <div className="flex items-center gap-2">
-                  <EntityIcon type={ent.type || ent.entity_type} />
+                  <EntityIcon type={ent.entity_type} />
                   <span className="text-xs font-medium text-zinc-300 truncate">
-                    {ent.name || ent.entity_name || '未命名'}
+                    {ent.name}
                   </span>
-                  {ent.type && (
+                  {ent.entity_type && (
                     <span className="text-[10px] text-zinc-600 bg-zinc-800 px-1.5 py-0.5 rounded">
-                      {ent.type}
+                      {ent.entity_type}
                     </span>
                   )}
                 </div>
@@ -218,7 +296,7 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
   )
 }
 
-function GroupHeader({ icon, label, count }) {
+function GroupHeader({ icon, label, count }: { icon: string; label: string; count: number }) {
   return (
     <div className="px-4 py-2 bg-zinc-900/60 border-b border-zinc-800 flex items-center gap-2">
       <Icon name={icon} size={12} className="text-zinc-500" />
@@ -228,8 +306,8 @@ function GroupHeader({ icon, label, count }) {
   )
 }
 
-function EntityIcon({ type }) {
-  const map = {
+function EntityIcon({ type }: { type?: string }) {
+  const map: Record<string, { icon: string; color: string }> = {
     character: { icon: 'user', color: 'text-violet-400' },
     location: { icon: 'map-pin', color: 'text-emerald-400' },
     item: { icon: 'box', color: 'text-amber-400' },
@@ -237,6 +315,7 @@ function EntityIcon({ type }) {
     concept: { icon: 'lightbulb', color: 'text-yellow-400' },
     event: { icon: 'calendar', color: 'text-red-400' },
   }
-  const cfg = map[type] || { icon: 'circle', color: 'text-zinc-500' }
+  const key = (type || '').toLowerCase()
+  const cfg = map[key] || { icon: 'circle', color: 'text-zinc-500' }
   return <Icon name={cfg.icon} size={12} className={`${cfg.color} shrink-0`} />
 }

@@ -75,3 +75,11 @@ export async function put<T = unknown>(url: string, data?: unknown): Promise<T> 
     body: JSON.stringify(data),
   })
 }
+
+export async function patch<T = unknown>(url: string, data?: unknown): Promise<T> {
+  return requestWithDiags<T>('PATCH', url, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  })
+}

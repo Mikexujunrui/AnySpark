@@ -1,947 +1,221 @@
+// SettingsModal — V4 适配版设置
+// 模型（/api/models 注册表 + 激活）/ 档位（/api/agency）/ 记忆（/api/manual）
 import { useState, useEffect, useCallback } from 'react'
 import Icon from './ui/Icon'
 import Modal from './ui/Modal'
 import Toggle from './ui/Toggle'
-import MemoryPanel from './MemoryPanel'
-import SettingsAboutTab from './SettingsAboutTab'
-import SettingsSlotsTab from './SettingsSlotsTab'
 
-const MODE_INFO = {
-  quality: { label: 'Quality', desc: '所有任务使用 Pro 模型，最高质量输出', icon: 'star', color: 'amber' },
-  split:   { label: 'Split',   desc: '创意任务用 Pro，其他用 Flash', icon: 'layers', color: 'blue' },
-  flash:   { label: 'Flash',   desc: '所有任务使用 Flash 模型，省钱快速', icon: 'zap', color: 'emerald' },
-  custom:  { label: 'Custom',  desc: '按任务类型自定义分配 Pro/Flash', icon: 'settings', color: 'purple' },
-}
-
-const TASK_LABELS = {
-  writing: '写作', planning: '规划', extraction: '提取',
-  editing: '编辑', general: '通用', research: '调研',
-}
-
-const PROVIDER_TYPE_LABELS = {
-  openai: 'OpenAI 兼容',
-  anthropic: 'Anthropic',
-  gemini: 'Gemini',
-}
-
-const PROVIDER_DEFAULT_URLS = {
-  openai: 'https://api.openai.com/v1',
-  anthropic: 'https://api.anthropic.com/v1',
-  gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
-}
+interface ModelItem { id: string; name: string; base_url?: string; model?: string; context_window?: number; is_active?: boolean }
+interface AgencyLevel { id: string; name: string; description: string; temperature: number; order: number; is_default?: boolean }
+interface ManualEntry { id: string; content: string; category?: string; locked?: boolean; activity?: string }
 
 export default function SettingsModal({ onClose, onModeChanged, bookId }: { onClose: () => void; onModeChanged?: (mode: string) => void; bookId?: string }) {
-  const [tab, setTab] = useState('providers')
-  const [settings, setSettings] = useState(null)
+  const [tab, setTab] = useState('models')
+  const [models, setModels] = useState<ModelItem[]>([])
+  const [activeModel, setActiveModel] = useState<string>('')
+  const [agency, setAgency] = useState<AgencyLevel[]>([])
+  const [currentAgency, setCurrentAgency] = useState<AgencyLevel | null>(null)
+  const [manual, setManual] = useState<ManualEntry[]>([])
   const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
   const [error, setError] = useState('')
   const [toast, setToast] = useState('')
 
-  // Update check
-  const [updateStatus, setUpdateStatus] = useState<{ current_version: string; update_check_enabled: boolean } | null>(null)
-  const [updateResult, setUpdateResult] = useState<any>(null)
-  const [checking, setChecking] = useState(false)
-
-  // Provider form
-  const [editingProvider, setEditingProvider] = useState(null)
-  const [providerForm, setProviderForm] = useState({
-    id: '', name: '', type: 'openai', api_key: '', base_url: '', models: '',
-  })
-  const [testing, setTesting] = useState(null)
-  const [fetchingModels, setFetchingModels] = useState(false)
-  const [availableModels, setAvailableModels] = useState<string[]>([])
-  const [modelSearch, setModelSearch] = useState('')
-
-  // Custom map
-  const [customMap, setCustomMap] = useState({})
-  const [effortMeta, setEffortMeta] = useState<{ scale: any[]; families: Record<string, string[]> } | null>(null)
-  const [generationForm, setGenerationForm] = useState({
-    temperature: 0.7,
-    top_p: 0.95,
-    frequency_penalty: 0.15,
-    presence_penalty: 0,
-    max_output_tokens: 65536,
-    reasoning_effort: 'medium',
-  })
-
-  // Book override state
-  const [bookOverrides, setBookOverrides] = useState(null)
-  const [bookOverrideForm, setBookOverrideForm] = useState({
-    mode: '', slot_pro_provider_id: '', slot_pro_model: '',
-    slot_flash_provider_id: '', slot_flash_model: '',
-  })
-
-  const showToast = useCallback((msg) => {
+  const showToast = useCallback((msg: string, _type?: string) => {
     setToast(msg)
     setTimeout(() => setToast(''), 2500)
   }, [])
 
-  const fetchSettings = useCallback(async () => {
+  const loadModels = useCallback(async () => {
     try {
-      const res = await fetch('/api/settings')
+      const res = await fetch('/api/models')
       const data = await res.json()
-      setSettings(data)
-      setCustomMap(data.custom_map || {})
-      setEffortMeta(data.effort_tiers || null)
-      setGenerationForm(data.generation || {
-        temperature: 0.7,
-        top_p: 0.95,
-        frequency_penalty: 0.15,
-        presence_penalty: 0,
-        max_output_tokens: 65536,
-        reasoning_effort: 'medium',
-      })
-      setLoading(false)
-    } catch (e) {
-      setError('加载设置失败')
-      setLoading(false)
-    }
+      setModels(data.models || [])
+      setActiveModel(data.active_id || '')
+    } catch { setError('加载模型失败') }
   }, [])
 
-  useEffect(() => { fetchSettings() }, [fetchSettings])
-
-  // Load book overrides when bookId changes
-  useEffect(() => {
-    if (bookId) {
-      fetch(`/api/books/${bookId}/settings`)
-        .then(r => r.json())
-        .then(data => {
-          if (data.overrides) {
-            setBookOverrides(data.overrides)
-            setBookOverrideForm(data.overrides)
-          } else {
-            setBookOverrides(null)
-            setBookOverrideForm({ mode: '', slot_pro_provider_id: '', slot_pro_model: '', slot_flash_provider_id: '', slot_flash_model: '' })
-          }
-        })
-        .catch(() => {})
-    }
-  }, [bookId])
-
-  // ── Update check ──
-  useEffect(() => {
-    fetch('/api/update/status')
-      .then(r => r.json())
-      .then(data => setUpdateStatus(data))
-      .catch(() => {})
+  const loadAgency = useCallback(async () => {
+    try {
+      const res = await fetch('/api/agency')
+      const data = await res.json()
+      setAgency(data.levels || [])
+      setCurrentAgency(data.current || null)
+    } catch { /* 静默 */ }
   }, [])
 
-  async function doCheckUpdate() {
-    setChecking(true)
-    setUpdateResult(null)
+  const loadManual = useCallback(async () => {
     try {
-      const res = await fetch('/api/update/check')
+      const res = await fetch('/api/manual')
       const data = await res.json()
-      setUpdateResult(data)
-    } catch (e) {
-      showToast('检查更新失败')
+      setManual(Array.isArray(data) ? data : [])
+    } catch { /* 静默 */ }
+  }, [])
+
+  useEffect(() => {
+    async function init() {
+      setLoading(true)
+      await Promise.all([loadModels(), loadAgency(), loadManual()])
+      setLoading(false)
     }
-    setChecking(false)
+    init()
+  }, [loadModels, loadAgency, loadManual])
+
+  async function activateModel(id: string) {
+    try {
+      await fetch(`/api/models/${encodeURIComponent(id)}/activate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      setActiveModel(id)
+      showToast('模型已激活')
+      onModeChanged?.(id)
+    } catch { showToast('激活失败', 'error') }
   }
 
-  async function doToggleUpdateCheck(enabled: boolean) {
+  async function setAgencyLevel(levelId: string) {
     try {
-      const res = await fetch('/api/update/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      })
+      const res = await fetch('/api/agency', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level_id: levelId }) })
       const data = await res.json()
-      setUpdateStatus(prev => prev ? { ...prev, update_check_enabled: data.update_check_enabled } : prev)
-      showToast(data.update_check_enabled ? '已开启更新检测' : '已关闭更新检测')
-    } catch (e) {
-      showToast('切换失败')
-    }
+      setCurrentAgency(data || currentAgency)
+      showToast('档位已切换')
+    } catch { showToast('切换失败', 'error') }
   }
 
-  // ── Provider CRUD ──
-
-  function openAddProvider() {
-    setEditingProvider(null)
-    setProviderForm({ id: '', name: '', type: 'openai', api_key: '', base_url: '', models: '' })
-    setAvailableModels([])
-    setModelSearch('')
-  }
-
-  function openEditProvider(p) {
-    setEditingProvider(p.id)
-    setProviderForm({
-      id: p.id, name: p.name, type: p.type,
-      api_key: '', base_url: p.base_url || '',
-      models: (p.models || []).join(', '),
-    })
-    setAvailableModels(p.models || [])
-    setModelSearch('')
-  }
-
-  function selectedModels() {
-    return [...new Set(providerForm.models.split(/[\n,，]+/).map(s => s.trim()).filter(Boolean))]
-  }
-
-  function setSelectedModels(models: string[]) {
-    setProviderForm(f => ({ ...f, models: [...new Set(models)].join(', ') }))
-  }
-
-  function toggleModel(model: string) {
-    const selected = selectedModels()
-    setSelectedModels(selected.includes(model) ? selected.filter(m => m !== model) : [...selected, model])
-  }
-
-  async function fetchProviderModels() {
-    setFetchingModels(true)
+  async function toggleLock(id: string, locked: boolean) {
     try {
-      const res = await fetch('/api/settings/models/discover', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          provider_id: editingProvider || '',
-          type: providerForm.type,
-          api_key: providerForm.api_key,
-          base_url: providerForm.base_url,
-        }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || '拉取模型失败')
-      setAvailableModels(data.models || [])
-      setModelSearch('')
-      showToast(`已拉取 ${data.count || data.models?.length || 0} 个模型，请勾选要使用的模型`)
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : '拉取模型失败')
-    }
-    setFetchingModels(false)
+      await fetch(`/api/manual/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ locked: !locked }) })
+      setManual(prev => prev.map(m => m.id === id ? { ...m, locked: !locked } : m))
+    } catch { /* 静默 */ }
   }
 
-  async function saveProvider() {
-    if (selectedModels().length === 0) {
-      showToast('请至少选择或手动填写一个模型')
-      return
-    }
-    setSaving(true)
-    try {
-      const body = {
-        ...providerForm,
-        models: selectedModels(),
-      }
-      const res = await fetch('/api/settings/providers', {
-        method: 'POST',
-        headers: { "X-Confirm-Delete": "true",  'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.detail || '保存失败')
-      }
-      const data = await res.json()
-      setSettings(data)
-      openAddProvider()
-      const assigned = ['slot_pro', 'slot_flash']
-        .filter(slot => data?.[slot]?.provider_id === body.id)
-        .map(slot => slot === 'slot_pro' ? 'Pro' : 'Flash')
-      showToast(assigned.length ? `Provider 已保存并分配到 ${assigned.join(' / ')}` : 'Provider 已保存')
-    } catch (e) {
-      showToast(e.message)
-    }
-    setSaving(false)
-  }
-
-  async function deleteProvider(id) {
-    if (!confirm(`确定删除此 Provider？`)) return
-    try {
-      const res = await fetch(`/api/settings/providers/${id}`, { method: 'DELETE', headers: { "X-Confirm-Delete": "true" } })
-      const data = await res.json()
-      setSettings(data)
-      showToast('已删除')
-    } catch (e) {
-      showToast('删除失败')
-    }
-  }
-
-  async function testProvider(id) {
-    setTesting(id)
-    try {
-      const res = await fetch('/api/settings/test', {
-        method: 'POST',
-        headers: { "X-Confirm-Delete": "true",  'Content-Type': 'application/json' },
-        body: JSON.stringify({ provider_id: id }),
-      })
-      const data = await res.json()
-      if (data.success) {
-        showToast(`连接成功 (${data.latency_ms}ms): ${data.reply}`)
-      } else {
-        showToast(`连接失败: ${data.error}`)
-      }
-    } catch (e) {
-      showToast('测试请求失败')
-    }
-    setTesting(null)
-  }
-
-  // ── Book overrides ──
-
-  async function saveBookOverrides() {
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/books/${bookId}/settings`, {
-        method: 'PUT',
-        headers: { "X-Confirm-Delete": "true",  'Content-Type': 'application/json' },
-        body: JSON.stringify(bookOverrideForm),
-      })
-      if (!res.ok) throw new Error('保存失败')
-      const data = await res.json()
-      setBookOverrides(data.overrides)
-      setSettings(prev => prev ? { ...prev, mode: data.overrides?.mode || prev.mode } : prev)
-      onModeChanged?.(data.overrides?.mode || settings?.mode)
-      showToast('书籍覆盖已保存')
-    } catch (e) {
-      showToast(e.message || '保存失败')
-    }
-    setSaving(false)
-  }
-
-  async function resetBookOverrides() {
-    setSaving(true)
-    try {
-      const res = await fetch(`/api/books/${bookId}/settings`, { method: 'DELETE', headers: { "X-Confirm-Delete": "true" } })
-      if (!res.ok) throw new Error('重置失败')
-      setBookOverrides(null)
-      setBookOverrideForm({ mode: '', slot_pro_provider_id: '', slot_pro_model: '', slot_flash_provider_id: '', slot_flash_model: '' })
-      showToast('已重置为全局设置')
-    } catch (e) {
-      showToast('重置失败')
-    }
-    setSaving(false)
-  }
-
-  // ── Slots ──
-
-  async function saveSlot(slot, providerId, model) {
-    const body: Record<string, any> = {}
-    if (slot === 'pro') {
-      body.slot_pro_provider_id = providerId
-      body.slot_pro_model = model
-    } else {
-      body.slot_flash_provider_id = providerId
-      body.slot_flash_model = model
-    }
-    try {
-      const res = await fetch('/api/settings/slots', {
-        method: 'POST',
-        headers: { "X-Confirm-Delete": "true",  'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      setSettings(data)
-      showToast('槽位已更新')
-    } catch (e) {
-      showToast('更新失败')
-    }
-  }
-
-  // ── Mode ──
-
-  async function switchMode(mode) {
-    try {
-      const body = { mode }
-      if (mode === 'custom') (body as any).custom_map = customMap
-      const res = await fetch('/api/settings/mode', {
-        method: 'POST',
-        headers: { "X-Confirm-Delete": "true",  'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      const data = await res.json()
-      setSettings(data)
-      onModeChanged?.(mode)
-      showToast(`已切换到 ${MODE_INFO[mode]?.label || mode} 模式`)
-    } catch (e) {
-      showToast('切换失败')
-    }
-  }
-
-  async function saveCustomMap() {
-    try {
-      const res = await fetch('/api/settings/mode', {
-        method: 'POST',
-        headers: { "X-Confirm-Delete": "true",  'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'custom', custom_map: customMap }),
-      })
-      const data = await res.json()
-      setSettings(data)
-      showToast('自定义分配已保存')
-    } catch (e) {
-      showToast('保存失败')
-    }
-  }
-
-  async function saveGenerationSettings() {
-    setSaving(true)
-    try {
-      const res = await fetch('/api/settings/generation', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(generationForm),
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.detail || '保存失败')
-      setSettings(data)
-      setGenerationForm(data.generation)
-      showToast('正文生成参数已保存')
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : '保存失败')
-    }
-    setSaving(false)
-  }
-
-  if (loading) {
-    return (
-      <Modal open onClose={onClose} title="API 设置" size="md">
-        <div className="p-8 text-zinc-400 text-sm">
-          <Icon name="loader" size={16} className="animate-spin mr-2 inline" />
-          加载中...
-        </div>
-      </Modal>
-    )
-  }
-
-  const providers = settings?.providers || []
-  const currentMode = settings?.mode || 'split'
+  const tabs = [
+    { key: 'models', label: '模型', icon: 'database' },
+    { key: 'agency', label: '档位', icon: 'zap' },
+    { key: 'memory', label: '记忆系统', icon: 'brain' },
+    { key: 'about', label: '关于', icon: 'info' },
+  ]
 
   return (
-    <Modal open onClose={onClose} title="API 设置" size="lg" panelClassName="max-h-[85vh] flex flex-col">
-        {/* Header */}
-        <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
-          <h2 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
-            <Icon name="settings" size={16} /> API 设置
-          </h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-1 rounded-lg hover:bg-zinc-800" aria-label="关闭">
-            <Icon name="x" size={16} />
+    <Modal open onClose={onClose} title="设置" size="lg">
+      <div className="flex border-b border-zinc-800 px-5 shrink-0">
+        {tabs.map(t => (
+          <button
+            key={t.key}
+            onClick={() => setTab(t.key)}
+            className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
+              tab === t.key ? 'border-blue-500 text-blue-400' : 'border-transparent text-zinc-500 hover:text-zinc-300'
+            }`}
+          >
+            <Icon name={t.icon} size={12} /> {t.label}
           </button>
-        </div>
+        ))}
+      </div>
 
-        {/* Tabs */}
-        <div className="flex border-b border-zinc-800 px-5 shrink-0">
-          {[
-            { key: 'providers', label: 'Provider', icon: 'globe' },
-            { key: 'slots', label: '模型分配', icon: 'layers' },
-            { key: 'mode', label: '模式', icon: 'zap' },
-            { key: 'generation', label: '生成参数', icon: 'sliders' },
-            ...(bookId ? [{ key: 'book', label: '书籍覆盖', icon: 'book-open' }] : []),
-            { key: 'memory', label: '记忆系统', icon: 'database' },
-            { key: 'about', label: '关于', icon: 'info' },
-          ].map(t => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium border-b-2 transition-colors ${
-                tab === t.key
-                  ? 'border-blue-500 text-blue-400'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              <Icon name={t.icon} size={12} /> {t.label}
-            </button>
-          ))}
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-5 py-4">
-          {/* ── Tab: Providers ── */}
-          {tab === 'providers' && (
-            <div className="space-y-4">
-              {/* Provider list */}
-              {providers.map(p => (
-                <div key={p.id} className="border border-zinc-800 rounded-xl p-3">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2">
-                      <Icon name="database" size={14} className="text-zinc-500" />
-                      <span className="text-xs font-semibold text-zinc-300">{p.name}</span>
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">
-                        {PROVIDER_TYPE_LABELS[p.type] || p.type}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <button onClick={() => testProvider(p.id)} disabled={testing === p.id}
-                        className="text-[10px] text-zinc-500 hover:text-emerald-400 px-1.5 py-0.5 rounded hover:bg-zinc-800 disabled:opacity-50">
-                        {testing === p.id ? '测试中...' : '测试连接'}
-                      </button>
-                      <button onClick={() => openEditProvider(p)}
-                        aria-label={`编辑 ${p.name}`}
-                        className="text-zinc-500 hover:text-blue-400 p-1 rounded hover:bg-zinc-800">
-                        <Icon name="edit" size={12} />
-                      </button>
-                      <button onClick={() => deleteProvider(p.id)}
-                        aria-label={`删除 ${p.name}`}
-                        className="text-zinc-500 hover:text-red-400 p-1 rounded hover:bg-zinc-800">
-                        <Icon name="trash" size={12} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="text-[10px] text-zinc-600 space-y-0.5">
-                    <div>ID: {p.id}</div>
-                    {p.base_url && <div>URL: {p.base_url}</div>}
-                    <div>Key: {p.api_key || '(未设置)'}</div>
-                    <div>Models: {(p.models || []).join(', ')}</div>
-                  </div>
-                </div>
-              ))}
-
-              {/* Add/Edit form */}
-              {editingProvider !== null || editingProvider === null ? null : null}
-              <div className="border border-zinc-800 rounded-xl p-3">
-                <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-semibold text-zinc-300">
-                    {editingProvider !== null ? `编辑: ${editingProvider}` : '添加 Provider'}
-                  </span>
-                  {editingProvider !== null && (
-                    <button onClick={openAddProvider} className="text-zinc-500 hover:text-zinc-300 text-[10px]">
-                      取消
-                    </button>
-                  )}
-                </div>
-                <div className="space-y-2.5">
-                  <div className="flex gap-2">
-                    <div className="flex-1">
-                      <label className="text-[10px] text-zinc-500 block mb-1">ID (唯一标识)</label>
-                      <input value={providerForm.id} onChange={e => setProviderForm(f => ({ ...f, id: e.target.value }))}
-                        disabled={editingProvider !== null}
-                        placeholder="deepseek-main"
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600 disabled:opacity-50" />
-                    </div>
-                    <div className="flex-1">
-                      <label className="text-[10px] text-zinc-500 block mb-1">名称</label>
-                      <input value={providerForm.name} onChange={e => setProviderForm(f => ({ ...f, name: e.target.value }))}
-                        placeholder="DeepSeek 主力"
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600" />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-zinc-500 block mb-1">类型</label>
-                    <select value={providerForm.type} onChange={e => {
-                      const type = e.target.value
-                      setProviderForm(f => ({ ...f, type, base_url: PROVIDER_DEFAULT_URLS[type] || '' }))
-                      setAvailableModels([])
-                    }}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600">
-                      {Object.entries(PROVIDER_TYPE_LABELS).map(([k, v]) => (
-                        <option key={k} value={k}>{v}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-zinc-500 block mb-1">API Key {editingProvider && '! 留空则保持原Key'}</label>
-                    <input value={providerForm.api_key} onChange={e => setProviderForm(f => ({ ...f, api_key: e.target.value }))}
-                      type="password" placeholder={editingProvider ? '留空保持不变' : 'sk-...'}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600" />
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-zinc-500 block mb-1">Base URL</label>
-                    <input value={providerForm.base_url} onChange={e => {
-                      setProviderForm(f => ({ ...f, base_url: e.target.value }))
-                      setAvailableModels([])
-                    }}
-                      placeholder={PROVIDER_DEFAULT_URLS[providerForm.type] || 'https://api.example.com/v1'}
-                      className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600" />
-                    <p className="text-[9px] text-zinc-600 mt-1">
-                      留空使用官方地址；第三方中转请填写它提供的 OpenAI 兼容地址
-                    </p>
-                  </div>
-                  <div className="border border-zinc-800 rounded-lg p-2.5 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <div className="text-[10px] text-zinc-400 font-medium">模型列表</div>
-                        <div className="text-[9px] text-zinc-600">已选 {selectedModels().length} 个</div>
-                      </div>
-                      <button onClick={fetchProviderModels} disabled={fetchingModels || (!providerForm.api_key && !editingProvider)}
-                        className="flex items-center gap-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-40 text-sky-400 px-2.5 py-1.5 rounded text-[10px] transition-colors">
-                        <Icon name="refresh" size={11} className={fetchingModels ? 'animate-spin' : ''} />
-                        {fetchingModels ? '拉取中...' : '拉取模型'}
-                      </button>
-                    </div>
-
-                    {availableModels.length > 0 && (
-                      <>
-                        <div className="flex gap-1.5">
-                          <input value={modelSearch} onChange={e => setModelSearch(e.target.value)}
-                            placeholder="搜索模型名称"
-                            className="flex-1 bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-[10px] text-zinc-300 outline-none focus:border-blue-600" />
-                          <button onClick={() => setSelectedModels(availableModels)}
-                            className="text-[9px] text-zinc-500 hover:text-zinc-300 px-1.5">全选</button>
-                          <button onClick={() => setSelectedModels([])}
-                            className="text-[9px] text-zinc-500 hover:text-zinc-300 px-1.5">清空</button>
-                        </div>
-                        <div className="max-h-44 overflow-y-auto border border-zinc-800 rounded bg-zinc-950/50 p-1">
-                          {availableModels
-                            .filter(model => model.toLowerCase().includes(modelSearch.trim().toLowerCase()))
-                            .map(model => (
-                              <label key={model} className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-zinc-800/70 cursor-pointer">
-                                <input type="checkbox" checked={selectedModels().includes(model)}
-                                  onChange={() => toggleModel(model)} className="accent-sky-500" />
-                                <span className="text-[10px] text-zinc-300 font-mono break-all">{model}</span>
-                              </label>
-                            ))}
-                        </div>
-                      </>
-                    )}
-
-                    <details>
-                      <summary className="text-[9px] text-zinc-600 hover:text-zinc-400 cursor-pointer">
-                        手动填写（用于不支持模型拉取的服务）
-                      </summary>
-                      <textarea value={providerForm.models}
-                        onChange={e => setProviderForm(f => ({ ...f, models: e.target.value }))}
-                        rows={2} placeholder="model-a, model-b"
-                        className="mt-1.5 w-full bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-[10px] text-zinc-300 outline-none focus:border-blue-600 resize-y" />
-                    </details>
-                  </div>
-                  <button onClick={saveProvider} disabled={saving || !providerForm.id || !providerForm.name || selectedModels().length === 0}
-                    className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-xs py-2 rounded-lg font-medium transition-colors">
-                    {saving ? '保存中...' : '保存 Provider'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── Tab: Slots ── */}
-          {tab === 'slots' && (
-            <SettingsSlotsTab
-              providers={providers}
-              slotPro={settings.slot_pro}
-              slotFlash={settings.slot_flash}
-              currentMode={currentMode}
-              customMap={customMap}
-              taskLabels={TASK_LABELS}
-              onSaveSlot={(slotName, providerId, model) => saveSlot(slotName, providerId, model)}
-            />
-          )}
-
-          {/* ── Tab: Mode ── */}
-          {tab === 'mode' && (
-            <div className="space-y-3">
-              {Object.entries(MODE_INFO).map(([mode, info]) => (
-                <button
-                  key={mode}
-                  onClick={() => switchMode(mode)}
-                  className={`w-full text-left border rounded-xl p-4 transition-all ${
-                    currentMode === mode
-                      ? `border-${info.color}-700 bg-${info.color}-950/30`
-                      : 'border-zinc-800 hover:border-zinc-700'
-                  }`}
-                >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Icon name={info.icon} size={14} className={currentMode === mode ? `text-${info.color}-400` : 'text-zinc-500'} />
-                    <span className={`text-xs font-semibold ${currentMode === mode ? `text-${info.color}-400` : 'text-zinc-400'}`}>
-                      {info.label}
-                    </span>
-                    {currentMode === mode && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded bg-${info.color}-900/50 text-${info.color}-400 ml-auto`}>
-                        当前
-                      </span>
-                    )}
-                  </div>
-                  <div className="text-[10px] text-zinc-500">{info.desc}</div>
-                </button>
-              ))}
-
-              {/* Custom map */}
-              {currentMode === 'custom' && (
-                <div className="border border-zinc-800 rounded-xl p-4 space-y-2">
-                  <div className="text-xs font-semibold text-zinc-300 mb-2">自定义任务分配</div>
-                  {Object.entries(TASK_LABELS).map(([key, label]) => (
-                    <div key={key} className="flex items-center justify-between">
-                      <span className="text-xs text-zinc-400">{label}</span>
-                      <div className="flex gap-1">
-                        {['pro', 'flash'].map(slot => (
-                          <button
-                            key={slot}
-                            onClick={() => setCustomMap(m => ({ ...m, [key]: slot }))}
-                            className={`text-[10px] px-2 py-1 rounded transition-colors ${
-                              (customMap[key] || 'flash') === slot
-                                ? slot === 'pro' ? 'bg-amber-900/50 text-amber-400' : 'bg-emerald-900/50 text-emerald-400'
-                                : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'
-                            }`}
-                          >
-                            {slot === 'pro' ? 'Pro' : 'Flash'}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  <button onClick={saveCustomMap}
-                    className="mt-2 w-full bg-blue-600 hover:bg-blue-500 text-white text-xs py-2 rounded-lg font-medium transition-colors">
-                    保存自定义分配
-                  </button>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* ── Tab: Prose Generation Parameters ── */}
-          {tab === 'generation' && (
-            <div className="space-y-4">
-              <div className="rounded-xl border border-sky-900/50 bg-sky-950/20 p-3">
-                <div className="text-xs font-semibold text-sky-300">只影响小说正文与改写</div>
-                <p className="mt-1 text-[10px] leading-relaxed text-zinc-500">
-                  Agent 的工具选择仍使用稳定参数，因此提高创造性不会让工具调用更容易“打架”。
-                  不同模型对参数的敏感程度不同，建议小幅调整后用同一段提示词对比。
-                </p>
-              </div>
-
-              {/* Reasoning effort tier */}
-              <div className="rounded-xl border border-zinc-800 p-4">
-                <div className="mb-2 flex items-center justify-between">
-                  <label className="text-xs font-medium text-zinc-300">思考强度</label>
-                  <span className="text-[10px] text-zinc-500">
-                    模型生成前思考的深度，影响正文与 Agent 决策
-                  </span>
-                </div>
-                {(() => {
-                  const scale = effortMeta?.scale || []
-                  const writingTiers = new Set(effortMeta?.families?.writing || ['off', 'low', 'medium', 'high'])
-                  return (
-                    <div className="grid grid-cols-5 gap-1.5">
-                      {scale.map((opt: any) => {
-                        const supported = writingTiers.has(opt.key)
-                        return (
-                          <button
-                            key={opt.key}
-                            title={`${opt.hint || ''}${supported ? '' : '（当前写作模型不支持该档位）'}`}
-                            onClick={() => setGenerationForm(f => ({ ...f, reasoning_effort: opt.key }))}
-                            className={`rounded-lg border px-2 py-1.5 text-[11px] transition-colors ${
-                              generationForm.reasoning_effort === opt.key
-                                ? 'border-sky-500 bg-sky-950/40 text-sky-300'
-                                : supported
-                                  ? 'border-zinc-700 bg-zinc-800 text-zinc-500 hover:text-zinc-300'
-                                  : 'border-zinc-800 bg-zinc-900/40 text-zinc-700 cursor-not-allowed opacity-60'
-                            }`}
-                          >
-                            {opt.label}
-                          </button>
-                        )
-                      })}
-                    </div>
-                  )
-                })()}
-                <p className="mt-1 text-[10px] text-zinc-600">
-                  不同模型支持的档位不同（DeepSeek 3 档、o 系列 4 档、Claude/Gemini 预算式）。不支持当前写作模型的档位已置灰，选择后仍会就近映射到最近档位。
-                </p>
-              </div>
-
-              {[
-                {
-                  key: 'temperature', label: '温度 Temperature', min: 0, max: 2, step: 0.05,
-                  hint: '越高越有变化，越低越保守。文学续写建议 0.55–0.85。',
-                },
-                {
-                  key: 'top_p', label: '候选范围 Top P', min: 0.05, max: 1, step: 0.05,
-                  hint: '控制候选词范围。一般只需与温度二选一重点调整。',
-                },
-                {
-                  key: 'frequency_penalty', label: '重复惩罚 Frequency', min: -2, max: 2, step: 0.05,
-                  hint: '减少同一词句反复出现。过高会导致用词生硬，建议 0–0.35。',
-                },
-                {
-                  key: 'presence_penalty', label: '话题拓展 Presence', min: -2, max: 2, step: 0.05,
-                  hint: '越高越鼓励引入新概念；续写容易跑题，通常保持 0 或略低。',
-                },
-              ].map(item => (
-                <div key={item.key} className="rounded-xl border border-zinc-800 p-4">
-                  <div className="mb-2 flex items-center justify-between">
-                    <label className="text-xs font-medium text-zinc-300">{item.label}</label>
-                    <input
-                      type="number"
-                      min={item.min}
-                      max={item.max}
-                      step={item.step}
-                      value={generationForm[item.key]}
-                      onChange={e => setGenerationForm(f => ({ ...f, [item.key]: Number(e.target.value) }))}
-                      className="w-20 rounded-lg border border-zinc-700 bg-zinc-800 px-2 py-1 text-right text-xs text-zinc-200 outline-none focus:border-sky-600"
-                    />
-                  </div>
-                  <input
-                    type="range"
-                    min={item.min}
-                    max={item.max}
-                    step={item.step}
-                    value={generationForm[item.key]}
-                    onChange={e => setGenerationForm(f => ({ ...f, [item.key]: Number(e.target.value) }))}
-                    className="w-full accent-sky-500"
-                  />
-                  <p className="mt-1 text-[10px] text-zinc-600">{item.hint}</p>
-                </div>
-              ))}
-
-              <div className="rounded-xl border border-zinc-800 p-4">
-                <label className="text-xs font-medium text-zinc-300">单次最大输出 Token</label>
-                <input
-                  type="number"
-                  min={512}
-                  max={65536}
-                  step={512}
-                  value={generationForm.max_output_tokens}
-                  onChange={e => setGenerationForm(f => ({ ...f, max_output_tokens: Number(e.target.value) }))}
-                  className="mt-2 w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-xs text-zinc-200 outline-none focus:border-sky-600"
-                />
-                <p className="mt-1 text-[10px] text-zinc-600">最终仍受所选模型和 API 服务商上限限制。</p>
-              </div>
-
-              <button
-                onClick={saveGenerationSettings}
-                disabled={saving}
-                className="w-full rounded-lg bg-sky-600 py-2 text-xs font-medium text-white transition-colors hover:bg-sky-500 disabled:bg-zinc-700 disabled:text-zinc-500"
-              >
-                {saving ? '保存中...' : '保存正文生成参数'}
-              </button>
-            </div>
-          )}
-
-          {/* ── Tab: Book Overrides ── */}
-          {tab === 'book' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-xs font-semibold text-zinc-300">当前书籍的 API 覆盖</div>
-                  <div className="text-[10px] text-zinc-500 mt-0.5">覆盖只影响当前书籍，不影响其他书籍的全局设置</div>
-                </div>
-                {bookOverrides && (
-                  <button
-                    onClick={resetBookOverrides}
-                    disabled={saving}
-                    className="text-[10px] text-amber-500 hover:text-amber-400 px-2 py-1 rounded hover:bg-amber-950/30 transition-colors"
-                  >
-                    重置为全局
-                  </button>
-                )}
-              </div>
-
-              {/* Mode override */}
-              <div className="border border-zinc-800 rounded-xl p-3">
-                <div className="text-[10px] text-zinc-500 mb-2">LLM 模式覆盖</div>
-                <div className="flex gap-1.5 flex-wrap">
-                  {['', ...Object.keys(MODE_INFO)].map(m => (
-                    <button
-                      key={m}
-                      onClick={() => setBookOverrideForm(f => ({ ...f, mode: m }))}
-                      className={`text-[10px] px-2.5 py-1 rounded transition-colors ${
-                        bookOverrideForm.mode === m
-                          ? 'bg-blue-900/50 text-blue-400 border border-blue-700/50'
-                          : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300 border border-transparent'
-                      }`}
-                    >
-                      {m || '全局默认'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Provider/model overrides */}
-              {(['pro', 'flash'] as const).map(slotName => {
-                const providerKey = `slot_${slotName}_provider_id`
-                const modelKey = `slot_${slotName}_model`
-                const selectedProviderId = bookOverrideForm[providerKey] || ''
-                const selectedProvider = providers.find(p => p.id === selectedProviderId)
-                const globalSlot = slotName === 'pro' ? settings?.slot_pro : settings?.slot_flash
-                return (
-                  <div key={slotName} className="border border-zinc-800 rounded-xl p-3">
-                    <div className="text-[10px] text-zinc-500 mb-2">
-                      {slotName === 'pro' ? 'Pro 高质量槽位' : 'Flash 快速槽位'}
-                    </div>
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={selectedProviderId}
-                        onChange={e => {
-                          const providerId = e.target.value
-                          const provider = providers.find(p => p.id === providerId)
-                          setBookOverrideForm(f => ({
-                            ...f,
-                            [providerKey]: providerId,
-                            [modelKey]: provider?.models?.[0] || '',
-                          }))
-                        }}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600"
-                      >
-                        <option value="">
-                          继承全局：{providers.find(p => p.id === globalSlot?.provider_id)?.name || '未选择'}
-                        </option>
-                        {providers.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                      </select>
-                      <select
-                        value={bookOverrideForm[modelKey] || ''}
-                        disabled={!selectedProvider}
-                        onChange={e => setBookOverrideForm(f => ({ ...f, [modelKey]: e.target.value }))}
-                        className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 outline-none focus:border-blue-600 disabled:text-zinc-600"
-                      >
-                        <option value="">
-                          {selectedProvider ? '-- 选择模型 --' : `继承：${globalSlot?.model || '未选择'}`}
-                        </option>
-                        {(selectedProvider?.models || []).map(model => (
-                          <option key={model} value={model}>{model}</option>
-                        ))}
-                      </select>
-                    </div>
-                  </div>
-                )
-              })}
-
-              {/* Global reference */}
-              <div className="border border-zinc-800 rounded-xl p-3 bg-zinc-950/50">
-                <div className="text-[10px] text-zinc-600 mb-2">全局设置参考</div>
-                <div className="grid grid-cols-2 gap-2 text-[10px]">
-                  <div>
-                    <span className="text-zinc-500">模式: </span>
-                    <span className="text-zinc-400">{settings?.mode || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500">Pro 槽位: </span>
-                    <span className="text-zinc-400">{settings?.slot_pro?.model || '-'}</span>
-                  </div>
-                  <div>
-                    <span className="text-zinc-500">Flash 槽位: </span>
-                    <span className="text-zinc-400">{settings?.slot_flash?.model || '-'}</span>
-                  </div>
-                </div>
-              </div>
-
-              {bookOverrides && (
-                <div className="border border-purple-800/40 rounded-xl p-3 bg-purple-950/20">
-                  <div className="text-[10px] text-purple-400 mb-1">已保存的覆盖</div>
-                  <pre className="text-[10px] text-purple-300/70 whitespace-pre-wrap">{JSON.stringify(bookOverrides, null, 2)}</pre>
-                </div>
-              )}
-
-              <button
-                onClick={saveBookOverrides}
-                disabled={saving}
-                className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white text-xs py-2 rounded-lg font-medium transition-colors"
-              >
-                {saving ? '保存中...' : '保存书籍覆盖'}
-              </button>
-            </div>
-          )}
-
-          {/* ── Tab: Memory ── */}
-          {tab === 'memory' && (
-            <MemoryPanel bookId={bookId} onToast={showToast} />
-          )}
-
-          {/* ── Tab: About / Update ── */}
-          {tab === 'about' && (
-            <SettingsAboutTab
-              updateStatus={updateStatus}
-              updateResult={updateResult}
-              checking={checking}
-              onToggleUpdateCheck={(v) => doToggleUpdateCheck(v)}
-              onCheckUpdate={doCheckUpdate}
-            />
-          )}
-        </div>
-
-        {/* Toast */}
-        {toast && (
-          <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-zinc-800 text-zinc-300 text-xs px-4 py-2 rounded-lg shadow-lg border border-zinc-700">
-            {toast}
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        {error && <div className="mb-3 px-3 py-2 bg-red-500/10 border border-red-500/30 text-red-400 text-xs rounded">{error}</div>}
+        {loading ? (
+          <div className="flex items-center justify-center py-10 text-zinc-500 text-sm gap-2">
+            <div className="w-5 h-5 border-2 border-zinc-700 border-t-zinc-400 rounded-full animate-spin" role="status" aria-label="加载中" />
+            加载中...
           </div>
+        ) : (
+          <>
+            {/* ── Tab: 模型 ── */}
+            {tab === 'models' && (
+              <div className="space-y-2">
+                <p className="text-xs text-zinc-500 mb-3">模型注册表（V4 多模型：1M 上下文 deepseek-v4 系列）</p>
+                {models.length === 0 && <p className="text-sm text-zinc-600">暂无模型</p>}
+                {models.map(m => (
+                  <div key={m.id} className="flex items-center gap-3 px-3 py-2.5 bg-zinc-900/50 rounded-lg border border-zinc-800">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm text-zinc-200 truncate">{m.name}</span>
+                        {m.is_active && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-900/40 text-emerald-400 rounded">激活</span>}
+                      </div>
+                      <div className="text-[11px] text-zinc-500 mt-0.5 truncate">{m.model}{m.context_window ? ` · ${Math.round(m.context_window / 10000) / 100}M 上下文` : ''}</div>
+                    </div>
+                    {!m.is_active && (
+                      <button onClick={() => activateModel(m.id)} className="text-xs px-2.5 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 rounded shrink-0">
+                        激活
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── Tab: 档位 ── */}
+            {tab === 'agency' && (
+              <div className="space-y-2">
+                <p className="text-xs text-zinc-500 mb-3">能动档位：AI 写作自由度（0=只听写 → 4=自主发挥）</p>
+                {agency.length === 0 && <p className="text-sm text-zinc-600">暂无档位</p>}
+                {agency.map(lv => (
+                  <button
+                    key={lv.id}
+                    onClick={() => setAgencyLevel(lv.id)}
+                    className={`w-full text-left px-3 py-2.5 rounded-lg border transition-colors ${
+                      currentAgency?.id === lv.id ? 'bg-sky-900/30 border-sky-700/60' : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className={`text-sm ${currentAgency?.id === lv.id ? 'text-sky-300' : 'text-zinc-200'}`}>{lv.name}</span>
+                      <span className="text-[10px] text-zinc-500">temp {lv.temperature}</span>
+                    </div>
+                    {lv.description && <p className="text-[11px] text-zinc-500 mt-0.5">{lv.description}</p>}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* ── Tab: 记忆系统（心智）── */}
+            {tab === 'memory' && (
+              <div className="space-y-2">
+                <p className="text-xs text-zinc-500 mb-3">心智条目：AI 对你的写作偏好的记忆（用户主权，可锁定）</p>
+                {manual.length === 0 && <p className="text-sm text-zinc-600">暂无心智条目</p>}
+                {manual.map(entry => (
+                  <div key={entry.id} className="px-3 py-2.5 bg-zinc-900/50 rounded-lg border border-zinc-800">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm text-zinc-200 flex-1">{entry.content}</p>
+                      <button onClick={() => toggleLock(entry.id, !!entry.locked)} className={`shrink-0 text-[11px] px-2 py-0.5 rounded ${entry.locked ? 'bg-yellow-900/40 text-yellow-400' : 'text-zinc-500 hover:text-zinc-300'}`}>
+                        {entry.locked ? '已锁定' : '锁定'}
+                      </button>
+                    </div>
+                    <div className="text-[10px] text-zinc-600 mt-1 flex gap-2">
+                      <span>{entry.category || 'style'}</span>
+                      {entry.activity && <span>活跃度: {entry.activity}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* ── Tab: 关于 ── */}
+            {tab === 'about' && (
+              <div className="space-y-3">
+                <div className="px-3 py-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
+                  <p className="text-sm text-zinc-200 font-medium">AnySpark v4</p>
+                  <p className="text-[11px] text-zinc-500 mt-1">小说特化版 AI 写作工作台——旧壳配新芯（feat/shell-port）</p>
+                  <p className="text-[11px] text-zinc-600 mt-2">
+                    能力：心智模型（偏好记忆）/ 知识图谱 / 特化工具 / 多项目 / 互动推演 / 评审团
+                  </p>
+                </div>
+                <div className="px-3 py-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
+                  <p className="text-sm text-zinc-200 font-medium">快捷键</p>
+                  <div className="text-[11px] text-zinc-500 mt-1 space-y-0.5">
+                    <p>Ctrl+1..N — 切换面板</p>
+                    <p>Ctrl+K — 命令面板</p>
+                    <p>Ctrl+. — 会话管理</p>
+                    <p>分屏时右键 tab — 设为次面板</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </>
         )}
+      </div>
+
+      {toast && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 bg-zinc-800 border border-zinc-700 text-zinc-200 text-xs rounded-lg shadow-lg">
+          {toast}
+        </div>
+      )}
     </Modal>
   )
 }

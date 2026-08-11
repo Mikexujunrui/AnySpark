@@ -94,6 +94,7 @@ export const api = {
   getSummary: knowledge.getSummary,
   deleteEntity: knowledge.deleteEntity,
   updateEntity: knowledge.updateEntity,
+  createEntity: knowledge.createEntity,
 
   // Extract
   extract: knowledge.extract,

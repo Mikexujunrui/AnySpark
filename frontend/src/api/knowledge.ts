@@ -1,6 +1,6 @@
 // Knowledge / Styles / Skills / Workflows / Stats — V4 适配层
 // 图谱→/api/graph；文风技巧→/api/skills；工作流→/api/workflows；统计→/api/stats。
-import { del, get, post, put } from "./http";
+import { del, get, patch, post, put } from "./http";
 import type { SkillData, SkillsListData, StylesListData } from "./types";
 
 // ── Workflows（工作流池）──
@@ -15,17 +15,41 @@ export const getCharacterMentions = (): Promise<unknown> => Promise.resolve([]);
 export const refreshCharacterMentions = (): Promise<unknown> => Promise.resolve({});
 
 // ── Knowledge（图谱）──
-export const getSummary = (bookId: string): Promise<unknown> => {
+// V4 结构：entities=[{id,name,entity_type,aliases,description,state,first_chapter,last_chapter}]
+//          relations=[{id,from_name,to_name,rel_type,description}]
+//          events=[{id,chapter_ref,time_point,label,description,involved}]
+export const getSummary = (bookId: string): Promise<Record<string, unknown>> => {
+  const bid = bookId || "main";
   return Promise.all([
-    get(`/api/graph/entities?book_id=${bookId || "main"}`),
-    get(`/api/graph/relations?book_id=${bookId || "main"}`),
-    get(`/api/graph/events?book_id=${bookId || "main"}`),
-  ]).then(([entities, relations, events]) => ({ entities, relations, events }));
+    get(`/api/graph/entities?book_id=${bid}`),
+    get(`/api/graph/relations?book_id=${bid}`),
+    get(`/api/graph/events?book_id=${bid}`),
+    get(`/api/plot`).catch(() => []),
+  ]).then(([entities, relations, events, foreshadows]) => ({
+    entities: entities as unknown[],
+    relations: relations as unknown[],
+    events: events as unknown[],
+    foreshadows: foreshadows as unknown[],
+  }));
 };
+// 实体搜索（V4 支持 q 模糊 + entity_type 过滤）
+export const searchEntities = (q: string, entityType = "", bookId = "main"): Promise<unknown[]> =>
+  get(`/api/graph/entities?q=${encodeURIComponent(q)}&entity_type=${encodeURIComponent(entityType)}&book_id=${bookId}`);
+// 删除实体（name 或 id 定位）
 export const deleteEntity = (_bookId: string, entityId: string): Promise<unknown> =>
   del(`/api/graph/entities/${encodeURIComponent(entityId)}`);
+// 编辑实体（V4 PATCH：aliases/description/state/entity_type）
 export const updateEntity = (_bookId: string, entityId: string, payload: unknown): Promise<unknown> =>
-  put(`/api/graph/entities/${encodeURIComponent(entityId)}`, payload);
+  patch(`/api/graph/entities/${encodeURIComponent(entityId)}`, payload);
+// 新建实体（V4 POST：name/entity_type/aliases/description/state）
+export const createEntity = (data: {
+  name: string;
+  entity_type?: string;
+  aliases?: string[];
+  description?: string;
+  state?: string;
+  book_id?: string;
+}): Promise<unknown> => post("/api/graph/entities", data);
 
 // ── Extract（图谱抽取：V4 POST /api/graph/extract）──
 export const extract = (text: string, bookId: string): Promise<unknown> =>

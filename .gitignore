@@ -61,3 +61,4 @@ benchmarks/writing/hunter/
 
 # ---- pi 运行时产物 ----
 .pi-subagents/
+frontend_v4_backup/
