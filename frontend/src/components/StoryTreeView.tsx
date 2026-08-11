@@ -1,27 +1,145 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useStoryStore } from "../stores/storyStore";
-import type { StoryNode, StoryThread } from "../api/story";
+import type { StoryNode } from "../api/story";
 
-// 节点样式按 kind 区分
-const KIND_STYLES: Record<StoryNode["kind"], { bg: string; border: string; label: string }> = {
-  root: { bg: "bg-amber-900/30", border: "border-amber-500", label: "根" },
-  main: { bg: "bg-emerald-900/30", border: "border-emerald-500", label: "主线" },
-  anchor: { bg: "bg-purple-900/30", border: "border-purple-500", label: "锚点" },
-  candidate: { bg: "bg-zinc-800/50", border: "border-zinc-600 border-dashed", label: "候选" },
-  subplot: { bg: "bg-blue-900/30", border: "border-blue-500", label: "支线" },
-  loop: { bg: "bg-rose-900/30", border: "border-rose-500", label: "循环" },
+/* ── 节点样式（按 kind 区分）── */
+const KIND_STYLES: Record<
+  StoryNode["kind"],
+  { fill: string; stroke: string; label: string; text: string }
+> = {
+  root: { fill: "rgba(146,64,14,0.35)", stroke: "#d97706", label: "根", text: "#fcd34d" },
+  main: { fill: "rgba(6,78,59,0.45)", stroke: "#10b981", label: "主线", text: "#6ee7b7" },
+  anchor: { fill: "rgba(88,28,135,0.4)", stroke: "#a855f7", label: "锚点", text: "#d8b4fe" },
+  candidate: { fill: "rgba(39,39,42,0.8)", stroke: "#71717a", label: "候选", text: "#a1a1aa" },
+  subplot: { fill: "rgba(30,58,138,0.4)", stroke: "#3b82f6", label: "支线", text: "#93c5fd" },
+  loop: { fill: "rgba(136,19,55,0.4)", stroke: "#f43f5e", label: "循环", text: "#fda4af" },
 };
 
+const NODE_W = 132;
+const NODE_H = 52;
+const LAYER_GAP = 210; // 层间距（x）
+const ROW_GAP = 88; // 同层节点间距（y）
+
+interface Pos {
+  x: number;
+  y: number;
+}
+
 export default function StoryTreeView() {
-  const { nodes, threads, loading, selectedNodeId, fetchTree, addNode, choose, anchor, removeNode, selectNode } =
+  const { nodes, threads, selectedNodeId, fetchTree, addNode, choose, anchor, removeNode, selectNode } =
     useStoryStore();
   const [showAddInput, setShowAddInput] = useState(false);
   const [newContent, setNewContent] = useState("");
   const [parentId, setParentId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // 画布变换（缩放/平移）
+  const [zoom, setZoom] = useState(0.9);
+  const [pan, setPan] = useState<Pos>({ x: 24, y: 24 });
+  // 节点手动拖拽位置（本地，不持久化）
+  const [manualPos, setManualPos] = useState<Record<string, Pos>>({});
+
+  const svgRef = useRef<SVGSVGElement>(null);
+  const dragRef = useRef<{ id: string; dx: number; dy: number; moved: boolean } | null>(null);
+  const panRef = useRef<{ x0: number; y0: number; px: number; py: number } | null>(null);
 
   useEffect(() => {
     fetchTree();
   }, [fetchTree]);
+
+  /* ── 分层布局：root=0，子节点右移一层；同层按创建序纵向排 ── */
+  const layout = useMemo(() => {
+    const layer: Record<string, number> = {};
+    const childrenOf: Record<string, string[]> = {};
+    for (const n of nodes) {
+      childrenOf[n.parent_id ?? "__root__"] = childrenOf[n.parent_id ?? "__root__"] ?? [];
+      childrenOf[n.parent_id ?? "__root__"].push(n.id);
+    }
+    const rootIds = (childrenOf["__root__"] ?? []).filter((id) => nodes.some((n) => n.id === id && !n.parent_id));
+    // BFS 分层
+    const queue: { id: string; d: number }[] = rootIds.map((id) => ({ id, d: 0 }));
+    for (const n of nodes) {
+      if (n.parent_id && !layer[n.parent_id]) {
+        queue.push({ id: n.id, d: 0 });
+      }
+    }
+    const visited = new Set<string>();
+    while (queue.length) {
+      const cur = queue.shift()!;
+      if (visited.has(cur.id)) continue;
+      visited.add(cur.id);
+      layer[cur.id] = Math.max(layer[cur.id] ?? 0, cur.d);
+      for (const cid of childrenOf[cur.id] ?? []) queue.push({ id: cid, d: (layer[cur.id] ?? 0) + 1 });
+    }
+    // 同层分组 + 排序（root 优先、main 优先）
+    const byLayer: Record<number, string[]> = {};
+    for (const n of nodes) {
+      const l = layer[n.id] ?? 0;
+      byLayer[l] = byLayer[l] ?? [];
+      byLayer[l].push(n.id);
+    }
+    const kindRank: Record<string, number> = { root: 0, main: 1, anchor: 2, subplot: 3, candidate: 4, loop: 5 };
+    for (const l of Object.keys(byLayer)) {
+      byLayer[+l].sort((a, b) => {
+        const na = nodes.find((n) => n.id === a)!;
+        const nb = nodes.find((n) => n.id === b)!;
+        return (kindRank[na.kind] ?? 9) - (kindRank[nb.kind] ?? 9) || na.created_at.localeCompare(nb.created_at);
+      });
+    }
+    // 坐标
+    const pos: Record<string, Pos> = {};
+    for (const l of Object.keys(byLayer)) {
+      byLayer[+l].forEach((id, idx) => {
+        pos[id] = { x: +l * LAYER_GAP, y: idx * ROW_GAP };
+      });
+    }
+    return { pos, byLayer, layer };
+  }, [nodes]);
+
+  // 最终位置：手动拖拽优先，否则布局
+  const finalPos = (id: string): Pos => manualPos[id] ?? layout.pos[id] ?? { x: 0, y: 0 };
+
+  /* ── 交互：节点拖拽 ── */
+  const onNodePointerDown = (e: React.PointerEvent, id: string) => {
+    e.stopPropagation();
+    const p = finalPos(id);
+    dragRef.current = { id, dx: e.clientX - p.x * zoom, dy: e.clientY - p.y * zoom, moved: false };
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+  };
+  const onNodePointerMove = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    const d = dragRef.current;
+    d.moved = true;
+    const nx = (e.clientX - d.dx) / zoom;
+    const ny = (e.clientY - d.dy) / zoom;
+    setManualPos((prev) => ({ ...prev, [d.id]: { x: nx, y: ny } }));
+  };
+  const onNodePointerUp = (e: React.PointerEvent) => {
+    if (dragRef.current) {
+      const d = dragRef.current;
+      if (!d.moved) selectNode(d.id); // 未移动 = 点击选中
+      dragRef.current = null;
+    }
+    (e.target as Element).releasePointerCapture?.(e.pointerId);
+  };
+
+  /* ── 画布平移 ── */
+  const onCanvasPointerDown = (e: React.PointerEvent) => {
+    panRef.current = { x0: e.clientX, y0: e.clientY, px: pan.x, py: pan.y };
+  };
+  const onCanvasPointerMove = (e: React.PointerEvent) => {
+    if (!panRef.current) return;
+    const p = panRef.current;
+    setPan({ x: p.px + (e.clientX - p.x0), y: p.py + (e.clientY - p.y0) });
+  };
+  const onCanvasPointerUp = () => (panRef.current = null);
+
+  const onWheel = useCallback((e: React.WheelEvent) => {
+    const factor = e.deltaY > 0 ? 0.9 : 1.1;
+    setZoom((z) => Math.min(2.5, Math.max(0.3, z * factor)));
+  }, []);
+
+  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
 
   const handleAdd = async () => {
     const content = newContent.trim();
@@ -31,17 +149,44 @@ export default function StoryTreeView() {
       setNewContent("");
       setShowAddInput(false);
       setParentId(null);
-    } catch {
-      // error handled in store
+    } catch (e) {
+      setError((e as Error).message);
     }
   };
 
-  // 构建树结构
-  const rootNodes = nodes.filter((n) => !n.parent_id);
-  const childrenOf = (id: string) => nodes.filter((n) => n.parent_id === id);
+  const handleChoose = async (id: string) => {
+    try {
+      await choose(id);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const handleAnchor = async (id: string) => {
+    try {
+      await anchor(id);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
+  const handleRemove = async (id: string) => {
+    if (!window.confirm("删除该节点及其所有后代节点？")) return;
+    try {
+      await removeNode(id);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  };
 
-  // 选中的节点详情
-  const selectedNode = nodes.find((n) => n.id === selectedNodeId);
+  /* ── 连线（父→子 贝塞尔）── */
+  const edgePath = (from: Pos, to: Pos) => {
+    const x1 = from.x + NODE_W, y1 = from.y + NODE_H / 2;
+    const x2 = to.x, y2 = to.y + NODE_H / 2;
+    const mx = (x1 + x2) / 2;
+    return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+  };
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -58,57 +203,215 @@ export default function StoryTreeView() {
         >
           + 节点
         </button>
+        <button
+          onClick={() => {
+            setManualPos({});
+            setZoom(0.9);
+            setPan({ x: 24, y: 24 });
+          }}
+          className="text-[11px] px-2 py-0.5 rounded text-zinc-500 hover:text-zinc-300 hover:bg-zinc-800"
+        >
+          重置视图
+        </button>
         <span className="text-[11px] text-zinc-600">|</span>
         <span className="text-[11px] text-zinc-500">
-          {nodes.length} 节点 · {threads.filter((t) => t.status === "active").length} 线进行中
+          {nodes.length} 节点 · {threads.filter((t) => t.status === "active").length} 线进行中 · 滚轮缩放 · 拖背景平移 · 拖节点移动
         </span>
+        {error && <span className="text-[11px] text-red-400 ml-auto">{error}</span>}
       </div>
 
-      <div className="flex-1 flex overflow-hidden">
-        {/* 左侧：树视图 */}
-        <div className="flex-1 overflow-auto p-4">
-          {loading && nodes.length === 0 ? (
-            <p className="text-sm text-zinc-600 text-center py-8">加载中...</p>
-          ) : nodes.length === 0 ? (
-            <div className="text-center py-12">
-              <p className="text-sm text-zinc-600 mb-2">叙事树为空</p>
-              <p className="text-xs text-zinc-700">通过探索或手动添加节点来构建树</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {rootNodes.map((node) => (
-                <TreeNode
-                  key={node.id}
-                  node={node}
-                  children={childrenOf(node.id)}
-                  allNodes={nodes}
-                  selectedId={selectedNodeId}
-                  onSelect={selectNode}
-                  onChoose={choose}
-                  onAnchor={anchor}
-                  onDelete={removeNode}
-                  onAddChild={(id) => {
-                    setParentId(id);
-                    setShowAddInput(true);
-                  }}
-                  depth={0}
-                />
-              ))}
-            </div>
-          )}
+      {/* 添加输入条 */}
+      {showAddInput && (
+        <div className="px-3 py-2 bg-zinc-900/40 border-b border-zinc-800/50 flex items-center gap-2 shrink-0">
+          <input
+            value={newContent}
+            onChange={(e) => setNewContent(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+            autoFocus
+            placeholder={parentId ? "子节点内容（挂到所选父节点下）..." : "节点内容..."}
+            className="flex-1 text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-200 outline-none focus:border-zinc-500"
+          />
+          <button
+            onClick={handleAdd}
+            className="text-[11px] px-2 py-1 rounded bg-zinc-700 text-zinc-200 hover:bg-zinc-600"
+          >
+            添加
+          </button>
+          <button
+            onClick={() => {
+              setShowAddInput(false);
+              setParentId(null);
+            }}
+            className="text-[11px] px-2 py-1 rounded text-zinc-500 hover:text-zinc-300"
+          >
+            取消
+          </button>
+        </div>
+      )}
+
+      {/* 画布 */}
+      <div className="flex-1 min-h-0 flex overflow-hidden">
+        <div className="flex-1 overflow-hidden relative bg-zinc-950">
+          <svg
+            ref={svgRef}
+            className="w-full h-full touch-none cursor-grab active:cursor-grabbing"
+            onPointerDown={onCanvasPointerDown}
+            onPointerMove={onCanvasPointerMove}
+            onPointerUp={onCanvasPointerUp}
+            onPointerLeave={onCanvasPointerUp}
+            onWheel={onWheel}
+          >
+            <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+              {/* 连线 */}
+              {nodes
+                .filter((n) => n.parent_id)
+                .map((n) => {
+                  const p = finalPos(n.parent_id!);
+                  const c = finalPos(n.id);
+                  return (
+                    <path
+                      key={`edge-${n.id}`}
+                      d={edgePath(p, c)}
+                      fill="none"
+                      stroke="rgba(113,113,122,0.45)"
+                      strokeWidth={1.6}
+                    />
+                  );
+                })}
+              {/* 节点 */}
+              {nodes.map((n) => {
+                const p = finalPos(n.id);
+                const st = KIND_STYLES[n.kind];
+                const selected = n.id === selectedNodeId;
+                return (
+                  <g
+                    key={n.id}
+                    transform={`translate(${p.x}, ${p.y})`}
+                    onPointerDown={(e) => onNodePointerDown(e, n.id)}
+                    onPointerMove={onNodePointerMove}
+                    onPointerUp={onNodePointerUp}
+                    className="cursor-pointer"
+                  >
+                    {/* 选中高亮 */}
+                    <rect
+                      x={-4}
+                      y={-4}
+                      width={NODE_W + 8}
+                      height={NODE_H + 8}
+                      rx={8}
+                      fill="none"
+                      stroke={selected ? "#fbbf24" : "transparent"}
+                      strokeWidth={selected ? 2 : 0}
+                      strokeDasharray="4 3"
+                    />
+                    <rect
+                      width={NODE_W}
+                      height={NODE_H}
+                      rx={6}
+                      fill={st.fill}
+                      stroke={st.stroke}
+                      strokeWidth={1.5}
+                    />
+                    {/* kind 角标 */}
+                    <rect x={NODE_W - 34} y={0} width={34} height={16} rx={4} fill={st.stroke} opacity={0.25} />
+                    <text
+                      x={NODE_W - 17}
+                      y={11}
+                      textAnchor="middle"
+                      fontSize={9}
+                      fill={st.text}
+                    >
+                      {st.label}
+                    </text>
+                    {/* 内容（截断） */}
+                    <text
+                      x={10}
+                      y={NODE_H / 2 + 4}
+                      fontSize={11}
+                      fill="#e4e4e7"
+                      style={{ pointerEvents: "none" }}
+                    >
+                      {n.content.length > 13 ? n.content.slice(0, 13) + "…" : n.content}
+                    </text>
+                    {/* chosen 标记 */}
+                    {n.chosen && (
+                      <circle cx={8} cy={NODE_H - 8} r={3.5} fill="#fbbf24" />
+                    )}
+                    {/* 操作小按钮（悬浮在节点右上） */}
+                    <g
+                      transform={`translate(${NODE_W - 20}, 20)`}
+                      className="hover:opacity-100"
+                      opacity={selected ? 1 : 0.25}
+                    >
+                      <circle
+                        cx={0}
+                        cy={0}
+                        r={7}
+                        fill="#27272a"
+                        stroke="#52525b"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setParentId(n.id);
+                          setShowAddInput(true);
+                        }}
+                        aria-label="添加子节点"
+                      />
+                      <text x={0} y={3} textAnchor="middle" fontSize={9} fill="#a1a1aa">+</text>
+                      <circle
+                        cx={14}
+                        cy={0}
+                        r={7}
+                        fill="#27272a"
+                        stroke="#52525b"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleChoose(n.id);
+                        }}
+                        aria-label="选为主线"
+                      />
+                      <text x={14} y={3} textAnchor="middle" fontSize={9} fill="#34d399">✓</text>
+                      <circle
+                        cx={28}
+                        cy={0}
+                        r={7}
+                        fill="#27272a"
+                        stroke="#52525b"
+                        onPointerDown={(e) => e.stopPropagation()}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleRemove(n.id);
+                        }}
+                        aria-label="删除（含后代）"
+                      />
+                      <text x={28} y={3} textAnchor="middle" fontSize={9} fill="#f87171">✕</text>
+                    </g>
+                  </g>
+                );
+              })}
+              {/* 空态提示 */}
+              {nodes.length === 0 && (
+                <text x={20} y={30} fontSize={13} fill="#52525b">
+                  叙事树为空——通过" + 节点"或探索来构建
+                </text>
+              )}
+            </g>
+          </svg>
         </div>
 
         {/* 右侧：详情面板 */}
         {selectedNode && (
-          <div className="w-64 border-l border-zinc-800 bg-zinc-900/30 p-3 overflow-auto">
+          <div className="w-64 border-l border-zinc-800 bg-zinc-900/30 p-3 overflow-auto shrink-0">
             <div className="flex items-center justify-between mb-2">
-              <span className={`text-[10px] px-1.5 py-0.5 rounded ${KIND_STYLES[selectedNode.kind].bg} ${KIND_STYLES[selectedNode.kind].border} border`}>
+              <span
+                className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                  KIND_STYLES[selectedNode.kind].stroke
+                } text-[${KIND_STYLES[selectedNode.kind].text}] bg-zinc-900/50`}
+              >
                 {KIND_STYLES[selectedNode.kind].label}
               </span>
-              <button
-                onClick={() => selectNode(null)}
-                className="text-zinc-600 hover:text-zinc-400 text-xs"
-              >
+              <button onClick={() => selectNode(null)} className="text-zinc-600 hover:text-zinc-400 text-xs">
                 ×
               </button>
             </div>
@@ -116,7 +419,7 @@ export default function StoryTreeView() {
             <div className="space-y-1.5">
               {selectedNode.kind !== "main" && (
                 <button
-                  onClick={() => choose(selectedNode.id)}
+                  onClick={() => handleChoose(selectedNode.id)}
                   className="w-full text-left text-xs px-2 py-1 rounded bg-emerald-900/30 text-emerald-400 hover:bg-emerald-900/50 transition-colors"
                 >
                   选为主线
@@ -124,7 +427,7 @@ export default function StoryTreeView() {
               )}
               {selectedNode.kind !== "anchor" && (
                 <button
-                  onClick={() => anchor(selectedNode.id)}
+                  onClick={() => handleAnchor(selectedNode.id)}
                   className="w-full text-left text-xs px-2 py-1 rounded bg-purple-900/30 text-purple-400 hover:bg-purple-900/50 transition-colors"
                 >
                   标为锚点
@@ -139,199 +442,20 @@ export default function StoryTreeView() {
               >
                 添加子节点
               </button>
+              <button
+                onClick={() => handleRemove(selectedNode.id)}
+                className="w-full text-left text-xs px-2 py-1 rounded bg-red-900/20 text-red-400 hover:bg-red-900/40 transition-colors"
+              >
+                删除节点（含后代）
+              </button>
             </div>
             <div className="mt-3 pt-3 border-t border-zinc-800">
-              <p className="text-[10px] text-zinc-600">
-                创建：{new Date(selectedNode.created_at).toLocaleDateString()}
-              </p>
-              {selectedNode.chosen && (
-                <p className="text-[10px] text-emerald-500 mt-1">当前主线</p>
-              )}
+              <p className="text-[10px] text-zinc-600">创建：{new Date(selectedNode.created_at).toLocaleDateString()}</p>
+              {selectedNode.chosen && <p className="text-[10px] text-emerald-500 mt-1">当前主线</p>}
             </div>
           </div>
         )}
       </div>
-
-      {/* 添加节点输入 */}
-      {showAddInput && (
-        <div className="border-t border-zinc-800 bg-zinc-900/50 p-3">
-          <div className="flex items-center gap-2">
-            <input
-              type="text"
-              value={newContent}
-              onChange={(e) => setNewContent(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") handleAdd();
-                if (e.key === "Escape") {
-                  setShowAddInput(false);
-                  setNewContent("");
-                  setParentId(null);
-                }
-              }}
-              placeholder={parentId ? "子节点内容..." : "节点内容..."}
-              className="flex-1 bg-zinc-800 text-zinc-200 text-sm px-3 py-1.5 rounded border border-zinc-700 focus:outline-none focus:border-zinc-500"
-              autoFocus
-            />
-            <button
-              onClick={handleAdd}
-              className="px-3 py-1.5 bg-zinc-700 hover:bg-zinc-600 text-zinc-200 text-sm rounded"
-            >
-              添加
-            </button>
-            <button
-              onClick={() => {
-                setShowAddInput(false);
-                setNewContent("");
-                setParentId(null);
-              }}
-              className="px-2 py-1.5 text-zinc-500 hover:text-zinc-300 text-sm"
-            >
-              取消
-            </button>
-          </div>
-          {parentId && (
-            <p className="text-[10px] text-zinc-600 mt-1">
-              父节点：{nodes.find((n) => n.id === parentId)?.content.slice(0, 30)}...
-            </p>
-          )}
-        </div>
-      )}
-
-      {/* 底部：线进度 */}
-      {threads.length > 0 && (
-        <div className="border-t border-zinc-800 bg-zinc-900/30 px-3 py-2">
-          <p className="text-[10px] text-zinc-600 mb-1">叙事线</p>
-          <div className="flex flex-wrap gap-2">
-            {threads.map((t) => (
-              <ThreadBadge key={t.id} thread={t} />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// 树节点组件（递归）
-function TreeNode({
-  node,
-  children,
-  allNodes,
-  selectedId,
-  onSelect,
-  onChoose,
-  onAnchor,
-  onDelete,
-  onAddChild,
-  depth,
-}: {
-  node: StoryNode;
-  children: StoryNode[];
-  allNodes: StoryNode[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-  onChoose: (id: string) => void;
-  onAnchor: (id: string) => void;
-  onDelete: (id: string) => void;
-  onAddChild: (id: string) => void;
-  depth: number;
-}) {
-  const style = KIND_STYLES[node.kind];
-  const isSelected = node.id === selectedId;
-
-  return (
-    <div style={{ marginLeft: depth * 20 }}>
-      {/* 节点卡片 */}
-      <div
-        onClick={() => onSelect(node.id)}
-        className={`group relative p-2 rounded border cursor-pointer transition-all ${style.bg} ${style.border} ${
-          node.chosen ? "ring-1 ring-emerald-500/50" : ""
-        } ${isSelected ? "ring-2 ring-zinc-400" : "hover:ring-1 hover:ring-zinc-600"}`}
-      >
-        <div className="flex items-start gap-2">
-          {node.kind === "anchor" && <span className="text-purple-400 text-xs">⚓</span>}
-          {node.chosen && <span className="text-emerald-400 text-xs">●</span>}
-          <span className="text-xs text-zinc-200 flex-1 line-clamp-2">{node.content}</span>
-        </div>
-        {/* 操作按钮（hover 显示） */}
-        <div className="absolute right-1 top-1 opacity-0 group-hover:opacity-100 flex gap-0.5 transition-opacity">
-          {node.kind === "candidate" && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onChoose(node.id);
-              }}
-              className="text-[9px] px-1 py-0.5 bg-emerald-900/50 text-emerald-400 rounded hover:bg-emerald-900/80"
-              title="选为主线"
-            >
-              主
-            </button>
-          )}
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onAddChild(node.id);
-            }}
-            className="text-[9px] px-1 py-0.5 bg-zinc-700 text-zinc-400 rounded hover:bg-zinc-600"
-            title="添加子节点"
-          >
-            +
-          </button>
-          {node.kind !== "root" && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (confirm("确定删除此节点及其所有子节点？")) {
-                  onDelete(node.id);
-                }
-              }}
-              className="text-[9px] px-1 py-0.5 bg-red-900/50 text-red-400 rounded hover:bg-red-900/80"
-              title="删除节点"
-            >
-              ×
-            </button>
-          )}
-        </div>
-      </div>
-      {/* 子节点 */}
-      {children.length > 0 && (
-        <div className="mt-1 space-y-1">
-          {children.map((child) => (
-            <TreeNode
-              key={child.id}
-              node={child}
-              children={allNodes.filter((n) => n.parent_id === child.id)}
-              allNodes={allNodes}
-              selectedId={selectedId}
-              onSelect={onSelect}
-              onChoose={onChoose}
-              onAnchor={onAnchor}
-              onDelete={onDelete}
-              onAddChild={onAddChild}
-              depth={depth + 1}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// 线进度徽章
-function ThreadBadge({ thread }: { thread: StoryThread }) {
-  const roleLabel = { main: "主线", subplot: "支线", parallel: "多线" }[thread.role];
-  const roleColor = { main: "text-emerald-400", subplot: "text-blue-400", parallel: "text-purple-400" }[thread.role];
-
-  return (
-    <div className="flex items-center gap-1.5 text-[11px]">
-      <span className={`${roleColor}`}>{roleLabel}</span>
-      <span className="text-zinc-300">{thread.name}</span>
-      {thread.progress && (
-        <span className="text-zinc-600">· {thread.progress}</span>
-      )}
-      {thread.status === "done" && (
-        <span className="text-[9px] text-zinc-600">[完成]</span>
-      )}
     </div>
   );
 }

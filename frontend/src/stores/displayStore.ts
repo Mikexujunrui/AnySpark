@@ -1,6 +1,14 @@
 import { create } from "zustand";
 
-export type DisplayMode = "paper" | "tree" | "skills" | "check" | "explore" | "plot" | "plan";
+export type DisplayMode =
+  | "paper"
+  | "tree"
+  | "skills"
+  | "check"
+  | "explore"
+  | "plot"
+  | "plan"
+  | "workflow";
 
 interface DisplayState {
   mode: DisplayMode;

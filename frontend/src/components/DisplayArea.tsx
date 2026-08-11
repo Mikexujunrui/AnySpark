@@ -2,6 +2,7 @@ import { useDisplayStore, type DisplayMode } from "../stores/displayStore";
 import Paper from "./Paper";
 import SkillPanel from "./SkillPanel";
 import StoryTreeView from "./StoryTreeView";
+import WorkflowPanel from "./WorkflowPanel";
 import CheckReport from "./CheckReport";
 import ExploreView from "./ExploreView";
 import PlotPanel from "./PlotPanel";
@@ -25,6 +26,7 @@ const MODE_LABELS: Record<DisplayMode, string> = {
   explore: "探索",
   plot: "关键点",
   plan: "计划",
+  workflow: "工作流",
 };
 
 export default function DisplayArea({
@@ -128,6 +130,7 @@ export default function DisplayArea({
         {mode === "explore" && <ExploreView />}
         {mode === "plot" && <PlotPanel />}
         {mode === "plan" && <PlanPanel />}
+        {mode === "workflow" && <WorkflowPanel />}
       </div>
     </div>
   );
