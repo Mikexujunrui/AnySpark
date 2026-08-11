@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useParams, Link, useSearchParams } from 'react-router-dom'
 import { Panel, Group, Separator } from 'react-resizable-panels'
 import { ApprovalProvider } from './approval/ApprovalContext'
+import { onTabSwitch } from '../lib/events'
 import { storage } from "../storage"
 import { api } from "../api"
 import { showToast } from './ui/toast-utils'
@@ -164,6 +165,19 @@ function BookDetail() {
     setPrimaryTab(t)
     storage.setActiveTab(bookId!, t)
   }
+
+  // 监听斜杠 UI 命令的 tab 切换事件（/tree /graph /outline 等）
+  useEffect(() => {
+    const off = onTabSwitch((tab) => {
+      if (tab === 'settings') {
+        setShowSettings(true)  // 设置是弹窗不是 tab
+        return
+      }
+      switchTab(tab)
+    })
+    return off
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookId])
 
   function switchSecondaryTab(t: string) {
     setSecondaryTab(t)

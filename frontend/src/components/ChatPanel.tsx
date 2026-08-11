@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Icon from './ui/Icon'
 import { useApproval } from './approval/ApprovalContext'
+import { SLASH_COMMANDS as COMMAND_REGISTRY, handleSlashInput } from '../lib/commands'
 import { useSSE } from "../hooks/useSSE"
 import MessageList from './chat/MessageList'
 import MessageInput from './chat/MessageInput'
@@ -38,9 +39,11 @@ const CHUNK_FLUSH_MS = 50  // flush buffered chunks at most every 50ms
 export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transformSignal }: { bookId: string; sessionId: string; autoModeEnabled: boolean; transformSignal: number }) {
   const { setAutoMode: setGlobalAutoMode } = useApproval()
   const welcomeMsg = { role: 'agent', text: '你好！我是你的 AI 写作助手 Agent。\n\n'
-    + '我会先理解你的内容类型，再自动选择最佳处理方式。\n'
-    + '在输入框输入 `/` 可查看所有快捷命令和技能。\n\n'
-    + '**提示**: 斜杠命令（如 `/w`、`/s`）走快速通道直达对应工具，自然语言描述走 Agent 智能路由。两者都能完成相同任务，选择你习惯的方式即可。' }
+    + '在输入框输入 `/` 可查看命令菜单。\n\n'
+    + '**命令分两类**：\n'
+    + '· UI 命令（`/tree` 叙事树、`/graph` 图谱、`/outline` 大纲、`/review` 评审…）——直接打开面板，不经 AI\n'
+    + '· AI 命令（`/w` 写作、`/s` 提取设定、`/style` 文风…）——翻译为明确指令交给 AI\n'
+    + '自然语言描述则走 Agent 智能路由。' }
 
   const [messages, setMessages] = useState([welcomeMsg])
   const [loaded, setLoaded] = useState(false)
@@ -403,18 +406,10 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     }
   }
 
-  const SLASH_COMMANDS = [
-    { cmd: '/s', desc: '强制提取设定', usage: '/s 文本内容' },
-    { cmd: '/w', desc: '严格模式写作', usage: '/w 写作指令' },
-    { cmd: '/ws', desc: '宽松模式写作', usage: '/ws 写作指令' },
-    { cmd: '/help', desc: '显示所有命令', usage: '/help' },
-    { cmd: '/skills', desc: '列出所有可用技能', usage: '/skills' },
-    { cmd: '/style', desc: '选择/查看写作风格', usage: '/style 风格名' },
-  ]
-
-  const slashItems = SLASH_COMMANDS.filter(s =>
-    slashFilter === '' || s.cmd.startsWith('/' + slashFilter.toLowerCase())
-  ).map(s => ({ name: s.cmd, description: s.desc, usage: s.usage }))
+  // 命令注册表驱动（真正的命令系统：ui 前端执行 / ai 翻译指令）
+  const slashItems = COMMAND_REGISTRY
+    .filter(c => slashFilter === '' || c.cmd.toLowerCase().includes(slashFilter.toLowerCase()))
+    .map(c => ({ name: '/' + c.cmd, description: c.desc, usage: c.usage || ('/' + c.cmd) }))
 
   // Load history on session mount
   useEffect(() => {
@@ -621,7 +616,17 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   }
 
   function handleSlashSelect(s) {
-    // 斜杠命令有 usage 字段，技能则用 name
+    const name = s.name.replace(/^\//, '')  // 去掉 / 前缀
+    const cmd = COMMAND_REGISTRY.find(c => c.cmd === name)
+    if (cmd && cmd.type === 'ui') {
+      // UI 命令：选中直接执行（不填输入框）
+      handleSlashInput('/' + name)
+      setInput('')
+      setShowSlash(false)
+      setSlashIdx(0)
+      return
+    }
+    // AI 命令：填 usage 让用户补参数
     setInput(s.usage ? (s.usage + ' ') : ('/' + s.name + ' '))
     setShowSlash(false)
     setSlashIdx(0)
@@ -629,7 +634,17 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
 
   async function sendMessage() {
     if (!input.trim() || streaming || question || plotCards) return
-    const msg = input.trim()
+    const raw = input.trim()
+    // 真正的命令系统：UI 命令前端执行（不经过 AI），AI 命令翻译为明确指令
+    const { consumed, send } = handleSlashInput(raw)
+    if (consumed && !send) {
+      // UI 命令已在前端执行（如切 tab），无需发消息
+      setInput('')
+      setShowSlash(false)
+      setSlashFilter('')
+      return
+    }
+    const msg = send || raw
     setInput('')
     setShowSlash(false)
     setSlashFilter('')
