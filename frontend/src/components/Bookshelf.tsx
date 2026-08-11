@@ -24,10 +24,46 @@ export default function Bookshelf() {
   const [importingSpark, setImportingSpark] = useState(false)
   const sparkInputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
+  // 破限模式状态（每书）：book_id → true/false
+  const [uncensoredMap, setUncensoredMap] = useState<Record<string, boolean>>({})
+  const [uncensoredBusy, setUncensoredBusy] = useState<string | null>(null)
 
   useEffect(() => {
     loadBooks()
   }, [])
+
+  // 批量加载全部项目的破限状态（S70：书籍级写作自由度开关）
+  useEffect(() => {
+    if (books.length === 0) return
+    let cancelled = false
+    ;(async () => {
+      const map: Record<string, boolean> = {}
+      for (const b of books) {
+        try {
+          const r = await fetch(`/api/uncensored?book_id=${encodeURIComponent(b.id)}`)
+          const d = await r.json()
+          if (!cancelled) map[b.id] = Boolean(d.enabled)
+        } catch { /* 静默 */ }
+      }
+      if (!cancelled) setUncensoredMap(map)
+    })()
+    return () => { cancelled = true }
+  }, [books])
+
+  async function toggleUncensored(bookId: string, e: React.MouseEvent) {
+    e.stopPropagation()
+    setUncensoredBusy(bookId)
+    const next = !uncensoredMap[bookId]
+    try {
+      await fetch('/api/uncensored', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ book_id: bookId, enabled: next }),
+      })
+      setUncensoredMap(prev => ({ ...prev, [bookId]: next }))
+    } catch { /* 静默 */ }
+    setUncensoredBusy(null)
+  }
 
   async function loadBooks() {
     setLoading(true)
@@ -236,18 +272,27 @@ export default function Bookshelf() {
                   onClick={() => navigate(`/book/${book.id}`)}
                   className="group cursor-pointer relative"
                 >
-                  <div className={`aspect-[3/4] rounded-xl bg-gradient-to-br ${progressColor(book.totalWords || 0)} p-4 flex flex-col justify-end relative overflow-hidden shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-200`}>
+                  <div className={`aspect-[3/4] rounded-xl bg-gradient-to-br ${progressColor(book.totalChars || 0)} p-4 flex flex-col justify-end relative overflow-hidden shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-200`}>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
                     <div className="relative z-10">
                       <div className="flex items-center justify-between mb-1">
-                        <span className="text-[9px] uppercase tracking-wider text-white/60 font-medium">{progressLabel(book.totalWords || 0)}</span>
+                        <span className="text-[9px] uppercase tracking-wider text-white/60 font-medium">{progressLabel(book.totalChars || 0)}</span>
                       </div>
                       <h3 className="text-white text-base font-bold leading-tight">{book.title}</h3>
                       <div className="flex items-center gap-2 text-white/50 text-[10px] mt-1">
                         {book.chapterCount > 0 && <span>{book.chapterCount} 章</span>}
-                        {book.totalWords > 0 && <span>{formatWords(book.totalWords)} 字</span>}
+                        {book.totalChars > 0 && <span>{formatWords(book.totalChars)} 字</span>}
                       </div>
                     </div>
+                    {/* 破限模式开关（S70：书籍级写作自由度） */}
+                    <button
+                      onClick={(e) => toggleUncensored(book.id, e)}
+                      className={`absolute bottom-2 left-2 z-20 flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded transition-all ${uncensoredMap[book.id] ? 'bg-red-500/80 text-white' : 'bg-white/10 text-white/50 hover:bg-white/20'}`}
+                      title={uncensoredMap[book.id] ? '破限模式已开启 — 点击关闭（不设题材禁区）' : '破限模式已关闭 — 点击开启（写作自由度：不设题材禁区）'}
+                    >
+                      <Icon name="unlock" size={10} />
+                      {uncensoredBusy === book.id ? '…' : uncensoredMap[book.id] ? '破限' : '破限'}
+                    </button>
                   </div>
                   <button
                     onClick={(e) => handleEdit(book, e)}

@@ -51,8 +51,22 @@ export const getOutline = (bookId: string): Promise<unknown> => {
 export const getDetailedOutline = (bookId: string): Promise<unknown> => getOutline(bookId);
 
 // ── Chapter history / versions：V4 无版本历史 API，降级（兼容任意调用签名）──
-export const getChapterHistory = (..._args: unknown[]): Promise<unknown[]> => Promise.resolve([]);
-export const getChapterVersion = (..._args: unknown[]): Promise<unknown> => Promise.resolve(null);
+// ── Chapter history / versions：V4 chapter_versions 表（GET /api/chapters/{id} 返回 versions）──
+export const getChapterHistory = (...args: unknown[]): Promise<unknown[]> => {
+  const chapterId = args[1] as string;
+  if (!chapterId) return Promise.resolve([]);
+  return get(`/api/chapters/${chapterId}`).then((ch) => (ch as any)?.versions || []);
+};
+export const getChapterVersion = (...args: unknown[]): Promise<unknown> => {
+  const chapterId = args[1] as string;
+  const versionId = args[2] as string;
+  if (!chapterId) return Promise.resolve(null);
+  return get(`/api/chapters/${chapterId}`).then((ch) => {
+    const versions = (ch as any)?.versions || [];
+    const found = versions.find((v: any) => String(v.saved_at) === String(versionId));
+    return { content: found?.content || '', original_content: null, patches_summary: [] };
+  });
+};
 export const revertChapter = (..._args: unknown[]): Promise<unknown> => Promise.resolve({ ok: true });
 export const deleteChapterVersion = (..._args: unknown[]): Promise<unknown> => Promise.resolve({ ok: true });
 
