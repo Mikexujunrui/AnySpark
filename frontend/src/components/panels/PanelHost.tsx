@@ -12,6 +12,8 @@ import ReviewPanel from '../ReviewPanel'
 import MaterialsPanel from '../MaterialsPanel'
 import StoryTreeView from '../StoryTreeView'
 import WorkflowPanel from '../WorkflowPanel'
+import PlotPanel from '../PlotPanel'
+import SkillPanel from '../SkillPanel'
 
 // V4 工具面板（open/onClose 签名）
 import BriefPanel from '../BriefPanel'
@@ -38,6 +40,8 @@ export default function PanelHost({ panelKey, bookId, sessionId }: { panelKey: s
       {panelKey === 'chapters' && <div className="h-full"><ChaptersPanel bookId={bookId} /></div>}
       {panelKey === 'knowledge' && <div className="h-full"><KnowledgePanel bookId={bookId} /></div>}
       {panelKey === 'outline' && <div className="h-full"><OutlinePanel bookId={bookId} /></div>}
+      {panelKey === 'foreshadows' && <div className="h-full"><PlotPanel /></div>}
+      {panelKey === 'styles' && <div className="h-full"><SkillPanel open onClose={() => {}} embedded /></div>}
       {panelKey === 'storytree' && <div className="h-full"><StoryTreeView /></div>}
       {panelKey === 'workflow' && <div className="h-full"><WorkflowPanel /></div>}
       {panelKey === 'search' && <div className="h-full"><SearchPanel bookId={bookId} /></div>}

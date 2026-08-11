@@ -32,12 +32,14 @@ const TAB_GROUPS: TabGroup[] = [
     tabs: [
       { key: 'knowledge', label: '知识库', icon: 'database' },
       { key: 'outline', label: '大纲', icon: 'list' },
+      { key: 'foreshadows', label: '伏笔', icon: 'target' },
       { key: 'materials', label: '资料', icon: 'book-open' },
     ],
   },
   {
     label: '辅助',
     tabs: [
+      { key: 'styles', label: '技巧', icon: 'pen-tool' },
       { key: 'review', label: '评审团', icon: 'clipboard-list' },
       { key: 'brief', label: '简介', icon: 'file-text' },
       { key: 'bias', label: 'AI倾向', icon: 'brain' },
