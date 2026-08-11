@@ -1268,3 +1268,39 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 - 审查 = **用户要求时**的能力（事后按需），非默认环节
 - 用户判别 = 主审查器；检测网/评审 = 按需补充
 - 不为审查做默认化/性能投入；基础设施（worker 阻塞）另论
+
+### 12.36 前端创作台整合（S75：合作者前端 f3-snapshot 并入，以本地后端为准）
+
+> 背景：合作者在 f3-snapshot 分支完成了全新前端创作台（frontend/ React 19 +
+> TypeScript + Vite + Tailwind 3 + TipTap + Zustand，约 1.2 万行，17 个 api 模块 +
+> 15 个面板组件），但其分支基于旧 merge-base，后端落后本地 15 个提交。主人拍板
+> **以本地后端为准**整合。
+
+#### 整合方式（integrate-f3 分支合并）
+
+- **前端全量并入**：frontend/ 为本地没有的全新目录，零冲突，直接并入。
+- **后端以本地为准**：冲突 3 文件手工解决——
+  - app.py：删 f3 重复的图谱 CRUD 路由（与本地 S72 功能重复且按内部 id 操作），
+    保留本地 S72（按 name + book_id 隔离）；保留 f3 独有端点（会话重命名/删除/
+    历史消息、章节 PUT 保存、资料删除、故事节点删除）。
+  - graph/schema.py：删 f3 重复的 create/update/delete 系列（同名方法会覆盖本地
+    实现，属硬伤），最终与 main 原版逐字节一致。
+  - template/materials.py：本地 S74 book_id 隔离 + f3 的 delete() 并存。
+
+#### 接口适配（向后兼容，不改本地设计语义）
+
+- **图谱实体 PATCH/DELETE 双定位** `{name_or_id}`：先按 name 后按内部 id 解析
+  （f3 前端按 id 操作）。S72 语义不变：实体主键仍是 name，改名不支持（删建）。
+- 事件/关系 PATCH/DELETE 本地本就按内部 id（eid/rid），与前端一致，无需改。
+- 前端 vite 代理端口 8002 → 8000（本地后端端口）。
+- /api/check findings 透传 severity（后端 Finding 本有 hard/suggestion，前端排序需要）。
+
+#### 验证
+
+后端 gate 全绿（ruff + mypy + 428 pytest）；前端 tsc + vite build 通过；端到端
+冒烟（图谱 CRUD 双定位、会话/章节/资料/故事节点增删改查）；前端 dev 代理连通后端。
+
+#### 遗留（非缺陷）
+
+- 实体改名不支持（S72 主键语义，前端表单含 name 字段但后端忽略，体验提示待前端做）
+- 前端构建产物约 616KB 单 chunk（>500KB 警告，后续可 code-split）
