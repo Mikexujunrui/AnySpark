@@ -12,6 +12,7 @@ members = [
     "anyspark-desktop",
     "anyspark-explore",
     "anyspark-graph",
+    "anyspark-library",
     "anyspark-play",
     "anyspark-review",
     "anyspark-template",
@@ -61,6 +62,7 @@ dependencies = [
     { name = "anyspark-desktop" },
     { name = "anyspark-explore" },
     { name = "anyspark-graph" },
+    { name = "anyspark-library" },
     { name = "anyspark-review" },
     { name = "anyspark-template" },
     { name = "anyspark-workflow" },
@@ -83,6 +85,7 @@ requires-dist = [
     { name = "anyspark-desktop", editable = "packages/desktop" },
     { name = "anyspark-explore", editable = "packages/explore" },
     { name = "anyspark-graph", editable = "packages/graph" },
+    { name = "anyspark-library", editable = "packages/library" },
     { name = "anyspark-review", editable = "packages/review" },
     { name = "anyspark-template", editable = "packages/template" },
     { name = "anyspark-workflow", editable = "packages/workflow" },
@@ -117,6 +120,7 @@ dependencies = [
     { name = "anyspark-core" },
     { name = "anyspark-explore" },
     { name = "anyspark-graph" },
+    { name = "anyspark-library" },
     { name = "anyspark-play" },
     { name = "anyspark-template" },
     { name = "anyspark-workflow" },
@@ -136,6 +140,7 @@ requires-dist = [
     { name = "anyspark-core", editable = "packages/core" },
     { name = "anyspark-explore", editable = "packages/explore" },
     { name = "anyspark-graph", editable = "packages/graph" },
+    { name = "anyspark-library", editable = "packages/library" },
     { name = "anyspark-play", editable = "packages/play" },
     { name = "anyspark-template", editable = "packages/template" },
     { name = "anyspark-workflow", editable = "packages/workflow" },
@@ -194,6 +199,17 @@ requires-dist = [{ name = "anyspark-core", editable = "packages/core" }]
 name = "anyspark-graph"
 version = "0.0.1"
 source = { editable = "packages/graph" }
+dependencies = [
+    { name = "anyspark-core" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "anyspark-core", editable = "packages/core" }]
+
+[[package]]
+name = "anyspark-library"
+version = "0.0.1"
+source = { editable = "packages/library" }
 dependencies = [
     { name = "anyspark-core" },
 ]
