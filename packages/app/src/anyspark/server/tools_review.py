@@ -85,7 +85,14 @@ def make_review_tools(
             context: dict[str, str] = {}
             # check 硬伤清单（check 内部 asyncio.run → to_thread 保证在线程池跑）
             try:
-                cr = await asyncio.to_thread(check_run, model, ch.title, ch.content[:20000])
+                # S109：审读告知边界——agent 循环内模型可用 read_chapter 补读全文
+                ch_content = ch.content or ""
+                if len(ch_content) > 20000:
+                    ch_content = (
+                        f"【注意：本章全文 {len(ch.content)} 字，以下仅前 20000 字——"
+                        "如需检查后半章请用 read_chapter 读全文】\n" + ch_content[:20000]
+                    )
+                cr = await asyncio.to_thread(check_run, model, ch.title, ch_content)
                 context["check_report"] = (
                     f"规则引擎硬伤检测（{cr.hard_count} 处硬伤，供核实）：\n{cr.render()}"
                 )

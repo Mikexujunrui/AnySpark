@@ -523,7 +523,10 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
     @router.post("/api/chat/direction", response_model=dict[str, str])
     def chat_direction(req: DirectionIn) -> dict[str, str]:
         """阶段 5 方向声明：AI 只声明"我准备写：…"不写正文（摩擦前置，用户 0.5s 确认）。"""
-        ctx = f"\n已知设定：{req.context[:2000]}" if req.context else ""
+        # S109：已知设定阈值 2000→4000；超限告知边界（直调无工具，模型不臆测）
+        ctx = f"\n已知设定：{req.context[:4000]}" if req.context else ""
+        if req.context and len(req.context) > 4000:
+            ctx += f"\n【注意：设定全文 {len(req.context)} 字，以上仅前 4000 字】"
         prompt = (
             "你是小说写作智能体。用户将让你写一段内容。"
             "在动笔前，先输出【方向声明】——一句话说明你准备写什么、怎么切入"
@@ -540,7 +543,10 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
     @router.post("/api/chat/candidates", response_model=dict[str, object])
     def chat_candidates(req: CandidatesIn) -> dict[str, object]:
         """候选卡堆：并行生成 N 个差异化候选（上下文隔离→真多样性，机制 1/4）。"""
-        ctx = f"\n已知设定：{req.context[:2000]}" if req.context else ""
+        # S109：已知设定阈值 2000→4000；超限告知边界
+        ctx = f"\n已知设定：{req.context[:4000]}" if req.context else ""
+        if req.context and len(req.context) > 4000:
+            ctx += f"\n【注意：设定全文 {len(req.context)} 字，以上仅前 4000 字】"
         n = max(2, min(4, req.n))
         styles = ["平实叙事", "强画面感", "悬念张力", "细腻心理"]
 
@@ -572,9 +578,13 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
             "balanced": "在保留原意的基础上改写，语言更生动",
             "bold": "大胆重构：换切入角度、换句式节奏、大幅改变表达",
         }
+        # S109：改写原文阈值 3000→8000（用户选中长段落不丢后半）；超限告知边界
+        src = req.text[:8000]
+        if len(req.text) > 8000:
+            src = f"【注意：原文全文 {len(req.text)} 字，以下仅前 8000 字】\n{src}"
         prompt = (
             "你是小说写作智能体。改写下面这段正文。"
-            f"要求：{instruct_map[mode]}。直接输出改写后的正文，不要解释。\n\n原文：\n{req.text[:3000]}"
+            f"要求：{instruct_map[mode]}。直接输出改写后的正文，不要解释。\n\n原文：\n{src}"
         )
         # 渐变条温度映射：保原味=低温，大幅改=高温（仅真实模型生效）
         rewrite_model: Any = deps.model

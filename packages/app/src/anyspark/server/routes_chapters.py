@@ -30,12 +30,17 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         ch = deps.chapters.get(chapter_id)
         if ch is None:
             raise HTTPException(status_code=404, detail="章节不存在")
+        ch_content = ch.content or ""
+        # S109：阈值 4000→12000 覆盖长章；超限时明确告知边界（模型不臆测后半章）
+        shown = ch_content[:12000]
+        if len(ch_content) > 12000:
+            shown = f"【注意：本章全文 {len(ch_content)} 字，以下仅前 12000 字】\n{shown}"
         prompt = (
             "你是小说写作智能体。读下面这章正文，输出两句：\n"
             "1. 一致性摘要（一句话概括本章发生了什么、推进了什么）\n"
             "2. 下一章衔接提示（建议下一章推进什么，如'推进角色弧/揭开伏笔'，给一个具体方向）\n"
             '格式（严格 JSON）：{"summary": "…", "next_hint": "…"}\n\n'
-            f"章节《{ch.title}》正文：\n{ch.content[:4000]}"
+            f"章节《{ch.title}》正文：\n{shown}"
         )
         out = model_for_task(deps, "extraction").respond(
             [Message(role="system", content=prompt)], []
@@ -54,8 +59,8 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
                     hint = str(data.get("next_hint", ""))
             except json.JSONDecodeError:
                 pass
-        # 图谱统计（本章涉及的实体）
-        involved = deps.graph_verifier.facts_for("main", ch.content[:2000])
+        # 图谱统计（本章涉及的实体）——S109：阈值 2000→8000 覆盖长章
+        involved = deps.graph_verifier.facts_for("main", (ch.content or "")[:8000])
         # S31：主线钩子检查——作者承诺的剧情钩子仍未回收的（轻量提示，建议非门禁）
         # 老龄化：带开放时长（中性事实，不设阈值不评判）
         open_hooks = deps.plots.open_must("main", current_order=ch.order_index) or []

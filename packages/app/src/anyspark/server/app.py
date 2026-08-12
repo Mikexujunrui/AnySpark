@@ -256,7 +256,14 @@ def build_app(
                 None,
             )
             if ch is not None:
-                instruction = f"【章节正文】\n{ch.content[:8000]}\n\n{instruction}"
+                # S109：工作流章节注入阈值 8000→15000；超限告知边界（直调无工具）
+                ch_content = ch.content or ""
+                if len(ch_content) > 15000:
+                    ch_content = (
+                        f"【注意：本章全文 {len(ch.content)} 字，以下仅前 15000 字，"
+                        "末尾部分未展示】\n" + ch_content[:15000]
+                    )
+                instruction = f"【章节正文】\n{ch_content}\n\n{instruction}"
         messages: list[Any] = []
         if system:
             messages.append(Message(role="system", content=system))

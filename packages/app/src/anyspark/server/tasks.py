@@ -33,10 +33,17 @@ def run_batch_rewrite(
             if ch is None:
                 batch["results"].append({"id": cid, "ok": False, "error": "章节不存在"})
             else:
+                # S109：批量改写全文给足（不截）；超长章（>20000）告知边界
+                ch_content = ch.content or ""
+                if len(ch_content) > 20000:
+                    ch_content = (
+                        f"【注意：本章全文 {len(ch.content)} 字，以下仅前 20000 字，"
+                        "末尾部分未展示】\n" + ch_content[:20000]
+                    )
                 prompt = (
                     "按用户指令改写以下章节。保持剧情走向/人物/设定/时间线一致，"
                     "只按指令调整（风格/情节/表达）。直接输出改写后的完整正文。\n"
-                    f"【指令】{instruction}\n【原章】\n{ch.content}\n【改写后正文】"
+                    f"【指令】{instruction}\n【原章】\n{ch_content}\n【改写后正文】"
                 )
                 out = model_for_task(deps, "editing").respond(
                     [Message(role="user", content=prompt)], []
@@ -70,7 +77,14 @@ def run_batch_review(deps: AppDeps, batch_id: str, chapter_ids: list[str]) -> No
             if ch is None:
                 batch["results"].append({"id": cid, "ok": False, "error": "章节不存在"})
             else:
-                report = run_review(model_for_task(deps, "editing"), ch.title, ch.content[:20000])
+                # S109：审读全文给足（不截）；超长章（>20000）告知边界
+                ch_content = ch.content or ""
+                if len(ch_content) > 20000:
+                    ch_content = (
+                        f"【注意：本章全文 {len(ch.content)} 字，以下仅前 20000 字，"
+                        "末尾部分未展示】\n" + ch_content[:20000]
+                    )
+                report = run_review(model_for_task(deps, "editing"), ch.title, ch_content)
                 batch["results"].append(
                     {
                         "id": cid,
