@@ -148,6 +148,53 @@ def test_chat_stream_sse_frames() -> None:
     assert any(e["name"] == "陈渡" for e in entities)
 
 
+def test_chat_stream_done_payload_parts() -> None:
+    """S82：done 帧附本轮 parts——工具调用卡片（type=tool_call）+ 思考过程（type=reasoning）。"""
+
+    class ThinkingModel:
+        model_name = "thinking-model"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+            self.calls += 1
+            if self.calls == 1:
+                return ModelOutput(
+                    text="",
+                    reasoning="先确认第一章开场基调，决定用雨夜氛围。",
+                    tool_calls=[
+                        ToolCall(
+                            name="write_chapter",
+                            arguments={"title": "第一章", "content": "雨夜，陈渡抵达雾城站。"},
+                        )
+                    ],
+                )
+            return ModelOutput(text="第一章已写好。", reasoning="已核对设定，正文落盘完成。")
+
+    client = TestClient(build_app(model=ThinkingModel(), db_path=Path(tempfile.mkdtemp()) / "t.db"))
+    r = client.post("/api/chat/stream", json={"message": "写第一章"})
+    assert r.status_code == 200
+    body = r.text
+    assert "event: done" in body
+    # done 帧 payload 带 parts
+    done_frames = [f for f in body.split("\n\n") if f.startswith("event: done")]
+    assert done_frames, "缺 done 帧"
+    payload = done_frames[-1].split("data: ", 1)[1]
+    import json
+
+    parsed = json.loads(payload)
+    parts = parsed.get("parts", [])
+    kinds = {p.get("type") for p in parts}
+    assert "tool_call" in kinds, f"parts 缺 tool_call: {parts}"
+    assert "reasoning" in kinds, f"parts 缺 reasoning: {parts}"
+    tc = next(p for p in parts if p.get("type") == "tool_call")
+    assert tc["name"] == "write_chapter"
+    assert tc.get("arguments", {}).get("title") == "第一章"
+    rn = next(p for p in parts if p.get("type") == "reasoning")
+    assert "氛围" in rn["text"]
+
+
 def test_chat_stream_error_frame() -> None:
     """S8：异常转 error 帧，不中断连接。"""
 
