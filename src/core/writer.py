@@ -43,12 +43,27 @@ def _build_reference_context(book_id: str, ref_chapters: list[str] | None = None
     prevents an author's unrelated novel from leaking its characters into the
     current story merely because it was added as a style sample.
     """
+    semantic_dna = ""
+    try:
+        from .author_dna import build_author_dna_context
+
+        semantic_dna = build_author_dna_context(book_id)
+    except Exception:
+        pass
+
     ref_ids = json_store.get_reference_books(book_id)
     if not ref_ids:
-        return ""
+        return semantic_dna
     profiles = json_store.get_reference_profiles(book_id)
 
     sections = []
+    scene_contract_active = False
+    try:
+        from .author_dna import load_state
+
+        scene_contract_active = bool(load_state(book_id).get("scene_contract", {}).get("enabled"))
+    except Exception:
+        pass
     from .graph_store import GraphStore
 
     for ref_id in ref_ids:
@@ -130,15 +145,22 @@ def _build_reference_context(book_id: str, ref_chapters: list[str] | None = None
                     if deep_style:
                         ref_sections.append(deep_style)
 
-                    exemplars = _build_style_exemplars(ref_id)
-                    if exemplars:
-                        ref_sections.append(exemplars)
+                    # With an active scene contract, Author DNA Lab injects
+                    # semantically retrieved excerpts.  Keep the generic
+                    # front/middle/end samples out to reduce attention noise.
+                    if not scene_contract_active:
+                        exemplars = _build_style_exemplars(ref_id)
+                        if exemplars:
+                            ref_sections.append(exemplars)
             except Exception:
                 pass  # analysis injection is best-effort
 
             sections.extend(ref_sections)
         except Exception as e:
             sections.append(f"## 参考书 {ref_id} (加载失败: {str(e)[:50]})")
+
+    if semantic_dna:
+        sections.append(semantic_dna)
 
     return "\n".join(sections) if sections else ""
 

@@ -50,7 +50,6 @@ class NarrativeSegmentContract:
     def render_prompt(self, previous_ending: str = "") -> str:
         previous = f"...​{previous_ending[-350:]}" if previous_ending else "（本章开头）"
         required = "；".join(self.must_cover) if self.must_cover else self.beat
-        forbidden = "\n".join(f"- {item}" for item in self.forbidden_future[:6]) or "- 无明示后续事件"
         open_threads = "；".join(self.open_threads) if self.open_threads else "保留下一段的可推进空间"
         end_state = self.end_state or "只到达当前事件的直接结果，不得进入下一事件"
         start_state = self.start_state or "承接上一段的最后现场状态"
@@ -63,8 +62,7 @@ class NarrativeSegmentContract:
 本段停止状态：{end_state}
 本段结束时仍需保留：{open_threads}
 
-下列是未来剧情边界，本段只能把它们当作“不得越过的警戒线”：
-{forbidden}
+未来剧情的具体内容已由系统隐藏。不得越过、猜测、概括或提前完成任何未提供的未来事件。
 
 【双重预算】
 - 文字预算：目标 {self.target_chars} 个中文字符左右，硬上限 {self.max_chars} 字符。

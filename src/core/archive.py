@@ -18,6 +18,7 @@ Archive layout (ZIP container)::
     timeline.json          — timeline data (if any)
     continuity_cards.json — structured chapter hand-off state (if any)
     plot_norms.json       — reusable plot constraints (if any)
+    author_dna.json       — confirmed rules, interpretations and active scene
 
 Usage::
 
@@ -555,6 +556,51 @@ def _copy_json_data(book_id: str, tmp: Path) -> None:
     except Exception as exc:
         logger.warning("Failed to copy plot norms: %s", exc)
 
+    # Preserve user-reviewed DNA without copying the source novels themselves.
+    # Chunk excerpts/offsets and in-flight jobs cannot be trusted on another
+    # machine, so the imported state is explicitly marked as detached.
+    try:
+        from .author_dna import load_state
+
+        dna = load_state(book_id)
+        layers = dna.get("layers", {})
+        meaningful = (
+            any(layer.get("status") == "accepted" for layer in layers.values())
+            or bool(dna.get("interpretations"))
+            or bool(dna.get("scene_contract", {}).get("enabled"))
+        )
+        if meaningful:
+            portable = {
+                "schema_version": dna.get("schema_version", 1),
+                "book_id": book_id,
+                "corpus": {
+                    "status": "detached",
+                    "portable_confirmed": True,
+                    "source_titles": [
+                        item.get("title", "") for item in dna.get("corpus", {}).get("coverage", [])
+                    ],
+                    "reference_ids": [],
+                    "chunks": [],
+                    "coverage": [],
+                    "total_chars": dna.get("corpus", {}).get("total_chars", 0),
+                    "total_chapters": dna.get("corpus", {}).get("total_chapters", 0),
+                    "total_chunks": 0,
+                    "estimated_calls": 0,
+                    "signature": "",
+                },
+                "layers": layers,
+                "observations": [],
+                "audit": dna.get("audit", {}),
+                "interpretations": dna.get("interpretations", []),
+                "scene_contract": dna.get("scene_contract", {"enabled": False}),
+                "job": {"status": "none", "progress": 0, "message": "迁移后尚未重建证据"},
+            }
+            (tmp / "author_dna.json").write_text(
+                json.dumps(portable, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+    except Exception as exc:
+        logger.warning("Failed to copy author DNA: %s", exc)
+
 
 def _restore_json_data(book_id: str, tmp: Path) -> int:
     """Restore JSON data files from the archive into the project data directory."""
@@ -666,5 +712,30 @@ def _restore_json_data(book_id: str, tmp: Path) -> int:
             json_store.save_plot_norms(book_id, json.loads(plot_norms_file.read_text(encoding="utf-8")))
         except Exception as exc:
             logger.warning("Failed to restore plot norms: %s", exc)
+
+    author_dna_file = tmp / "author_dna.json"
+    if author_dna_file.exists():
+        try:
+            from .author_dna import save_state
+
+            dna = json.loads(author_dna_file.read_text(encoding="utf-8"))
+            if isinstance(dna, dict):
+                dna["book_id"] = book_id
+                dna["job"] = {"status": "none", "progress": 0, "message": "迁移后尚未重建证据"}
+                corpus = dna.setdefault("corpus", {})
+                corpus.update(
+                    {
+                        "status": "detached",
+                        "portable_confirmed": True,
+                        "reference_ids": [],
+                        "chunks": [],
+                        "coverage": [],
+                        "signature": "",
+                    }
+                )
+                dna["observations"] = []
+                save_state(book_id, dna)
+        except Exception as exc:
+            logger.warning("Failed to restore author DNA: %s", exc)
 
     return chapter_count

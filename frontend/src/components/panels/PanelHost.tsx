@@ -15,13 +15,13 @@ import ReferenceBooksPanel from '../ReferenceBooksPanel'
 import StylesPanel from '../StylesPanel'
 import FileTree from '../FileTree'
 import SearchPanel from '../SearchPanel'
-import SimulationPanel from '../../features/simulation/SimulationPanel'
 import SimulationLayout from '../../features/simulation/components/SimulationLayout'
 import WorkflowView from '../WorkflowView'
 import ReviewPanel from '../ReviewPanel'
 import InspirationInbox from '../InspirationInbox'
 import StyleAnalysisPanel from '../StyleAnalysisPanel'
 import PlotNormsPanel from '../PlotNormsPanel'
+import AuthorDnaPanel from '../AuthorDnaPanel'
 
 export default function PanelHost({ panelKey, bookId, sessionId, autoModeEnabled, transformSignal }) {
   // ChatPanel always stays mounted to preserve SSE connection
@@ -69,6 +69,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, autoModeEnabled
       {panelKey === 'foreshadows' && <div className="h-full"><ForeshadowBoard bookId={bookId} /></div>}
       {panelKey === 'style-analysis' && <div className="h-full"><StyleAnalysisPanel bookId={bookId} /></div>}
       {panelKey === 'references' && <div className="h-full"><ReferenceBooksPanel bookId={bookId} /></div>}
+      {panelKey === 'author-dna' && <div className="h-full"><AuthorDnaPanel bookId={bookId} /></div>}
       {panelKey === 'styles' && <div className="h-full"><StylesPanel bookId={bookId} /></div>}
       {panelKey === 'files' && <div className="h-full"><FileTree bookId={bookId} /></div>}
       {panelKey === 'search' && <div className="h-full"><SearchPanel bookId={bookId} /></div>}

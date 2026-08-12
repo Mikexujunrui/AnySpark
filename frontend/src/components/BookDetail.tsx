@@ -55,6 +55,7 @@ const TAB_GROUPS: TabGroup[] = [
       { key: 'inspirations', label: '灵感', icon: 'lightbulb' },
       { key: 'style-analysis', label: '文风', icon: 'compass' },
       { key: 'references', label: '参考书', icon: 'book-open' },
+      { key: 'author-dna', label: '作者DNA', icon: 'microscope' },
     ],
   },
   {

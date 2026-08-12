@@ -121,6 +121,10 @@ class BookStoreMixin(SessionStoreMixin):
             if mentions_file.exists():
                 mentions_file.unlink()
 
+            author_dna_file = DATA_DIR / "analyses" / "author_dna" / f"author_dna_{self._safe_id(book_id)}.json"
+            if author_dna_file.exists():
+                author_dna_file.unlink()
+
             # Workflow subscriptions
             wf_subs_file = DATA_DIR / f"workflow_subs_{self._safe_id(book_id)}.json"
             if wf_subs_file.exists():

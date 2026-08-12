@@ -782,6 +782,11 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
         return guard
     mode = args.get("mode", "strict")
     target_words = int(args.get("target_words", 2500))
+    from core.author_dna import build_active_writer_package, get_active_scene_contract
+
+    active_scene_contract = get_active_scene_contract(book_id)
+    if active_scene_contract.get("target_words"):
+        target_words = int(active_scene_contract["target_words"])
     scope = WritingKnowledgeScope(book_id=book_id, target_word_count=target_words)
 
     for s, method in [
@@ -803,11 +808,11 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
 
     if ch_num and 1 <= ch_num <= len(chapters_list):
         ch = chapters_list[ch_num - 1]
-        if ch.get("synopsis"):
+        if ch.get("synopsis") and not active_scene_contract:
             scope.chapter_outline = ch["synopsis"]
         for cname in ch.get("characters", []):
             scope.add_character(cname, ExposureLevel.FULL, "大纲标注")
-        if ch.get("notes"):
+        if ch.get("notes") and not active_scene_contract:
             scope.writing_rules = (scope.writing_rules + "\n" + ch["notes"]).strip()
 
     if ch_num and ch_num > 1 and 0 <= ch_num - 2 < len(chapters_list):
@@ -821,11 +826,11 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
     extra_match = _match_extra_outline(book_id, instruction, bool(args.get("is_extra", False)))
     if extra_match and extra_match["outline_entry"]:
         oe = extra_match["outline_entry"]
-        if oe.get("synopsis"):
+        if oe.get("synopsis") and not active_scene_contract:
             scope.chapter_outline = oe["synopsis"]
         for cname in oe.get("characters", []):
             scope.add_character(cname, ExposureLevel.FULL, "番外大纲标注")
-        if oe.get("notes"):
+        if oe.get("notes") and not active_scene_contract:
             scope.writing_rules = (scope.writing_rules + "\n" + oe["notes"]).strip()
 
     if not scope.characters and not scope.locations:
@@ -874,7 +879,7 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
 
     scoped_context = cm.build_scoped_context(scope)
 
-    ext_inst = instruction
+    ext_inst = "执行已启用的当前场景合同" if active_scene_contract else instruction
     if scope.chapter_outline:
         ext_inst += f"\n\n本章大纲: {scope.chapter_outline}"
 
@@ -882,7 +887,7 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
     plot_chain = None
     chapter_function = ""
 
-    if ch_num:
+    if ch_num and not active_scene_contract:
         detailed = json_store.get_detailed_outline(book_id).get("chapters", [])
         if ch_num - 1 < len(detailed) and detailed[ch_num - 1]:
             ch_detail = detailed[ch_num - 1]
@@ -894,7 +899,7 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
                 ext_inst += f"\n本章叙事功能: {ch_detail['chapter_function']}"
 
     # 番外细纲注入
-    if extra_match and extra_match["detail_entry"]:
+    if extra_match and extra_match["detail_entry"] and not active_scene_contract:
         de = extra_match["detail_entry"]
         if de.get("plot_chain"):
             plot_chain = de["plot_chain"]
@@ -903,14 +908,47 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
             chapter_function = de["chapter_function"]
             ext_inst += f"\n本章叙事功能: {de['chapter_function']}"
 
+    if active_scene_contract:
+        active_beats = [str(item).strip() for item in active_scene_contract.get("beats", []) if str(item).strip()]
+        chapter_function = str(
+            active_scene_contract.get("story_function") or active_scene_contract.get("purpose") or "当前场景"
+        )
+        if active_beats:
+            plot_chain = []
+            for index, beat in enumerate(active_beats):
+                is_first = index == 0
+                is_last = index == len(active_beats) - 1
+                plot_chain.append(
+                    {
+                        "beat": beat,
+                        "must_cover": [beat],
+                        "start_state": active_scene_contract.get("start_state", "") if is_first else "承接上一节拍",
+                        "end_state": (
+                            active_scene_contract.get("end_state", "")
+                            if is_last
+                            else "完成当前局部节拍，停在下一节拍发生之前"
+                        ),
+                        "open_threads": [] if is_last else ["场景合同的结束状态尚未达成"],
+                    }
+                )
+            if len(active_beats) == 1:
+                ext_inst += f"\n\n当前唯一允许推进的节拍：{active_beats[0]}"
+
     if scope.writing_rules:
         ext_inst += f"\n\n写作规则: {scope.writing_rules}"
 
     from core.plot_norms import build_plot_norms_prompt
 
     plot_norms_prompt = build_plot_norms_prompt(book_id)
+    node_writing_rules = scope.writing_rules
     if plot_norms_prompt:
         ext_inst += f"\n\n{plot_norms_prompt}"
+        node_writing_rules = (node_writing_rules + "\n\n" + plot_norms_prompt).strip()
+
+    active_writer_package = build_active_writer_package(book_id)
+    if active_writer_package:
+        ext_inst += f"\n\n{active_writer_package}"
+        node_writing_rules = (node_writing_rules + "\n\n" + active_writer_package).strip()
 
     # ── 长章剧情预算：先分段，再写正文 ──
     # A token/character cap alone makes models compress the whole chapter into
@@ -924,7 +962,7 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
         else target_words > max_segment_words
     )
     explicit_segment_plan = args.get("segment_plan")
-    if isinstance(explicit_segment_plan, list) and explicit_segment_plan:
+    if not active_scene_contract and isinstance(explicit_segment_plan, list) and explicit_segment_plan:
         plot_chain = explicit_segment_plan
 
     required_segments = max(1, (target_words + max_segment_words - 1) // max_segment_words)
@@ -1019,7 +1057,7 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
             ref_block,
             plot_chain,
             chapter_function,
-            scope.writing_rules,
+            node_writing_rules,
             system,
             book_id,
             queue,
@@ -1582,6 +1620,12 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
     target_words = int(args.get("target_words", 2500))
     ch_num = _requested_regular_chapter_index(args, instruction)
 
+    from core.author_dna import build_active_writer_package, get_active_scene_contract
+
+    active_scene_contract = get_active_scene_contract(book_id)
+    if active_scene_contract.get("target_words"):
+        target_words = int(active_scene_contract["target_words"])
+
     scope = WritingKnowledgeScope(book_id=book_id, target_word_count=target_words)
 
     # ── 解析参数，构建作用域 ──
@@ -1610,12 +1654,12 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
         args.get("chapter_title", "")
         if ch_num and 1 <= ch_num <= len(chapters):
             ch_outline = chapters[ch_num - 1]
-            if ch_outline.get("synopsis"):
+            if ch_outline.get("synopsis") and not active_scene_contract:
                 scope.chapter_outline = ch_outline["synopsis"]
             if ch_outline.get("characters"):
                 for cname in ch_outline["characters"]:
                     scope.add_character(cname, ExposureLevel.FULL, "大纲标注")
-            if ch_outline.get("notes"):
+            if ch_outline.get("notes") and not active_scene_contract:
                 scope.writing_rules = (scope.writing_rules + "\n" + ch_outline["notes"]).strip()
 
     # ── 前情提要 ──
@@ -1634,7 +1678,7 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
     # ── 构建精选上下文并写作 ──
     cm = ContextManager(book_id)
     scoped_context = cm.build_scoped_context(scope)
-    extended_instruction = instruction
+    extended_instruction = "执行已启用的当前场景合同" if active_scene_contract else instruction
     if scope.chapter_outline:
         extended_instruction += f"\n\n本章大纲: {scope.chapter_outline}"
     if scope.writing_rules:
@@ -1645,6 +1689,10 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
     plot_norms_prompt = build_plot_norms_prompt(book_id)
     if plot_norms_prompt:
         extended_instruction += f"\n\n{plot_norms_prompt}"
+
+    active_writer_package = build_active_writer_package(book_id, include_beats=True)
+    if active_writer_package:
+        extended_instruction += f"\n\n{active_writer_package}"
 
     # ── 注入前3章连续性卡片 ──
     if ch_num and ch_num > 1:
