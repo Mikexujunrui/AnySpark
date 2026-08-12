@@ -10,7 +10,9 @@ The agent can suggest skills based on content classification.
 
 import json
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -24,6 +26,109 @@ if getattr(sys, "frozen", False):
 else:
     SYSTEM_SKILLS_DIR = PROJECT_ROOT / "skills"
 USER_SKILLS_DIR = DATA_DIR / "skills"
+
+
+@dataclass
+class SkillStepState:
+    index: int
+    tool: str
+    label: str
+    params: dict = field(default_factory=dict)
+    status: str = "pending"
+    attempts: int = 0
+    error: str = ""
+
+    def to_dict(self) -> dict:
+        return {
+            "index": self.index,
+            "tool": self.tool,
+            "label": self.label,
+            "params": self.params,
+            "status": self.status,
+            "attempts": self.attempts,
+            "error": self.error,
+        }
+
+
+@dataclass
+class SkillRun:
+    """In-memory state machine for one explicit ``/skill`` invocation.
+
+    The old implementation rendered the YAML as prose and trusted the model
+    to follow it.  This runtime makes the next declared tool a hard boundary:
+    later steps cannot execute until the current step returns successfully.
+    """
+
+    name: str
+    steps: list[SkillStepState]
+    current_index: int = 0
+    text_only_stalls: int = 0
+    failed: bool = False
+
+    @property
+    def complete(self) -> bool:
+        return self.current_index >= len(self.steps)
+
+    @property
+    def current(self) -> SkillStepState | None:
+        if self.complete:
+            return None
+        return self.steps[self.current_index]
+
+    @property
+    def tool_names(self) -> set[str]:
+        return {step.tool for step in self.steps if step.tool}
+
+    def allow_tool(self, tool_name: str) -> tuple[bool, str]:
+        if self.failed:
+            return False, f"Skill {self.name} 已在第 {self.current_index + 1} 步失败，需先报告或重试。"
+        expected = self.current
+        if expected is None:
+            return False, f"Skill {self.name} 所有步骤已完成，不应继续调用工具。"
+        if tool_name != expected.tool:
+            return (
+                False,
+                f"Skill 步骤锁：当前必须先执行第 {expected.index} 步 "
+                f"「{expected.label}」（{expected.tool}），不能越级调用 {tool_name}。",
+            )
+        return True, ""
+
+    def record_result(self, tool_name: str, success: bool, error: str = "") -> bool:
+        """Record a tool result and return whether the workflow advanced."""
+
+        current = self.current
+        if current is None or current.tool != tool_name:
+            return False
+        current.attempts += 1
+        if not success:
+            current.status = "failed"
+            current.error = error[:300]
+            # Stop the workflow at the failing step.  Re-running the explicit
+            # Skill starts a fresh state machine; silently skipping to a later
+            # write step would be much more dangerous.
+            self.failed = True
+            return False
+        current.status = "completed"
+        current.error = ""
+        self.current_index += 1
+        self.text_only_stalls = 0
+        return True
+
+    def record_text_only_stall(self) -> int:
+        self.text_only_stalls += 1
+        return self.text_only_stalls
+
+    def progress(self) -> dict[str, Any]:
+        current = self.current
+        return {
+            "skill": self.name,
+            "completed": self.current_index,
+            "total": len(self.steps),
+            "complete": self.complete,
+            "current_tool": current.tool if current else "",
+            "current_label": current.label if current else "",
+            "steps": [step.to_dict() for step in self.steps],
+        }
 
 
 class Skill:
@@ -177,6 +282,25 @@ class SkillManager:
                 }
             )
         return results
+
+    def start_run(self, skill_name: str) -> SkillRun:
+        skill = self._skills.get(skill_name)
+        if not skill:
+            raise ValueError(f"技能不存在: {skill_name}")
+        steps = []
+        for index, raw in enumerate(skill.steps, 1):
+            tool = str(raw.get("tool", "")).strip()
+            if not tool:
+                continue
+            steps.append(
+                SkillStepState(
+                    index=index,
+                    tool=tool,
+                    label=str(raw.get("label", tool)),
+                    params=dict(raw.get("params", {}) or {}),
+                )
+            )
+        return SkillRun(name=skill.name, steps=steps)
 
     def render_instruction(self, skill_name: str, user_input: str = "") -> str:
         """Render a skill as an executable Agent instruction.

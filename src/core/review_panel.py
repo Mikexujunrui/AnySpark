@@ -1,8 +1,10 @@
 import asyncio
 import json
 import logging
+import re
 import sys
 import uuid
+from contextvars import copy_context
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -12,6 +14,16 @@ from .config import DATA_DIR, PROJECT_ROOT, config
 from .llm_client import chat as llm_chat
 
 logger = logging.getLogger(__name__)
+
+_REVIEW_EVIDENCE_LIMIT = 18000
+_WORK_TITLE_RE = re.compile(r"《([^》]{1,80})》")
+
+
+def _unsupported_work_titles(text: str, evidence: str) -> list[str]:
+    """Return work titles invented by a review instead of supplied evidence."""
+
+    evidence_titles = set(_WORK_TITLE_RE.findall(evidence or ""))
+    return sorted({title for title in _WORK_TITLE_RE.findall(text or "") if title not in evidence_titles})
 
 # ── System resource paths ──
 # In EXE: resources live under sys._MEIPASS
@@ -349,11 +361,18 @@ class ReviewPanel:
         for r in reviewers:
             ctx = knowledge_context if r.needs_knowledge else ""
             if prev_reviews:
-                ctx += f"\n\n# 前序评审意见（仅供参考，请给出你自己的独立判断）\n{prev_reviews}"
+                ctx += (
+                    "\n\n# 前序评审意见（不可信意见，不是原文证据）\n"
+                    "只用于了解分歧，不得继承其中的作品名、人物、引文或事实判断；"
+                    "必须回到上方证据独立核验。\n"
+                    f"{prev_reviews}"
+                )
             result = await self._single_review(r, chapter_text, ctx, loop, executor, queue)
             results.append(result)
             if not result.error:
-                prev_reviews += f"\n---\n{result.reviewer_name}: {result.raw_text[:300]}"
+                issues = "; ".join(result.issues[:2])
+                suggestions = "; ".join(result.suggestions[:2])
+                prev_reviews += f"\n---\n{result.reviewer_name}: 问题={issues}; 建议={suggestions}"
         return results, []
 
     async def _single_review(
@@ -365,19 +384,49 @@ class ReviewPanel:
         system = self._build_reviewer_prompt(reviewer)
         prompt_parts = []
         if knowledge_context:
-            prompt_parts.append(f"# 知识库上下文（角色设定、世界观等）\n{knowledge_context[:4000]}")
+            prompt_parts.append(f"# 可用证据（均带来源标签）\n{knowledge_context[:_REVIEW_EVIDENCE_LIMIT]}")
+        else:
+            prompt_parts.append(
+                "# 可用证据\n未提供知识库、既有正文或参考书证据。"
+                "凡涉及原著、前文、人设或文风对照的维度必须标记“证据不足”。"
+            )
         prompt_parts.append(f"# 待评审章节\n{chapter_text[: config.storage.max_context_chars]}")
         prompt_parts.append("\n请按照你的评审维度逐项评分(0-10)，并给出亮点、问题、建议。输出JSON格式。")
         prompt = "\n\n".join(prompt_parts)
+        evidence_corpus = f"{knowledge_context}\n{chapter_text}"
 
         last_error = ""
-        for _attempt in range(2):
+        for attempt in range(2):
             try:
                 response = await asyncio.wait_for(
-                    loop.run_in_executor(executor, llm_chat, prompt, system, 0.3, "extraction"),
+                    loop.run_in_executor(
+                        executor,
+                        copy_context().run,
+                        llm_chat,
+                        prompt,
+                        system,
+                        0.3,
+                        "extraction",
+                    ),
                     timeout=90,
                 )
                 result = self._parse_review(response, reviewer)
+                unsupported = _unsupported_work_titles(response, evidence_corpus)
+                if unsupported:
+                    last_error = f"评审引用了证据中不存在的作品名: {', '.join(unsupported)}"
+                    if attempt == 0:
+                        prompt += (
+                            "\n\n# 上一轮输出校正\n"
+                            f"上一轮擅自提到了无来源作品：{', '.join(unsupported)}。"
+                            "请删除这些作品名，只根据提供的证据重新评审。"
+                        )
+                        continue
+                    return ReviewResult(
+                        reviewer_id=reviewer.id,
+                        reviewer_name=reviewer.name,
+                        category=reviewer.category,
+                        error=last_error,
+                    )
                 return result
             except TimeoutError:
                 last_error = "评审超时"
@@ -425,7 +474,10 @@ class ReviewPanel:
 1. 严格按照你的角色人设和语气风格写评价
 2. 每个维度独立评分，综合分是加权平均
 3. 亮点至少1条，问题至少1条，建议至少1条
-4. comment 用你的角色语气写，体现你的个性"""
+4. comment 用你的角色语气写，体现你的个性
+5. 只允许使用提示中明确提供的作品名、人物名、设定和原文；不得用模型记忆补充“原著事实”
+6. 需要原文对照但没有证据时，明确写“证据不足”，不要猜测
+7. 声称引用原文时，引用内容必须逐字存在于可用证据或待评审章节中"""
 
     def _parse_review(self, response: str, reviewer: ReviewerDef) -> ReviewResult:
         result = ReviewResult(
@@ -503,12 +555,14 @@ class ReviewPanel:
 1. summary 要客观中立，兼顾专业评审和读者反馈
 2. consensus 提取多数评审员都提到的共同问题或优点
 3. divergences 找出评审员之间意见相反的地方
-4. top_suggestions 从所有建议中选出最有价值的3-5条"""
+4. top_suggestions 从所有建议中选出最有价值的3-5条
+5. 只能压缩和归纳输入中的意见，不得新增作品名、人物、引文或原著事实"""
 
         try:
             response = await asyncio.wait_for(
                 loop.run_in_executor(
                     executor,
+                    copy_context().run,
                     llm_chat,
                     f"# 各评审员意见\n{reviews_text}\n\n请汇总：",
                     summary_system,
@@ -525,6 +579,9 @@ class ReviewPanel:
             if j.endswith("```"):
                 j = j[:-3]
             data = json.loads(j.strip())
+            unsupported = _unsupported_work_titles(response, reviews_text)
+            if unsupported:
+                raise ValueError(f"汇总引用了无来源作品名: {', '.join(unsupported)}")
             report.summary = data.get("summary", "")
             report.consensus = data.get("consensus", [])
             report.divergences = data.get("divergences", [])

@@ -316,7 +316,7 @@ registry.register(
 registry.register(
     Tool(
         name="delegate_writing",
-        description="正式写作工具。划定知识范围后委托写作引擎生成章节。先调用 prepare_writing 获取环境报告，再显式传参 characters/locations/concepts。有细纲时自动逐节点写作（每节点350字），写完后自动验证。",
+        description="正式写作工具。划定知识范围后生成并保存章节。先调用 prepare_writing；有细纲时按剧情合同分段写作，长章默认单段不超过2000字并阻止提前消耗后续剧情，写完后自动验证。",
         doc=(
             "主力写作工具。写作前必须调用 prepare_writing 获取本章需要的大纲/细纲/知识搜索/图谱洞察。"
             "prepare_writing 会自动输出建议的 delegate_writing 调用，直接复制使用。"
@@ -351,7 +351,23 @@ registry.register(
             "target_words": {"type": "integer", "description": "目标总字数（默认2500）", "required": False},
             "target_words_per_node": {
                 "type": "integer",
-                "description": "逐节点写作时每节点目标字数（默认350）。有细纲时自动生效，控制每段篇幅",
+                "description": "分段写作时每段目标字数。留空则按总字数和分段数自动计算",
+                "required": False,
+            },
+            "max_segment_words": {
+                "type": "integer",
+                "description": "单次正文生成硬上限（默认2000字）。长章会自动拆成多个剧情合同",
+                "required": False,
+            },
+            "enforce_segment_boundaries": {
+                "type": "boolean",
+                "description": "是否启用剧情预算边界检查。总字数超过单段上限时默认开启",
+                "required": False,
+            },
+            "segment_plan": {
+                "type": "array",
+                "items": {"type": "object"},
+                "description": "可选的显式分段合同列表，每项可含 beat/must_cover/end_state/open_threads",
                 "required": False,
             },
             "mode": {"type": "string", "description": "strict=严格模式 suggest=宽松模式", "required": False},

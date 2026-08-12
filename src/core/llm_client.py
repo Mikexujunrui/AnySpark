@@ -36,6 +36,40 @@ CREATIVE_TASKS = set(config.llm.creative_tasks)
 _active_book_id: ContextVar[str] = ContextVar("anyspark_active_book_id", default="")
 
 
+def normalize_content_text(content: Any, _depth: int = 0) -> str:
+    """Extract prose text from provider-specific content shapes.
+
+    A few OpenAI-compatible gateways emit ``{"text": ...}``, nested
+    ``content`` blocks, or lists of text parts instead of a plain string.
+    ``str(dict)`` prevents a crash but leaks Python/JSON representation into
+    the manuscript.  Prefer known text fields and ignore unknown metadata.
+    """
+
+    if _depth > 6 or content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, bytes):
+        return content.decode("utf-8", errors="replace")
+    if isinstance(content, (list, tuple)):
+        return "".join(normalize_content_text(item, _depth + 1) for item in content)
+    if isinstance(content, dict):
+        for key in ("text", "output_text", "content", "delta", "message"):
+            if key in content:
+                text = normalize_content_text(content[key], _depth + 1)
+                if text:
+                    return text
+        return ""
+    for attr in ("text", "content", "value"):
+        if hasattr(content, attr):
+            text = normalize_content_text(getattr(content, attr), _depth + 1)
+            if text:
+                return text
+    if isinstance(content, (int, float, bool)):
+        return str(content)
+    return ""
+
+
 class LLMConfigurationError(RuntimeError):
     """Raised when a configured model slot cannot create a provider client."""
 
@@ -438,11 +472,10 @@ def chat_stream(
             for chunk in stream:
                 content = chunk.choices[0].delta.content
                 if content:
-                    content_yielded = True
-                    # Some providers (reasoning modes) return non-str content;
-                    # normalize to str so downstream ``''.join(chunks)`` never
-                    # raises ``sequence item ... expected str instance, dict found``.
-                    yield content if isinstance(content, str) else str(content)
+                    text = normalize_content_text(content)
+                    if text:
+                        content_yielded = True
+                        yield text
             return  # success
         except Exception as e:
             last_error = e

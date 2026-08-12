@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller specification for the native macOS AnySpark application."""
 
+import os
 import tomllib
 from pathlib import Path
 
@@ -8,8 +9,23 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 ROOT = Path(".").resolve()
 ICON = ROOT / "packaging" / "macos" / "AnySpark.icns"
-with (ROOT / "pyproject.toml").open("rb") as version_file:
-    VERSION = tomllib.load(version_file)["project"]["version"]
+SOURCE_VERSION_FILE = ROOT / "pyproject.toml"
+with SOURCE_VERSION_FILE.open("rb") as version_file:
+    SOURCE_VERSION = tomllib.load(version_file)["project"]["version"]
+VERSION = os.environ.get("ANYSPARK_BUILD_VERSION", SOURCE_VERSION)
+PACKAGED_VERSION_FILE = SOURCE_VERSION_FILE
+if VERSION != SOURCE_VERSION:
+    PACKAGED_VERSION_FILE = ROOT / "build" / "packaged-metadata" / "pyproject.toml"
+    PACKAGED_VERSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    source_metadata = SOURCE_VERSION_FILE.read_text(encoding="utf-8")
+    PACKAGED_VERSION_FILE.write_text(
+        source_metadata.replace(
+            f'version = "{SOURCE_VERSION}"',
+            f'version = "{VERSION}"',
+            1,
+        ),
+        encoding="utf-8",
+    )
 
 
 def source_modules(directory):
@@ -47,7 +63,7 @@ a = Analysis(
         ("reviewers", "reviewers"),
         ("skills", "skills"),
         ("src/core/prompts", "core/prompts"),
-        ("pyproject.toml", "."),
+        (str(PACKAGED_VERSION_FILE), "."),
         ("LICENSE", "."),
         *tiktoken_datas,
     ],

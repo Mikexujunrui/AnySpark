@@ -3,7 +3,8 @@
   avatar: pen
   category: continuation
   active: false
-  needs_knowledge: false
+  # 文风判断必须看到当前书正文和参考书样本，否则只能靠模型记忆猜。
+  needs_knowledge: true
   persona: |
     你是一位小说续写的文风评审专家。你的任务是评估续文的语言风格是否与原文保持一致。
 

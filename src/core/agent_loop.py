@@ -125,7 +125,6 @@ def _extract_last_tool_summary(messages: list[dict]) -> str:
 
 
 @dataclass
-@dataclass
 class AgentConfig:
     agent_type: str = "write"
     mode: str = "write"
@@ -139,6 +138,10 @@ class AgentConfig:
     task_description: str = ""
     auto_mode_enabled: bool = True  # 机器人开关，False 时隐藏 start_autopilot
     memory_mode: str = "normal"  # "normal" | "clean_slate" | "experimental"
+    skill_name: str = ""  # explicit /skill invocation; empty for ordinary chat
+    skill_run: Any | None = None  # per-run state machine, initialized lazily
+    capability_packs: tuple[str, ...] = ()
+    active_tool_names: tuple[str, ...] = ()
     # ── pi-style hooks ──
     before_tool_call: Callable | None = None  # (tool_name, args) → {"block": bool, "reason": str} | None
     after_tool_call: Callable | None = None  # (tool_name, args, result, is_error) → modified_result | None
@@ -231,17 +234,35 @@ async def _loop_inner(
 ) -> AsyncGenerator[LoopEvent, None]:
 
     session_id = agent_config.session_id or agent_config.book_id or "default"
-    messages = _prepare_initial_messages(user_message, agent_config, history_messages)
     # is_subagent: True when this agent was spawned by another agent (not by the user).
     # Sub-agents must NOT see the task tool to prevent recursive spawn chains
     # (Nesting prevention for sub-agents).
     is_subagent = agent_config.session_id.startswith("sub_")
-    tool_list = resolve_tools_for_agent(agent_config.agent_type, agent_config.mode, is_subagent=is_subagent)
+    skill_tools: set[str] | None = None
+    if agent_config.skill_name:
+        from .skills import manager as skill_manager
+
+        agent_config.skill_run = skill_manager.start_run(agent_config.skill_name)
+        skill_tools = agent_config.skill_run.tool_names
+
+    from .capability_router import select_capabilities
+
+    capability_selection = select_capabilities(user_message, skill_tools=skill_tools)
+    tool_list = resolve_tools_for_agent(
+        agent_config.agent_type,
+        agent_config.mode,
+        is_subagent=is_subagent,
+        user_message=user_message,
+        skill_tools=skill_tools,
+    )
     # ── Auto-mode gate: start_autopilot requires the robot switch (autoModeEnabled) ──
     # Controlled by the bot-icon toggle in BookDetail. When off, the Agent
     # cannot see or use the Autopilot tool — it must use delegate_writing instead.
     if not agent_config.auto_mode_enabled:
         tool_list = [t for t in tool_list if t.get("name") != "start_autopilot"]
+    agent_config.capability_packs = capability_selection.packs
+    agent_config.active_tool_names = tuple(tool.get("name", "") for tool in tool_list if tool.get("name"))
+    messages = _prepare_initial_messages(user_message, agent_config, history_messages)
 
     # Token budget cap (industry-standard dual control with the round cap).
     # 0 ratio = disabled. Otherwise cap cumulative tokens at ratio × context limit.
@@ -284,6 +305,9 @@ async def _loop_inner(
             "agent": agent_config.agent_type,
             "mode": agent_config.mode,
             "tools_count": len(tool_list),
+            "capability_packs": list(capability_selection.packs),
+            "tool_names": [tool.get("name", "") for tool in tool_list],
+            "skill": agent_config.skill_run.progress() if agent_config.skill_run else None,
         },
     )
 
@@ -298,9 +322,43 @@ async def _loop_inner(
             queued_inputs = await run_state.drain_queued(session_id)
             if queued_inputs:
                 _inject_queued_inputs(messages, queued_inputs)
+                # Steering input may legitimately change the task phase (for
+                # example from discussion to "now write it").  Expand the
+                # available packs for the rest of this run; explicit Skills
+                # remain locked to their declared tools.
+                if not agent_config.skill_run:
+                    steering_text = "\n".join(str(item.text) for item in queued_inputs)
+                    steering_selection = select_capabilities(steering_text)
+                    steering_tools = resolve_tools_for_agent(
+                        agent_config.agent_type,
+                        agent_config.mode,
+                        is_subagent=is_subagent,
+                        user_message=steering_text,
+                    )
+                    if not agent_config.auto_mode_enabled:
+                        steering_tools = [t for t in steering_tools if t.get("name") != "start_autopilot"]
+                    existing_names = {tool.get("name") for tool in tool_list}
+                    added = [tool for tool in steering_tools if tool.get("name") not in existing_names]
+                    if added:
+                        tool_list.extend(added)
+                        agent_config.capability_packs = tuple(
+                            dict.fromkeys(agent_config.capability_packs + steering_selection.packs)
+                        )
+                        agent_config.active_tool_names = tuple(
+                            tool.get("name", "") for tool in tool_list if tool.get("name")
+                        )
+                        _append_user_hint(
+                            messages,
+                            f"[能力包已扩展] 新增 {', '.join(steering_selection.packs)}；"
+                            f"新增工具 {', '.join(tool.get('name', '') for tool in added)}。",
+                        )
                 yield LoopEvent(
                     type="progress",
-                    data={"stage": f"已接收 {len(queued_inputs)} 条追加指令，正在调整当前任务..."},
+                    data={
+                        "stage": f"已接收 {len(queued_inputs)} 条追加指令，正在调整当前任务...",
+                        "capability_packs": list(agent_config.capability_packs),
+                        "tools_count": len(tool_list),
+                    },
                 )
 
             # ── Stage 0: proactive stale tool result pruning ──
@@ -431,6 +489,52 @@ async def _loop_inner(
 
                 final_text = (response.content or "").strip()
 
+                # An explicit Skill is a state machine, not a suggestion.  A
+                # text-only answer before the declared steps finish is a
+                # premature stop: keep the same run alive and point the model
+                # at the exact next tool.  After two misses, fail visibly
+                # instead of spinning until the global round limit.
+                skill_run = agent_config.skill_run
+                if skill_run and not skill_run.complete and not skill_run.failed:
+                    stalls = skill_run.record_text_only_stall()
+                    current = skill_run.current
+                    if stalls <= 2 and current is not None:
+                        assistant_text = response.content or streamed_text
+                        if assistant_text:
+                            messages.append({"role": "assistant", "content": assistant_text})
+                        _append_user_hint(
+                            messages,
+                            f"[Skill 运行时] 工作流尚未完成。当前是第 {current.index}/{len(skill_run.steps)} 步"
+                            f"「{current.label}」，必须现在调用 {current.tool}，不要只描述计划。",
+                        )
+                        yield LoopEvent(
+                            type="progress",
+                            data={
+                                "stage": (
+                                    f"Skill {skill_run.name}: 阻止提前结束，"
+                                    f"等待第 {current.index}/{len(skill_run.steps)} 步 {current.tool}"
+                                )
+                            },
+                        )
+                        continue
+
+                    err_msg = (
+                        f"Skill {skill_run.name} 未执行必需的第 {current.index if current else '?'} 步"
+                        f"（{current.tool if current else '未知'}），已阻止假完成。"
+                    )
+                    state.metrics.finish_reason = "skill_stalled"
+                    yield LoopEvent(type="error", data={"message": err_msg})
+                    yield LoopEvent(
+                        type="done",
+                        data={
+                            "message": err_msg,
+                            "rounds": state.round,
+                            "parts": [p.to_dict() for p in state.parts],
+                            "metrics": _loop_metrics_dict(state.metrics),
+                        },
+                    )
+                    return
+
                 # Close the race where steering input arrives while the model
                 # is producing its terminal answer. Keep the same run alive.
                 await asyncio.sleep(0)
@@ -517,6 +621,29 @@ async def _loop_inner(
                 yield ev
             if state.metrics.finish_reason == "review_result":
                 return
+
+            skill_run = agent_config.skill_run
+            if skill_run:
+                if skill_run.failed:
+                    failed_step = skill_run.current
+                    _append_user_hint(
+                        messages,
+                        "[Skill 运行时] 当前步骤执行失败。禁止跳到后续步骤；"
+                        f"请向用户报告 {failed_step.tool if failed_step else '未知工具'} 的失败原因并结束。",
+                    )
+                elif skill_run.complete:
+                    _append_user_hint(
+                        messages,
+                        f"[Skill 运行时] {skill_run.name} 的 {len(skill_run.steps)} 个步骤已全部成功，"
+                        "请根据真实工具结果做简短总结，不要再调用其他工具。",
+                    )
+                elif skill_run.current is not None:
+                    current = skill_run.current
+                    _append_user_hint(
+                        messages,
+                        f"[Skill 运行时] 已进入第 {current.index}/{len(skill_run.steps)} 步"
+                        f"「{current.label}」。下一个唯一允许的步骤工具是 {current.tool}。",
+                    )
 
             # ── pi-style should_stop hook ──
             if agent_config.should_stop and agent_config.should_stop(state.round, state.metrics):
@@ -692,6 +819,8 @@ def _prepare_initial_messages(
         style_name=active_style,
         auto_mode_enabled=agent_config.auto_mode_enabled,
         book_id=agent_config.book_id,
+        capability_packs=agent_config.capability_packs,
+        active_tool_names=agent_config.active_tool_names,
     )
 
     messages = [{"role": "system", "content": system_prompt}]
@@ -1174,9 +1303,24 @@ async def _prepare_tool_calls(
     from .tool_meta import FULL_CHAPTER_GENERATION_TOOLS
 
     full_write_seen = False
+    skill_step_seen = False
     try:
         for tc in response.tool_calls:
             handle.check_cancelled()
+
+            skill_run = agent_config.skill_run
+            if skill_run:
+                allowed, reason = skill_run.allow_tool(tc.name)
+                if not allowed or skill_step_seen:
+                    if skill_step_seen and allowed:
+                        reason = (
+                            f"Skill 步骤锁：第 {skill_run.current.index if skill_run.current else '?'} 步"
+                            "每轮只允许一次调用，已阻止重复执行。"
+                        )
+                    messages.append({"role": "tool", "tool_call_id": tc.id, "content": reason})
+                    processed_ids.add(tc.id)
+                    continue
+                skill_step_seen = True
 
             if tc.name in FULL_CHAPTER_GENERATION_TOOLS:
                 if state.chapter_write_completed:
@@ -1197,6 +1341,11 @@ async def _prepare_tool_calls(
                 args = json.loads(tc.arguments) if tc.arguments else {}
             except json.JSONDecodeError:
                 args = {}
+
+            if skill_run and skill_run.current and skill_run.current.tool == tc.name:
+                preset_args = dict(skill_run.current.params)
+                preset_args.update(args)
+                args = preset_args
 
             tool_def = registry.get(tc.name)
             if tool_def:
@@ -1400,6 +1549,21 @@ async def _process_tool_result(
             )
         result_str = _finalize_tool_result(result)
 
+    skill_run = agent_config.skill_run
+    if skill_run:
+        success, skill_error = _skill_tool_result_status(result)
+        advanced = skill_run.record_result(tool_name, success, skill_error)
+        progress = skill_run.progress()
+        if success and advanced:
+            stage = (
+                f"Skill {skill_run.name}: 已完成 {progress['completed']}/{progress['total']} 步"
+                if not progress["complete"]
+                else f"Skill {skill_run.name}: 全部 {progress['total']} 步已完成"
+            )
+        else:
+            stage = f"Skill {skill_run.name}: 步骤 {tool_name} 失败，已停止后续执行"
+        yield LoopEvent(type="skill", data={"stage": stage, **progress})
+
     if result_str != "":
         messages.append({"role": "tool", "tool_call_id": tc.id, "content": result_str})
     else:
@@ -1424,6 +1588,32 @@ def _finalize_tool_result(result) -> str:
         return json.dumps(result, ensure_ascii=False)
     result_str = str(result) if result else ""
     return truncate_tool_output(result_str)
+
+
+def _skill_tool_result_status(result) -> tuple[bool, str]:
+    """Classify whether a Skill step produced a usable result.
+
+    Tool implementations have several historical return shapes, so the
+    runtime uses conservative structural checks instead of relying on one
+    exact error schema.
+    """
+
+    if isinstance(result, BaseException):
+        return False, str(result)
+    if isinstance(result, dict):
+        if result.get("error") or result.get("type") == "error":
+            return False, str(result.get("message") or result.get("error") or result)[:300]
+        if result.get("type") == "writing_result" and (
+            result.get("saved") is False or result.get("partial") is True
+        ):
+            return False, str(result.get("text") or "写作结果未完整保存")[:300]
+        return True, ""
+    text = str(result or "").strip()
+    lowered = text.lower()
+    error_prefixes = ("错误", "[错误]", "工具执行失败", "写作中断", "error:", "tool error")
+    if not text or lowered.startswith(tuple(prefix.lower() for prefix in error_prefixes)):
+        return False, text[:300] or "工具未返回有效结果"
+    return True, ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────

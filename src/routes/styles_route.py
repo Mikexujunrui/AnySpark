@@ -148,33 +148,8 @@ def delete_custom_style(name: str):
 
 
 # ── Skills (workflows) ──
-
-
-def _skill_to_response(s: dict) -> dict:
-    return {
-        "name": s["name"],
-        "description": s["description"],
-        "triggers": s["triggers"],
-        "steps": s["steps"],
-        "instructions": s.get("instructions", ""),
-        "guardrails": s.get("guardrails", []),
-        "outputs": s.get("outputs", []),
-        "source": s["source"],
-    }
-
-
-@router.get("/skills")
-def list_skills(source: str | None = None):
-    skills = skill_manager.list_skills(source=source)
-    return {"skills": [_skill_to_response(s) for s in skills]}
-
-
-@router.get("/skills/{name}")
-def get_skill(name: str):
-    skill = skill_manager.get(name)
-    if not skill:
-        raise HTTPException(404, f"技能不存在: {name}")
-    return _skill_to_response(skill.to_dict())
+# GET routes live in skills_route.py. Keeping a second pair here caused
+# duplicate OpenAPI operation IDs and the later handlers were unreachable.
 
 
 @router.post("/skills/custom")

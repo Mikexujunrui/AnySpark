@@ -69,10 +69,16 @@ def make_base(size: int = 1024) -> Image.Image:
 
 def main() -> int:
     if len(sys.argv) != 2:
-        print("usage: generate_macos_icon.py OUTPUT.iconset", file=sys.stderr)
+        print("usage: generate_macos_icon.py OUTPUT.iconset|OUTPUT.icns", file=sys.stderr)
         return 2
 
-    output_dir = Path(sys.argv[1])
+    output = Path(sys.argv[1])
+    if output.suffix.lower() == ".icns":
+        output.parent.mkdir(parents=True, exist_ok=True)
+        make_base().save(output, format="ICNS")
+        return 0
+
+    output_dir = output
     output_dir.mkdir(parents=True, exist_ok=True)
     base = make_base()
 

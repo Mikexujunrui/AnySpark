@@ -120,7 +120,12 @@ AGENT_PROMPTS = {
 3. 写完后 finalize_chapter chapter_id=#X → 验证+AI味扫描+提取知识+伏笔检查（一键完成）
 
 - prepare_writing 会自动输出建议的 delegate_writing 调用，直接复制使用
-- 有细纲时自动逐节点写作（每节点350字），无细纲时一次性写作
+- 有细纲时自动按剧情合同分段写作；长章默认每段不超过2000字，且不允许本段提前完成后续事件
+- 🔴 **字数语义不得混淆**：
+  - 用户说“本章/全文目标8000字” → `target_words=8000`（完整任务容量）
+  - 用户说“单轮/每段不超过2000字” → `max_segment_words=2000`（单次输出上限）
+  - 两者同时出现时必须同时传入，绝对不能把单段上限当成整章目标
+  - 分段不是把全部剧情压缩进第一段；每段只能消耗对应的剧情预算
 - 写完后自动运行 verify_chapter 验证
 - 如果验证发现幻觉实体，用 patch_chapter 修正后重新验证
 - 可指定 ref_chapters 注入原著章节原文
@@ -471,6 +476,16 @@ def build_system_prompt(agent_type: str = "write", style_name: str = "", **kwarg
             "不要尝试规划或启动 Autopilot。"
         )
 
+    active_tool_names = tuple(kwargs.get("active_tool_names", ()) or ())
+    capability_packs = tuple(kwargs.get("capability_packs", ()) or ())
+    if active_tool_names:
+        sections.append(
+            "\n# 本轮能力边界（运行时硬约束）\n"
+            f"- 已加载能力包：{', '.join(capability_packs) or '专用 Agent'}\n"
+            f"- 本轮可用工具：{', '.join(active_tool_names)}\n"
+            "- 基础说明中即使提到其他工具，本轮也视为不可用；不得伪造调用或用文字声称已执行。"
+        )
+
     skills = skill_manager.list_skills()
     if skills:
         skill_text = "\n".join(f"- /{s['name']}: {s['description']}" for s in skills)
@@ -736,12 +751,27 @@ AGENT_TOOL_MAP = {
 }
 
 
-def resolve_tools_for_agent(agent_type: str, mode: str = "write", is_subagent: bool = False) -> list[dict]:
+def resolve_tools_for_agent(
+    agent_type: str,
+    mode: str = "write",
+    is_subagent: bool = False,
+    user_message: str = "",
+    skill_tools: set[str] | None = None,
+) -> list[dict]:
     from .web_search import web_search_enabled
 
     if mode == "plan" or agent_type == "plan":
         excluded = WRITE_TOOLS | HIDDEN_TOOLS
         tools = registry.filter_by_names(excluded, exclude=True)
+    elif agent_type in ("write", "general") and (user_message or skill_tools is not None):
+        # Main Agents used to receive every registered tool on every turn.
+        # Route ordinary turns into small capability packs; explicit Skills
+        # expose only their declared workflow tools.  Calls without a message
+        # retain the legacy all-tools behavior for API compatibility/tests.
+        from .capability_router import select_capabilities
+
+        selection = select_capabilities(user_message, skill_tools=skill_tools)
+        tools = registry.filter_by_names(set(selection.tool_names))
     elif agent_tools := AGENT_TOOL_MAP.get(agent_type):
         if "include" in agent_tools:
             tools = registry.filter_by_names(agent_tools["include"])

@@ -7,6 +7,7 @@ import asyncio
 import json
 import logging
 import re
+from contextvars import copy_context
 
 from core.config import config
 from core.llm_client import chat as llm_chat
@@ -313,15 +314,15 @@ async def _write_chapter(loop, args: dict, book_id: str, msg: str) -> str | dict
     if guard:
         return guard
     ref_chapters = args.get("ref_chapters", []) or None
-    result = await loop.run_in_executor(
-        _ai_executor,
-        lambda: wr(
+    def writer_call():
+        return wr(
             args.get("instruction", msg),
             mode=args.get("mode", "strict"),
             project_id=book_id,
             ref_chapters=ref_chapters,
-        ),
-    )
+        )
+
+    result = await loop.run_in_executor(_ai_executor, copy_context().run, writer_call)
     title = args.get("chapter_title", args.get("title", ""))
     is_extra = bool(args.get("is_extra", False))
     chapter_index = args.get("chapter_index", None)
@@ -395,7 +396,7 @@ async def _write_chapter_streaming(loop, args: dict, kb, book_id: str, msg: str,
         finally:
             chunk_queue.put_nowait(None)
 
-    loop.run_in_executor(_ai_executor, _run)
+    loop.run_in_executor(_ai_executor, copy_context().run, _run)
 
     while True:
         chunk = await chunk_queue.get()
@@ -472,7 +473,7 @@ async def _write_chapter_streaming(loop, args: dict, kb, book_id: str, msg: str,
     }
 
 
-async def _write_by_nodes(
+async def _write_by_nodes_legacy(
     loop,
     scoped_context: str,
     ref_block: str,
@@ -553,7 +554,7 @@ async def _write_by_nodes(
             finally:
                 chunk_queue.put_nowait(None)
 
-        loop.run_in_executor(_ai_executor, _run)
+        loop.run_in_executor(_ai_executor, copy_context().run, _run)
 
         while True:
             chunk = await chunk_queue.get()
@@ -587,6 +588,163 @@ async def _write_by_nodes(
             full_text += sep
             if queue:
                 await queue.put({"_writing": sep})
+
+    return full_text, write_error
+
+
+async def _write_by_nodes(
+    loop,
+    scoped_context: str,
+    ref_block: str,
+    plot_chain: list,
+    chapter_function: str,
+    writing_rules: str,
+    system: str,
+    book_id: str,
+    queue=None,
+    target_words_per_node: int = 350,
+    forbidden_characters: list | None = None,
+    target_words: int | None = None,
+    max_segment_words: int | None = None,
+    enforce_segment_boundaries: bool = False,
+) -> tuple[str, str | None]:
+    """Write plot events under explicit prose and narrative budgets.
+
+    When boundary enforcement is active, a segment stays buffered until a
+    separate judge confirms it has not consumed future beats.  Rejected prose
+    is therefore never flashed in the preview and then silently replaced.
+    """
+
+    from core.llm_client import chat_stream, normalize_content_text
+    from core.narrative_budget import build_segment_contracts, check_segment_boundary
+
+    total_target = int(target_words or max(target_words_per_node * len(plot_chain), target_words_per_node))
+    hard_limit = int(max_segment_words or target_words_per_node + 150)
+    contracts = build_segment_contracts(
+        plot_chain,
+        target_chars=total_target,
+        max_segment_chars=hard_limit,
+    )
+    if not contracts:
+        return "", "没有可执行的分段创作合同"
+
+    stable_system = f"""{system}
+
+# 本章可用知识库设定
+{scoped_context}
+{ref_block}
+---
+本章共 {len(contracts)} 个叙事分段。每次只执行当前合同，后续事件只是禁止越过的边界。
+{f"本章叙事功能: {chapter_function}" if chapter_function else ""}
+{f"写作规则: {writing_rules}" if writing_rules else ""}"""
+
+    async def _generate(prompt_text: str, stream_live: bool) -> tuple[str, str | None]:
+        chunk_queue: asyncio.Queue = asyncio.Queue()
+        chunks: list[str] = []
+        errors: list[str] = []
+
+        def _run():
+            try:
+                for chunk in chat_stream(prompt_text, system=stable_system, temperature=0.7, task="writing"):
+                    text = normalize_content_text(chunk)
+                    if not text:
+                        continue
+                    chunks.append(text)
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, text)
+            except Exception as exc:
+                logger.exception("segment writing failed")
+                err_str = str(exc).lower()
+                if any(k in err_str for k in ("content_filter", "content filter", "sensitive", "policy", "moderation")):
+                    errors.append("内容审查拦截")
+                else:
+                    errors.append(f"LLM 错误: {str(exc)[:100]}")
+            finally:
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
+
+        loop.run_in_executor(_ai_executor, copy_context().run, _run)
+        while True:
+            chunk = await chunk_queue.get()
+            if chunk is None:
+                break
+            if stream_live and queue:
+                await queue.put({"_writing": chunk})
+        return "".join(chunks), errors[0] if errors else None
+
+    full_text = ""
+    prev_ending = ""
+    write_error: str | None = None
+
+    for contract in contracts:
+        if queue:
+            await queue.put(
+                {
+                    "_progress": (
+                        f"分段 {contract.index}/{contract.total}: {contract.beat[:30]}... "
+                        f"（硬上限 {contract.max_chars} 字）"
+                    )
+                }
+            )
+
+        prompt = contract.render_prompt(prev_ending)
+        node_text, node_error = await _generate(prompt, stream_live=not enforce_segment_boundaries)
+        if node_error:
+            write_error = f"{node_error}（分段 {contract.index}: {contract.beat[:20]}）"
+            break
+
+        if enforce_segment_boundaries:
+            boundary = await check_segment_boundary(loop, node_text, contract)
+            if not boundary.check_available and queue:
+                await queue.put({"_progress": f"分段 {contract.index}: ⚠️ {boundary.reason}，已保留本次结果"})
+            if not boundary.passed:
+                if queue:
+                    await queue.put(
+                        {
+                            "_progress": (
+                                f"分段 {contract.index}: 检测到剧情预算透支（{boundary.reason[:80]}），"
+                                "正在限定原边界重试一次..."
+                            )
+                        }
+                    )
+                retry_prompt = (
+                    prompt
+                    + "\n\n# 边界校正\n"
+                    + f"上一版越界：{boundary.reason}；证据：{boundary.evidence[:200]}。\n"
+                    + "请重新完整输出本段，只展开当前事件，提前停在合同指定状态。"
+                )
+                node_text, node_error = await _generate(retry_prompt, stream_live=False)
+                if node_error:
+                    write_error = f"{node_error}（分段 {contract.index} 边界重试）"
+                    break
+                boundary = await check_segment_boundary(loop, node_text, contract)
+                if not boundary.passed:
+                    write_error = (
+                        f"剧情边界检查未通过（分段 {contract.index}/{contract.total}）: "
+                        f"{boundary.reason or '模型提前消耗了后续事件'}"
+                    )
+                    break
+
+            if queue and node_text:
+                await queue.put({"_writing": node_text})
+
+        full_text += node_text
+        prev_ending = node_text[-350:]
+
+        if forbidden_characters and node_text:
+            violations = [name for name in forbidden_characters if name in node_text]
+            if violations and queue:
+                await queue.put(
+                    {
+                        "_progress": (
+                            f"分段 {contract.index}: 检测到禁止角色 {','.join(violations)}；"
+                            "已保留当前草稿并交给写后评审"
+                        )
+                    }
+                )
+
+        if contract.index < contract.total:
+            full_text += "\n\n"
+            if queue:
+                await queue.put({"_writing": "\n\n"})
 
     return full_text, write_error
 
@@ -724,6 +882,45 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
     if scope.writing_rules:
         ext_inst += f"\n\n写作规则: {scope.writing_rules}"
 
+    # ── 长章剧情预算：先分段，再写正文 ──
+    # A token/character cap alone makes models compress the whole chapter into
+    # the first response.  Long tasks are converted to semantic contracts so
+    # each model call may consume only one slice of the plot.
+    max_segment_words = max(500, int(args.get("max_segment_words", 2000) or 2000))
+    explicit_boundary_setting = args.get("enforce_segment_boundaries")
+    enforce_segment_boundaries = (
+        bool(explicit_boundary_setting)
+        if explicit_boundary_setting is not None
+        else target_words > max_segment_words
+    )
+    explicit_segment_plan = args.get("segment_plan")
+    if isinstance(explicit_segment_plan, list) and explicit_segment_plan:
+        plot_chain = explicit_segment_plan
+
+    required_segments = max(1, (target_words + max_segment_words - 1) // max_segment_words)
+    if enforce_segment_boundaries and target_words > max_segment_words and (
+        not plot_chain or len(plot_chain) < required_segments
+    ):
+        from core.narrative_budget import plan_segment_contracts
+
+        source_beats = plot_chain or [scope.chapter_outline or instruction]
+        if queue:
+            await queue.put(
+                {
+                    "_progress": (
+                        f"正在分配剧情预算: 目标 {target_words} 字，"
+                        f"拆为 {required_segments} 段，单段不超过 {max_segment_words} 字..."
+                    )
+                }
+            )
+        plot_chain = await plan_segment_contracts(
+            loop,
+            source_beats=source_beats,
+            instruction=ext_inst,
+            target_chars=target_words,
+            max_segment_chars=max_segment_words,
+        )
+
     # ── 注入前3章连续性卡片 ──
     if ch_num and ch_num > 1:
         cards = json_store.get_recent_continuity_cards(book_id, ch_num, count=3)
@@ -768,10 +965,20 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
 
     # ── 逐节点写作分支：有细纲 plot_chain (≥2 事件) 时自动启用 ──
     if plot_chain and len(plot_chain) >= 2:
-        target_words_per_node = int(args.get("target_words_per_node", 350))
+        requested_per_node = args.get("target_words_per_node")
+        target_words_per_node = (
+            int(requested_per_node)
+            if requested_per_node
+            else max(350, min(max_segment_words, (target_words + len(plot_chain) - 1) // len(plot_chain)))
+        )
         if queue:
             await queue.put(
-                {"_progress": f"逐节点写作模式: {len(plot_chain)} 个事件，每节点约 {target_words_per_node} 字"}
+                {
+                    "_progress": (
+                        f"分段合同写作: {len(plot_chain)} 段，每段约 {target_words_per_node} 字"
+                        + (f"，剧情边界硬上限 {max_segment_words} 字" if enforce_segment_boundaries else "")
+                    )
+                }
             )
 
         full_text, write_error = await _write_by_nodes(
@@ -786,6 +993,9 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
             queue,
             target_words_per_node,
             forbidden_characters=scope.forbidden_characters,
+            target_words=target_words,
+            max_segment_words=max_segment_words if enforce_segment_boundaries else target_words_per_node + 150,
+            enforce_segment_boundaries=enforce_segment_boundaries,
         )
 
         if write_error:
@@ -890,12 +1100,15 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
     def _run():
         nonlocal write_error, write_blocked
         from core.llm_client import chat_stream as cs
+        from core.llm_client import normalize_content_text
 
         try:
             for chunk in cs(prompt, system=system, temperature=0.7, task="writing"):
-                text = chunk if isinstance(chunk, str) else str(chunk)
+                text = normalize_content_text(chunk)
+                if not text:
+                    continue
                 chunks.append(text)
-                chunk_queue.put_nowait(text)
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, text)
         except Exception as e:
             logger.exception("write_chapter_streaming failed")
             err_str = str(e).lower()
@@ -905,9 +1118,9 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
             else:
                 write_error = str(e)[:100]
         finally:
-            chunk_queue.put_nowait(None)
+            loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
 
-    loop.run_in_executor(_ai_executor, _run)
+    loop.run_in_executor(_ai_executor, copy_context().run, _run)
 
     while True:
         chunk = await chunk_queue.get()
@@ -1110,7 +1323,13 @@ async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: s
             # Generate edit ops via LLM (non-streaming, JSON output)
             try:
                 raw_ops = await loop.run_in_executor(
-                    _ai_executor, llm_chat, tweak_prompt, tweak_system, 0.1, "extraction"
+                    _ai_executor,
+                    copy_context().run,
+                    llm_chat,
+                    tweak_prompt,
+                    tweak_system,
+                    0.1,
+                    "extraction",
                 )
 
                 # Parse JSON from response
@@ -1210,9 +1429,13 @@ async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: s
             nonlocal write_error
             try:
                 for chunk in chat_stream(prompt, system=system, temperature=0.7, task="writing"):
-                    text = chunk if isinstance(chunk, str) else str(chunk)
+                    from core.llm_client import normalize_content_text
+
+                    text = normalize_content_text(chunk)
+                    if not text:
+                        continue
                     node_chunks.append(text)
-                    chunk_queue.put_nowait(text)
+                    loop.call_soon_threadsafe(chunk_queue.put_nowait, text)
             except Exception as e:
                 logger.exception("write_chapter_streaming failed")
                 err_str = str(e).lower()
@@ -1221,9 +1444,9 @@ async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: s
                 else:
                     write_error = f"LLM错误（场景{i + 1}）: {str(e)[:80]}"
             finally:
-                chunk_queue.put_nowait(None)
+                loop.call_soon_threadsafe(chunk_queue.put_nowait, None)
 
-        loop.run_in_executor(_ai_executor, _run)
+        loop.run_in_executor(_ai_executor, copy_context().run, _run)
 
         while True:
             chunk = await chunk_queue.get()
@@ -1417,7 +1640,15 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
 
     system = plugin_manager.call_hook_chain("modify_system_prompt", system, context="writing")
 
-    result = await loop.run_in_executor(_ai_executor, llm_chat, prompt, system, 0.7, "writing")
+    result = await loop.run_in_executor(
+        _ai_executor,
+        copy_context().run,
+        llm_chat,
+        prompt,
+        system,
+        0.7,
+        "writing",
+    )
 
     title = args.get("chapter_title", "")
     is_extra = bool(args.get("is_extra", False))

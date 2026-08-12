@@ -153,6 +153,7 @@ async def session_status(session_id: str):
 async def chat_with_agent(req: MessageRequest):
     msg = req.message.strip()
     display_msg = msg
+    selected_skill_name = ""
 
     # ── 会话自动命名：首条非斜杠命令消息自动成为会话标题 ──
     if req.session_id and not msg.startswith("/") and not msg.startswith("#"):
@@ -196,6 +197,7 @@ async def chat_with_agent(req: MessageRequest):
         if skill_manager.get(command):
             if req.mode == "plan":
                 return {"type": "error", "message": "执行写作技能需要 Write 模式。"}
+            selected_skill_name = command
             msg = skill_manager.render_instruction(command, remainder)
 
     from core.settings import get_settings, validate_runtime_settings
@@ -223,7 +225,10 @@ async def chat_with_agent(req: MessageRequest):
         return EventSourceResponse(_write_shortcut(instruction, mode, req.book_id, req.session_id, msg))
 
     # ── Flash 快捷路由：仅高确定性的生成类意图 ──
-    intent, _ = await _classify_intent(msg, req.book_id)
+    # Explicit Skills must enter the Agent state machine.  Classifying the
+    # rendered Skill prompt could otherwise spot a word such as "大纲" and
+    # incorrectly bypass the remaining workflow via a one-tool shortcut.
+    intent, _ = ("general", {}) if selected_skill_name else await _classify_intent(msg, req.book_id)
 
     if intent == "generate_outline":
         return EventSourceResponse(_tool_shortcut("generate_outline", {}, req, msg))
@@ -245,7 +250,15 @@ async def chat_with_agent(req: MessageRequest):
 
     # New run started — proceed with agent loop
     try:
-        return EventSourceResponse(_agent_loop_sse(msg, req, handle, display_msg=display_msg))
+        return EventSourceResponse(
+            _agent_loop_sse(
+                msg,
+                req,
+                handle,
+                display_msg=display_msg,
+                skill_name=selected_skill_name,
+            )
+        )
     except Exception:
         await run_state.release(sid, handle)
         raise
@@ -435,7 +448,13 @@ def _style_cmd(req: MessageRequest, msg: str) -> dict:
         return {"type": "text", "message": "\n".join(lines)}
 
 
-async def _agent_loop_sse(msg: str, req: MessageRequest, handle=None, display_msg: str | None = None):
+async def _agent_loop_sse(
+    msg: str,
+    req: MessageRequest,
+    handle=None,
+    display_msg: str | None = None,
+    skill_name: str = "",
+):
     persisted_user_msg = display_msg if display_msg is not None else msg
     history_msgs = _load_history_as_llm_messages(req.session_id) if req.session_id else []
 
@@ -456,6 +475,7 @@ async def _agent_loop_sse(msg: str, req: MessageRequest, handle=None, display_ms
         extra_context=extra_context,
         auto_mode_enabled=req.auto_mode_enabled,
         memory_mode=req.memory_mode,
+        skill_name=skill_name,
     )
 
     # ── Event sourcing: write user message event ──
@@ -616,10 +636,34 @@ def _map_loop_event_to_sse(event: LoopEvent) -> dict | None:
     d = event.data
 
     if t == "start":
+        packs = d.get("capability_packs") or []
+        pack_note = f"，能力包: {', '.join(packs)}" if packs else ""
         return {
             "event": "progress",
             "data": json.dumps(
-                {"stage": "Agent 启动", "detail": f"{d.get('agent')} 模式, {d.get('tools_count')} 个工具"},
+                {
+                    "stage": "Agent 启动",
+                    "detail": f"{d.get('agent')} 模式, {d.get('tools_count')} 个工具{pack_note}",
+                    "capability_packs": packs,
+                    "tool_names": d.get("tool_names", []),
+                    "skill": d.get("skill"),
+                },
+                ensure_ascii=False,
+            ),
+        }
+
+    elif t == "skill":
+        return {
+            "event": "progress",
+            "data": json.dumps(
+                {
+                    "stage": d.get("stage", "Skill 执行中"),
+                    "skill": d.get("skill", ""),
+                    "completed": d.get("completed", 0),
+                    "total": d.get("total", 0),
+                    "current_tool": d.get("current_tool", ""),
+                    "steps": d.get("steps", []),
+                },
                 ensure_ascii=False,
             ),
         }

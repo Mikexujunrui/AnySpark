@@ -8,6 +8,7 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 BUILD_VENV="${BUILD_VENV:-$ROOT/.venv-macos-build}"
 PNPM_BIN="${PNPM_BIN:-}"
 NODE_BIN="${NODE_BIN:-}"
+SKIP_INSTALL="${SKIP_INSTALL:-0}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
     echo "ERROR: The macOS application must be built on macOS."
@@ -18,11 +19,25 @@ echo "[1/6] Preparing Python build environment..."
 if [[ ! -x "$BUILD_VENV/bin/python" ]]; then
     "$PYTHON_BIN" -m venv "$BUILD_VENV"
 fi
-"$BUILD_VENV/bin/python" -m pip install --upgrade pip
-"$BUILD_VENV/bin/python" -m pip install -r requirements-macos.txt
+if [[ "$SKIP_INSTALL" == "1" ]]; then
+    if [[ ! -x "$BUILD_VENV/bin/pyinstaller" ]]; then
+        echo "ERROR: SKIP_INSTALL=1 requires PyInstaller in $BUILD_VENV."
+        exit 1
+    fi
+    echo "      Reusing the existing Python build environment."
+else
+    "$BUILD_VENV/bin/python" -m pip install --upgrade pip
+    "$BUILD_VENV/bin/python" -m pip install -r requirements-macos.txt
+fi
 
 echo "[2/6] Installing frontend dependencies..."
-if command -v npm >/dev/null 2>&1; then
+if [[ "$SKIP_INSTALL" == "1" ]]; then
+    if [[ ! -x frontend/node_modules/.bin/vite ]]; then
+        echo "ERROR: SKIP_INSTALL=1 requires existing frontend dependencies."
+        exit 1
+    fi
+    echo "      Reusing the existing frontend dependencies."
+elif command -v npm >/dev/null 2>&1; then
     npm ci --prefix frontend
 elif [[ -n "$PNPM_BIN" && -x "$PNPM_BIN" ]]; then
     "$PNPM_BIN" --dir frontend install --no-frozen-lockfile
@@ -46,9 +61,13 @@ fi
 
 echo "[4/6] Generating application icon..."
 mkdir -p packaging/macos
-rm -rf packaging/macos/AnySpark.iconset
-"$BUILD_VENV/bin/python" scripts/generate_macos_icon.py packaging/macos/AnySpark.iconset
-iconutil -c icns packaging/macos/AnySpark.iconset -o packaging/macos/AnySpark.icns
+# macOS 26 iconutil can reject otherwise valid generated icon sets. Pillow's
+# native ICNS writer avoids that platform regression. Build under /tmp so File
+# Provider metadata from Documents cannot affect the generated icon.
+ICON_ROOT="$(mktemp -d /tmp/anyspark-icon.XXXXXX)"
+"$BUILD_VENV/bin/python" scripts/generate_macos_icon.py "$ICON_ROOT/AnySpark.icns"
+ditto --noextattr --noqtn "$ICON_ROOT/AnySpark.icns" packaging/macos/AnySpark.icns
+rm -rf "$ICON_ROOT"
 
 echo "[5/6] Building AnySpark.app..."
 rm -rf build/AnySpark dist/AnySpark dist/AnySpark.app
@@ -66,11 +85,12 @@ codesign --force --deep --sign - "$SIGNED_APP"
 codesign --verify --deep --strict --verbose=2 "$SIGNED_APP"
 
 echo "[6/6] Creating drag-to-install DMG..."
-VERSION="$("$BUILD_VENV/bin/python" -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+VERSION="${ANYSPARK_BUILD_VERSION:-$("$BUILD_VENV/bin/python" -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')}"
+BUILD_LABEL="${ANYSPARK_BUILD_LABEL:-$VERSION}"
 ARCH="$(uname -m)"
 DMG_STAGE="$SIGN_ROOT/dmg-stage"
-DMG_PATH="$ROOT/dist/AnySpark_${VERSION}_macOS_${ARCH}.dmg"
-ZIP_PATH="$ROOT/dist/AnySpark_${VERSION}_macOS_${ARCH}.zip"
+DMG_PATH="$ROOT/dist/AnySpark_${BUILD_LABEL}_macOS_${ARCH}.dmg"
+ZIP_PATH="$ROOT/dist/AnySpark_${BUILD_LABEL}_macOS_${ARCH}.zip"
 mkdir -p "$DMG_STAGE"
 ditto --noextattr --noqtn "$SIGNED_APP" "$DMG_STAGE/AnySpark.app"
 ln -s /Applications "$DMG_STAGE/Applications"
