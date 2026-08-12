@@ -244,6 +244,14 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     },
     onMetrics: (data) => {
       setMetrics(data)
+    },
+    // S99 第二步：接力轮开始——把队列消息作为 user 消息显示、队列条同步减少
+    onQueueConsume: (data) => {
+      const text = String((data as Record<string, unknown>)?.text || '')
+      if (text) {
+        setMessages(prev => [...prev, { role: 'user', text }])
+      }
+      setPendingQueue(prev => prev.slice(1))
     }
   })
 

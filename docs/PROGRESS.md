@@ -2722,3 +2722,29 @@ git worktree 隔离（data/ 不入库 + merge 冲突风险，水土不服不做�
 
 **遗留（第二步，按需）**：SSE 循环化接力执行——队列消息在会话 done 后自动消费，同连接多轮，
 轮间 `queue_pending` 帧；图谱抽取/摘要 hooks 逐轮挂载；cancel 只停当前轮（队列保留）。
+
+## S99 运行控制三件套——第二步 SSE 循环化接力执行（已完成 ✅）
+
+**目标**：排队消息在会话完成后**自动接力执行**——同一 SSE 连接跑完整条队列，队列空才发最终 done。
+这是第一步"排队只能存着"的补全，让"发起任务 → 排队指令 → 放手 → 回来收结果"闭环。
+
+**交付**（`routes_chat.py` chat_stream）：
+- **run_agent 循环化**：首轮 = 用户手动消息；每轮 run 完成后：挂后台摘要+图谱抽取（接力轮同样挂载）
+  → 检查 token 取消（**cancel 只停当前轮，不消费队列 → 队列保留**）→ 消费队列下一条（FIFO）
+  → 发 `queue_consume` 帧 {text, remaining} → 继续下一轮；队列空才 break
+- **事件协议调整**：agent 层单轮 `done` 不再转发 SSE（内部消化）；run_agent 结束发 `stream_end`
+  {rounds} → gen() 收到才发最终 `done` 帧（带 parts/token_usage/**rounds** 总轮数）
+- **防失控上限**：`MAX_QUEUE_ROUNDS = 20`，超限停止并保留剩余队列（警告日志）
+- 测试 `test_queue.py` +2：接力消费（queue_consume×2、rounds=3、队列清空）/ 空队列单轮兼容（rounds=1）
+
+**前端**：
+- `useSSE.ts`：+`onQueueConsume` 回调；done 帧 rounds 替换硬编码 1（RunLedger 显示真实接力轮数）
+- `ChatPanel.tsx`：onQueueConsume → 队列消息作为 user 消息显示 + 队列条 slice(1) 同步减少；
+  接力期间 streaming 持续 true（中止/插入/继续排队均可操作）
+
+**验证**：test_queue 7 + test_app 32 全过；前端 tsc 通过；全量 gate ✅
+
+**语义总结（主人确认）**：
+- 中止 = 停当前轮，队列保留（队列条仍可见，可删/转插入/或手动发消息后再接力）
+- 手动发新消息 = 正常跑（跑完后遗留队列继续接力——队列是"会话待办"）
+- steer = 即时干预当前轮；队列消息 = 当前轮完成后的待办，两者层级不同不冲突

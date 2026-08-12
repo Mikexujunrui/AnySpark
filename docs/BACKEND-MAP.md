@@ -51,6 +51,8 @@ POST /api/chat 或 /api/chat/stream（routes_chat）
       ├ recorder 记录（思维链只进记录不进上下文）
       └ steering 插话（/api/chat/steer → agent.steer；S99 排队消息可转插入 /api/chat/queue/…/steer）
   → 响应：ChatResponse / SSE 帧
+  → S99 第二步 SSE 接力：chat_stream 单连接跑完整条队列——每轮 done 后消费队列下一条
+    （queue_consume 帧），队列空才发最终 done（带 rounds 总轮数）；cancel 只停当前轮队列保留
   → 后台（不阻塞响应）：summarize 场景记忆 + 图谱抽取/伏笔回收/学习审查
 ```
 

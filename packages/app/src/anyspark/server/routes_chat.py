@@ -39,6 +39,9 @@ from anyspark.server.schemas import (
 )
 from anyspark.server.stats import compute_stats
 
+# S99 第二步：单连接接力执行的最大轮数（防队列无限消费失控；超限剩余队列保留）
+MAX_QUEUE_ROUNDS = 20
+
 
 def make_chat_router(deps: AppDeps) -> APIRouter:
     """聊天路由（依赖：deps.model / deps.store / deps.models / deps.chapters /
@@ -292,44 +295,83 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
         # S99：token 消耗累积（每轮 record 的 usage 相加）——done 帧带给前端展示
         usage_acc: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
-        def run_agent(agent: Agent, msg: str, conv_id: str) -> None:
+        def run_agent(agent: Agent, first_msg: str, conv_id: str) -> None:
+            """S99 第二步：SSE 循环化接力——单连接跑完整条队列，队列空才发 stream_end。
+
+            cancel 只停当前轮（token 中断后不消费队列 → 队列保留）；
+            每轮结束照常挂后台摘要 + 图谱抽取（接力轮同样挂载）。
+            """
             try:
                 token = CancellationToken()
                 deps.active_tokens[conv_id] = token
                 with deps.active_lock:
                     deps.active_agents[conv_id] = agent  # S25：steer 端点可运行中插话
+                rounds = 0
                 try:
-                    turn = agent.run(msg, conv_id, token)
+                    msg = first_msg
+                    while True:
+                        if rounds >= MAX_QUEUE_ROUNDS:
+                            logger.warning(
+                                "queue 接力达上限 %d 轮，剩余队列保留: conv=%s",
+                                MAX_QUEUE_ROUNDS,
+                                conv_id,
+                            )
+                            break
+                        rounds += 1
+                        turn = agent.run(msg, conv_id, token)
+                        # S53c ② 归档后分析：每轮结束后台摘要成场景记忆（不阻塞 SSE）
+                        deps.bg_queue.put(BgTask(kind="summarize", conv_id=conv_id))
+                        # 图谱抽取：与 /api/chat 行为一致（write_chapter 落盘后自动抽取）
+                        # extract_graph 开关（S15）：默认开保持现状，可关省 token
+                        if req.extract_graph:
+                            for wc in turn.tool_calls:
+                                if wc.name == "write_chapter":
+                                    title = str(wc.arguments.get("title", "")).strip()
+                                    content = str(wc.arguments.get("content", ""))
+                                    if title and content:
+                                        chs = deps.chapters.list_by_book("main")
+                                        order = next(
+                                            (c.order_index for c in chs if c.title == title),
+                                            len(chs),
+                                        )
+                                        # 后台队列处理（不阻塞 SSE 的 done 帧）
+                                        line = (
+                                            str(wc.arguments.get("line", "main")).strip() or "main"
+                                        )
+                                        deps.bg_queue.put(
+                                            BgTask(
+                                                kind="chapter",
+                                                title=title,
+                                                content=content,
+                                                order=order,
+                                                line=line,
+                                            )
+                                        )
+                        # 取消只停当前轮：不消费队列（队列保留，前端队列条仍可见）
+                        if token.is_cancelled():
+                            logger.info("queue 接力被取消: conv=%s 已跑%d轮", conv_id, rounds)
+                            break
+                        # 消费队列下一条（FIFO；队列空则结束本轮连接）
+                        with deps.queue_lock:
+                            items = deps.conv_queues.get(conv_id, [])
+                            if items:
+                                nxt = items.pop(0)
+                                if items:
+                                    deps.conv_queues[conv_id] = items
+                                else:
+                                    deps.conv_queues.pop(conv_id, None)
+                            else:
+                                nxt = None
+                        if nxt is None:
+                            break
+                        msg = nxt["text"]
+                        remaining = len(items) if items else 0
+                        events_queue.put(("queue_consume", {"text": msg, "remaining": remaining}))
                 finally:
                     deps.active_tokens.pop(conv_id, None)
                     with deps.active_lock:
                         deps.active_agents.pop(conv_id, None)
-                # S53c ② 归档后分析：会话结束后台摘要成场景记忆（不阻塞 SSE done 帧）
-                deps.bg_queue.put(BgTask(kind="summarize", conv_id=conv_id))
-                # 图谱抽取：与 /api/chat 行为一致（write_chapter 落盘后自动抽取）
-                # extract_graph 开关（S15）：默认开保持现状，可关省 token
-                if req.extract_graph:
-                    for wc in turn.tool_calls:
-                        if wc.name == "write_chapter":
-                            title = str(wc.arguments.get("title", "")).strip()
-                            content = str(wc.arguments.get("content", ""))
-                            if title and content:
-                                chs = deps.chapters.list_by_book("main")
-                                order = next(
-                                    (c.order_index for c in chs if c.title == title),
-                                    len(chs),
-                                )
-                                # 后台队列处理（不阻塞 SSE 的 done 帧）
-                                line = str(wc.arguments.get("line", "main")).strip() or "main"
-                                deps.bg_queue.put(
-                                    BgTask(
-                                        kind="chapter",
-                                        title=title,
-                                        content=content,
-                                        order=order,
-                                        line=line,
-                                    )
-                                )
+                events_queue.put(("stream_end", {"rounds": rounds}))
             except Exception as exc:  # 异常转 error 帧（不中断连接）
                 logger.exception("chat/stream 执行异常: %s", exc)
                 events_queue.put(("error", {"message": f"执行失败: {exc}"}))
@@ -405,6 +447,9 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                             if isinstance(v, (int, float)):
                                 usage_acc[k] += int(v)
                     return
+                elif e.type == "done":
+                    # S99：agent 层单轮完成不转发——连接结束由 stream_end 帧决定
+                    return
                 elif e.type == "tool_call":
                     # S82：带 arguments 的工具调用卡片（name[] + arguments[] zip）
                     names = payload.get("name") or []
@@ -443,10 +488,15 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                 except queue.Empty:
                     yield _sse_frame("error", {"message": "流式超时（120s 无事件）"})
                     break
-                if etype == "done":
-                    # S82：done 帧附本轮 parts（工具调用卡片 + 思考过程），
-                    # 前端 attach 到最后一条 agent 消息
-                    done_payload: dict[str, Any] = {"conversation_id": conv_id}
+                if etype == "stream_end":
+                    # S99 第二步：整条队列跑完（或取消/超限）才发最终 done 帧
+                    done_payload: dict[str, Any] = {
+                        "conversation_id": conv_id,
+                        "rounds": int(payload.get("rounds", 1)),
+                        # S100：模型名——前端按模型定价估算成本（pro 3/6 元，
+                        # flash 1/2 元每百万 token）
+                        "model": getattr(deps.model, "model_name", "?"),
+                    }
                     if parts_acc:
                         done_payload["parts"] = parts_acc
                     # S99：token 消耗汇总（前端 RunLedger 展示）

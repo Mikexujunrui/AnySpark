@@ -16,6 +16,7 @@ export interface SSECallbacks {
   onKnowledgeChanged?: () => void
   onCorrection?: (data: Record<string, unknown>) => void
   onMetrics?: (data: Record<string, unknown>) => void
+  onQueueConsume?: (data: Record<string, unknown>) => void
   onError?: (error: Error, msg: string) => void
 }
 
@@ -26,7 +27,7 @@ export interface SSEOptions {
   autoModeEnabled: boolean
 }
 
-export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onMetrics, onError }: SSEOptions & SSECallbacks) {
+export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onMetrics, onQueueConsume, onError }: SSEOptions & SSECallbacks) {
   const [streaming, setStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
@@ -37,6 +38,10 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
   const turnRef = useRef(0)
   const maxTurnsRef = useRef(0)
   const doneStepsRef = useRef(0)
+  // S100：会话累计 token（每次 done 累加）——常驻用量条展示
+  const sessionTokensRef = useRef<{ prompt_tokens: number; completion_tokens: number; total_tokens: number }>({
+    prompt_tokens: 0, completion_tokens: 0, total_tokens: 0,
+  })
 
   useEffect(() => {
     mountedRef.current = true
@@ -97,7 +102,14 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
             // S98：轮次信息（core turn_start 带 turn_index/max_iterations）
             turnRef.current = Number((data as Record<string, unknown>)?.turn_index) || turnRef.current + 1
             maxTurnsRef.current = Number((data as Record<string, unknown>)?.max_iterations) || maxTurnsRef.current
-            progressNow('正在思考…', `第 ${turnRef.current} 轮规划`)
+            // S100：软警告——接近轮次上限（剩 3 轮内）提示即将收尾（pi turnBudget soft 语义）
+            const nearLimit = maxTurnsRef.current > 0 && turnRef.current >= maxTurnsRef.current - 3
+            progressNow(
+              '正在思考…',
+              nearLimit
+                ? `第 ${turnRef.current}/${maxTurnsRef.current} 轮（⚠️ 接近上限，即将收尾）`
+                : `第 ${turnRef.current} 轮规划`
+            )
             break
           case 'text_delta': {
             const text = typeof data === 'string' ? data : String((data as Record<string, unknown>)?.content || '')
@@ -150,8 +162,17 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
               }
               // 工具调用轨迹（RunLedger 展示）
               const usage = (data as Record<string, unknown>)?.token_usage
+              // S100：会话累计 token（常驻用量条）
+              if (usage && typeof usage === 'object') {
+                const u = usage as Record<string, number>
+                sessionTokensRef.current.prompt_tokens += u.prompt_tokens || 0
+                sessionTokensRef.current.completion_tokens += u.completion_tokens || 0
+                sessionTokensRef.current.total_tokens += u.total_tokens || 0
+              }
+              // S99 第二步：done 帧带 rounds（接力总轮数），替换硬编码 1
+              const rounds = Number((data as Record<string, unknown>)?.rounds) || 1
               onMetrics?.({
-                rounds: 1,
+                rounds,
                 llm_calls: toolCallsRef.current + 1,
                 tool_calls: toolCallsRef.current,
                 tool_names: toolNamesRef.current,
@@ -160,9 +181,17 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
                 tokens: usage && typeof usage === 'object'
                   ? (usage as Record<string, number>)
                   : undefined,
+                // S100：会话累计 token + 模型名（常驻用量条 / 成本估算）
+                session_tokens: { ...sessionTokensRef.current },
+                model: String((data as Record<string, unknown>)?.model || ''),
               })
               onKnowledgeChanged?.()
             }
+            break
+          }
+          case 'queue_consume': {
+            // S99 第二步：接力轮开始——前端把该文本作为 user 消息显示、队列条同步减少
+            onQueueConsume?.(data as Record<string, unknown>)
             break
           }
           case 'error':
