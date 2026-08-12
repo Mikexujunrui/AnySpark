@@ -17,6 +17,7 @@ export interface SSECallbacks {
   onCorrection?: (data: Record<string, unknown>) => void
   onMetrics?: (data: Record<string, unknown>) => void
   onQueueConsume?: (data: Record<string, unknown>) => void
+  onBatchProposal?: (data: Record<string, unknown>) => void
   onError?: (error: Error, msg: string) => void
 }
 
@@ -27,7 +28,7 @@ export interface SSEOptions {
   autoModeEnabled: boolean
 }
 
-export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onMetrics, onQueueConsume, onError }: SSEOptions & SSECallbacks) {
+export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onMetrics, onQueueConsume, onBatchProposal, onError }: SSEOptions & SSECallbacks) {
   const [streaming, setStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
@@ -134,6 +135,15 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
               nameList.forEach((n: string) => { if (n) toolNamesRef.current[n] = (toolNamesRef.current[n] || 0) + 1 })
               onMessage?.({ type: 'tool', text: `[工具调用: ${name}]` })
               progressNow('调用工具', `${name}…`)
+              // S102：批量工具（提议模式）——提取参数回调给宿主弹批准窗
+              const argsList = (data as Record<string, unknown>)?.arguments
+              if (onBatchProposal && Array.isArray(argsList)) {
+                nameList.forEach((n: string, i: number) => {
+                  if (n === 'batch_rewrite' || n === 'batch_review') {
+                    onBatchProposal({ name: n, arguments: argsList[i] || {} })
+                  }
+                })
+              }
             }
             break
           }

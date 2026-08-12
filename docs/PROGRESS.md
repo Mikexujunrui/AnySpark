@@ -2793,3 +2793,33 @@ S74 数据隔离 + S81 作用域隔离 + S101b 简介隔离统一。历史惰性
   四个无参函数无任何调用方（图谱实际走 FullGraphView 直 fetch + getSummary）——删除
 
 **验证**：前端 tsc 全绿；PlotPanel 仅 PanelHost 一处实例化（已传 bookId）。
+
+## S102 agent 批量工具 + 权限批准弹窗（已完成 ✅）
+
+**需求（主人）**：批量功能不应是"给人类看的 checkbox 面板"，应该是 AI 自主调用——但要
+有权限批准弹窗（批量改多章原稿是重操作）。
+
+**决策（主人确认）**：按建议三件套做——① agent 批量工具 + 批准弹窗（核心）② 人类入口
+收敛为对话触发 ③ 进度轻量化显示到对话。
+
+**方案（提议模式）**：agent 工具**只提议不执行**——批量改写/审读是重操作，执行权在用户。
+流程：agent 判断需要批量 → 调 `batch_rewrite`/`batch_review` 工具（解析章节标题、返回
+"待用户批准"结构化申请）→ agent 转告用户 → 前端检测到批量工具调用 → 本轮结束弹
+**权限批准弹窗**（显示章节+指令+预估耗时，自主模式免确认）→ 批准后前端调现有
+/api/batch/* 执行 → 对话内轮询显示进度/结果。
+
+**交付**：
+- 后端 `tools_domain.py` +`make_batch_implementer`（batch_rewrite/batch_review 提议工具：
+  chapter_titles 模糊匹配章节、未匹配提示、参数校验；不接触 deps.batches，纯提议）
+- `toolkit.py` enable_domain 区注册（默认开）
+- 测试 `test_batch_tool.py` 5 用例：提议不执行（含指令/章节）/审读提议（含未匹配提示）/
+  缺参校验/JSON 数组字符串兼容/**集成——agent 循环真实调用 batch_rewrite（注册链路完整）**
+- 前端 `useSSE.ts`：tool_call 识别 batch 工具 → `onBatchProposal` 回调（name+arguments）
+- 前端 `ChatPanel.tsx`：`batchProposalRef` 收集申请 → streaming 结束弹 ApprovalModal
+  （requestApproval，cost=high）→ 批准：listChapters 标题→id → batchRewrite/batchReview
+  → 对话内进度消息轮询（3s，替换式更新，完成显示 hard 数）→ 拒绝：对话提示未执行
+
+**语义**：批量入口统一走"对话自然语言 → agent 提议 → 弹窗批准 → 执行"；
+BatchPanel 保留（进度查看），checkbox 手动发起入口被对话触发取代（第 2 点收敛完成）。
+
+**验证**：test_batch_tool 5 passed + ruff/mypy/tsc 全绿；全量 gate ✅

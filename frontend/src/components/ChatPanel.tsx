@@ -16,6 +16,8 @@ import AutopilotConsole from './chat/AutopilotConsole'
 import { api } from "../api"
 import { triggerRefresh } from "../store"
 import { enqueueChat, dequeueChat, steerQueuedChat, steerChat, fetchQueues, type QueueItem } from '../api/chat'
+import { batchRewrite, batchReview, getBatchStatus } from '../api/batch'
+import { listChapters } from '../api/chapters'
 
 const DIAG_PREFIX = '[CONN-DIAG]'
 
@@ -39,7 +41,7 @@ function filterAutopilotNoise(messages: { role: string; text: string; autopilot?
 // ── SSE chunk throttling: batch append updates to avoid per-chunk re-renders ──
 const CHUNK_FLUSH_MS = 50  // flush buffered chunks at most every 50ms
 export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transformSignal }: { bookId: string; sessionId: string; autoModeEnabled: boolean; transformSignal: number }) {
-  const { setAutoMode: setGlobalAutoMode } = useApproval()
+  const { setAutoMode: setGlobalAutoMode, requestApproval } = useApproval()
   const welcomeMsg = { role: 'agent', text: '你好！我是你的 AI 写作助手 Agent。\n\n'
     + '在输入框输入 `/` 可查看命令菜单。\n\n'
     + '**命令分两类**：\n'
@@ -76,6 +78,8 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const [showToolCalls, setShowToolCalls] = useState(true)  // toggle for tool call / thinking display
   // S99：会话消息队列（排队接力第一步——排队/查看/删/转插入；接力执行=第二步）
   const [pendingQueue, setPendingQueue] = useState<QueueItem[]>([])
+  // S102：批量提议（agent 调 batch_rewrite/batch_review 后待批准弹窗）
+  const batchProposalRef = useRef<{ name: string; arguments: Record<string, unknown> } | null>(null)
   const saveTimerRef = useRef(null)
   const hideTimerRef = useRef(null)
   const lastSentMsgRef = useRef('')
@@ -253,7 +257,13 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         setMessages(prev => [...prev, { role: 'user', text }])
       }
       setPendingQueue(prev => prev.slice(1))
-    }
+    },
+    // S102：批量提议——记住最新申请，等本轮结束后弹批准窗
+    onBatchProposal: (data) => {
+      const name = String((data as Record<string, unknown>)?.name || '')
+      const args = (data as Record<string, unknown>)?.arguments as Record<string, unknown> | undefined
+      if (name && args) batchProposalRef.current = { name, arguments: args }
+    },
   })
 
   // ── Global Escape key to cancel streaming ──
@@ -730,6 +740,85 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         setMessages(prev => [...prev, { role: 'agent', text: `⚠️ 转插入失败：${res.reason || '未知原因'}（已保留在队列）` }])
       }
     } catch { /* 静默 */ }
+  }
+
+  // ── S102 批量批准：本轮结束有批量提议 → 弹窗 → 批准执行 + 轮询进度 ──
+  useEffect(() => {
+    if (streaming || !batchProposalRef.current) return
+    const proposal = batchProposalRef.current
+    batchProposalRef.current = null  // 防重复弹
+    void handleBatchProposal(proposal)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streaming])
+
+  async function handleBatchProposal(proposal: { name: string; arguments: Record<string, unknown> }) {
+    const isRewrite = proposal.name === 'batch_rewrite'
+    const label = isRewrite ? '批量改写' : '批量审读'
+    const titlesRaw = String(proposal.arguments?.chapter_titles || '')
+    const instruction = String(proposal.arguments?.instruction || '').trim()
+    // 标题解析：JSON 数组字符串或逗号分隔
+    let titles: string[] = []
+    try {
+      const parsed = JSON.parse(titlesRaw)
+      if (Array.isArray(parsed)) titles = parsed.map(String)
+    } catch { /* 非 JSON */ }
+    if (titles.length === 0) titles = titlesRaw.split(/[,，、;；\n]/).map(s => s.trim()).filter(Boolean)
+    if (titles.length === 0) {
+      setMessages(prev => [...prev, { role: 'agent', text: `⚠️ ${label}申请参数异常：未解析到章节` }])
+      return
+    }
+
+    const ok = await requestApproval({
+      title: `AI 请求${label}`,
+      desc: `${label}以下 ${titles.length} 章：\n${titles.join('、')}`
+        + (isRewrite && instruction ? `\n\n指令：${instruction}` : '')
+        + `\n\n批准后将${isRewrite ? '修改原稿（旧版进版本历史可回退）' : '运行检测网审读'}`,
+      estSeconds: titles.length * (isRewrite ? 20 : 8),
+      cost: 'high',
+    })
+    if (!ok) {
+      setMessages(prev => [...prev, { role: 'agent', text: `[${label}已拒绝] 未执行` }])
+      return
+    }
+
+    // 批准 → 章节标题解析为 id → 提交批量
+    try {
+      const chs = await listChapters()
+      const ids = chs
+        .filter(c => titles.some(t => c.title.includes(t) || t.includes(c.title)))
+        .map(c => c.id)
+      if (ids.length === 0) {
+        setMessages(prev => [...prev, { role: 'agent', text: `⚠️ ${label}提交失败：章节标题未匹配到任何章节` }])
+        return
+      }
+      setMessages(prev => [...prev, { role: 'agent', text: `[${label}已提交] 共 ${ids.length} 章，正在执行…` }])
+      const { batch_id } = isRewrite
+        ? await batchRewrite(ids, instruction)
+        : await batchReview(ids)
+      // 轮询进度 → 替换进度消息（找到以 [label 开头的最新 agent 消息）
+      const timer = window.setInterval(async () => {
+        try {
+          const st = await getBatchStatus(batch_id)
+          const text = st.status === 'done'
+            ? `[${label}完成] ${st.done}/${st.total} 章`
+              + (isRewrite ? '' : `（hard ${st.results.filter(r => (r as any).hard).length} 处）`)
+            : `[${label}执行中] ${st.done}/${st.total} 章…`
+          setMessages(prev => {
+            const idx = prev.findIndex(m => m.role === 'agent' && m.text?.startsWith(`[${label}`))
+            const msg = { role: 'agent', text }
+            if (idx >= 0) {
+              const next = [...prev]; next[idx] = msg; return next
+            }
+            return [...prev, msg]
+          })
+          if (st.status === 'done') window.clearInterval(timer)
+        } catch {
+          window.clearInterval(timer)
+        }
+      }, 3000)
+    } catch {
+      setMessages(prev => [...prev, { role: 'agent', text: `⚠️ ${label}提交失败，请检查后端` }])
+    }
   }
 
   async function handleCancel() {

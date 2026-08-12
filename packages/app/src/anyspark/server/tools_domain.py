@@ -15,6 +15,7 @@ anyspark.server.tools_domain — 写作领域工具集（S48-P2：小说特化�
 
 from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -1677,3 +1678,162 @@ def make_reference_lookup_implementer(
         return ToolResult(call=call, ok=True, content="\n\n".join(lines))
 
     return spec, implementer
+
+
+def make_batch_implementer(chapters: Any, book_id: str = "main") -> tuple[list[Any], list[Any]]:
+    """S102：批量改写/批量审读**提议工具**（agent 自主发起，人工批准后执行）。
+
+    与 /api/batch/* 的关系：agent 工具只做"提议"——解析章节、返回待确认申请，
+    **不执行**（批量改写多章原稿是重操作，执行权在用户确认后由前端调 /api/batch/*）。
+    返回结构化待确认信息（匹配到的章节 + 指令），agent 转告用户等待批准。
+    """
+
+    def _parse_titles(raw: Any) -> list[str]:
+        """chapter_titles 参数解析：兼容数组 / JSON 字符串 / 逗号·顿号·换行分隔。"""
+        if isinstance(raw, list):
+            return [str(x).strip() for x in raw if str(x).strip()]
+        s = str(raw or "").strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return [str(x).strip() for x in parsed if str(x).strip()]
+        except (ValueError, TypeError):
+            pass
+        return [t.strip() for t in re.split(r"[,，、;；\n]", s) if t.strip()]
+
+    def _resolve_titles(chs: list[Any], titles: list[str]) -> tuple[list[Any], list[str]]:
+        """标题模糊匹配章节（标题包含/被包含），去重保序。返回 (匹配章节, 未匹配标题)。"""
+        matched: list[Any] = []
+        unmatched: list[str] = []
+        for t in titles:
+            found = [c for c in chs if t in c.title or c.title in t]
+            if found:
+                matched.extend(found)
+            else:
+                unmatched.append(t)
+        seen: set[str] = set()
+        dedup: list[Any] = []
+        for c in matched:
+            if c.id not in seen:
+                seen.add(c.id)
+                dedup.append(c)
+        return dedup, unmatched
+
+    def _chapters() -> list[Any]:
+        try:
+            return list(chapters.list_by_book(book_id))
+        except Exception as exc:
+            raise RuntimeError(f"读取章节失败: {exc}") from exc
+
+    def _fmt_proposal(
+        kind: str, matched: list[Any], unmatched: list[str], instruction: str = ""
+    ) -> str:
+        lines = [f"【批量{kind}申请·待用户批准】"]
+        if instruction:
+            lines.append(f"指令：{instruction}")
+        lines.append(f"目标章节（{len(matched)}章）：")
+        lines.extend(f"- {c.title}" for c in matched)
+        if unmatched:
+            lines.append(f"未匹配（已忽略）：{'、'.join(unmatched)}")
+        lines.append("请转告用户确认；用户批准后批量才会真正执行（本工具只提交申请）。")
+        return "\n".join(lines)
+
+    rewrite_spec = ToolSpec(
+        name="batch_rewrite",
+        description=(
+            "提议批量改写多章（统一指令应用：改文风/改情节/统一细节）。"
+            "需要一次性处理多章时使用；chapter_titles 传章节标题，多个用逗号分隔"
+            "（支持部分匹配，如'第三章,雨夜'）。**注意：本工具只提交申请不直接执行**"
+            "——多章原稿批量修改需用户批准后才执行，批准后进度会另行呈现。"
+        ),
+        params=[
+            ParamSpec(
+                name="chapter_titles",
+                type="string",
+                required=True,
+                description="要改写的章节标题（多个用逗号分隔，可部分匹配）",
+            ),
+            ParamSpec(
+                name="instruction",
+                type="string",
+                required=True,
+                description="统一改写指令（如'统一为冷峻克制的都市感'）",
+            ),
+        ],
+    )
+
+    def rewrite_impl(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        titles = _parse_titles(arguments.get("chapter_titles"))
+        instruction = str(arguments.get("instruction", "")).strip()
+        if not titles or not instruction:
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=(
+                    "参数不完整：需要 chapter_titles（章节标题，逗号分隔）"
+                    "和 instruction（改写指令）。"
+                ),
+            )
+        try:
+            matched, unmatched = _resolve_titles(_chapters(), titles)
+        except RuntimeError as exc:
+            return ToolResult(call=call, ok=False, content=str(exc))
+        if not matched:
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=(
+                    "未匹配到任何章节。现有章节标题："
+                    f"{'、'.join(c.title for c in _chapters()[:10]) or '（空）'}"
+                ),
+            )
+        return ToolResult(
+            call=call, ok=True, content=_fmt_proposal("改写", matched, unmatched, instruction)
+        )
+
+    review_spec = ToolSpec(
+        name="batch_review",
+        description=(
+            "提议批量审读多章（检测网：一致性/动机因果/情感连贯等 7 类问题）。"
+            "需要一次性审读多章时使用；chapter_titles 传章节标题，多个用逗号分隔"
+            "（支持部分匹配）。**注意：本工具只提交申请不直接执行**——"
+            "用户批准后才真正审读，审读报告批准后另行呈现。"
+        ),
+        params=[
+            ParamSpec(
+                name="chapter_titles",
+                type="string",
+                required=True,
+                description="要审读的章节标题（多个用逗号分隔，可部分匹配）",
+            ),
+        ],
+    )
+
+    def review_impl(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        titles = _parse_titles(arguments.get("chapter_titles"))
+        if not titles:
+            return ToolResult(
+                call=call,
+                ok=False,
+                content="参数不完整：需要 chapter_titles（章节标题，逗号分隔）。",
+            )
+        try:
+            matched, unmatched = _resolve_titles(_chapters(), titles)
+        except RuntimeError as exc:
+            return ToolResult(call=call, ok=False, content=str(exc))
+        if not matched:
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=(
+                    "未匹配到任何章节。现有章节标题："
+                    f"{'、'.join(c.title for c in _chapters()[:10]) or '（空）'}"
+                ),
+            )
+        return ToolResult(call=call, ok=True, content=_fmt_proposal("审读", matched, unmatched))
+
+    return [rewrite_spec, review_spec], [rewrite_impl, review_impl]

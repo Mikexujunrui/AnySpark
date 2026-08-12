@@ -99,6 +99,7 @@ def build_toolkit(
     # 默认开（小说写作必需能力）；skip_inject 无关（工具注册非注入）。
     if enable_domain:
         from anyspark.server.tools_domain import (
+            make_batch_implementer,
             make_graph_query_implementer,
             make_graph_register_implementer,
             make_ingest_implementer,
@@ -117,6 +118,11 @@ def build_toolkit(
             make_skill_lookup_implementer,
             make_skill_refine_implementer,
         )
+
+        # S102：批量改写/批量审读**提议工具**（agent 自主发起，前端弹窗批准后执行）
+        b_specs, b_impls = make_batch_implementer(ctx.chapters, book_id=ctx.book_id)
+        for _s, _i in zip(b_specs, b_impls, strict=True):
+            registry.register(_s, _i)
 
         gq_spec, gq_impl = make_graph_query_implementer(ctx.graph, book_id=ctx.book_id)
         registry.register(gq_spec, gq_impl)
