@@ -49,7 +49,7 @@ POST /api/chat 或 /api/chat/stream（routes_chat）
   → Agent.run（core.loop 循环：模型→工具→回填→终答）
       ├ 事件流 turn_start→text_delta/tool_call→tool_execution_start/end→tool_result→done
       ├ recorder 记录（思维链只进记录不进上下文）
-      └ steering 插话（/api/chat/steer → agent.steer）
+      └ steering 插话（/api/chat/steer → agent.steer；S99 排队消息可转插入 /api/chat/queue/…/steer）
   → 响应：ChatResponse / SSE 帧
   → 后台（不阻塞响应）：summarize 场景记忆 + 图谱抽取/伏笔回收/学习审查
 ```
@@ -93,16 +93,17 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
   → 写"这本书风格"时 write_chapter 的 skills 点名「书名」→ 整本方法论注入
 ```
 
-## 3. 路由层职责表（15 router，~164 端点）
+## 3. 路由层职责表（16 router，~166 端点）
 
 | Router | 端点区 | 核心依赖 |
 |---|---|---|
-| routes_chat | chat/stream/cancel/steer/stats/direction/candidates/rewrite | model/store/chapters/active_*/bg_queue |
+| routes_chat | chat/stream/cancel/steer/stats/direction/candidates/rewrite + S99 队列（queues 查看/queue 入队/queue 删/queue→steer 转插入） | model/store/chapters/active_*/bg_queue/conv_queues |
 | routes_conversations | 会话 CRUD/fork/rename + 模型注册表 CRUD/激活 | store/models |
 | routes_books | 书架（项目枚举/创建/删除） | workspace/chapters |
 | routes_chapters | 章节 CRUD/patch/export/wrapup | chapters/workspace/export |
 | routes_manual→routes_mind | manual/brief/signals/mind 全部 | manual/signals/workspace/mind_planner |
 | routes_settings | 设定档 categories/CRUD/uncensored/extract | settings/model/workspace |
+| routes_mode | 快速模式 GET/POST /api/settings/mode（模式/槽位/任务映射 S98） | mode_store/models |
 | routes_skills | 技巧 generate/CRUD/drafts + bias | skills/skill_generator/bias |
 | routes_agency | 能动性 CRUD/generate + 批量改写/审读 | agency/bias/batches/bg_queue |
 | routes_explore | intent/cards/path/dims/archive + check | dim_store/archive/explore |
@@ -161,6 +162,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | PlayStore | play/tree | play_sessions/tree | 推演 |
 | WorkflowStore | workflow/store | templates/drafts/tasks | 工作流 |
 | ModelRegistry | app/models/registry | model_configs | 运行时模型 |
+| ModeStore | app/models/mode | mode_config | 快速模式（S98 单行配置） |
 | ExtensionToolStore | app/server/tools_extensions | ext_tools | 扩展工具 |
 | 全部连接 | core/db.connect | — | S79 收敛一处 |
 
