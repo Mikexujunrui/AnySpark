@@ -6,6 +6,7 @@ import { useSSE } from "../hooks/useSSE"
 import MessageList from './chat/MessageList'
 import MessageInput from './chat/MessageInput'
 import ContextBar from './chat/ContextBar'
+import UsageStrip from './chat/UsageStrip'
 import WritingPreview from './chat/WritingPreview'
 import TaskListPanel from './chat/TaskListPanel'
 import WorkflowProgress from './chat/WorkflowProgress'
@@ -879,6 +880,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
           <div className="flex items-center gap-2">
             <div className="flex-1 min-w-0">
               <ContextBar contextUsage={contextUsage} />
+              <UsageStrip metrics={metrics as any} />
               <RunLedger metrics={metrics} />
             </div>
             {searchQuery && (
