@@ -14,7 +14,12 @@ import sys
 from pathlib import Path
 
 _configured = False
-LOG_DIR = Path(__file__).resolve().parents[5] / "data" / "logs"
+# S109：frozen → exe 同目录 data/logs（与 app 数据根一致）；开发 → 项目 data/logs
+if getattr(sys, "frozen", False):
+    _LOG_DIR = Path(sys.executable).resolve().parent / "data" / "logs"
+else:
+    _LOG_DIR = Path(__file__).resolve().parents[5] / "data" / "logs"
+LOG_DIR = _LOG_DIR
 LOG_FILE = LOG_DIR / "anyspark.log"
 
 # 应用 logger（统一出口）

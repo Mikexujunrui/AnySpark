@@ -280,20 +280,57 @@ def make_zip(out_dir: Path) -> Path:
     return out
 
 
+def build_exe() -> Path:
+    """S109：PyInstaller 打独立 exe（零依赖、无路径绑定）——前端 dist + 后端进单 exe。"""
+    print("  [pyinstaller] 构建独立 exe（需先 build_frontend）...")
+    r = subprocess.run(
+        [sys.executable, "-m", "PyInstaller", "anyspark.spec", "--noconfirm"], cwd=ROOT
+    )
+    if r.returncode != 0:
+        raise SystemExit("[错误] PyInstaller 打包失败")
+    exe = ROOT / "dist" / "AnySpark.exe"
+    if not exe.exists():
+        raise SystemExit(f"[错误] 未找到 {exe}")
+    print(f"  [exe] {exe.name}：{exe.stat().st_size / 1024 / 1024:.1f} MB")
+    return exe
+
+
 def main() -> None:
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     with_venv = "--with-venv" in sys.argv
+    exe_mode = "--exe" in sys.argv
     do_zip = "--zip" in sys.argv
     out_dir = Path(args[0]) if args else ROOT.parent / "AnySparkV4-发布"
-    print(f"打包到: {out_dir}（{'便携版：含 .venv' if with_venv else '源码版：需 uv sync'}）")
+    mode = (
+        "单 exe 版（双击即用，零依赖）"
+        if exe_mode
+        else ("便携版：含 .venv" if with_venv else "源码版：需 uv sync")
+    )
+    print(f"打包到: {out_dir}（{mode}）")
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
 
     build_frontend()
-    assemble(out_dir)
-    if with_venv:
-        copy_venv(out_dir)
+    if exe_mode:
+        # 单 exe 发布：exe + 使用说明，不带源码/venv
+        exe = build_exe()
+        shutil.copy2(exe, out_dir / exe.name)
+        readme = out_dir / "使用说明.txt"
+        readme.write_text(
+            "AnySpark v4 创作台（独立版）\n\n"
+            "使用：\n"
+            "1. 双击 AnySpark.exe 启动（自动在 exe 同目录创建 data/ 与 .env 模板）\n"
+            "2. 编辑 data/.env，填入你的 DeepSeek API Key（DEEPSEEK_API_KEY=sk-...）\n"
+            "3. 重新启动 exe，浏览器/窗口打开后即可使用\n\n"
+            "数据：所有作品数据（章节/图谱/书库）保存在 exe 同目录 data/，可整体拷贝迁移。\n"
+            "日志：data/logs/anyspark.log\n",
+            encoding="utf-8",
+        )
+    else:
+        assemble(out_dir)
+        if with_venv:
+            copy_venv(out_dir)
 
     # 统计
     size = sum(f.stat().st_size for f in out_dir.rglob("*") if f.is_file())
@@ -302,7 +339,9 @@ def main() -> None:
     print(f"  → {out_dir}")
     if do_zip:
         make_zip(out_dir)
-    if with_venv:
+    if exe_mode:
+        print("  [单 exe 版] 双击 AnySpark.exe 即用（零依赖、无路径绑定；填 data/.env 的 API Key）")
+    elif with_venv:
         print("  [便携版] 解压即用：填 .env API Key → 双击 start.bat（无需 Python/uv）")
     else:
         print("  [源码版] 双击 start.bat（首次需装 uv + uv sync + 填 .env API Key）")

@@ -52,6 +52,7 @@ dev = [
     "ruff==0.16.1",
     "mypy==1.11.2",
     "types-PyYAML==6.0.12",  # S64：review 包 yaml 类型桩
+    "pyinstaller==6.11.1",
 ]
 
 [tool.ruff]

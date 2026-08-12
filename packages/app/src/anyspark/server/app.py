@@ -7,7 +7,9 @@ anyspark.server.app — FastAPI 后端（真实 API 层）。
 
 from __future__ import annotations
 
+import contextlib
 import queue
+import sys
 import threading
 import time
 from pathlib import Path
@@ -106,8 +108,30 @@ from anyspark.workflow import (
 )
 
 # 数据根：项目 data/（gitignored，绝不入库）
-PROJECT_ROOT = Path(__file__).resolve().parents[5]
-DATA_DIR = PROJECT_ROOT / "data"
+# S109 打包改造：PyInstaller frozen 下——资源根=_MEIPASS（只读：frontend dist/.env 模板/reviewers），
+# 数据根=exe 同目录 /data（用户可写、可整体拷贝）；开发模式保持项目 data/。
+
+
+def _is_frozen() -> bool:
+    return bool(getattr(sys, "frozen", False))
+
+
+def _runtime_root() -> Path:
+    """资源根：frozen → PyInstaller 解包目录（只读）；开发 → 项目根。"""
+    if _is_frozen():
+        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    return Path(__file__).resolve().parents[5]
+
+
+def _data_root() -> Path:
+    """数据根：frozen → exe 同目录 /data（可写、可拷贝、可见）；开发 → 项目 data/。"""
+    if _is_frozen():
+        return Path(sys.executable).resolve().parent / "data"
+    return Path(__file__).resolve().parents[5] / "data"
+
+
+PROJECT_ROOT = _runtime_root()
+DATA_DIR = _data_root()
 DB_PATH = DATA_DIR / "anyspark.db"
 
 # S55 #3 注入块分层缓存：stable 块（跨请求不变）按签名缓存，volatile 块每次组装。
@@ -129,7 +153,19 @@ def build_app(
     - db_path: 默认 data/anyspark.db；测试可注入临时路径
     - workspace: S48 工作区（默认 data/workspace）；测试可注入临时路径隔离
     """
-    load_dotenv(PROJECT_ROOT / ".env")
+    # S109：.env 位置——frozen 下放数据根（exe 同目录，用户可填 key）；缺失时从模板生成
+    if _is_frozen():
+        env_path = DATA_DIR / ".env"
+        if not env_path.exists():
+            DATA_DIR.mkdir(parents=True, exist_ok=True)
+            template = PROJECT_ROOT / ".env.example"
+            if template.exists():
+                with contextlib.suppress(Exception):
+                    env_path.write_text(template.read_text(encoding="utf-8"), encoding="utf-8")
+            logger.warning("已生成 .env 模板（请填入 DeepSeek API Key 后重启）：%s", env_path)
+    else:
+        env_path = PROJECT_ROOT / ".env"
+    load_dotenv(env_path)
     setup_logging()
 
     real_db = db_path or DB_PATH
@@ -230,7 +266,10 @@ def build_app(
     workflow_generator = WorkflowGenerator(model)
     # S65 互动推演（独立扩展包 anyspark-play）：扮演角色多轮选择推进的推演树
     # S65：拟人化评审团面板（系统评审员随包分发 + 用户自定义覆盖 data/reviewers/）
-    review_panel = ReviewPanel()
+    # S109：frozen 下系统评审员在 _MEIPASS/reviewers（默认 parents 计算失效）
+    review_panel = (
+        ReviewPanel(system_dir=PROJECT_ROOT / "reviewers") if _is_frozen() else ReviewPanel()
+    )
     try:
         review_panel.add_dir(DATA_DIR / "reviewers")
     except Exception as _rpe:  # 用户目录损坏不影响服务启动
