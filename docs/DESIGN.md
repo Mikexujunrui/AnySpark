@@ -1459,3 +1459,30 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 - 可改 title/topic/key_points/key_settings/characters/terms/purpose（局部更新，list 自动序列化）
 - **kind/source_ref 不可经此改**（冷藏语义保护）；前端卡片 hover 铅笔按钮 → 编辑弹层
 - 底层 materials.update（仅更新传入字段，无需删建）
+
+### 12.41 会话绑定项目 + 智能体作用域隔离（S81，主人拍板）
+
+> 背景：会话全局共享（conversations 无 book_id，前端按书 localStorage 模拟隔离）；
+> 智能体循环看的是 chat 请求 book_id（前端没传 → 永远 main）。主人拍板：
+> **会话绑定书籍项目；智能体循环只看到打开项目的信息**。
+
+#### 决策
+
+- **会话 = 项目内资源**：conversations 加 book_id（幂等迁移，旧会话默认 main）。
+  创建/列表/fork 全按项目；chat 无会话创建时绑定请求的 book_id。
+- **智能体作用域 = 打开的项目**：前端 streamChat/useSSE 传 book_id → agent 循环的
+  ctx.book_id = 该项目 → 图谱查证/伏笔/计划/设定/资料/章节/检索全部只看到该项目。
+- **隔离哲学**：数据隔离（S74 book_id 贯穿）+ 作用域隔离（会话绑定）双线合一；
+  "不该看到所有项目" = 智能体工具按 book_id 装（S74 已就位），会话按 book_id 归属（本阶段补齐）。
+
+#### 实现
+
+- sqlite.py：表加列 + create(book_id)/list_conversations(book_id)/fork 继承归属
+- 新增 POST /api/conversations {title, book_id}（此前前端 createSession 一直 404 由 chat 兜底）
+- GET /api/conversations?book_id=（缺省 main 安全）；chat 创建会话绑定 req.book_id
+- 前端：getSessions/createSession 传 bookId；useSSE sendMessage 带 book_id
+
+#### 遗留
+
+- 部分 REST API（GET /api/graph/entities 等）仍硬编码 main——前端图谱面板跨项目显示，
+  属图谱 UI 隔离（并行会话 S84b/S90 方向），单独立项。
