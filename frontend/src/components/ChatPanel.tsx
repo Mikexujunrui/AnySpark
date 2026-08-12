@@ -29,6 +29,10 @@ const DIAG_PREFIX = '[CONN-DIAG]'
 // stays clean.
 function filterAutopilotNoise(messages: { role: string; text: string; autopilot?: boolean }[]): typeof messages {
   return messages.filter((_msg, i, arr) => {
+    // S107：过滤历史遗留的空气泡——agent 工具轮空文本被持久化（无文本无 parts 的纯空消息）
+    if (_msg.role === 'agent' && !(_msg.text || '').trim() && !((_msg as any).parts && (_msg as any).parts.length)) {
+      return false
+    }
     // Standalone autopilot agent message (autopilot:true flag)
     if ((_msg as any).autopilot === true) return false
     // User message starting with "[autopilot]" → skip the pair
