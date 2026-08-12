@@ -82,7 +82,7 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
           iconClass="text-pink-400"
           title="互动推演"
           desc="玩法灵感 · 模型自由推演"
-          actions={{ 
+          actions={
             <div className="flex items-center gap-2">
             <button
               onClick={() => setShowCreate(!showCreate)}
@@ -96,7 +96,7 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
               </svg>
             </button>
             </div>
-          }}
+          }
         />
 
         {/* 新建表单 */}

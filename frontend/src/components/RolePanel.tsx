@@ -69,7 +69,7 @@ export default function RolePanel({ open, onClose, embedded = false }: RolePanel
           iconClass="text-sky-400"
           title="角色推演"
           desc="低成本多探索 + 判别选优"
-          actions={{
+          actions={
             <div className="flex items-center gap-2">
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

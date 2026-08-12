@@ -151,7 +151,7 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
           iconClass="text-violet-400"
           title="心智"
           desc="AI 倾向 · 心智记忆"
-          actions={{ 
+          actions={
             <div className="flex items-center gap-2">
             <div className="flex bg-zinc-800 rounded-lg p-0.5">
               {(["bias", "memory"] as MindView[]).map(v => (
@@ -174,7 +174,7 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
               </svg>
             </button>
             </div>
-          }}
+          }
         />
 
         {/* 新增表单（倾向视图） */}

@@ -77,7 +77,7 @@ export default function DimsPanel({ open, onClose, embedded = false }: DimsPanel
           iconClass="text-sky-400"
           title="探索维度"
           desc="探索方向内容载体"
-          actions={{ 
+          actions={
             <div className="flex items-center gap-2">
             <button
               onClick={() => setShowAdd(!showAdd)}
@@ -91,7 +91,7 @@ export default function DimsPanel({ open, onClose, embedded = false }: DimsPanel
               </svg>
             </button>
             </div>
-          }}
+          }
         />
 
         {/* 新增表单 */}

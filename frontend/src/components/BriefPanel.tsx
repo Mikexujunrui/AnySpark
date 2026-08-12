@@ -105,7 +105,7 @@ export default function BriefPanel({ open, onClose, embedded = false, bookId = "
           iconClass="text-amber-400"
           title="项目简介"
           desc="协作约定 · 项目上下文"
-          actions={{ 
+          actions={
             <div className="flex items-center gap-2">
             {!editing && (
               <button
@@ -135,7 +135,7 @@ export default function BriefPanel({ open, onClose, embedded = false, bookId = "
               </svg>
             </button>
             </div>
-          }}
+          }
         />
 
         {/* 操作条：AI 生成草案 */}
