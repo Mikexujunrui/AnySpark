@@ -91,8 +91,12 @@ def test_skill_refine_tool_library_source_creates_draft(tmp_path: Path) -> None:
 
     class _Gen:
         def generate(self, source_text, hint, max_items, mode):  # type: ignore[no-untyped-def]
-            assert mode == "book"
-            assert "第一章" in source_text  # 原文来自书库
+            assert mode in ("writing", "main")
+            return []
+
+        def generate_book(self, source_text, hint=""):  # type: ignore[no-untyped-def]
+            # S106：拆书走新接口（分块抽样+归并）；原文来自书库全文
+            assert "第一章" in source_text
             return [
                 {
                     "name": "斗破苍穹写作法",

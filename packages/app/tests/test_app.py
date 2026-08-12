@@ -145,7 +145,9 @@ def test_chat_stream_sse_frames() -> None:
 
     _tp = _json.loads(turn_frame.split("data: ", 1)[1])
     assert _tp.get("turn_index", 0) >= 1
-    assert _tp.get("max_iterations", 0) >= 1
+    # S108：max_iterations 可为 None（对齐 pi 去硬上限，None=不限制）
+    _mi = _tp.get("max_iterations")
+    assert _mi is None or _mi >= 1
     assert "event: tool_call" in body
     assert "event: text" in body
     assert "event: done" in body

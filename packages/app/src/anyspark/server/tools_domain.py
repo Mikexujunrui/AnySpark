@@ -1591,7 +1591,8 @@ def make_skill_refine_implementer(
                 book = library.get_book(library_book_id)
                 if book is None:
                     return ToolResult(call=call, ok=False, content=f"书库无此书：{library_book_id}")
-                source_text = library.read_book(library_book_id, max_chars=200000).strip()
+                # S106：拆书需全文（12MB 级整本书）——不截断，抽样归并由 generate_book 内部做
+                source_text = library.read_book(library_book_id, max_chars=None).strip()
                 if not source_text:
                     return ToolResult(
                         call=call, ok=False, content=f"书库《{book['name']}》无内容（先导入文本）"
@@ -1620,8 +1621,8 @@ def make_skill_refine_implementer(
         mode = str(arguments.get("mode", "writing")).strip() or "writing"
         try:
             if mode == "book":
-                # S78 拆书：整本书多维拆解 → 一份「书名」skill（大窗口，单条）
-                candidates = generator.generate(source_text, hint, 1, mode="book")
+                # S78/S106 拆书：整本书多维拆解 → 一份「书名」skill（大书分块抽样+归并）
+                candidates = generator.generate_book(source_text, hint)
                 tag = "拆书 skill"
             else:
                 candidates = generator.generate(source_text, hint, 5, mode="writing")

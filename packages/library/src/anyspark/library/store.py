@@ -132,8 +132,8 @@ class LibraryStore:
         f.write_text(f"# {title}\n\n{content}\n", encoding="utf-8")
         return f
 
-    def read_book(self, book_id: str, max_chars: int = 200000) -> str:
-        """整本书文本（截断保护；供检索源/导入确认）。"""
+    def read_book(self, book_id: str, max_chars: int | None = 200000) -> str:
+        """整本书文本（max_chars 截断保护；None = 不截断，供拆书提炼/导入确认）。"""
         d = self.root / book_id
         if not d.exists():
             return ""
@@ -143,7 +143,7 @@ class LibraryStore:
             text = f.read_text(encoding="utf-8")
             parts.append(f"【{f.stem}】\n{text}")
             total += len(text)
-            if total > max_chars:
+            if max_chars is not None and total > max_chars:
                 break
         return "\n\n".join(parts)
 

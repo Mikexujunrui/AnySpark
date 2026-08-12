@@ -160,6 +160,37 @@ GENERATE_PROMPT_PLOT = """你是小说剧情模式提炼器。给定一部小说
 """
 
 
+# 拆书抽样（S106：12MB 整本书提炼修复——原实现只取开头 20000 字符 ≈ 1.6%）
+# 对齐 GENERATE_PROMPT_BOOK 设计意图「开篇/中段/高潮拼接」：全文均匀抽段分别拆解 → 归并
+_BOOK_SAMPLES = 16  # 抽样段数（覆盖全书，成本 = 16 次提炼 + 1 次归并）
+_BOOK_WINDOW = 12000  # 每段取的连续字符窗口（喂模型前再限 20000）
+
+
+MERGE_PROMPT_BOOK = """你是小说拆书汇总器。以下是同一本书多个代表段分别拆解出的方法论片段
+（各段已按 7 维度拆过，存在重复/冲突/各自侧重）。
+把 N 段融合成**一份**完整、去重、自洽的整本书方法论 skill（name=书名）。
+
+规则：
+- 合并重复维度（取最完整/最具体的表述），保留各段独有特征（开篇文风/中段节奏/结尾钩子逻辑都要覆盖）
+- 冲突时以出现频率高者为准，罕见的章节特征标注「（部分章节）」
+- 拒绝空洞概括——每句仍须落到可执行动作（负面约束 + 正面做法 + 原文摘录案例）
+- 输出 JSON 数组（仅一条）：[{"name": 书名, "description": 一句话索引, "content": 融合后完整方法论, "tags": "文风,结构,节奏"}]
+
+以下为各段拆解结果：
+"""
+
+
+def _sample_blocks(text: str, n: int, window: int) -> list[str]:
+    """整本书均匀抽 n 段：每段起点 = i*total/n，取其后连续 window 字符。
+
+    书小于 n*window 时整体一次返回（老路径）；否则覆盖开篇/中段/结尾。
+    """
+    total = len(text)
+    if total <= n * window:
+        return [text]
+    return [text[i * total // n : i * total // n + window] for i in range(n)]
+
+
 def _parse_skills(raw: str) -> list[dict[str, str]]:
     """宽容解析模型输出的 skill JSON 数组（R1 收敛到 core.jsonutil）。"""
     data = parse_json_array(raw)
@@ -299,6 +330,51 @@ class SkillGenerator:
             for c in cands:
                 c["target"] = "main"
         return cands
+
+    def generate_book(self, source_text: str, hint: str = "") -> list[dict[str, str]]:
+        """S106：拆书（整本书）——分块抽样提炼 + 归并成一份「书名」skill。
+
+        修复：原 mode=book 只取 source_text[:20000]（12MB 书仅开头 1.6%，
+        提炼结果等同失败）。现对齐 prompt 设计意图「开篇/中段/高潮拼接」：
+        全文均匀抽 _BOOK_SAMPLES 段 → 每段单独拆解（GENERATE_PROMPT_BOOK）→
+        MERGE_PROMPT_BOOK 归并去重成最终一份。
+        """
+        if not source_text.strip():
+            return []
+        samples = _sample_blocks(source_text, _BOOK_SAMPLES, _BOOK_WINDOW)
+        partials: list[str] = []
+        fallback: list[dict[str, str]] = []
+        for i, sample in enumerate(samples, 1):
+            prompt = GENERATE_PROMPT_BOOK + f"\n（代表段 {i}/{len(samples)}）\n{sample[:20000]}\n"
+            if hint.strip():
+                prompt += f"\n额外指引：{hint.strip()}\n"
+            try:
+                output = self._model.respond(  # type: ignore[attr-defined]
+                    [Message(role="system", content=prompt)],
+                    [],
+                )
+                cands = _parse_skills(output.text)[:1]
+                if cands:
+                    partials.append(f"【代表段 {i}】\n{cands[0].get('content', '')}")
+                    if not fallback:
+                        fallback = cands  # 归并失败时的降级：第一段结果
+            except Exception:
+                continue
+        if not partials:
+            return []
+        merge_prompt = MERGE_PROMPT_BOOK + "\n\n".join(partials) + "\n"
+        try:
+            merged = _parse_skills(
+                self._model.respond(  # type: ignore[attr-defined]
+                    [Message(role="system", content=merge_prompt)], []
+                ).text
+            )[:1]
+        except Exception:
+            merged = []
+        final = merged or fallback
+        for c in final:
+            c["target"] = "both"  # 拆书方法论：文风给写作、结构给主循环
+        return final
 
     def generate_main(
         self,

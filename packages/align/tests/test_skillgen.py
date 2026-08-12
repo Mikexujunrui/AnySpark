@@ -132,6 +132,57 @@ def test_generate_mode_writing_keeps_target() -> None:
     assert all(c.get("target", "writing") in ("writing", "main", "both") for c in cands)
 
 
+def test_generate_book_sampling_and_merge() -> None:
+    """S106：拆书（整本书）——12MB 级大书分块抽样 + 归并成一份。"""
+    from anyspark.align.skillgen import _BOOK_SAMPLES, _sample_blocks
+
+    class CountingBookModel:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.sample_prompts: list[str] = []
+
+        def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+            self.calls += 1
+            prompt = next((m.content for m in messages if m.role == "system"), "")
+            if "汇总器" in prompt:
+                # 归并调用：输出最终融合 skill
+                return ModelOutput(
+                    text="""```json
+[{"name": "全书方法论", "description": "整本书写法", "content": "开篇短句直给；中段节奏交替；结尾钩子回收。", "tags": "文风,结构"}]
+```"""
+                )
+            self.sample_prompts.append(prompt)
+            # 每段拆解：输出该段 skill（content 带段标记）
+            return ModelOutput(
+                text="""```json
+[{"name": "段", "content": "某段特征技法。", "description": ""}]
+```"""
+            )
+
+    model = CountingBookModel()
+    gen = SkillGenerator(model)
+    # 12MB 级大书：远超 20000 字符旧窗口
+    big_text = "第X章 " + ("雨夜，钟声。" * 200000)  # ~300 万字符
+    cands = gen.generate_book(big_text, hint="侧重悬念")
+    # 抽样 16 段 + 1 次归并
+    assert model.calls == _BOOK_SAMPLES + 1, (
+        f"应抽 {_BOOK_SAMPLES} 段+1 归并，实际 {model.calls} 次"
+    )
+    assert len(cands) == 1
+    assert cands[0]["target"] == "both"  # 拆书方法论双目标
+    assert "全书方法论" in cands[0]["name"]
+    # 每段喂的是抽样片段（含段标记，非开头截断）
+    assert all("代表段" in p for p in model.sample_prompts)
+    # 小书走单段（不浪费多次调用）
+    small_model = CountingBookModel()
+    SkillGenerator(small_model).generate_book("短文本。" * 100)
+    assert small_model.calls == 2  # 1 段提炼 + 1 归并
+    # 空文本 → 空
+    assert SkillGenerator(model).generate_book("") == []
+    assert len(_sample_blocks("x" * 10, 16, 12000)) == 1  # 小书整体
+    assert len(_sample_blocks("x" * (16 * 12000 + 1), 16, 12000)) == 16
+
+
 def test_generate_api_main_mode() -> None:
     """S58：API 传 mode=main 产出 target=main 候选。"""
     model = FakeSkillModel(GOOD_OUTPUT)

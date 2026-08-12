@@ -85,10 +85,11 @@ def make_library_router(deps: AppDeps) -> APIRouter:
         book = deps.library.get_book(book_id)
         if book is None:
             raise HTTPException(status_code=404, detail=f"书库无此书: {book_id}")
-        source = deps.library.read_book(book_id, max_chars=200000)
+        # S106：拆书需全文（12MB 级整本书）——不截断，抽样归并由 generate_book 内部做
+        source = deps.library.read_book(book_id, max_chars=None)
         if not source.strip():
             raise HTTPException(status_code=400, detail="书库无内容（先导入文本）")
-        cands = deps.skill_generator.generate(source, hint, 1, mode="book")
+        cands = deps.skill_generator.generate_book(source, hint)
         if not cands:
             raise HTTPException(status_code=502, detail="提炼失败（无有效候选）")
         c = cands[0]
