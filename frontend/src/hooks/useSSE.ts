@@ -33,6 +33,10 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
   const convIdRef = useRef<string | null>(null)
   const toolNamesRef = useRef<Record<string, number>>({})
   const toolCallsRef = useRef(0)
+  // S98：步骤进度——轮次（turn_index/max_iterations）+ 已完成工具步骤数（真实计数，非猜测）
+  const turnRef = useRef(0)
+  const maxTurnsRef = useRef(0)
+  const doneStepsRef = useRef(0)
 
   useEffect(() => {
     mountedRef.current = true
@@ -50,7 +54,19 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
     convIdRef.current = null
     toolNamesRef.current = {}
     toolCallsRef.current = 0
+    turnRef.current = 0
+    maxTurnsRef.current = 0
+    doneStepsRef.current = 0
     let streamingStarted = false
+
+    // S98：带轮次/步骤计数的进度（ProgressIndicator 用真实轮次进度 + 工具完成数）
+    const progressNow = (stage: string, detail?: string) => onProgress?.({
+      stage,
+      detail,
+      turnIndex: turnRef.current,
+      maxIterations: maxTurnsRef.current,
+      doneSteps: doneStepsRef.current,
+    })
 
     try {
       const res = await fetch('/api/chat/stream', {
@@ -78,15 +94,18 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
         switch (event.type) {
           case 'turn_start':
             if (data?.conversation_id) convIdRef.current = String(data.conversation_id)
-            // S82：步骤进度——告诉用户 AI 当前在干什么（ProgressIndicator 展示 stage/detail）
-            onProgress?.({ stage: '正在思考…', detail: 'AI 正在规划如何处理你的请求' })
+            // S98：轮次信息（core turn_start 带 turn_index/max_iterations）
+            turnRef.current = Number((data as Record<string, unknown>)?.turn_index) || turnRef.current + 1
+            maxTurnsRef.current = Number((data as Record<string, unknown>)?.max_iterations) || maxTurnsRef.current
+            progressNow('正在思考…', `第 ${turnRef.current} 轮规划`)
             break
           case 'text_delta': {
             const text = typeof data === 'string' ? data : String((data as Record<string, unknown>)?.content || '')
             if (text) {
               if (!streamingStarted) {
                 streamingStarted = true
-                onProgress?.(null)
+                // S98：正文开始不隐藏进度条，阶段转「生成正文」（可能还有后续轮次调工具）
+                progressNow('生成正文', '')
                 onMessage?.({ type: 'start', text })
               } else {
                 onMessage?.({ type: 'append', text })
@@ -102,18 +121,22 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
               const nameList = Array.isArray(names) ? names : [name]
               nameList.forEach((n: string) => { if (n) toolNamesRef.current[n] = (toolNamesRef.current[n] || 0) + 1 })
               onMessage?.({ type: 'tool', text: `[工具调用: ${name}]` })
-              onProgress?.({ stage: '调用工具', detail: `${name}…` })
+              progressNow('调用工具', `${name}…`)
             }
             break
           }
           case 'tool_execution_start': {
             const tname = String((data as Record<string, unknown>)?.name || '')
             onMessage?.({ type: 'tool', text: `[正在执行: ${tname}…]` })
-            onProgress?.({ stage: '正在执行', detail: `${tname}…` })
+            progressNow('正在执行', `${tname}…`)
             break
           }
-          case 'tool_execution_end':
+          case 'tool_execution_end': {
+            // S98：工具步骤完成计数（仅 ok 计入）
+            if ((data as Record<string, unknown>)?.ok) doneStepsRef.current += 1
+            progressNow('正在执行', `${String((data as Record<string, unknown>)?.name || '')} 完成`)
             break
+          }
           case 'tool_result':
             break
           case 'done': {

@@ -108,7 +108,7 @@ function ChapterDiffBadge({ part }) {
   )
 }
 
-function ReasoningBlock({ text }) {
+function ReasoningBlock({ text, index }: { text: string; index?: number }) {
   const [open, setOpen] = useState(false)
   if (!text) return null
   return (
@@ -119,7 +119,7 @@ function ReasoningBlock({ text }) {
       >
         <Icon name={open ? 'chevron-down' : 'chevron-right'} size={10} />
         <Icon name="brain" size={10} />
-        思考过程{open ? '' : `（${text.length}字）`}
+        思考过程{index ? ` ${index}` : ''}{open ? '' : `（${text.length}字）`}
       </button>
       {open && (
         <div className="mt-1 text-[11px] text-zinc-500 bg-zinc-900/40 border border-zinc-800 rounded-md p-2 max-h-48 overflow-y-auto whitespace-pre-wrap italic">
@@ -132,22 +132,20 @@ function ReasoningBlock({ text }) {
 
 function TurnParts({ parts }) {
   if (!parts || parts.length === 0) return null
-  const toolCalls = parts.filter(p => p.type === 'tool_call')
-  const diffs = parts.filter(p => p.type === 'chapter_diff')
-  const reasoning = parts.filter(p => p.type === 'reasoning').map(p => p.text).join('')
+  // S98：按执行顺序逐条渲染——每条思维链独立折叠块（不再 join 成一个），
+  // 工具调用卡片/章节徽章穿插在对应轮次之间，完整还原每轮「思考→调用→结果」链路
+  let reasoningIdx = 0
   return (
     <div className="space-y-1 mb-2">
-      {reasoning && <ReasoningBlock text={reasoning} />}
-      {diffs.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {diffs.map((d, i) => <ChapterDiffBadge key={i} part={d} />)}
-        </div>
-      )}
-      {toolCalls.length > 0 && (
-        <div className="flex flex-wrap gap-1">
-          {toolCalls.map((tc, i) => <ToolCallCard key={i} part={tc} />)}
-        </div>
-      )}
+      {parts.map((p, i) => {
+        if (p.type === 'reasoning') {
+          reasoningIdx += 1
+          return <ReasoningBlock key={i} text={p.text} index={reasoningIdx} />
+        }
+        if (p.type === 'tool_call') return <ToolCallCard key={i} part={p} />
+        if (p.type === 'chapter_diff') return <ChapterDiffBadge key={i} part={p} />
+        return null
+      })}
     </div>
   )
 }

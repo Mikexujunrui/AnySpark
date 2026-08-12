@@ -139,6 +139,13 @@ def test_chat_stream_sse_frames() -> None:
     assert r.headers["content-type"].startswith("text/event-stream")
     body = r.text
     assert "event: turn_start" in body
+    # S98：turn_start 带轮次信息（前端进度条用真实轮次进度）
+    turn_frame = next(f for f in body.split("\n\n") if f.startswith("event: turn_start"))
+    import json as _json
+
+    _tp = _json.loads(turn_frame.split("data: ", 1)[1])
+    assert _tp.get("turn_index", 0) >= 1
+    assert _tp.get("max_iterations", 0) >= 1
     assert "event: tool_call" in body
     assert "event: text" in body
     assert "event: done" in body

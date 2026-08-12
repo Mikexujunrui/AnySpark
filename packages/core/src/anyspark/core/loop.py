@@ -160,7 +160,16 @@ class Agent:
             for m in steer_msgs:
                 store.append(conversation_id, m)
                 self.events.emit(Event(type="user_text", payload={"content": m.content}))
-            self.events.emit(Event(type="turn_start", payload={}))
+            self.events.emit(
+                Event(
+                    type="turn_start",
+                    # S98：带轮次信息——前端进度条用真实轮次进度（turn_index/max_iterations）
+                    payload={
+                        "turn_index": turn_index,
+                        "max_iterations": self.max_tool_iterations,
+                    },
+                )
+            )
             history = store.messages(conversation_id)
             prompt_messages = (
                 [Message(role="system", content=system_block)] if system_block else []

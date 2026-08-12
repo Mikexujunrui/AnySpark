@@ -1,9 +1,14 @@
 import Icon from '../ui/Icon'
 
+// S98：运行进度条（真实计数，非猜测）
+// progress = { stage, detail, turnIndex, maxIterations, doneSteps }
+//  - turnIndex/maxIterations：core turn_start 携带的真实轮次（分母=16 轮硬上限）
+//  - doneSteps：已完成的工具执行步骤数（tool_execution_end ok 累计）
 export default function ProgressIndicator({ progress }) {
   if (!progress) return null
-  const pct = progress.total ? Math.round(((progress.done || 0) / progress.total) * 100) : null
-  const inferredPct = progress.stage?.includes('Step 1') ? 25 : progress.stage?.includes('Step 2') ? 50 : progress.stage?.includes('Step 3') ? 75 : 40
+  const { stage, detail, turnIndex, maxIterations, doneSteps } = progress
+  // 轮次真实进度；完成时（done 事件）progress 置 null 隐藏，这里封顶 99 避免误导 100%
+  const pct = maxIterations ? Math.min(Math.round(((turnIndex || 0) / maxIterations) * 100), 99) : null
 
   return (
     <div className="flex gap-3">
@@ -13,24 +18,22 @@ export default function ProgressIndicator({ progress }) {
       <div className="bg-zinc-800/80 border border-zinc-700 rounded-xl px-4 py-3 min-w-[360px]">
         <div className="flex items-center gap-2 mb-2">
           <Icon name="loader" size={13} className="text-accent animate-spin" />
-          <span className="text-sm font-medium text-zinc-100">{progress.stage || '处理中'}</span>
-          <span className="ml-auto text-xs text-accent font-medium truncate max-w-[120px]">
+          <span className="text-sm font-medium text-zinc-100">{stage || '处理中'}</span>
+          <span className="ml-auto text-xs text-accent font-medium truncate max-w-[140px]">
             {pct !== null ? `${pct}%` : '运行中'}
           </span>
         </div>
-        {progress.detail && <p className="text-xs text-zinc-500 mb-2 truncate">{progress.detail}</p>}
+        {detail && <p className="text-xs text-zinc-500 mb-2 truncate">{detail}</p>}
         <div className="h-1.5 bg-zinc-700/60 rounded-full overflow-hidden">
           <div
             className="h-full bg-accent rounded-full transition-all duration-300"
-            style={{ width: `${pct ?? inferredPct}%` }}
+            style={{ width: `${pct ?? 30}%` }}
           />
         </div>
-        {progress.total && (
-          <div className="flex justify-between text-[10px] text-zinc-500 mt-1.5">
-            <span>进度</span>
-            <span>{progress.done || 0} / {progress.total}</span>
-          </div>
-        )}
+        <div className="flex justify-between text-[10px] text-zinc-500 mt-1.5">
+          <span>{turnIndex ? `第 ${turnIndex} / ${maxIterations} 轮` : '推进中'}</span>
+          <span>{doneSteps ? `已完成 ${doneSteps} 个工具步骤` : ''}</span>
+        </div>
       </div>
     </div>
   )
