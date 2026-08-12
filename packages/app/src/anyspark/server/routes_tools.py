@@ -12,6 +12,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response
 
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
 from anyspark.server.schemas import CodexIn, IngestIn, ToolRegisterIn, ToolUpdateIn
@@ -130,7 +131,7 @@ def make_tools_router(deps: AppDeps) -> APIRouter:
             deps.workspace,
             deps.chapters,
             deps.materials,
-            deps.model,
+            model_for_task(deps, "extraction"),
             req.book_id,
             req.filename,
             mode=req.mode,

@@ -19,6 +19,7 @@ from anyspark.align import (
     parse_reconcile_result,
 )
 from anyspark.core import Message
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import logger
 from anyspark.server.schemas import (
@@ -157,7 +158,9 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
                 "已固化设定 / 当前进展 / 写作注意事项。\n"
                 "用明确无歧义的自然语言，总长 300 字以内。\n\n素材：\n" + "\n".join(parts)
             )
-            output = deps.model.respond([Message(role="system", content=prompt)], [])
+            output = model_for_task(deps, "extraction").respond(
+                [Message(role="system", content=prompt)], []
+            )
             draft = (output.text or "").strip()
             if not draft:
                 return {"draft": "", "note": "生成失败（空输出）"}
@@ -200,7 +203,9 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
             return {"results": [], "note": "无条目可对账"}
         prompt = build_reconcile_prompt(entries, recent_signals)
         try:
-            output = deps.model.respond([Message(role="system", content=prompt)], [])
+            output = model_for_task(deps, "extraction").respond(
+                [Message(role="system", content=prompt)], []
+            )
             results = parse_reconcile_result(output.text)
             return {"results": results, "note": ""}
         except Exception as exc:  # 对账失败不影响主链路
@@ -234,7 +239,9 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
             }
         prompt = build_agency_suggest_prompt(collab, levels)
         try:
-            output = deps.model.respond([Message(role="system", content=prompt)], [])
+            output = model_for_task(deps, "planning").respond(
+                [Message(role="system", content=prompt)], []
+            )
             res = parse_agency_suggest_result(output.text)
             valid = next((lv for lv in levels if lv.id == res.get("level_id", "")), None)
             return {

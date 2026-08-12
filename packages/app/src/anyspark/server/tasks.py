@@ -14,6 +14,7 @@ from anyspark.align import ManualEntry
 from anyspark.align.mindup import build_learning_review_prompt, parse_learning_review_result
 from anyspark.check import run_review
 from anyspark.core import Message
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
 
@@ -37,7 +38,9 @@ def run_batch_rewrite(
                     "只按指令调整（风格/情节/表达）。直接输出改写后的完整正文。\n"
                     f"【指令】{instruction}\n【原章】\n{ch.content}\n【改写后正文】"
                 )
-                out = deps.model.respond([Message(role="user", content=prompt)], [])
+                out = model_for_task(deps, "editing").respond(
+                    [Message(role="user", content=prompt)], []
+                )
                 new_text = (out.text or "").strip()
                 if new_text:
                     deps.chapters.upsert(
@@ -67,7 +70,7 @@ def run_batch_review(deps: AppDeps, batch_id: str, chapter_ids: list[str]) -> No
             if ch is None:
                 batch["results"].append({"id": cid, "ok": False, "error": "章节不存在"})
             else:
-                report = run_review(deps.model, ch.title, ch.content[:20000])
+                report = run_review(model_for_task(deps, "editing"), ch.title, ch.content[:20000])
                 batch["results"].append(
                     {
                         "id": cid,
@@ -239,7 +242,9 @@ def review_for_learning(deps: AppDeps, book_id: str, title: str, content: str) -
     try:
         entries = deps.manual.list("project", book_id)
         prompt = build_learning_review_prompt(entries, f"章节：{title}\n\n{content[:1200]}")
-        output = deps.model.respond([Message(role="system", content=prompt)], [])
+        output = model_for_task(deps, "extraction").respond(
+            [Message(role="system", content=prompt)], []
+        )
         found = parse_learning_review_result(output.text)
         added = 0
         for item in found:

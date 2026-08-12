@@ -13,6 +13,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from anyspark.core import Message
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.schemas import (
     SettingCategoryIn,
@@ -132,7 +133,7 @@ def make_settings_router(deps: AppDeps) -> APIRouter:
             '"name": "顾欣桐", "content": "..."}]}\n'
             f"【实体】\n{ent_txt}\n【事件】\n{ev_txt}"
         )
-        out = deps.model.respond(
+        out = model_for_task(deps, "extraction").respond(
             [
                 Message(
                     role="system",

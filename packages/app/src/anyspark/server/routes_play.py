@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException
 
 from anyspark.check import run_review
 from anyspark.explore import load_role_card, run_roleplay
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
 from anyspark.server.schemas import (
@@ -50,7 +51,9 @@ def make_play_router(deps: AppDeps) -> APIRouter:
                 status_code=404,
                 detail=f"角色卡不存在（可先 POST /api/role/card 创建）：{req.role}",
             )
-        result = run_roleplay(deps.model, role_card, state=state, scenario=req.scenario, n=req.n)
+        result = run_roleplay(
+            model_for_task(deps, "planning"), role_card, state=state, scenario=req.scenario, n=req.n
+        )
         if not result.candidates:
             raise HTTPException(status_code=502, detail="推演失败（无有效候选）")
         logger.info(
@@ -173,7 +176,7 @@ def make_play_router(deps: AppDeps) -> APIRouter:
 
         if req.with_check:
             check_report = await asyncio.to_thread(
-                run_review, deps.model, chapter_ref or "当前章节", text[:20000]
+                run_review, model_for_task(deps, "editing"), chapter_ref or "当前章节", text[:20000]
             )
 
             context["check_report"] = (
@@ -189,7 +192,7 @@ def make_play_router(deps: AppDeps) -> APIRouter:
                 )
 
         report = await review_panel.run_review(
-            deps.model,
+            model_for_task(deps, "editing"),
             text,
             chapter_ref=chapter_ref or "当前章节",
             reviewer_ids=req.reviewer_ids or None,

@@ -14,6 +14,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import Response
 
 from anyspark.core import Message
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import logger
 from anyspark.server.schemas import ChapterCreate, ChapterOut, ChapterPatchIn, ChapterUpdate
@@ -36,7 +37,9 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
             '格式（严格 JSON）：{"summary": "…", "next_hint": "…"}\n\n'
             f"章节《{ch.title}》正文：\n{ch.content[:4000]}"
         )
-        out = deps.model.respond([Message(role="system", content=prompt)], [])
+        out = model_for_task(deps, "extraction").respond(
+            [Message(role="system", content=prompt)], []
+        )
         cleaned = out.text.strip()
         fence = re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, re.DOTALL)
         if fence:

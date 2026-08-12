@@ -10,6 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from anyspark.check import compile_rule, compile_with_model, run_review
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.schemas import CheckRequest, RuleRequest
 
@@ -21,7 +22,7 @@ def make_check_router(deps: AppDeps) -> APIRouter:
     @router.post("/api/check", response_model=dict[str, object])
     def check_text_route(req: CheckRequest) -> dict[str, object]:
         """多检测者审读正文（骨架检测项，并行）+ 图谱事实证据 + 时序校验（确定性规则）。"""
-        report = run_review(deps.model, req.target, req.text)
+        report = run_review(model_for_task(deps, "editing"), req.target, req.text)
         # S7：图谱事实证据——文本涉及的已知实体/关系（检测网/用户比对设定冲突）
         evidence = deps.graph_verifier.render_evidence("main", req.text)
         # S13：时序校验——截止当前章节时空点，提及未来才首现的实体=时空倒置
@@ -59,7 +60,9 @@ def make_check_router(deps: AppDeps) -> APIRouter:
         """
         assert deps.model is not None
         # LLM 编译（内容判断）→ 失败回退轻量模板（无 LLM 场景）
-        compiled = compile_with_model(req.rule, deps.model) or compile_rule(req.rule)
+        compiled = compile_with_model(req.rule, model_for_task(deps, "general")) or compile_rule(
+            req.rule
+        )
         if compiled is None:
             return {
                 "ok": False,

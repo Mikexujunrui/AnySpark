@@ -2749,3 +2749,26 @@ git worktree 隔离（data/ 不入库 + merge 冲突风险，水土不服不做�
 - 中止 = 停当前轮，队列保留（队列条仍可见，可删/转插入/或手动发消息后再接力）
 - 手动发新消息 = 正常跑（跑完后遗留队列继续接力——队列是"会话待办"）
 - steer = 即时干预当前轮；队列消息 = 当前轮完成后的待办，两者层级不同不冲突
+
+## S98b 快速模式全路由接入（已完成 ✅）——V4 任务种类适配
+
+**背景**：S98 只接入 chat 写作路径（writing/planning/editing）。主人要求全部组件接入，
+并提示 V4 任务种类与老版本不同需适配。盘点 V4 全部 deps.model 调用点后接入：
+
+**任务映射（V4 实际任务 → 老版本 6 类，无新增类型）**：
+- writing：chat 写作/方向声明（S98 已接）
+- planning：探索（intent/path）、角色推演（play）、候选生成、档位生成/建议（agency/mind）
+- extraction：章节摘要/衔接、项目简介、心智对账、设定提炼、资料摘要、ingest 摄入、
+  心智学习审查（tasks）
+- editing：审读/检测（check/review_panel/tasks）、批量改写、chat rewrite
+- general：规则编译（compile_with_model）、后台杂项
+
+**改动**（10 文件，纯 deps.model.respond → model_for_task(deps, task)）：
+routes_agency / routes_chapters / routes_check / routes_explore / routes_mind /
+routes_play / routes_plot / routes_settings / routes_tools / tasks.py
+
+**保持兼容**：槽位未配 = 跟随激活配置（现有行为零变化）；agent 工具内部
+（ToolContext.model）跟随 agent 构造模型不单独分流。
+
+**验证**：全仓 pytest 445 passed（含并行会话 S99/S100 提交后）+ ruff/mypy 全绿；
+test_mode 13 + test_models 15 回归绿。

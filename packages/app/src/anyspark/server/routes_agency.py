@@ -13,6 +13,7 @@ from fastapi import APIRouter, HTTPException
 
 from anyspark.align import build_agency_gen_prompt, parse_agency_gen_result
 from anyspark.core import Message
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import logger
 from anyspark.server.schemas import (
@@ -73,7 +74,9 @@ def make_agency_router(deps: AppDeps) -> APIRouter:
             raise HTTPException(status_code=400, detail="n 需在 1-5 之间")
         prompt = build_agency_gen_prompt(req.description, req.n)
         try:
-            out = deps.model.respond([Message(role="system", content=prompt)], [])
+            out = model_for_task(deps, "planning").respond(
+                [Message(role="system", content=prompt)], []
+            )
             candidates = parse_agency_gen_result(out.text)
             return {
                 "candidates": candidates[: req.n],

@@ -11,6 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.schemas import (
     MaterialImportIn,
@@ -102,7 +103,7 @@ def make_plot_router(deps: AppDeps) -> APIRouter:
     def add_material(req: MaterialIn) -> dict[str, object]:
         """上传材料 → 真实 LLM 消化成摘要卡 → 图谱关联 → 入库（原文保留）。"""
         purpose: Any = req.purpose if req.purpose in ("style", "fact", "both") else "fact"
-        digestor = MaterialDigestor(deps.model)
+        digestor = MaterialDigestor(model_for_task(deps, "extraction"))
         card = digestor.digest(req.text, purpose=purpose)
         if req.title:
             card.title = req.title

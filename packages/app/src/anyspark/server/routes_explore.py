@@ -12,6 +12,7 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 
 from anyspark.explore import DirectionCard, IntentUnderstander, run_exploration
+from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
 from anyspark.server.schemas import (
@@ -32,7 +33,7 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
     @router.post("/api/explore/intent", response_model=dict[str, object])
     def explore_intent(req: ExploreIntentIn) -> dict[str, object]:
         """种子 → 概念卡 + 关键歧义点（意图理解）。"""
-        understander = IntentUnderstander(deps.model)
+        understander = IntentUnderstander(model_for_task(deps, "planning"))
         return understander.understand(req.seed)
 
     @router.post("/api/explore/cards", response_model=list[dict[str, object]])
@@ -47,7 +48,7 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
         # S68：探索注入真实模板库（L2+L3 合并；template 来源探索者消费，死库接线）
         templates = [f"{t.name}：{t.description}" for t in deps.templates_external.all()[:12]]
         cards = run_exploration(
-            deps.model,
+            model_for_task(deps, "planning"),
             req.seed,
             req.intent_confirmed,
             constraints,
@@ -85,7 +86,9 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
             for e in deps.settings.list(req.book_id)
             if e.category == "世界观规则" and (e.content or "").strip()
         ] + req.constraints
-        result = explore_path(deps.model, from_desc, to_desc, constraints, n=req.n)
+        result = explore_path(
+            model_for_task(deps, "planning"), from_desc, to_desc, constraints, n=req.n
+        )
         if not result.paths:
             raise HTTPException(status_code=502, detail="路径探索失败（无有效候选）")
         paths = result.to_dict()["paths"]
