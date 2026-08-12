@@ -225,6 +225,28 @@
       label: "调用原文一致性评审"
       params: {}
 
+- name: opening_200_audit
+  description: "首章前200字体检：只看开篇进入速度、信息负担、具体画面和继续阅读驱动力"
+  triggers: [novel_chapter, story_fragment]
+  instructions: |
+    只读取第一章开头200到300字并调用 opening_hook_editor。不要把后文成败倒推为开头问题，
+    不要求所有题材使用同一种强冲突模板，不直接重写正文。
+  guardrails:
+    - "仅评审第一章开头，不把整章或后续剧情塞进评审上下文"
+    - "每个问题引用具体短句，最多给三项建议"
+    - "禁止自动修改正文"
+  outputs:
+    - "开头有效机制"
+    - "必须修的阅读障碍与可选类型偏好"
+    - "最多三项最小改动建议"
+  steps:
+    - tool: read_chapter
+      label: "读取第一章开头"
+      params: {chapter_id: "#1", offset: 0, limit: 300}
+    - tool: run_review
+      label: "调用首章200字钩子编辑"
+      params: {chapter: "#1", reviewers: "opening_hook_editor", mode: "concurrent", excerpt_limit: 300}
+
 - name: surgical_literary_revision
   description: "文学外科手术式修改：先定位味道不对的具体段落，确认后只做最小 patch"
   triggers: [story_fragment, instruction]

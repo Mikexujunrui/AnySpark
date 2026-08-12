@@ -129,6 +129,11 @@ registry.register(
                 "description": "执行模式: concurrent(并发,默认) 或 serial(串行，后续评审员可看到前序意见)",
                 "required": False,
             },
+            "excerpt_limit": {
+                "type": "integer",
+                "description": "只评审正文开头多少字；留空则评审全文。适合首章开头体检",
+                "required": False,
+            },
         },
     )
 )

@@ -224,6 +224,7 @@ async def _run_review(loop, args: dict, kb, book_id: str, msg: str = "", queue=N
     chapter_ref = args.get("chapter", "")
     reviewers_str = args.get("reviewers", "")
     mode = args.get("mode", "concurrent")
+    excerpt_limit = int(args.get("excerpt_limit", 0) or 0)
 
     # Ensure chapter_ref is a string (LLM may pass int)
     if not isinstance(chapter_ref, str):
@@ -250,6 +251,9 @@ async def _run_review(loop, args: dict, kb, book_id: str, msg: str = "", queue=N
 
     if not chapter_text:
         chapter_text = chapter_ref
+
+    if excerpt_limit > 0:
+        chapter_text = chapter_text[: max(50, min(excerpt_limit, 20_000))]
 
     if not chapter_text or len(chapter_text) < 50:
         return "错误: 需要提供章节内容。请指定章节序号（如 #1）或直接传入文本。"
