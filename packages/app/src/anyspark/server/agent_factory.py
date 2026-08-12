@@ -90,6 +90,9 @@ def make_agent(
             play_engine=deps.play_engine,
             review_panel=deps.review_panel,
             skill_generator=deps.skill_generator,
+            # S105：工具层多书隔离（S74 已加字段但装配漏传——list_chapters 等
+            # 全部落到默认 main，新项目会话读到旧项目章节，泄漏根因）
+            book_id=book_id,
             # S68：探索注入真实模板库（L2+L3 合并，agent 的 explore_direction 消费）
             templates=[f"{t.name}：{t.description}" for t in deps.templates_external.all()[:12]],
         ),
@@ -200,8 +203,9 @@ def make_agent(
         if plot_block:
             append_blocks.append(plot_block)
     # 设定档注入（S41 作者正典：人物卡/能力体系/世界观规则——与图谱互补）
+    # S105：按书过滤（S74 字段已有，装配漏传默认 main → 新项目注入旧项目设定）
     if "settings" not in skip:
-        settings_block = render_settings_adaptive(deps.settings.list())
+        settings_block = render_settings_adaptive(deps.settings.list(book_id))
         if settings_block:
             append_blocks.append(settings_block)
     # S53 心智指导块：文风偏好 + 习惯（渐进式披露：只列关键条目，指导性保留）

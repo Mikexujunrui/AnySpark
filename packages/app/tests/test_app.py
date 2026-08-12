@@ -155,6 +155,54 @@ def test_chat_stream_sse_frames() -> None:
     assert any(e["name"] == "陈渡" for e in entities)
 
 
+def test_chat_stream_book_isolation_agent_assembly() -> None:
+    """S105：make_agent 装配层多书隔离——新书会话的 list_chapters 不得返回 main 章节。
+
+    回归：ToolContext.book_id 漏传（默认 main）→ 工具全部落到旧书。
+    """
+
+    class LeakDetectModel:
+        model_name = "leak-detect"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+            self.calls += 1
+            if self.calls == 1:
+                # 第一轮：调 list_chapters 工具
+                return ModelOutput(tool_calls=[ToolCall(name="list_chapters", arguments={})])
+            # 第二轮：检查工具结果是否含 main 章节标题（泄漏即标记）
+            tool_texts = [m.content for m in messages if m.role == "tool"]
+            leaked = any("main专属章" in t for t in tool_texts)
+            return ModelOutput(text="LEAK!" if leaked else "OK-NO-LEAK")
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=LeakDetectModel(), db_path=db))
+    # 准备：main 书一章（新书不该看到）+ 新书一章
+    assert (
+        client.post(
+            "/api/chapters",
+            json={"book_id": "main", "title": "main专属章", "content": "旧书内容"},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.post(
+            "/api/chapters",
+            json={"book_id": "newbook", "title": "新书第一章", "content": "新书内容"},
+        ).status_code
+        == 200
+    )
+    # 新书会话发消息 → AI 调 list_chapters → 应只见新书章节
+    r = client.post(
+        "/api/chat/stream",
+        json={"message": "看看有什么章节", "book_id": "newbook"},
+    )
+    assert r.status_code == 200
+    assert "OK-NO-LEAK" in r.text, f"新书会话读到 main 章节（工具未按书隔离）: {r.text[:300]}"
+
+
 def test_chat_stream_done_payload_parts() -> None:
     """S82：done 帧附本轮 parts——工具调用卡片（type=tool_call）+ 思考过程（type=reasoning）。"""
 
