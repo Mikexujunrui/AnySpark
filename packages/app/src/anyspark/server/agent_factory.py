@@ -22,6 +22,23 @@ from anyspark.server.tools_writing import UNCENSORED_PROMPT
 _skill_cache: dict[str, str] = {}  # 签名 → 索引块（S60：只存索引，内容靠 skill_lookup 按需）
 
 
+def model_for_task(
+    deps: AppDeps,
+    task: str,
+    temperature: float | None = None,
+    thinking: str | None = None,
+) -> Model:
+    """S98 快速模式：按任务标签取模型（槽位分流，RetryingModel 包装保重试）。
+
+    task 缺省/槽位未配 → 激活配置（现有行为不变）。非 provider 场景（测试 fake）
+    直接返回共享 deps.model。
+    """
+    base = getattr(deps.model, "inner", deps.model)
+    if isinstance(base, ModelProvider) and task:
+        return RetryingModel(base.build_for_task(task, temperature=temperature, thinking=thinking))
+    return deps.model
+
+
 def make_agent(
     deps: AppDeps,
     system_prompt: str,
@@ -39,6 +56,7 @@ def make_agent(
     model_id: str | None = None,
     thinking: str | None = None,
     context: str = "",
+    task: str = "writing",  # S98 快速模式：任务标签→槽位分流（quality/split/flash/custom）
 ) -> Agent:
     # 心智规划提前（S56 C 架构）：style_prefs 供写作工具意图模式选文笔 skill
     # S61：context=本轮用户意图，心智块渐进式披露按相关动态选取
@@ -120,8 +138,13 @@ def make_agent(
             )
         )
     elif isinstance(base_model, ModelProvider):
-        # S47 运行时模型：按当前激活配置 + 档位温度 + 思考强度覆盖构造
-        m = RetryingModel(base_model.build(temperature=eff_temp, thinking=thinking))
+        # S47 运行时模型 + S98 快速模式：按任务解析槽位模型（模式分流；未配回退激活）
+        if task:
+            m = RetryingModel(
+                base_model.build_for_task(task, temperature=eff_temp, thinking=thinking)
+            )
+        else:
+            m = RetryingModel(base_model.build(temperature=eff_temp, thinking=thinking))
     elif isinstance(base_model, DeepSeekModel) and eff_temp != 0.7:
         # 真实模型 + 能动性温度映射（档位低=精确执行温度低）
         m = RetryingModel(DeepSeekModel(temperature=eff_temp))

@@ -261,15 +261,42 @@ class ModelProvider:
         self,
         registry: ModelRegistry,
         client_factory: Callable[..., DeepSeekModel] = DeepSeekModel,
+        mode: Any | None = None,
     ) -> None:
+        """mode: ModeResolver——按任务分流槽位模型（S98）；None=全部用激活配置。"""
         self._registry = registry
         self._factory = client_factory
+        self._mode = mode
         self._lock = threading.Lock()
         self._cache: dict[tuple[str, float, str | None], DeepSeekModel] = {}
 
     def build(self, temperature: float | None = None, thinking: str | None = None) -> DeepSeekModel:
         """按当前激活配置构造 DeepSeekModel（可覆盖温度/思考强度；None=用配置值）。"""
         cfg = self._registry.active()
+        return self._build_cfg(cfg, temperature, thinking)
+
+    def build_for_task(
+        self,
+        task: str,
+        temperature: float | None = None,
+        thinking: str | None = None,
+    ) -> DeepSeekModel:
+        """S98：按任务解析槽位模型构造（模式分流 quality/split/flash/custom）。
+
+        槽位未配 / 指向的模型不存在 → 回退激活配置（向后兼容，现有行为不变）。
+        """
+        cfg = self._mode.resolve(task) if self._mode is not None else None
+        if cfg is None:
+            return self.build(temperature, thinking)
+        return self._build_cfg(cfg, temperature, thinking)
+
+    def _build_cfg(
+        self,
+        cfg: ModelConfig,
+        temperature: float | None = None,
+        thinking: str | None = None,
+    ) -> DeepSeekModel:
+        """按给定配置构造 DeepSeekModel（温度/思考覆盖；None=用配置值），同参缓存复用。"""
         eff_temp = cfg.temperature if temperature is None else temperature
         eff_thinking = cfg.thinking if thinking is None else thinking
         key = (cfg.id, eff_temp, eff_thinking)

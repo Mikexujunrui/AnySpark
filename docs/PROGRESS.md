@@ -33,6 +33,7 @@
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
 > 当前无会话声明。
+> [S99] 正在改 `deps.py`（+conv_queues/queue_lock）+ `schemas.py`（+QueueIn/QueueItemIn）+ `routes_chat.py`（+队列 4 端点，独立区域不动 S98 的 chat_stream/task 接入）+ `routes_conversations.py`（删会话清队列）+ 前端 `api/chat.ts`/`MessageInput.tsx`/`ChatPanel.tsx`（右下角：插入指导 + 排队队列条——中止/插入/队列三功能第一步）——完成提交后删除本行
 > [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 
@@ -2657,3 +2658,68 @@ S88b 打包脚本漏 format 成全量 gate 唯一红；S81/S89 两次裹挟（�
 
 **后续候选（未做，YAGNI）**：提交前自动 diff 审计脚本（gate.py 已给出清单，先手跑看收益）；
 git worktree 隔离（data/ 不入库 + merge 冲突风险，水土不服不做）。
+
+
+## S98 快速模式切换落地（已完成 ✅）——任务→槽位→模型分配（v3 移植）
+
+**背景（主人需求）**：老版本设置左侧有快速模式切换——不同任务可用不同模型
+（简单任务用便宜模型、复杂任务用昂贵模型）。当前 V4 前端有模式按钮但后端无实现：
+`switchMode` 把模式名（quality/split）当模型 id 去 activate，404 被 catch 吞掉，
+按钮点击无效；设置里也无任务分配定义。
+
+**交付**：
+- `models/mode.py`（新）：ModeConfig（mode/slot_pro/slot_flash/custom_map）+ ModeStore
+  （SQLite 单行持久化）+ ModeResolver（任务→槽位模型，未配回退激活配置，向后兼容）
+  - VALID_MODES：quality（全任务→Pro）/ flash（全任务→Flash）/ split（创作类→Pro
+    其余→Flash，默认）/ custom（按任务类型查 custom_map）
+  - TASK_TYPES 6 类（writing/planning/extraction/editing/general/research）+ 老默认映射
+- `registry.py`：ModelProvider.build_for_task(task)——按任务分流槽位模型
+- `server/routes_mode.py`（新）：GET/POST /api/settings/mode（模式+槽位+映射+模型列表）
+- `agent_factory.py`：make_agent 加 task 参数；model_for_task 辅助（RetryingModel 包装）
+- `routes_chat.py`：chat/chat_stream→writing、direction→writing、candidates→planning、
+  rewrite→editing 分流
+- 前端：`api/settings.ts` switchMode 真实现（POST mode）+ getMode；`BookDetail` 初始模式
+  从后端读；`SettingsModal` 新增「模式」tab（4 模式单选 + 槽位下拉 + custom 任务映射）
+
+**验证**：test_mode.py 13 用例（存储/解析矩阵/API/单字段切换/build_for_task 分流）
++ test_models 15 全绿；ruff/mypy 全绿；前端 tsc/build 全绿；端到端冒烟（GET 默认 split、
+槽位持久化到 SQLite、模式单字段切换槽位保留）。
+
+**说明**：check/explore/graph 等组件仍走激活配置（未按任务分流）——机制已就绪
+（model_for_task），后续按任务逐个接入即可；非 chat 路由默认 task 缺省=激活配置，行为不变。
+
+
+## S99 运行控制三件套（中止/插入/队列）——第一步（已完成 ✅）
+
+**需求（主人）**：会话运行中右下角要支持三个功能——中止（已有）、插入指导（steer 即时干预）、
+排队（消息接力）。交互参考 IDE 智能体：streaming 时输入框可输入，**回车=排队**，输入框上方
+显示排队消息条（可删除/转插入），非 streaming 回车=正常发送。
+
+**决策（主人确认，分两步落地）**：
+- 第一步（本次）：插入指导按钮 + 会话消息队列（排队/查看/删/转插入）+ 队列条 UI——**不做自动接力**
+- 第二步（后续）：SSE 循环化实现真·接力执行（队列消费 = 同连接多轮跑，done 才关）
+- 中止语义：**停当前轮、队列保留**（中止是"这条别跑了"，不是"计划全作废"）
+
+**交付**：
+- 后端（4 新端点，`routes_chat.py` S99 队列区，独立于 S98 的 chat_stream/task 接入）：
+  - `GET /api/chat/queues` —— 全部会话排队消息 + 运行中会话（队列信息面板数据源）
+  - `POST /api/chat/queue` —— 入队（不要求会话在运行；快照返回）
+  - `DELETE /api/chat/queue/{conv}/{item}` —— 删队（删空自动清理会话键）
+  - `POST /api/chat/queue/{conv}/{item}/steer` —— 转插入（**原子**：steer 成功才移除；
+    会话未运行时保留并提示，区别于删除不丢指令）
+  - `deps.py` + `conv_queues/queue_lock`（进程内，会话级）；删会话顺带清队列（routes_conversations）
+  - 测试 `packages/app/tests/test_queue.py` 5 用例（入队/查看/删/删空清理/转插入失败分支/删会话清队列）
+- 前端：
+  - `MessageInput.tsx`：streaming 时输入框**不禁用**；回车=排队（非 streaming 回车=发送，空内容不发）；
+    streaming+有内容显示**插入指导**按钮（立即 steer）；输入框上方**排队消息条**（每条：文本截断 +
+    转插入 ↪ + 删除 ✕）；streaming 占位符提示"回车排队下一条指令"
+  - `ChatPanel.tsx`：队列 state + 会话切换拉队列 + 4 个处理函数（排队/插入/删/转插入），
+    失败反馈走消息条（无 toast 机制）
+  - `api/chat.ts`：fetchQueues/enqueueChat/dequeueChat/steerQueuedChat；`Icon.tsx` 补 arrow-right-circle
+
+**验证**（分层门禁，前后端都有改动 → 全量）：
+- ruff+format+mypy 全绿；`test_queue.py` 5 passed + test_app 相关子集 7 passed；
+  前端 tsc + build 通过；gate.py 全量 ✅
+
+**遗留（第二步，按需）**：SSE 循环化接力执行——队列消息在会话 done 后自动消费，同连接多轮，
+轮间 `queue_pending` 帧；图谱抽取/摘要 hooks 逐轮挂载；cancel 只停当前轮（队列保留）。

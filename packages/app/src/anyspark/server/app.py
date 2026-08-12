@@ -49,6 +49,7 @@ from anyspark.explore import (
 )
 from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
 from anyspark.library import LibraryStore
+from anyspark.models.mode import ModeResolver, ModeStore
 from anyspark.models.registry import (
     ModelProvider,
     ModelRegistry,
@@ -69,6 +70,7 @@ from anyspark.server.routes_explore import make_explore_router
 from anyspark.server.routes_graph import make_graph_router
 from anyspark.server.routes_library import make_library_router
 from anyspark.server.routes_mind import make_mind_router
+from anyspark.server.routes_mode import make_mode_router
 from anyspark.server.routes_play import make_play_router
 from anyspark.server.routes_plot import make_plot_router
 from anyspark.server.routes_settings import make_settings_router
@@ -187,7 +189,10 @@ def build_app(
     # 测试可注入 fake model（实现 core Model 协议），走共享分支不受影响。
     # 注意：必须在任何依赖 model 的组件（summarizer/plot/提炼器等）之前初始化。
     models = ModelRegistry(real_db)
-    provider = ModelProvider(models)
+    # S98 快速模式切换：模式/槽位/任务映射存储 + 解析器；provider 按任务分流（未配回退激活）
+    mode_store = ModeStore(real_db)
+    mode_resolver = ModeResolver(mode_store, models)
+    provider = ModelProvider(models, mode=mode_resolver)
     model = model or RetryingModel(provider)
     memory_store = MemoryStore(real_db)  # S53c ② 场景记忆（项目档案延续性层）
     story_tree = StoryTreeStore(real_db)  # S59 叙事树（分叉路径模型）
@@ -431,6 +436,8 @@ def build_app(
         templates_external=templates_external,
         plots=plots,
         models=models,
+        mode_store=mode_store,
+        mode_resolver=mode_resolver,
         memory_store=memory_store,
         story_tree=story_tree,
         story_threads=story_threads,
@@ -496,6 +503,7 @@ def build_app(
     app.include_router(make_explore_router(deps))
     app.include_router(make_graph_router(deps))
     app.include_router(make_mind_router(deps))
+    app.include_router(make_mode_router(deps))
     app.include_router(make_library_router(deps))
     app.include_router(make_play_router(deps))
     app.include_router(make_plot_router(deps))

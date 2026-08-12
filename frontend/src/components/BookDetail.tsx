@@ -131,7 +131,7 @@ function BookDetail() {
       }
     }
     load()
-    api.getSettings().then((d: any) => { if (!cancelled) setLlmMode(d.mode || DEFAULT_MODE.key) }).catch(() => {})
+    api.getMode().then((d: any) => { if (!cancelled) setLlmMode(d.mode || DEFAULT_MODE.key) }).catch(() => {})
     return () => { cancelled = true }
   }, [bookId])
 

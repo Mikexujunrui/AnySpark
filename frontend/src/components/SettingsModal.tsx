@@ -10,10 +10,151 @@ interface AgencyLevel { id: string; name: string; description: string; temperatu
 
 const THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 
+// S98 快速模式：模式说明 + 任务类型中文名
+const MODE_INFO: { key: string; label: string; desc: string }[] = [
+  { key: 'quality', label: 'Pro 全量', desc: '所有任务用贵模型（写作/规划/编辑/研究全走 Pro 槽）' },
+  { key: 'split', label: '智能分流', desc: '创作类（写作/规划/编辑）用 Pro，其余用 Flash——默认模式' },
+  { key: 'flash', label: 'Flash 全量', desc: '所有任务用便宜模型（省 token，适合大批量/草稿）' },
+  { key: 'custom', label: '自定义', desc: '按任务类型逐一指定 Pro/Flash' },
+]
+const TASK_TYPE_LABELS: { key: string; label: string }[] = [
+  { key: 'writing', label: '写作' },
+  { key: 'planning', label: '规划' },
+  { key: 'extraction', label: '提取' },
+  { key: 'editing', label: '编辑' },
+  { key: 'general', label: '通用' },
+  { key: 'research', label: '研究' },
+]
+
 // 模型表单空态（注册/编辑共用；编辑时回填 id 走同一 POST 覆盖更新）
 const EMPTY_MODEL_FORM = { id: '', name: '', model: '', base_url: '', api_key: '', thinking: 'medium', max_tokens: 16384, temperature: 0.7, context_window: 65536 }
 
 
+
+// S98 快速模式设置：4 模式 + 槽位（pro/flash 选注册表模型）+ custom 任务类型映射
+function ModeSettings({ onModeChanged }: { onModeChanged?: (mode: string) => void }) {
+  const [modeCfg, setModeCfg] = useState<any>(null)
+  const [saving, setSaving] = useState(false)
+  const [toast, setToast] = useState('')
+
+  const showToast = (msg: string) => {
+    setToast(msg)
+    setTimeout(() => setToast(''), 2500)
+  }
+
+  useEffect(() => {
+    fetch('/api/settings/mode')
+      .then((r) => r.json())
+      .then((d) => setModeCfg(d))
+      .catch(() => { /* 静默 */ })
+  }, [])
+
+  const save = async () => {
+    if (!modeCfg) return
+    setSaving(true)
+    try {
+      const r = await fetch('/api/settings/mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: modeCfg.mode,
+          slot_pro: modeCfg.slot_pro || '',
+          slot_flash: modeCfg.slot_flash || '',
+          custom_map: modeCfg.custom_map,
+        }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d?.detail || `HTTP ${r.status}`)
+      setModeCfg(d)
+      onModeChanged?.(d.mode)
+      showToast(`模式已保存：${MODE_INFO.find((m) => m.key === d.mode)?.label || d.mode}`)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!modeCfg) {
+    return <div className="text-sm text-zinc-600">加载中...</div>
+  }
+  const models = modeCfg.models || []
+  const slotOpts = (label: string) => (
+    <>
+      <option value="">未指定（跟随激活模型）</option>
+      {models.map((m: any) => (
+        <option key={m.id} value={m.id}>{m.name}（{m.model}）{m.is_active ? ' · 激活' : ''}</option>
+      ))}
+    </>
+  )
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs text-zinc-500">快速模式切换：不同任务可用不同模型（简单任务用便宜模型、复杂任务用贵模型）</p>
+
+      {/* 4 模式单选 */}
+      <div className="grid grid-cols-2 gap-2">
+        {MODE_INFO.map((m) => (
+          <button
+            key={m.key}
+            onClick={() => setModeCfg({ ...modeCfg, mode: m.key })}
+            className={`text-left px-3 py-2 rounded-lg border transition-colors ${modeCfg.mode === m.key ? 'bg-sky-900/30 border-sky-700/60' : 'bg-zinc-900/50 border-zinc-800 hover:border-zinc-700'}`}
+          >
+            <div className="flex items-center justify-between">
+              <span className={`text-sm ${modeCfg.mode === m.key ? 'text-sky-300' : 'text-zinc-200'}`}>{m.label}</span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-500">{m.key}</span>
+            </div>
+            <p className="text-[11px] text-zinc-500 mt-0.5">{m.desc}</p>
+          </button>
+        ))}
+      </div>
+
+      {/* 槽位：pro / flash 选注册表模型 */}
+      <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 space-y-2">
+        <p className="text-[11px] text-zinc-500">槽位分配（未指定=跟随激活模型，不参与分流）</p>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-amber-400 w-14 shrink-0">Pro 槽</span>
+          <select value={modeCfg.slot_pro || ''} onChange={(e) => setModeCfg({ ...modeCfg, slot_pro: e.target.value })} className="flex-1 bg-zinc-800 text-zinc-300 text-xs px-2 py-1.5 rounded border border-zinc-700">
+            {slotOpts('pro')}
+          </select>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-emerald-400 w-14 shrink-0">Flash 槽</span>
+          <select value={modeCfg.slot_flash || ''} onChange={(e) => setModeCfg({ ...modeCfg, slot_flash: e.target.value })} className="flex-1 bg-zinc-800 text-zinc-300 text-xs px-2 py-1.5 rounded border border-zinc-700">
+            {slotOpts('flash')}
+          </select>
+        </div>
+      </div>
+
+      {/* custom 模式：任务类型 → 槽位映射 */}
+      {modeCfg.mode === 'custom' && (
+        <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 space-y-1.5">
+          <p className="text-[11px] text-zinc-500">任务类型 → 槽位（仅 custom 模式生效）</p>
+          {TASK_TYPE_LABELS.map((t) => (
+            <div key={t.key} className="flex items-center gap-2">
+              <span className="text-xs text-zinc-300 w-14 shrink-0">{t.label}</span>
+              <select
+                value={modeCfg.custom_map?.[t.key] || 'flash'}
+                onChange={(e) => setModeCfg({ ...modeCfg, custom_map: { ...modeCfg.custom_map, [t.key]: e.target.value } })}
+                className="flex-1 bg-zinc-800 text-zinc-300 text-xs px-2 py-1.5 rounded border border-zinc-700"
+              >
+                <option value="pro">Pro（贵）</option>
+                <option value="flash">Flash（便宜）</option>
+              </select>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="flex items-center gap-3">
+        <button className="px-4 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-sm disabled:opacity-50" onClick={save} disabled={saving}>
+          {saving ? '保存中…' : '保存'}
+        </button>
+        {toast && <span className="text-xs text-emerald-400">{toast}</span>}
+      </div>
+    </div>
+  )
+}
 
 // S87 破限提示自编辑（书籍级：开关 + 自定义提示词，空=内置默认）
 function WritingSettings({ bookId }: { bookId: string }) {
@@ -224,6 +365,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
 
   const tabs = [
     { key: 'models', label: '模型', icon: 'database' },
+    { key: 'mode', label: '模式', icon: 'git-branch' },
     { key: 'agency', label: '档位', icon: 'zap' },
     { key: 'writing', label: '写作', icon: 'pen-tool' },
     { key: 'about', label: '关于', icon: 'info' },
@@ -321,6 +463,11 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                   </div>
                 ))}
               </div>
+            )}
+
+            {/* ── Tab: 模式 ── */}
+            {tab === 'mode' && (
+              <ModeSettings onModeChanged={onModeChanged} />
             )}
 
             {/* ── Tab: 档位 ── */}

@@ -38,6 +38,7 @@ from anyspark.core import Agent, CancellationToken, Model
 from anyspark.explore import DimensionStore, ProjectArchive
 from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
 from anyspark.library import LibraryStore
+from anyspark.models.mode import ModeResolver, ModeStore
 from anyspark.models.registry import ModelProvider, ModelRegistry
 from anyspark.play import PlayEngine, PlayStore
 from anyspark.review import ReviewPanel
@@ -88,6 +89,8 @@ class AppDeps:
     templates_external: ExternalLibrary
     plots: PlotStore
     models: ModelRegistry
+    mode_store: ModeStore
+    mode_resolver: ModeResolver
     memory_store: MemoryStore
     story_tree: StoryTreeStore
     story_threads: StoryThreadStore

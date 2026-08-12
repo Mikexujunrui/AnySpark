@@ -15,9 +15,12 @@ export const deleteProvider = (): Promise<unknown> => Promise.resolve({ ok: true
 export const updateSlots = (): Promise<unknown> => Promise.resolve({ ok: true });
 
 export const switchMode = (newMode: string): Promise<unknown> => {
-  // 模型激活（V4 /api/models/{id}/activate）
-  return post(`/api/models/${encodeURIComponent(newMode)}/activate`, {}).catch(() => ({ ok: false }));
+  // S98 快速模式：真实现——模式切换持久化（v3 移植；quality/split/flash/custom）
+  return post("/api/settings/mode", { mode: newMode }).catch(() => ({ ok: false }));
 };
+
+// S98 模式配置读取（模式 + 槽位 + 任务映射 + 注册表模型列表）
+export const getMode = (): Promise<unknown> => get("/api/settings/mode");
 
 export const testProvider = (): Promise<unknown> => Promise.resolve({ ok: true });
 

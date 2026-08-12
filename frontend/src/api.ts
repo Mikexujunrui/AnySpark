@@ -129,6 +129,7 @@ export const api = {
   deleteProvider: settings.deleteProvider,
   updateSlots: settings.updateSlots,
   switchMode: settings.switchMode,
+  getMode: settings.getMode,
   testProvider: settings.testProvider,
 
   // Book-level settings (config layering)
