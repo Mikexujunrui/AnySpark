@@ -33,7 +33,14 @@ BACKEND_PACKAGES = [
 ]
 
 # 复制时排除的目录/文件
-EXCLUDE_DIRS = {"tests", "__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", "node_modules"}
+EXCLUDE_DIRS = {
+    "tests",
+    "__pycache__",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".mypy_cache",
+    "node_modules",
+}
 EXCLUDE_SUFFIXES = (".pyc", ".pyo", ".pyd")
 
 
@@ -168,22 +175,118 @@ exit /b 0
     (out_root / "start.bat").write_text(start, encoding="utf-8", newline="\r\n")
 
 
+def copy_venv(out_root: Path) -> None:
+    """在发布目录重建干净 .venv（便携版：解压即用，用户无需装 Python/uv）。
+
+    关键：根 .venv 是 uv workspace **editable 安装**（.pth 指向根源码路径，
+    跨机复制会断）——必须重建为非 editable 真实安装：
+      1. uv venv 新建
+      2. uv pip install 第三方依赖（uv export --no-emit-workspace 导出，不含 workspace 成员）
+      3. uv pip install --no-deps 各包路径（真实复制进 site-packages，无路径依赖）
+    """
+    venv = out_root / ".venv"
+    print("  [重建] 发布目录 .venv（非 editable 真实安装，约 1-2 分钟）...")
+    import subprocess as sp
+
+    # 1. 建 venv
+    r = sp.run(["uv", "venv", str(venv)], cwd=str(out_root), capture_output=True, text=True)
+    if r.returncode != 0:
+        print(f"  [错误] uv venv 失败: {r.stderr[-300:]}")
+        return
+    py = venv / "Scripts" / "python.exe"
+    if not py.exists():
+        print(f"  [错误] venv python 未创建: {py}")
+        return
+
+    # 2. 第三方依赖（从根 uv.lock 导出，不含 workspace 成员）
+    reqs = ROOT.parent / "pkg_reqs_tmp.txt"
+    sp.run(
+        ["uv", "export", "--format", "requirements.txt", "--no-emit-workspace",
+         "--no-hashes", "-o", str(reqs)],
+        cwd=str(ROOT), check=True, capture_output=True,
+    )
+    r = sp.run(
+        ["uv", "pip", "install", "--python", str(py), "-r", str(reqs)],
+        cwd=str(out_root), capture_output=True, text=True,
+    )
+    reqs.unlink(missing_ok=True)
+    if r.returncode != 0:
+        print(f"  [错误] 第三方依赖安装失败: {r.stderr[-300:]}")
+        return
+
+    # 3. 各包（--no-deps 真实安装；core 先，其余依赖 core 的随后，app 最后）
+    order = [
+        "core", "align", "explore", "check", "template", "graph",
+        "workflow", "review", "play", "library", "app",
+    ]
+    for name in order:
+        pkg = out_root / "packages" / name
+        if not pkg.exists():
+            continue
+        r = sp.run(
+            ["uv", "pip", "install", "--python", str(py), "--no-deps", str(pkg)],
+            cwd=str(out_root), capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            print(f"  [警告] {name} 安装失败: {r.stderr[-200:]}")
+
+    exe = venv / "Scripts" / "anyspark-server.exe"
+    if not exe.exists():
+        print(f"  [警告] anyspark-server.exe 未生成: {exe}")
+
+
+
+
+def make_zip(out_dir: Path) -> Path:
+    """把发布目录打成 zip（排除 data 运行时数据；便携版含 .venv）。"""
+    import zipfile
+
+    out = out_dir.parent / (out_dir.name + ".zip")
+    if out.exists():
+        out.unlink()
+    n = 0
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED, compresslevel=6) as zf:
+        for f in out_dir.rglob("*"):
+            if not f.is_file():
+                continue
+            rel = f.relative_to(out_dir)
+            parts = rel.parts
+            if "data" in parts:  # 运行时数据不进包
+                continue
+            if ".venv" in parts and ("__pycache__" in parts or f.suffix == ".pyc"):
+                continue
+            zf.write(f, f"{out_dir.name}/{rel}")
+            n += 1
+    print(f"  [zip] {out.name}：{n} 文件，{out.stat().st_size/1024/1024:.1f} MB")
+    return out
+
+
 def main() -> None:
-    out_dir = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT.parent / "AnySparkV4-发布"
-    print(f"打包到: {out_dir}")
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    with_venv = "--with-venv" in sys.argv
+    do_zip = "--zip" in sys.argv
+    out_dir = Path(args[0]) if args else ROOT.parent / "AnySparkV4-发布"
+    print(f"打包到: {out_dir}（{'便携版：含 .venv' if with_venv else '源码版：需 uv sync'}）")
     if out_dir.exists():
         shutil.rmtree(out_dir)
     out_dir.mkdir(parents=True)
 
     build_frontend()
     assemble(out_dir)
+    if with_venv:
+        copy_venv(out_dir)
 
     # 统计
     size = sum(f.stat().st_size for f in out_dir.rglob("*") if f.is_file())
     n_files = sum(1 for f in out_dir.rglob("*") if f.is_file())
     print(f"  [4/4] 完成：{n_files} 文件，{size/1024/1024:.1f} MB")
     print(f"  → {out_dir}")
-    print("  双击 start.bat 启动（首次需 uv sync 装依赖 + 填 .env API Key）")
+    if do_zip:
+        make_zip(out_dir)
+    if with_venv:
+        print("  [便携版] 解压即用：填 .env API Key → 双击 start.bat（无需 Python/uv）")
+    else:
+        print("  [源码版] 双击 start.bat（首次需装 uv + uv sync + 填 .env API Key）")
 
 
 if __name__ == "__main__":
