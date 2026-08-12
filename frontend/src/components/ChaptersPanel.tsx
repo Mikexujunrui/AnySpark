@@ -596,9 +596,11 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
       {/* Main content */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {!selectedId ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-zinc-600 gap-3">
-            <Icon name="file-text" size={32} className="text-zinc-700" />
-            <span className="text-sm">选择一个章节或创建新章节</span>
+          <div className="flex-1 flex flex-col items-center justify-center gap-3">
+            <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-600/20 to-violet-600/20 border border-zinc-800 flex items-center justify-center">
+              <Icon name="file-text" size={28} className="text-sky-400" />
+            </div>
+            <span className="text-sm text-zinc-500">选择一个章节或创建新章节</span>
           </div>
         ) : (
           <>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useSkillStore } from "../stores/skillStore";
 import ConfirmModal from "./ui/ConfirmModal";
+import PanelHeader from "./ui/PanelHeader";
 
 interface SkillPanelProps {
   open: boolean;
@@ -160,22 +161,29 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
       {/* 面板 */}
       <div className="relative ml-auto w-[480px] h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl">
         {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">技巧库</h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowAdd(!showAdd)}
-              className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded"
-            >
-              {showAdd ? "取消" : "+ 新增"}
-            </button>
-            <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
+        <PanelHeader
+          compact
+          maxW={false}
+          icon="pen-tool"
+          iconClass="text-sky-400"
+          title="技巧库"
+          desc="叙事技法 · 写作时按需注入"
+          actions={
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAdd(!showAdd)}
+                className="text-xs px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
+              >
+                {showAdd ? "取消" : "+ 新增"}
+              </button>
+              <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-1 rounded-lg hover:bg-zinc-800 transition-colors">
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          }
+        />
 
         {/* 新增表单 */}
         {showAdd && (

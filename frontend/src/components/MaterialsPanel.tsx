@@ -3,6 +3,7 @@ import { api } from '../api'
 import ConfirmModal from './ui/ConfirmModal'
 import Modal from './ui/Modal'
 import Icon from './ui/Icon'
+import PanelHeader from './ui/PanelHeader'
 import LoadingState from './ui/Skeleton'
 import { showToast } from './ui/toast-utils'
 
@@ -185,32 +186,31 @@ export default function MaterialsPanel({ bookId = 'main' }: { bookId?: string })
   }
 
   return (
-    <div className="max-w-6xl mx-auto px-6 py-10">
-      <header className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-            <Icon name="folder" size={28} /> {isGlobal ? "全局资料池" : "项目资料池"}
-          </h1>
-          <p className="text-zinc-500 mt-1 text-sm">
-            {isGlobal
-              ? "全局大池子：跨书素材/灵感/参考书原文；项目可从这里导入（导入为冷藏副本）"
-              : "项目小池子：灵感卡（智能体可见）+ 冷藏副本（仅人工查看）；智能体只检索灵感卡，不注入写作"}
-          </p>
-        </div>
-        <div className="flex gap-2">
-          {!isGlobal && (
-            <button onClick={openImport}
-              className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-5 py-2.5 rounded-lg transition-colors text-sm font-medium flex items-center gap-2">
-              <Icon name="download" size={16} /> 从全局池导入
+    <div className="min-h-screen">
+      <PanelHeader
+        icon="folder"
+        iconClass="text-amber-400"
+        maxW={false}
+        title={isGlobal ? "全局资料池" : "项目资料池"}
+        desc={isGlobal
+          ? "全局大池子：跨书素材/灵感/参考书原文；项目可从这里导入（导入为冷藏副本）"
+          : "项目小池子：灵感卡（智能体可见）+ 冷藏副本（仅人工查看）；智能体只检索灵感卡，不注入写作"}
+        actions={
+          <div className="flex gap-2">
+            {!isGlobal && (
+              <button onClick={openImport}
+                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-4 py-2 rounded-lg transition-colors text-sm font-medium flex items-center gap-2">
+                <Icon name="download" size={15} /> 从全局池导入
+              </button>
+            )}
+            <button onClick={() => setShowAdd(true)}
+              className="bg-gradient-to-r from-amber-600 to-orange-500 hover:from-amber-500 hover:to-orange-400 active:scale-95 text-white px-4 py-2 rounded-lg transition-all text-sm font-medium flex items-center gap-2 shadow-lg shadow-amber-900/30">
+              <Icon name="plus" size={15} /> 添加资料
             </button>
-          )}
-          <button onClick={() => setShowAdd(true)}
-            className="bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-5 py-2.5 rounded-lg transition-colors text-sm font-medium flex items-center gap-2">
-            <Icon name="plus" size={16} /> 添加资料
-          </button>
-        </div>
-      </header>
-
+          </div>
+        }
+      />
+      <div className="max-w-6xl mx-auto px-6 py-8">
       <div className="flex gap-2 mb-6">
         <input
           type="text" value={query}
@@ -515,6 +515,7 @@ export default function MaterialsPanel({ bookId = 'main' }: { bookId?: string })
           </div>
         </Modal>
       )}
+      </div>
     </div>
   )
 }
