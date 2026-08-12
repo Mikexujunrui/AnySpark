@@ -181,6 +181,14 @@ def build_toolkit(
             registry.register(rl_spec, rl_impl)
         rc_spec, rc_impl = make_read_context_implementer(ctx.chapters, book_id=ctx.book_id)
         registry.register(rc_spec, rc_impl)
+        # S108：资料库查询（原 enable_extras 默认关→挪到 domain 默认开：AI 应能查看资料库）
+        if ctx.materials is not None:
+            from anyspark.server.tools_extras import make_read_material_implementer
+
+            material_spec, material_impl = make_read_material_implementer(
+                ctx.materials, book_id=ctx.book_id
+            )
+            registry.register(material_spec, material_impl)
         rt_spec, rt_impl = make_register_tool_implementer(ctx.ext_tools)
         registry.register(rt_spec, rt_impl)
         # S53c ① 心智登记工具：对话中"记一下"→ 即时落心智条目（user 来源高置信度）
@@ -216,17 +224,9 @@ def build_toolkit(
         )
         registry.register(cx_spec, cx_impl)
 
-    # S32 扩展：read_material，按 enable_extras 点亮（默认关，
-    # 防无关工具调用干扰主链路——S15 哲学延续）。
     # S63：check_text 退役——被 S59 workflow 的 review_chapter script 取代
     # （review_chapter 能读章节全文+接改写循环，check_text 无图谱证据/需自传全文）。
-    if enable_extras:
-        from anyspark.server.tools_extras import make_read_material_implementer
-
-        material_spec, material_impl = make_read_material_implementer(
-            ctx.materials, book_id=ctx.book_id
-        )
-        registry.register(material_spec, material_impl)
+    # S108：read_material 已挪到 enable_domain 默认开（AI 查看资料库是写作必需能力）。
 
     # 网络搜索工具：按需注册（S15 起默认关——写作主链路不背考据能力，需要时点亮）
     if enable_search:

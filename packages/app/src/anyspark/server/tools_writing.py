@@ -337,6 +337,20 @@ class WritingTools:
             )
         if not path.exists():
             return ToolResult(call=call, ok=False, content=f"文件不存在：{raw}")
+        if path.is_dir():
+            # S108：目录 → 列出内容（此前 read_text 读目录报 Errno 13 误导为权限错误）
+            try:
+                items = sorted(p.name + ("/" if p.is_dir() else "") for p in path.iterdir())
+            except Exception as exc:
+                return ToolResult(call=call, ok=False, content=f"目录读取失败：{exc}")
+            if not items:
+                return ToolResult(call=call, ok=True, content=f"目录 {raw} 为空。")
+            return ToolResult(
+                call=call,
+                ok=True,
+                content=f"目录 {raw} 内容（{len(items)} 项）：\n"
+                + "\n".join(f"- {i}" for i in items[:100]),
+            )
         try:
             if path.suffix.lower() == ".docx":
                 text = _extract_docx_text(path)
@@ -449,11 +463,17 @@ _WRITING_SPECS: list[ToolSpec] = [
     ToolSpec(
         name="read_file",
         description=(
-            "读取沙箱内文件（txt/md/docx），用于参考资料。只允许 data/sandbox/ 内相对路径。"
+            "读取沙箱内文件（txt/md/docx）或列出目录内容，用于参考资料/笔记。"
+            "只允许 data/sandbox/ 内相对路径；传目录（如 `.`、`notes`）会列出其中文件。\n"
+            "注意：查叙事技巧用 skill_lookup，查资料库用 read_material，"
+            "查参考书用 reference_lookup——read_file 只读沙箱笔记文件。"
         ),
         params=[
             ParamSpec(
-                name="path", type="string", required=True, description="相对路径，如 notes/设定.md"
+                name="path",
+                type="string",
+                required=True,
+                description="相对路径，如 notes/设定.md 或 .",
             )
         ],
     ),

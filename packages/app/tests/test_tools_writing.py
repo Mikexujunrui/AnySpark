@@ -157,3 +157,26 @@ def test_clean_write_no_inject_when_flag_off() -> None:
     reg = _unc_registry(model, ws)
     _invoke(reg, "write_chapter", {"title": "测试章", "intent": "写一段黑暗氛围的场景"})
     assert all("创作模式声明" not in c for c in model.clean_contexts)
+
+
+def test_read_file_lists_directory(tmp_path) -> None:
+    """S108：read_file 传目录 → 列出内容（此前 Errno 13 误导为权限错误）。"""
+    from anyspark.server.tools_writing import SANDBOX_DIR, _resolve_sandbox_path
+    from anyspark.server.tools_writing import WritingTools
+    from anyspark.core import ToolSpec, ToolCall
+
+    # 真实沙箱目录（测试环境 data/sandbox 已存在）
+    sd = SANDBOX_DIR
+    if not sd.exists():
+        sd.mkdir(parents=True)
+    # 建一个测试文件
+    probe = sd / "_read_file_dir_test.txt"
+    probe.write_text("内容", encoding="utf-8")
+
+    tools = WritingTools(chapters=None, book_id="main")  # type: ignore[arg-type]
+    r = tools.read_file(ToolSpec(name="read_file"), {"path": "."})
+    assert r.ok is True
+    assert "_read_file_dir_test.txt" in r.content  # 目录列出包含测试文件
+    assert r.content.startswith("目录")  # 不再是 Errno 13
+
+    probe.unlink(missing_ok=True)
