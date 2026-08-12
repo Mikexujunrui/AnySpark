@@ -18,6 +18,7 @@ import { triggerRefresh } from "../store"
 import { enqueueChat, dequeueChat, steerQueuedChat, steerChat, fetchQueues, type QueueItem } from '../api/chat'
 import { batchRewrite, batchReview, getBatchStatus } from '../api/batch'
 import { listChapters } from '../api/chapters'
+import { listSkillDrafts, promoteSkillDraft, deleteSkillDraft } from '../api/skills'
 
 const DIAG_PREFIX = '[CONN-DIAG]'
 
@@ -80,6 +81,8 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const [pendingQueue, setPendingQueue] = useState<QueueItem[]>([])
   // S102：批量提议（agent 调 batch_rewrite/batch_review 后待批准弹窗）
   const batchProposalRef = useRef<{ name: string; arguments: Record<string, unknown> } | null>(null)
+  // S104：技能草稿生成（agent 调 skill_refine 后弹窗确认采纳）
+  const skillRefineRef = useRef<boolean>(false)
   const saveTimerRef = useRef(null)
   const hideTimerRef = useRef(null)
   const lastSentMsgRef = useRef('')
@@ -263,6 +266,10 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
       const name = String((data as Record<string, unknown>)?.name || '')
       const args = (data as Record<string, unknown>)?.arguments as Record<string, unknown> | undefined
       if (name && args) batchProposalRef.current = { name, arguments: args }
+    },
+    // S104：技能草稿生成 → 本轮结束后弹确认窗
+    onSkillRefine: () => {
+      skillRefineRef.current = true
     },
   })
 
@@ -750,6 +757,36 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     void handleBatchProposal(proposal)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streaming])
+
+  // ── S104 技能草稿确认：本轮结束 skill_refine 生成过草稿 → 弹窗采纳/拒绝 ──
+  useEffect(() => {
+    if (streaming || !skillRefineRef.current) return
+    skillRefineRef.current = false
+    void handleSkillRefineProposal()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [streaming])
+
+  async function handleSkillRefineProposal() {
+    const ok = await requestApproval({
+      title: 'AI 生成了技能草稿',
+      desc: '写作过程中 AI 从参考内容提炼了叙事技法候选（已存草稿）。\n\n批准 = 全部采纳转正为可用技能；拒绝 = 删除草稿。\n也可稍后去「叙述」面板逐条确认。',
+      estSeconds: 1,
+      cost: 'low',
+    })
+    try {
+      if (ok) {
+        const drafts = await listSkillDrafts()
+        for (const d of drafts) await promoteSkillDraft(d.id)
+        setMessages(prev => [...prev, { role: 'agent', text: `✅ 已采纳 ${drafts.length} 条技能草稿（可在「叙述」面板查看使用）` }])
+      } else {
+        const drafts = await listSkillDrafts()
+        for (const d of drafts) await deleteSkillDraft(d.id)
+        setMessages(prev => [...prev, { role: 'agent', text: '[技能草稿已拒绝] 未采纳，草稿已清理' }])
+      }
+    } catch {
+      setMessages(prev => [...prev, { role: 'agent', text: '⚠️ 技能草稿处理失败（可去「叙述」面板手动确认）' }])
+    }
+  }
 
   async function handleBatchProposal(proposal: { name: string; arguments: Record<string, unknown> }) {
     const isRewrite = proposal.name === 'batch_rewrite'

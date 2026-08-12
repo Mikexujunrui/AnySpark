@@ -8,10 +8,34 @@ interface SkillPanelProps {
   embedded?: boolean;
 }
 
+// S104：AI 生成候选草稿区（agent skill_refine 产出 → 人工确认转正）
+function DraftSection({ drafts, onApprove, onReject }: { drafts: { id: string; name: string; description?: string; target?: string }[]; onApprove: (id: string) => void; onReject: (id: string) => void }) {
+  if (drafts.length === 0) return null;
+  return (
+    <div className="p-3 bg-amber-900/20 border border-amber-700/40 rounded-lg space-y-2">
+      <p className="text-[11px] text-amber-400 font-medium">AI 生成的技能草稿（{drafts.length} 条待确认）</p>
+      {drafts.map((d) => (
+        <div key={d.id} className="bg-zinc-900/70 rounded px-2.5 py-2 space-y-1">
+          <p className="text-xs text-zinc-200 truncate">{d.name}</p>
+          {d.description && <p className="text-[11px] text-zinc-500 line-clamp-2">{d.description}</p>}
+          <div className="flex gap-2 pt-1">
+            <button onClick={() => onApprove(d.id)} className="text-[11px] px-2 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded">采纳</button>
+            <button onClick={() => onReject(d.id)} className="text-[11px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded">拒绝</button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function SkillPanel({ open, onClose, embedded = false }: SkillPanelProps) {
   const skills = useSkillStore((s) => s.skills);
+  const drafts = useSkillStore((s) => s.drafts);
   const loading = useSkillStore((s) => s.loading);
   const fetchSkills = useSkillStore((s) => s.fetchSkills);
+  const fetchDrafts = useSkillStore((s) => s.fetchDrafts);
+  const approveDraft = useSkillStore((s) => s.approveDraft);
+  const rejectDraft = useSkillStore((s) => s.rejectDraft);
   const addSkill = useSkillStore((s) => s.addSkill);
   const editSkill = useSkillStore((s) => s.editSkill);
   const removeSkill = useSkillStore((s) => s.removeSkill);
@@ -29,8 +53,11 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
 
   useEffect(() => {
-    if (open) fetchSkills();
-  }, [open, fetchSkills]);
+    if (open) {
+      fetchSkills();
+      fetchDrafts(); // S104：草稿待确认区
+    }
+  }, [open, fetchSkills, fetchDrafts]);
 
   const handleAdd = async () => {
     if (!newName.trim() || !newContent.trim()) return;
@@ -83,6 +110,8 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
     return (
       <div className="h-full bg-zinc-900 flex flex-col overflow-hidden">
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          {/* S104：AI 草稿待确认区 */}
+          <DraftSection drafts={drafts} onApprove={approveDraft} onReject={rejectDraft} />
           {loading ? (
             <p className="text-zinc-600 text-sm text-center py-4">加载中...</p>
           ) : skills.length === 0 ? (
@@ -191,6 +220,8 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
 
         {/* 列表 */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+          {/* S104：AI 草稿待确认区 */}
+          <DraftSection drafts={drafts} onApprove={approveDraft} onReject={rejectDraft} />
           {loading ? (
             <p className="text-zinc-600 text-sm text-center py-4">加载中...</p>
           ) : skills.length === 0 ? (

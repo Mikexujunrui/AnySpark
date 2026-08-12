@@ -117,7 +117,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 
-## 4. Agent 工具层（23 工具 × 开关）
+## 4. Agent 工具层（27 工具 × 开关）
 
 | 工具 | 用途 | 开关 |
 |---|---|---|
@@ -125,7 +125,8 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | explore_direction | 方向建议（种子含糊时） | 常驻 |
 | skill_lookup | 按需细看技巧全文 | enable_domain |
 | graph_query / graph_register | 图谱查证/登记 | enable_domain |
-| plot_list | 伏笔查看（A/B 分级） | enable_domain |
+| plot_list / plot_register / plot_resolve / plot_update / plot_delete | 伏笔查看/登记/回收归档/修改/删除（S104 补回收链路） | enable_domain |
+| check_text | 硬伤检测 + 自然语言规则检测（S104 重建，智能体自查） | enable_domain |
 | plan_list | 剧情计划查看 | enable_domain |
 | setting_query | 设定档查证 | enable_domain |
 | search_chapters / read_context | 正文检索/锚点阅读 | enable_domain |

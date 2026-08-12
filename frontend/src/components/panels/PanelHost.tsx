@@ -18,6 +18,7 @@ import SkillPanel from '../SkillPanel'
 
 // V4 工具面板（open/onClose 签名）
 import BriefPanel from '../BriefPanel'
+import CodexPanel from '../CodexPanel'
 import BiasPanel from '../BiasPanel'
 import BatchPanel from '../BatchPanel'
 import TemplatePanel from '../TemplatePanel'
@@ -60,6 +61,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {panelKey === 'tools' && <div className="h-full min-h-0 flex flex-col"><ToolsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'play' && <div className="h-full min-h-0 flex flex-col"><PlayPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'dims' && <div className="h-full min-h-0 flex flex-col"><DimsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
+      {panelKey === 'codex' && <div className="h-full min-h-0 flex flex-col"><CodexPanel /></div>}
       {panelKey === 'upload' && <div className="h-full min-h-0 flex flex-col"><UploadPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
     </div>
   )

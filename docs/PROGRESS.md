@@ -32,7 +32,8 @@
   - 测试现状：pytest 424 例全绿 + 前端 tsc/lint/build 全绿（分层门禁见 AGENTS.md）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
-> 当前无会话声明。
+> [S104] 正在改 `tools_domain.py`（新增 check_text 检测工具 + plot_resolve/update/delete 伏笔工具）+ 前端 `SkillPanel`（草稿确认弹窗）/`ChatPanel`+`useSSE`（skill_refine 生成弹窗）/`CodexPanel`（新，codex 展示）——不动并行会话 S103 的 skill_refine/library 区——完成提交后删除本行
+> [S103] 正在改 `routes_library.py`（+POST /api/library/{id}/refine-skill：书库→skill 提炼存草稿）+ `schemas.py`（+LibraryRefineIn）+ 新测试 `test_library_refine.py` + 前端 `Bookshelf.tsx`（+书库 tab）+ 新组件 `LibraryShelfPanel.tsx`（书库管理+导入+提炼技能+草稿确认）+ `api/skills.ts`（drafts API）+ `api/library.ts`（refine API）——完成提交后删除本行
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
@@ -2822,3 +2823,55 @@ S74 数据隔离 + S81 作用域隔离 + S101b 简介隔离统一。历史惰性
 BatchPanel 保留（进度查看），checkbox 手动发起入口被对话触发取代（第 2 点收敛完成）。
 
 **验证**：test_batch_tool 5 passed + ruff/mypy/tsc 全绿；全量 gate ✅
+
+## S103 书库 → 技能全链路（书架「书库」标签 + 对话提炼 + 草稿确认）（已完成 ✅）
+
+**需求（主人）**：① 全局功能（书库）放书架界面——加「书库」标签；② 完整链路：书库上传
+一直到技能（上传 txt → 提炼 → 确认生效）；③ 技能提炼不应只靠手动按钮——**对话里直接跟
+智能体说一声，让它从书库提炼某本书**。
+
+**交付**：
+- **后端 `POST /api/library/{book_id}/refine-skill`**（routes_library）：取书库原文
+  （read_book ≤20 万字）→ skill_generator mode=book 拆书多维拆解 → **存草稿**
+  （skills.add_draft, source=library）→ 前端确认转正。重复提炼 409（同名去重）；空书 400；无书 404
+- **skill_refine 工具扩展**（tools_domain + toolkit 注册传 library/skills）：
+  - 新参数 `library_book_id`（书库取原文，三来源：书库/资料库/source_text）
+  - **候选统一存草稿**（source=agent）——修复对话链路断链（此前只展示不入草稿，前端看不到）
+  - 返回带"草稿已生成 N 条，去书库/技巧标签确认"（同名去重提示）
+- **前端**：
+  - 书架 tab 加「**书库**」（Bookshelf + LibraryShelfPanel 新组件）：全局书库管理
+    （建书/导入 txt/删除）+ 每本书「**提炼技能**」按钮 + **技能草稿区**（确认生效/删除）
+  - api：skills.ts +drafts CRUD（list/promote/delete）；library.ts +refineLibrarySkill
+  - Icon.tsx +book
+- **测试**：test_library_refine.py 5 用例——端点全链路（建书→导入→提炼→草稿→promote 生效/
+  409/400/404）+ skill_refine 工具书库来源存草稿（同名去重）+ 无书 404
+
+**操作**：书架→书库→导入斗破 txt→点「提炼技能」→草稿区「确认生效」；
+或对话直接说"把书库的《斗破苍穹》提炼成技能"→ AI 调 skill_refine（library_book_id）→ 草稿出现→确认。
+
+**验证**：test_library_refine 5 passed + test_batch_tool 5 + ruff/mypy/tsc 全绿
+
+## S104 功能链路补全（已完成 ✅）——主人四项决策落地
+
+**背景**：链路审计报告（137 端点 × 27 工具 × 前端 37 API 模块对账）后主人决策：
+① 检测不做 UI（智能体自行调用）② 技能生成弹窗人工批准 ③ 伏笔给智能体赋能
+（查看/删改/生成 + 写完自动回收）④ codex 前端展示。
+
+**交付**：
+- ① **check_text 工具重建**（tools_check.py，enable_domain 默认开）：无规则=run_review
+  硬伤报告；有规则=compile_with_model 自然语言规则检测（模板 fallback，不可识别明确告知）
+  ——S63 退役的弱化版升级为写作自查能力；/api/check 保留（图谱证据/时序的人用 API）
+- ② **技能生成弹窗**：skill_refine（S103 草稿化）→ useSSE 检测工具调用 → 本轮结束
+  requestApproval 弹窗 → 批准=全部 promote 转正 / 拒绝=全部 delete；SkillPanel 加
+  「AI 生成的技能草稿」待确认区（逐条采纳/拒绝）——双通道（弹窗批量 + 面板逐条）
+- ③ **伏笔 agent 赋能**：plot_resolve（回收归档+章节）/ plot_update（优先级/关注度/
+  状态）/ plot_delete 三工具——写作规划埋伏笔（plot_register 已有）+ 写完自动回收；
+  PlotPanel 人类手动 UI 已有（S101c 修过 book_id）
+- ④ **CodexPanel**（前端展示）：api/codex.ts + CodexPanel 组件（代码输入/运行/
+  stdout/stderr 展示，内置 ws_* 只读数据环境示例）+ 工具坞「代码」tab
+
+**验证**：test_tools_domain（6，含 plot_resolve/update/delete 断言）+ test_tools_extras
+（8，check_text 重建断言）全绿；前端 tsc+build 全绿；codex/run 冒烟（真实 27 章统计）；
+BACKEND-MAP 工具表 23→27。
+
+**并行会话**：S103 书→技能链路（另一个智能体）与本次无冲突（skill_refine 区未碰）。

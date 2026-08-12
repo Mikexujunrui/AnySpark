@@ -212,7 +212,160 @@ def make_plot_implementer(plots: Any, book_id: str = "main") -> tuple[list[Any],
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"查询失败：{exc}")
 
-    return [register_spec, list_spec], [register, list_points]
+    # ── S104：回收归档（写完发现伏笔已揭开 → 自己标记 resolved）──
+    resolve_spec = ToolSpec(
+        name="plot_resolve",
+        description=(
+            "回收归档一个伏笔/剧情钩子（标记已解决）。"
+            "写完章节发现某个伏笔已在文中揭开/回收时使用——把它标记 resolved，"
+            "伏笔图谱不再提醒，承诺闭环。需先 plot_list 查伏笔 id。"
+        ),
+        params=[
+            ParamSpec(
+                name="plot_id",
+                type="string",
+                required=True,
+                description="伏笔 id（plot_list 返回）",
+            ),
+            ParamSpec(
+                name="chapter_ref",
+                type="string",
+                required=False,
+                description="回收章节（如'第 12 章'）；缺省记当前轮次",
+            ),
+        ],
+    )
+
+    def resolve(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        plot_id = str(arguments.get("plot_id", "")).strip()
+        if not plot_id:
+            return ToolResult(call=call, ok=False, content="缺少参数 plot_id。")
+        try:
+            p = plots.get(plot_id)
+            if p is None:
+                return ToolResult(call=call, ok=False, content=f"伏笔不存在：{plot_id}")
+            chapter_ref = str(arguments.get("chapter_ref", "")).strip() or None
+            updated = plots.update(
+                plot_id,
+                status="resolved",
+                resolved_chapter=chapter_ref or p.resolved_chapter,
+            )
+            assert updated is not None
+            where = f"（回收于 {updated.resolved_chapter}）" if updated.resolved_chapter else ""
+            return ToolResult(
+                call=call,
+                ok=True,
+                content=f"已回收归档伏笔#{plot_id[:8]}：{updated.content} {where}",
+                data={"plot_id": plot_id, "status": "resolved"},
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"回收失败：{exc}")
+
+    # ── S104：修改伏笔（优先级/关注度/回收章节/状态）──
+    update_spec = ToolSpec(
+        name="plot_update",
+        description=(
+            "修改一个伏笔的元信息（优先级/关注度/回收章节/状态）。"
+            "写的过程中调整伏笔重要性（升级为 must 主线承诺 / 降级为 soft）时使用。"
+            "改内容本身请删除后重新登记（plot_delete + plot_register）。"
+        ),
+        params=[
+            ParamSpec(
+                name="plot_id",
+                type="string",
+                required=True,
+                description="伏笔 id（plot_list 返回）",
+            ),
+            ParamSpec(
+                name="priority",
+                type="string",
+                required=False,
+                description="must（主线承诺）或 soft（细节线索）",
+            ),
+            ParamSpec(
+                name="attention",
+                type="string",
+                required=False,
+                description="care（在意，重点跟进）或 ignore（忽略）",
+            ),
+            ParamSpec(
+                name="status",
+                type="string",
+                required=False,
+                description="open（开放）或 resolved（已回收）",
+            ),
+            ParamSpec(
+                name="chapter_ref",
+                type="string",
+                required=False,
+                description="回收/关联章节",
+            ),
+        ],
+    )
+
+    def update_point(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        plot_id = str(arguments.get("plot_id", "")).strip()
+        if not plot_id:
+            return ToolResult(call=call, ok=False, content="缺少参数 plot_id。")
+        try:
+            priority = str(arguments.get("priority", "")).strip() or None
+            attention = str(arguments.get("attention", "")).strip() or None
+            status = str(arguments.get("status", "")).strip() or None
+            chapter_ref = str(arguments.get("chapter_ref", "")).strip() or None
+            updated = plots.update(
+                plot_id,
+                priority=priority,
+                attention=attention,
+                status=status,
+                chapter_ref=chapter_ref,
+            )
+            if updated is None:
+                return ToolResult(call=call, ok=False, content=f"伏笔不存在：{plot_id}")
+            return ToolResult(
+                call=call, ok=True, content=f"已更新伏笔#{plot_id[:8]}（{updated.status}）"
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"更新失败：{exc}")
+
+    # ── S104：删除伏笔（误登记/废弃线索）──
+    delete_spec = ToolSpec(
+        name="plot_delete",
+        description=(
+            "删除一个伏笔（误登记/废弃线索时清理）。"
+            "注意：已回收的伏笔保留作归档记录，通常不需要删除。"
+        ),
+        params=[
+            ParamSpec(
+                name="plot_id",
+                type="string",
+                required=True,
+                description="伏笔 id（plot_list 返回）",
+            ),
+        ],
+    )
+
+    def delete_point(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        plot_id = str(arguments.get("plot_id", "")).strip()
+        if not plot_id:
+            return ToolResult(call=call, ok=False, content="缺少参数 plot_id。")
+        try:
+            if plots.get(plot_id) is None:
+                return ToolResult(call=call, ok=False, content=f"伏笔不存在：{plot_id}")
+            plots.delete(plot_id)
+            return ToolResult(call=call, ok=True, content=f"已删除伏笔#{plot_id[:8]}")
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"删除失败：{exc}")
+
+    return [register_spec, list_spec, resolve_spec, update_spec, delete_spec], [
+        register,
+        list_points,
+        resolve,
+        update_point,
+        delete_point,
+    ]
 
 
 def make_plan_implementer(plans: Any, book_id: str = "main") -> tuple[list[Any], list[Any]]:
@@ -1361,8 +1514,16 @@ def make_path_explore_implementer(model: Any) -> tuple[Any, Any]:
     return spec, implementer
 
 
-def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, Any]:
+def make_skill_refine_implementer(
+    generator: Any,
+    materials: Any,
+    library: Any = None,
+    skills: Any = None,
+) -> tuple[Any, Any]:
     """文风参考书 → skill 提炼工具（S72）：把原文/资料提炼成叙事技法候选。
+
+    S103：加 library_book_id（从书库取原文）+ 候选存草稿（skills.add_draft，
+    前端草稿区人工确认转正——对话触发的提炼不再断链）。
 
     需要借鉴某本书/资料的写法（句式/节奏/用词/视角）时使用——生成 skill 候选
     供用户确认（人工确认闸门：不自动入库，对齐 S54 哲学）。
@@ -1371,15 +1532,21 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
     spec = ToolSpec(
         name="skill_refine",
         description=(
-            "从原文或资料库提炼叙事技法 skill 候选（把文风参考书变成方法论）。"
+            "从原文、资料库或书库提炼叙事技法 skill 候选（把文风参考书变成方法论）。"
             "需要借鉴某本书/某资料的写法（句式/节奏/用词/视角）时使用——"
-            "生成候选供用户确认（人工确认后生效，不自动入库）。"
-            "material_id 从资料库取原文（read_material 返回的 ids），或直接传 source_text。"
+            "生成候选存草稿供用户确认（确认后生效，不自动入库）。"
+            "三种来源三选一：library_book_id（书库的书）、material_id（资料库，"
+            "read_material 返回的 ids）、或直接传 source_text。"
             "mode=book（拆书）：把整本书写法多维拆解（文风/节奏/结构/人设/对白/信息投放/钩子）"
-            "融合成一份「书名」skill（name=书名，一次点名拿到整本方法论）；"
-            "建议 source_text 拼接开篇+中段+高潮代表性章节（可 read_chapter 多取几章）。"
+            "融合成一份「书名」skill（name=书名，一次点名拿到整本方法论）。"
         ),
         params=[
+            ParamSpec(
+                name="library_book_id",
+                type="string",
+                required=False,
+                description="书库的书 id（reference_lookup 可查；从其全文提炼，拆书模式推荐）",
+            ),
             ParamSpec(
                 name="material_id",
                 type="string",
@@ -1390,7 +1557,7 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
                 name="source_text",
                 type="string",
                 required=False,
-                description="原文文本（与 material_id 二选一）；拆书模式建议多章拼接",
+                description="原文文本（与 library_book_id/material_id 三选一）",
             ),
             ParamSpec(
                 name="hint",
@@ -1414,7 +1581,23 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
         call = ToolCall(name=spec_.name, arguments=arguments)
         source_text = str(arguments.get("source_text", "")).strip()
         material_id = str(arguments.get("material_id", "")).strip()
+        library_book_id = str(arguments.get("library_book_id", "")).strip()
         hint = str(arguments.get("hint", "")).strip()
+        # S103：书库取原文（read_book 拼全书，拆书模式覆盖多章）
+        if library_book_id:
+            if library is None:
+                return ToolResult(call=call, ok=False, content="书库不可用（未装配）")
+            try:
+                book = library.get_book(library_book_id)
+                if book is None:
+                    return ToolResult(call=call, ok=False, content=f"书库无此书：{library_book_id}")
+                source_text = library.read_book(library_book_id, max_chars=200000).strip()
+                if not source_text:
+                    return ToolResult(
+                        call=call, ok=False, content=f"书库《{book['name']}》无内容（先导入文本）"
+                    )
+            except Exception as exc:
+                return ToolResult(call=call, ok=False, content=f"读取书库失败：{exc}")
         if material_id:
             try:
                 card = materials.get(material_id)
@@ -1447,7 +1630,22 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
             return ToolResult(call=call, ok=False, content=f"提炼失败：{exc}")
         if not candidates:
             return ToolResult(call=call, ok=False, content="提炼失败（无有效候选）。")
-        lines = [f"【{tag} {len(candidates)} 条（待人工确认，不自动生效）】"]
+        # S103：候选存草稿（skills.add_draft）——前端草稿区人工确认转正，对话链路不再断链
+        draft_ids: list[str] = []
+        if skills is not None:
+            for c in candidates:
+                d = skills.add_draft(
+                    name=str(c.get("name", "")),
+                    description=str(c.get("description", ""))[:500],
+                    content=str(c.get("content", "")),
+                    example=str(c.get("example", ""))[:2000],
+                    tags=str(c.get("tags", "")),
+                    target=str(c.get("target", "writing")),
+                    source="agent",
+                )
+                if d:
+                    draft_ids.append(str(d["id"]))
+        lines = [f"【{tag} {len(candidates)} 条（已存草稿，待人工确认生效）】"]
         for i, c in enumerate(candidates, 1):
             name = c.get("name", f"候选{i}")
             desc = str(c.get("description", ""))[:60]
@@ -1458,7 +1656,10 @@ def make_skill_refine_implementer(generator: Any, materials: Any) -> tuple[Any, 
                 f"   （整本方法论 {len(content)} 字，分小节："
                 "文风/节奏/结构/人设/对白/信息投放/钩子）"
             )
-        lines.append("（确认后由用户走技能确认流程生效）")
+        if draft_ids:
+            lines.append(f"（草稿已生成 {len(draft_ids)} 条，去书库/技巧标签确认后生效）")
+        elif skills is not None:
+            lines.append("（已有同名草稿或技能，未重复生成——可先确认/删除旧的再提炼）")
         return ToolResult(call=call, ok=True, content="\n".join(lines))
 
     return spec, implementer

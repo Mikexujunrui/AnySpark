@@ -124,6 +124,12 @@ def build_toolkit(
         for _s, _i in zip(b_specs, b_impls, strict=True):
             registry.register(_s, _i)
 
+        # S104：检测工具（智能体自查硬伤/自然语言规则，替代人用 /api/check）
+        from anyspark.server.tools_check import make_check_implementer
+
+        ck_spec, ck_impl = make_check_implementer(ctx.model)
+        registry.register(ck_spec, ck_impl)
+
         gq_spec, gq_impl = make_graph_query_implementer(ctx.graph, book_id=ctx.book_id)
         registry.register(gq_spec, gq_impl)
         # S60：技巧查证工具（与索引常驻配套：索引轻量注入，内容按需细看）
@@ -134,8 +140,11 @@ def build_toolkit(
         gr_spec, gr_impl = make_graph_register_implementer(ctx.graph, book_id=ctx.book_id)
         registry.register(gr_spec, gr_impl)
         # S72：文风参考书 → skill 提炼（方法论通道；生成候选，人工确认生效）
+        # S103：+library（书库取原文）+ skills（候选存草稿，对话链路可确认）
         if ctx.skill_generator is not None and ctx.materials is not None:
-            sr_spec, sr_impl = make_skill_refine_implementer(ctx.skill_generator, ctx.materials)
+            sr_spec, sr_impl = make_skill_refine_implementer(
+                ctx.skill_generator, ctx.materials, library=ctx.library, skills=ctx.skills_store
+            )
             registry.register(sr_spec, sr_impl)
         # S80：灵感登记（资料库 = 灵感冷藏库；AI 可写 inspiration，copy 仅人工/导入）
         if ctx.materials is not None:

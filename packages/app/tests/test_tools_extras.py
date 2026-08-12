@@ -166,8 +166,12 @@ def test_read_material_empty_listing() -> None:
 
 
 def test_check_text_retired() -> None:
-    """S63：check_text 工具已退役（S59 workflow 的 review_chapter 取代）——
-    不再从 tools_extras 导出，Agent 工具集不再含 check_text。"""
+    """S63 退役 + S104 重建：旧 tools_extras 版已退役；新版在 tools_check（默认开）。"""
     import anyspark.server.tools_extras as te
 
-    assert not hasattr(te, "make_check_implementer"), "check_text 应已退役"
+    assert not hasattr(te, "make_check_implementer"), "旧 tools_extras 版应已退役"
+    # S104：重建版在 tools_check（agent 自查能力），工具名 check_text
+    from anyspark.server.tools_check import make_check_implementer
+
+    spec, _ = make_check_implementer(object())  # 只查 spec 名，不触发模型
+    assert spec.name == "check_text"

@@ -54,8 +54,8 @@ def test_graph_query_finds_entity_with_state() -> None:
 def test_plot_register_and_list() -> None:
     plots = PlotStore(_db())
     specs, impls = make_plot_implementer(plots)
-    register, list_impl = impls
-    assert len(specs) == 2
+    register, list_impl, resolve, update_point, delete_point = impls
+    assert len(specs) == 5  # S104：+plot_resolve/plot_update/plot_delete
 
     r = _call(register, content="怀表背面刻有一串数字", priority="must")
     assert r.ok is True
@@ -66,6 +66,25 @@ def test_plot_register_and_list() -> None:
     rl = _call(list_impl)
     assert "怀表背面刻有一串数字" in rl.content  # must 展开列出
     assert "另有 1 条细节线索开放中" in rl.content  # soft 只汇总数量（S31 设计）
+
+    # S104：回收归档 + 修改 + 删除
+    plot_id = r.data["plot_id"]
+    rr = _call(resolve, plot_id=plot_id, chapter_ref="第 12 章")
+    assert rr.ok is True and "已回收归档" in rr.content
+    assert plots.get(plot_id).status == "resolved"  # type: ignore[union-attr]
+    assert plots.get(plot_id).resolved_chapter == "第 12 章"  # type: ignore[union-attr]
+    # 已回收的伏笔在 render 中以 ✓ 标记（不再开放提醒）
+    rl2 = _call(list_impl)
+    assert "✓ [伏笔] 怀表背面刻有一串数字" in rl2.content
+    # update：升级 soft 为 must
+    r2_id = r2.data["plot_id"]
+    ru = _call(update_point, plot_id=r2_id, priority="must")
+    assert ru.ok is True
+    assert plots.get(r2_id).priority == "must"  # type: ignore[union-attr]
+    # delete：删除后查不到
+    rd = _call(delete_point, plot_id=r2_id)
+    assert rd.ok is True
+    assert plots.get(r2_id) is None
 
 
 def test_plan_list_and_mark_done() -> None:

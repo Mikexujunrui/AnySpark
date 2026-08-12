@@ -18,6 +18,7 @@ export interface SSECallbacks {
   onMetrics?: (data: Record<string, unknown>) => void
   onQueueConsume?: (data: Record<string, unknown>) => void
   onBatchProposal?: (data: Record<string, unknown>) => void
+  onSkillRefine?: (data: Record<string, unknown>) => void // S104：技能草稿生成提醒
   onError?: (error: Error, msg: string) => void
 }
 
@@ -28,7 +29,7 @@ export interface SSEOptions {
   autoModeEnabled: boolean
 }
 
-export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onMetrics, onQueueConsume, onBatchProposal, onError }: SSEOptions & SSECallbacks) {
+export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onMetrics, onQueueConsume, onBatchProposal, onSkillRefine, onError }: SSEOptions & SSECallbacks) {
   const [streaming, setStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
   const mountedRef = useRef(true)
@@ -142,6 +143,12 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
                   if (n === 'batch_rewrite' || n === 'batch_review') {
                     onBatchProposal({ name: n, arguments: argsList[i] || {} })
                   }
+                })
+              }
+              // S104：技能草稿生成提醒（skill_refine 产出 → 弹窗确认）
+              if (onSkillRefine && Array.isArray(argsList)) {
+                nameList.forEach((n: string) => {
+                  if (n === 'skill_refine') onSkillRefine({ name: n })
                 })
               }
             }
