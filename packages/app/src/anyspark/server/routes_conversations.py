@@ -22,7 +22,7 @@ from anyspark.models.registry import (
 )
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
-from anyspark.server.schemas import ConversationRenameIn, ModelIn
+from anyspark.server.schemas import ConversationRenameIn, MessagesSaveIn, ModelIn
 
 
 def make_conversations_router(deps: AppDeps) -> APIRouter:
@@ -85,6 +85,22 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
             raise HTTPException(status_code=404, detail="会话不存在")
         msgs = deps.store.messages(conv_id)
         return [{"role": m.role, "content": m.content} for m in msgs]
+
+    @router.post("/api/conversations/{conv_id}/messages", response_model=dict[str, int])
+    def save_conversation_messages(conv_id: str, req: MessagesSaveIn) -> dict[str, int]:
+        """S80：前端全量保存消息（编辑消息/手动整理后 auto-save 覆盖写）。
+
+        事务内清空该会话消息后重新写入（前端持有完整消息数组，覆盖语义一致）；
+        与 chat 过程中的自动落库不冲突（最终一致）。
+        """
+        conv = deps.store.get(conv_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        from anyspark.core import Message
+
+        msgs = [Message(role=m.role, content=m.content, metadata={}) for m in req.messages]
+        deps.store.replace_messages(conv_id, msgs)
+        return {"saved": len(msgs)}
 
     @router.delete("/api/conversations/{conv_id}", response_model=dict[str, bool])
     def delete_conversation(conv_id: str) -> dict[str, bool]:

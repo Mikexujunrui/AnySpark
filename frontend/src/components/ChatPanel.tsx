@@ -258,7 +258,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     function onBeforeUnload() {
       if (streaming && sessionId) {
         // Use sendBeacon for reliable delivery during page unload
-        navigator.sendBeacon(`/api/sessions/${sessionId}/cancel`, JSON.stringify({}))
+        navigator.sendBeacon(`/api/chat/cancel`, new Blob([JSON.stringify({ conversation_id: sessionId })], { type: 'application/json' }))
       }
     }
     window.addEventListener('beforeunload', onBeforeUnload)
@@ -416,7 +416,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     setMessages([welcomeMsg])
     setLoaded(false)
     if (!sessionId) return
-    const url = `/api/books/${bookId}/sessions/${sessionId}/messages`
+    const url = `/api/conversations/${sessionId}/messages`
     console.log(`${DIAG_PREFIX} ChatPanel — 加载历史消息 | session=%s | url=%s`, sessionId, url)
     fetch(url)
       .then(r => {
@@ -448,23 +448,16 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     if (!loaded || !sessionId) return
     clearTimeout(saveTimerRef.current)
     saveTimerRef.current = setTimeout(() => {
-      fetch(`/api/books/${bookId}/sessions/${sessionId}/messages`, {
+      fetch(`/api/conversations/${sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify({ messages: messages.map(m => ({ role: m.role, content: m.text || '' })) }),
       }).catch(e => console.error(`${DIAG_PREFIX} ChatPanel — 消息保存失败: %s`, e.message))
     }, 500)
     return () => clearTimeout(saveTimerRef.current)
   }, [messages, bookId, sessionId, loaded])
 
-  // Context usage poll
-  useEffect(() => {
-    if (!sessionId) return
-    fetch(`/api/books/${bookId}/sessions/${sessionId}/context`)
-      .then(r => r.ok ? r.json() : Promise.reject('not ok'))
-      .then(data => setContextUsage(data))
-      .catch(() => setContextUsage(null))
-  }, [messages.length, sessionId, bookId])
+  // S80：context 用量统计后端无此端点，移除（ContextBar 已能处理 null）
 
   async function handleUpload(file) {
     if (!file || uploading) return

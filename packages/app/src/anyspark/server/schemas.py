@@ -57,6 +57,19 @@ class ConversationRenameIn(BaseModel):
     title: str
 
 
+class MessagePayload(BaseModel):
+    """S80：单条消息（前端全量保存用）。"""
+
+    role: Literal["system", "user", "assistant", "tool"]
+    content: str
+
+
+class MessagesSaveIn(BaseModel):
+    """S80：会话消息全量保存。"""
+
+    messages: list[MessagePayload]
+
+
 class RoleCardIn(BaseModel):
     """S48-P4 角色卡（卡片/角色卡-{name}.md）。"""
 
