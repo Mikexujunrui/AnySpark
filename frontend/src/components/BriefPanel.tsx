@@ -6,10 +6,11 @@ interface BriefPanelProps {
   open: boolean;
   onClose: () => void;
   embedded?: boolean;
+  bookId?: string; // S101：按项目隔离简介
 }
 
 // 项目简介面板（S58：项目智能体简介，AI 与用户共看的协作总览）
-export default function BriefPanel({ open, onClose, embedded = false }: BriefPanelProps) {
+export default function BriefPanel({ open, onClose, embedded = false, bookId = "main" }: BriefPanelProps) {
   const content = useBriefStore((s) => s.content);
   const exists = useBriefStore((s) => s.exists);
   const loading = useBriefStore((s) => s.loading);
@@ -31,7 +32,7 @@ export default function BriefPanel({ open, onClose, embedded = false }: BriefPan
       estSeconds: 14,
       cost: 'medium',
     })
-    if (ok) generate()
+    if (ok) generate(bookId)
   }
 
   const [editing, setEditing] = useState(false);
@@ -40,10 +41,10 @@ export default function BriefPanel({ open, onClose, embedded = false }: BriefPan
 
   useEffect(() => {
     if (open) {
-      fetchBrief();
+      fetchBrief(bookId);
       setEditing(false);
     }
-  }, [open, fetchBrief]);
+  }, [open, fetchBrief, bookId]);
 
   if (!open) return null;
 
@@ -65,7 +66,21 @@ export default function BriefPanel({ open, onClose, embedded = false }: BriefPan
     if (!editorText.trim()) return;
     setSaving(true);
     try {
-      await save(editorText.trim());
+      await save(bookId, editorText.trim());
+      setEditing(false);
+      setEditText("");
+      setSaving(false);
+    } catch {
+      setSaving(false);
+    }
+  };
+
+  // S101：删除简介（空内容保存=后端删文件）
+  const handleDelete = async () => {
+    if (!window.confirm("删除项目简介？此操作不可恢复。")) return;
+    setSaving(true);
+    try {
+      await save(bookId, "");
       setEditing(false);
       setEditText("");
       setSaving(false);
@@ -92,6 +107,16 @@ export default function BriefPanel({ open, onClose, embedded = false }: BriefPan
                 className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 disabled:opacity-50 text-zinc-300 rounded"
               >
                 编辑
+              </button>
+            )}
+            {!editing && exists && (
+              <button
+                onClick={handleDelete}
+                disabled={loading || saving}
+                title="删除项目简介"
+                className="text-xs px-2 py-1 bg-red-900/40 hover:bg-red-800/50 disabled:opacity-50 text-red-300 rounded"
+              >
+                删除
               </button>
             )}
             <button

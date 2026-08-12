@@ -109,9 +109,13 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
 
     @router.post("/api/brief", response_model=dict[str, Any])
     def save_brief(req: BriefIn) -> dict[str, Any]:
-        """写项目简介（用户/前端可编辑，权威在 md 文件）。"""
-        deps.workspace.write_brief(req.book_id, req.content)
-        return {"book_id": req.book_id, "content": req.content.strip(), "exists": True}
+        """写项目简介（用户/前端可编辑，权威在 md 文件；空内容=删除，S101）。"""
+        content = req.content.strip()
+        if content:
+            deps.workspace.write_brief(req.book_id, content)
+        else:
+            deps.workspace.delete_brief(req.book_id)
+        return {"book_id": req.book_id, "content": content, "exists": bool(content)}
 
     @router.post("/api/brief/generate", response_model=dict[str, Any])
     def generate_brief(req: BriefGenerateIn) -> dict[str, Any]:

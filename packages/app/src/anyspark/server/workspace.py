@@ -104,6 +104,14 @@ class Workspace:
         f.write_text(text, encoding="utf-8")
         return f
 
+    def delete_brief(self, book_id: str = "main") -> bool:
+        """删除项目简介文件（空内容保存=删除，S101）。"""
+        f = self.brief_file(book_id)
+        if f.exists():
+            f.unlink()
+            return True
+        return False
+
     # -- S70 分级开关：破限模式（每书一标志文件，存在=开） --
     def uncensored_flag(self, book_id: str = "main") -> Path:
         return self.project_dir(book_id) / ".uncensored"

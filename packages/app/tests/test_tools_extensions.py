@@ -383,6 +383,17 @@ def test_brief_crud_and_injection() -> None:
     client.post("/api/chat", json={"message": "写一段"})
     assert any("项目简介" in p and "雾城悬疑" in p for p in model.prompts)
 
+    # S101：空内容保存 = 删除
+    r3 = client.post("/api/brief", json={"content": ""})
+    assert r3.json()["exists"] is False
+    assert client.get("/api/brief").json()["exists"] is False
+
+    # S101：按书隔离——A 书写入，B 书为空
+    client.post("/api/brief", json={"content": "A 书专属简介", "book_id": "book-a"})
+    assert client.get("/api/brief?book_id=book-a").json()["content"] == "A 书专属简介"
+    assert client.get("/api/brief?book_id=book-b").json()["exists"] is False
+    assert client.get("/api/brief").json()["exists"] is False  # main 不受影响
+
 
 def test_context_mode_fresh_skips_memory_plan() -> None:
     """S58 context_mode=fresh：不注入场景记忆/剧情计划，保留心智/简介。"""

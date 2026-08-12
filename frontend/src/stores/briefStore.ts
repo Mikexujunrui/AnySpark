@@ -9,9 +9,9 @@ interface BriefState {
   note: string;
   generating: boolean;
 
-  fetchBrief: () => Promise<void>;
-  save: (content: string) => Promise<void>;
-  generate: () => Promise<void>;
+  fetchBrief: (bookId: string) => Promise<void>;
+  save: (bookId: string, content: string) => Promise<void>;
+  generate: (bookId: string) => Promise<void>;
   setDraft: (draft: string) => void;
   clearDraft: () => void;
 }
@@ -24,10 +24,11 @@ export const useBriefStore = create<BriefState>((set) => ({
   note: "",
   generating: false,
 
-  fetchBrief: async () => {
+  // S101：按 book_id 隔离（此前硬编码 main 跨项目共享）
+  fetchBrief: async (bookId) => {
     set({ loading: true });
     try {
-      const brief = await getBrief();
+      const brief = await getBrief(bookId);
       set({ content: brief.content, exists: brief.exists, loading: false });
     } catch (error) {
       console.error("Failed to fetch brief:", error);
@@ -35,20 +36,20 @@ export const useBriefStore = create<BriefState>((set) => ({
     }
   },
 
-  save: async (content) => {
+  save: async (bookId, content) => {
     try {
-      const saved = await saveBrief(content);
-      set({ content: saved.content, exists: true, draft: "", note: "" });
+      const saved = await saveBrief(bookId, content);
+      set({ content: saved.content, exists: saved.exists, draft: "", note: "" });
     } catch (error) {
       console.error("Failed to save brief:", error);
       throw error;
     }
   },
 
-  generate: async () => {
+  generate: async (bookId) => {
     set({ generating: true, note: "" });
     try {
-      const result = await generateBrief();
+      const result = await generateBrief(bookId);
       set({
         draft: result.draft,
         note: result.note,
