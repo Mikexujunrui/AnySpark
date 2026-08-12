@@ -94,6 +94,7 @@ export default function Bookshelf() {
       await api.updateBook(editing.id, {
         title: editing.title,
         description: editing.description || '',
+        projectType: editing.projectType || 'original',
       })
       setEditing(null)
       loadBooks()
@@ -201,7 +202,7 @@ export default function Bookshelf() {
               <button
                 onClick={() => setShowSettings(true)}
                 className="bg-zinc-800 hover:bg-zinc-700 active:scale-95 text-zinc-400 px-3 py-2.5 rounded-lg transition-all text-sm flex items-center gap-2"
-                title="API 设置"
+                title="设置"
               >
                 <Icon name="settings" size={16} /> 设置
               </button>
@@ -241,6 +242,7 @@ export default function Bookshelf() {
                     <div className="relative z-10">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-[9px] uppercase tracking-wider text-white/60 font-medium">{progressLabel(book.totalWords || 0)}</span>
+                        {book.projectType === 'continuation' && <span className="rounded bg-violet-950/70 px-1.5 py-0.5 text-[9px] text-violet-200">续写</span>}
                       </div>
                       <h3 className="text-white text-base font-bold leading-tight">{book.title}</h3>
                       <div className="flex items-center gap-2 text-white/50 text-[10px] mt-1">
@@ -295,6 +297,20 @@ export default function Bookshelf() {
                     <textarea value={editing.description || ''} rows={3}
                       onChange={e => setEditing({ ...editing, description: e.target.value })}
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 resize-none" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-zinc-400 block mb-1">项目用途</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      {[
+                        { key: 'original', label: '从零原创' },
+                        { key: 'continuation', label: '原作续写' },
+                      ].map(option => (
+                        <button key={option.key} onClick={() => setEditing({ ...editing, projectType: option.key })}
+                          className={`rounded-lg border px-3 py-2 text-xs transition-colors ${(editing.projectType || 'original') === option.key ? 'border-violet-600 bg-violet-950/30 text-violet-300' : 'border-zinc-700 bg-zinc-800 text-zinc-500'}`}>
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
                 </div>
                 <div className="flex gap-2 mt-4 justify-end">

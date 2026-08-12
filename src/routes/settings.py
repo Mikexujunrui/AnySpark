@@ -108,6 +108,10 @@ class GenerationSettingsUpdate(BaseModel):
     max_output_tokens: int = 65536
     reasoning_effort: str = "medium"
 
+
+class ExperimentalFeaturesUpdate(BaseModel):
+    author_dna_lab: bool = False
+
 # ── Endpoints ───────────────────────────────────────────────────────────────
 
 
@@ -280,6 +284,18 @@ def update_generation_settings(data: GenerationSettingsUpdate):
     """
     s = get_settings()
     s.generation = GenerationSettings(**data.model_dump()).normalized()
+    update_settings(s)
+    return s.to_dict(mask_keys=True)
+
+
+@router.put("/settings/experimental")
+def update_experimental_features(data: ExperimentalFeaturesUpdate):
+    """Persist explicit opt-ins for unfinished product experiments."""
+
+    s = get_settings()
+    flags = dict(s.experimental_features or {})
+    flags["author_dna_lab"] = bool(data.author_dna_lab)
+    s.experimental_features = flags
     update_settings(s)
     return s.to_dict(mask_keys=True)
 

@@ -42,6 +42,7 @@ class BookStoreMixin(SessionStoreMixin):
                 "id": bid,
                 "title": title,
                 "description": description,
+                "projectType": "original",
                 "creativeConstitution": "",
                 "constitutionEnabled": True,
                 "entityCount": 0,

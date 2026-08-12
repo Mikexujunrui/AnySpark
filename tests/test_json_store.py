@@ -21,6 +21,7 @@ def test_create_book(store):
     assert book["id"]
     assert book["entityCount"] == 0
     assert book["chapterCount"] == 0
+    assert book["projectType"] == "original"
 
 
 def test_load_books_empty(store):

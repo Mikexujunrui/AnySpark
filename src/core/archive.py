@@ -79,6 +79,7 @@ def export_spark(book_id: str, output_path: str | None = None) -> str:
             book_metadata = {
                 "title": book.get("title", ""),
                 "description": book.get("description", ""),
+                "projectType": book.get("projectType", "original"),
                 "creativeConstitution": book.get("creativeConstitution", ""),
                 "constitutionEnabled": book.get("constitutionEnabled", True),
             }
@@ -159,6 +160,23 @@ def import_spark(book_id: str, archive_path: str) -> dict:
             raise ValueError(
                 f"Unsupported archive version: {manifest.get('format_version')}. Expected: {ARCHIVE_VERSION}"
             )
+
+        # Project purpose is portable, while the global experimental opt-in
+        # intentionally is not. Older trial archives containing author DNA
+        # are treated as continuation projects so their preserved data can be
+        # re-enabled deliberately on the destination machine.
+        try:
+            from data.json_store import json_store
+
+            book_meta = manifest.get("book", {}) if isinstance(manifest.get("book"), dict) else {}
+            project_type = str(
+                book_meta.get("projectType")
+                or ("continuation" if (tmp / "author_dna.json").exists() else "original")
+            )
+            if project_type in {"original", "continuation"}:
+                json_store.update_book(book_id, {"projectType": project_type})
+        except Exception as exc:
+            logger.warning("Failed to restore project type: %s", exc)
 
         # ── Import graph ──
         graph_db = tmp / GRAPH_DB_FILENAME

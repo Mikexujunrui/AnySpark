@@ -21,6 +21,10 @@ VALID_PROVIDER_TYPES = ("openai", "anthropic", "gemini")
 
 TASK_TYPES = ("writing", "planning", "extraction", "editing", "general", "research")
 
+DEFAULT_EXPERIMENTAL_FEATURES = {
+    "author_dna_lab": False,
+}
+
 # Maps llm_client task labels → custom_map keys
 _TASK_TO_TYPE = {
     "writing": "writing",
@@ -127,6 +131,10 @@ class AppSettings:
     update_check_enabled: bool = True  # whether to check GitHub for new releases
     memory_enabled: bool = True  # global toggle for the memory system (project + preferences)
     custom_family_tiers: dict = field(default_factory=dict)  # {familyName: tierConfig} for reasoning effort
+    # Experimental features are opt-in and remain disabled after upgrading.
+    # Unknown keys are preserved so future builds can add flags without
+    # invalidating settings written by a newer version.
+    experimental_features: dict = field(default_factory=lambda: dict(DEFAULT_EXPERIMENTAL_FEATURES))
 
     # ── helpers ──
 
@@ -166,6 +174,7 @@ class AppSettings:
             update_check_enabled=self.update_check_enabled,
             memory_enabled=self.memory_enabled,
             custom_family_tiers=dict(self.custom_family_tiers),
+            experimental_features=dict(self.experimental_features),
         )
         return effective
 
@@ -199,6 +208,10 @@ class AppSettings:
             if isinstance(generation_data, dict)
             else GenerationSettings()
         )
+        experimental_features = dict(DEFAULT_EXPERIMENTAL_FEATURES)
+        stored_experiments = d.get("experimental_features", {})
+        if isinstance(stored_experiments, dict):
+            experimental_features.update({str(key): bool(value) for key, value in stored_experiments.items()})
         return AppSettings(
             providers=providers,
             slot_pro=slot_pro,
@@ -210,6 +223,7 @@ class AppSettings:
             update_check_enabled=d.get("update_check_enabled", True),
             memory_enabled=d.get("memory_enabled", True),
             custom_family_tiers=d.get("custom_family_tiers", {}) or {},
+            experimental_features=experimental_features,
         )
 
 

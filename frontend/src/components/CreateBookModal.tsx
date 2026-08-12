@@ -5,12 +5,13 @@ import Modal from './ui/Modal'
 export default function CreateBookModal({ onClose, onCreate }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
+  const [projectType, setProjectType] = useState<'original' | 'continuation'>('original')
   const [touched, setTouched] = useState(false)
 
   function handleSubmit(e) {
     e.preventDefault()
     if (!title.trim()) return
-    onCreate({ title: title.trim(), description: description.trim() })
+    onCreate({ title: title.trim(), description: description.trim(), projectType })
   }
 
   const titleError = touched && !title.trim()
@@ -52,6 +53,19 @@ export default function CreateBookModal({ onClose, onCreate }) {
             className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500 mb-6 resize-none h-20"
             placeholder="简短描述你的故事..."
           />
+          <label className="mb-2 block text-sm text-zinc-400">项目用途</label>
+          <div className="mb-6 grid grid-cols-2 gap-2">
+            <button type="button" onClick={() => setProjectType('original')}
+              className={`rounded-xl border p-3 text-left transition-colors ${projectType === 'original' ? 'border-sky-600 bg-sky-950/30 text-sky-300' : 'border-zinc-700 bg-zinc-800 text-zinc-500'}`}>
+              <div className="text-xs font-medium">从零原创</div>
+              <div className="mt-1 text-[10px] opacity-70">默认，使用普通创作工作流</div>
+            </button>
+            <button type="button" onClick={() => setProjectType('continuation')}
+              className={`rounded-xl border p-3 text-left transition-colors ${projectType === 'continuation' ? 'border-violet-600 bg-violet-950/30 text-violet-300' : 'border-zinc-700 bg-zinc-800 text-zinc-500'}`}>
+              <div className="text-xs font-medium">原作续写</div>
+              <div className="mt-1 text-[10px] opacity-70">可选择开启实验性作者 DNA</div>
+            </button>
+          </div>
           <div className="flex gap-3 justify-end">
             <button type="button" onClick={onClose}
               className="px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors">取消</button>

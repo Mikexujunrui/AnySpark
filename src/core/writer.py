@@ -59,9 +59,9 @@ def _build_reference_context(book_id: str, ref_chapters: list[str] | None = None
     sections = []
     scene_contract_active = False
     try:
-        from .author_dna import load_state
+        from .author_dna import get_active_scene_contract
 
-        scene_contract_active = bool(load_state(book_id).get("scene_contract", {}).get("enabled"))
+        scene_contract_active = bool(get_active_scene_contract(book_id))
     except Exception:
         pass
     from .graph_store import GraphStore

@@ -30,6 +30,7 @@ from pathlib import Path
 from typing import Any
 
 from core.config import DATA_DIR
+from core.settings import get_settings
 from core.utils import safe_json_parse
 from data.json_store import json_store
 
@@ -47,6 +48,42 @@ LAYER_LABELS: dict[str, str] = {
 
 _lock = threading.RLock()
 _running: dict[str, asyncio.Task] = {}
+
+
+class AuthorDnaUnavailableError(RuntimeError):
+    """Raised between checkpoints when the user disables the experiment."""
+
+
+def get_author_dna_availability(book_id: str) -> dict[str, Any]:
+    """Return both opt-in gates without mutating preserved experiment data."""
+
+    settings = get_settings()
+    globally_enabled = bool((settings.experimental_features or {}).get("author_dna_lab", False))
+    try:
+        book = json_store.get_book(book_id)
+        project_type = str(book.get("projectType", "original"))
+    except Exception:
+        project_type = "missing"
+    continuation_project = project_type == "continuation"
+    return {
+        "available": globally_enabled and continuation_project,
+        "globally_enabled": globally_enabled,
+        "project_type": project_type,
+        "continuation_project": continuation_project,
+        "reason": (
+            ""
+            if globally_enabled and continuation_project
+            else "请先在设置 → 实验性功能中开启作者 DNA 实验室"
+            if not globally_enabled
+            else "作者 DNA 实验室只对标记为续写的项目开放"
+        ),
+    }
+
+
+def _ensure_author_dna_available(book_id: str) -> None:
+    availability = get_author_dna_availability(book_id)
+    if not availability["available"]:
+        raise AuthorDnaUnavailableError(str(availability["reason"]))
 
 
 def _now() -> str:
@@ -548,6 +585,7 @@ async def run_analysis_job(book_id: str, job_id: str) -> dict[str, Any]:
 
         next_batch = int(state["job"].get("next_batch", 0))
         for index in range(next_batch, len(batches)):
+            _ensure_author_dna_available(book_id)
             observations = await asyncio.to_thread(_extract_batch, book_id, batches[index])
             state = load_state(book_id)
             existing = state.get("observations", [])
@@ -580,6 +618,7 @@ async def run_analysis_job(book_id: str, job_id: str) -> dict[str, Any]:
         layer_keys = list(LAYER_LABELS)
         next_layer = int(state["job"].get("next_layer", 0))
         for index in range(next_layer, len(layer_keys)):
+            _ensure_author_dna_available(book_id)
             layer_key = layer_keys[index]
             state = load_state(book_id)
             layer = await asyncio.to_thread(
@@ -604,6 +643,7 @@ async def run_analysis_job(book_id: str, job_id: str) -> dict[str, Any]:
         state["job"].update({"phase": "audit", "message": "正在进行六层交叉审计"})
         state["job"]["progress"] = _job_progress(state["job"], len(batches))
         save_state(book_id, state)
+        _ensure_author_dna_available(book_id)
         audit = await asyncio.to_thread(_cross_audit, book_id, state["layers"])
         state = load_state(book_id)
         state["audit"] = audit
@@ -613,11 +653,16 @@ async def run_analysis_job(book_id: str, job_id: str) -> dict[str, Any]:
     except Exception as exc:
         state = load_state(book_id)
         if state.get("job", {}).get("id") == job_id:
+            unavailable = isinstance(exc, AuthorDnaUnavailableError)
             state["job"].update(
                 {
-                    "status": "failed",
+                    "status": "interrupted" if unavailable else "failed",
                     "error": str(exc)[:500],
-                    "message": "分析中断，检查点已保留，可继续",
+                    "message": (
+                        "实验功能已停用；检查点已保留，重新开启后可继续"
+                        if unavailable
+                        else "分析中断，检查点已保留，可继续"
+                    ),
                 }
             )
             save_state(book_id, state)
@@ -790,6 +835,8 @@ def save_scene_contract(book_id: str, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def get_active_scene_contract(book_id: str) -> dict[str, Any]:
+    if not get_author_dna_availability(book_id)["available"]:
+        return {}
     contract = load_state(book_id).get("scene_contract", {})
     return dict(contract) if contract.get("enabled") else {}
 
@@ -811,6 +858,9 @@ def _accepted_dna_lines(state: dict[str, Any]) -> list[str]:
 
 def build_author_dna_context(book_id: str) -> str:
     """Render accepted semantic rules; unreviewed model output never leaks."""
+
+    if not get_author_dna_availability(book_id)["available"]:
+        return ""
 
     state = load_state(book_id)
     corpus_refs = set(state.get("corpus", {}).get("reference_ids", []))
@@ -952,6 +1002,8 @@ def compile_writer_package(
 
 
 def build_active_writer_package(book_id: str, *, include_beats: bool = False) -> str:
+    if not get_author_dna_availability(book_id)["available"]:
+        return ""
     state = load_state(book_id)
     contract = state.get("scene_contract", {})
     if not contract.get("enabled"):

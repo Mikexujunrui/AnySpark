@@ -18,6 +18,7 @@ from core.author_dna import (
     compile_writer_package,
     create_analysis_job,
     delete_interpretation,
+    get_author_dna_availability,
     get_evidence_chunk,
     load_state,
     retry_analysis_job,
@@ -29,6 +30,12 @@ from core.author_dna import (
 )
 
 router = APIRouter(tags=["author-dna"])
+
+
+def _require_author_dna_access(book_id: str) -> None:
+    availability = get_author_dna_availability(book_id)
+    if not availability["available"]:
+        raise HTTPException(403, availability["reason"])
 
 
 class CorpusMapRequest(BaseModel):
@@ -88,11 +95,13 @@ class SceneContractRequest(BaseModel):
 
 @router.get("/books/{book_id}/author-dna")
 def get_author_dna(book_id: str):
+    _require_author_dna_access(book_id)
     return load_state(book_id)
 
 
 @router.post("/books/{book_id}/author-dna/corpus")
 def create_corpus_map(book_id: str, body: CorpusMapRequest):
+    _require_author_dna_access(book_id)
     try:
         return build_corpus_map(
             book_id,
@@ -106,6 +115,7 @@ def create_corpus_map(book_id: str, body: CorpusMapRequest):
 
 @router.get("/books/{book_id}/author-dna/evidence/{chunk_id}")
 def read_author_dna_evidence(book_id: str, chunk_id: str):
+    _require_author_dna_access(book_id)
     chunk = get_evidence_chunk(book_id, chunk_id)
     if not chunk:
         raise HTTPException(404, "证据块不存在；参考书内容可能已经变化")
@@ -114,6 +124,7 @@ def read_author_dna_evidence(book_id: str, chunk_id: str):
 
 @router.post("/books/{book_id}/author-dna/jobs")
 async def start_author_dna_job(book_id: str, body: AnalysisJobRequest):
+    _require_author_dna_access(book_id)
     try:
         job = create_analysis_job(book_id, force=body.force)
         return schedule_analysis_job(book_id, job["id"])
@@ -123,6 +134,7 @@ async def start_author_dna_job(book_id: str, body: AnalysisJobRequest):
 
 @router.get("/books/{book_id}/author-dna/jobs/{job_id}")
 def get_author_dna_job(book_id: str, job_id: str):
+    _require_author_dna_access(book_id)
     state = load_state(book_id)
     job = state.get("job", {})
     if job.get("id") != job_id:
@@ -132,6 +144,7 @@ def get_author_dna_job(book_id: str, job_id: str):
 
 @router.post("/books/{book_id}/author-dna/jobs/{job_id}/retry")
 async def retry_author_dna_job(book_id: str, job_id: str):
+    _require_author_dna_access(book_id)
     try:
         retry_analysis_job(book_id, job_id)
     except KeyError as exc:
@@ -141,6 +154,7 @@ async def retry_author_dna_job(book_id: str, job_id: str):
 
 @router.put("/books/{book_id}/author-dna/layers/{layer_key}")
 def put_author_dna_layer(book_id: str, layer_key: str, body: LayerUpdateRequest):
+    _require_author_dna_access(book_id)
     if layer_key not in LAYER_LABELS:
         raise HTTPException(404, "作者 DNA 层不存在")
     try:
@@ -151,6 +165,7 @@ def put_author_dna_layer(book_id: str, layer_key: str, body: LayerUpdateRequest)
 
 @router.post("/books/{book_id}/author-dna/interpretations")
 def create_author_interpretation(book_id: str, body: InterpretationRequest):
+    _require_author_dna_access(book_id)
     try:
         return add_interpretation(book_id, body.model_dump())
     except ValueError as exc:
@@ -159,6 +174,7 @@ def create_author_interpretation(book_id: str, body: InterpretationRequest):
 
 @router.put("/books/{book_id}/author-dna/interpretations/{entry_id}")
 def put_author_interpretation(book_id: str, entry_id: str, body: InterpretationUpdateRequest):
+    _require_author_dna_access(book_id)
     try:
         return update_interpretation(book_id, entry_id, body.model_dump(exclude_none=True))
     except KeyError as exc:
@@ -167,6 +183,7 @@ def put_author_interpretation(book_id: str, entry_id: str, body: InterpretationU
 
 @router.post("/books/{book_id}/author-dna/interpretations/{entry_id}/verify")
 async def verify_author_interpretation(book_id: str, entry_id: str):
+    _require_author_dna_access(book_id)
     try:
         return await asyncio.to_thread(verify_interpretation, book_id, entry_id)
     except KeyError as exc:
@@ -177,6 +194,7 @@ async def verify_author_interpretation(book_id: str, entry_id: str):
 
 @router.delete("/books/{book_id}/author-dna/interpretations/{entry_id}")
 def remove_author_interpretation(book_id: str, entry_id: str):
+    _require_author_dna_access(book_id)
     if not delete_interpretation(book_id, entry_id):
         raise HTTPException(404, "用户解读不存在")
     return {"ok": True}
@@ -184,9 +202,11 @@ def remove_author_interpretation(book_id: str, entry_id: str):
 
 @router.put("/books/{book_id}/author-dna/scene-contract")
 def put_scene_contract(book_id: str, body: SceneContractRequest):
+    _require_author_dna_access(book_id)
     return save_scene_contract(book_id, body.model_dump())
 
 
 @router.post("/books/{book_id}/author-dna/writer-package")
 def create_writer_package(book_id: str, body: SceneContractRequest | None = None):
+    _require_author_dna_access(book_id)
     return compile_writer_package(book_id, body.model_dump() if body else None)

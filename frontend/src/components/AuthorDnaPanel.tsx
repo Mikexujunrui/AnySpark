@@ -310,7 +310,7 @@ export default function AuthorDnaPanel({ bookId }: { bookId: string }) {
     <div className="h-full overflow-y-auto p-6 text-zinc-200">
       <header className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <h2 className="flex items-center gap-2 text-lg font-semibold"><Icon name="microscope" size={20} />作者 DNA 实验室</h2>
+          <h2 className="flex items-center gap-2 text-lg font-semibold"><Icon name="microscope" size={20} />作者 DNA 实验室 <span className="rounded bg-amber-950 px-2 py-0.5 text-[10px] font-normal text-amber-300">实验性 · 仅续写</span></h2>
           <p className="mt-1 text-xs leading-relaxed text-zinc-500">原文证据、作者规律、你的阅读理解和续写设定分层保存；未经确认的模型结论不会进入正文。</p>
         </div>
         <span className={`rounded-full border px-2.5 py-1 text-[10px] ${accepted === 6 ? 'border-emerald-800 bg-emerald-950/40 text-emerald-300' : 'border-zinc-700 bg-zinc-900 text-zinc-400'}`}>{accepted === 6 ? 'DNA 已启用' : `${accepted}/6 层已确认`}</span>

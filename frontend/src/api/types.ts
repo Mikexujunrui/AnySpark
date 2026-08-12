@@ -21,6 +21,7 @@ export interface BookData {
   id: string
   title: string
   description: string
+  projectType: 'original' | 'continuation'
   entityCount: number
   chapterCount: number
   createdAt: string
@@ -110,4 +111,5 @@ export interface SettingsData {
   slot_pro?: { provider_id: string; model: string }
   slot_flash?: { provider_id: string; model: string }
   custom_map?: Record<string, string>
+  experimental_features?: Record<string, boolean>
 }

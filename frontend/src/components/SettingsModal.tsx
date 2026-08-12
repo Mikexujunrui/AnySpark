@@ -1,10 +1,10 @@
 import { useState, useEffect, useCallback } from 'react'
 import Icon from './ui/Icon'
 import Modal from './ui/Modal'
-import Toggle from './ui/Toggle'
 import MemoryPanel from './MemoryPanel'
 import SettingsAboutTab from './SettingsAboutTab'
 import SettingsSlotsTab from './SettingsSlotsTab'
+import ExperimentalFeaturesPanel from './ExperimentalFeaturesPanel'
 
 const MODE_INFO = {
   quality: { label: 'Quality', desc: '所有任务使用 Pro 模型，最高质量输出', icon: 'star', color: 'amber' },
@@ -30,7 +30,7 @@ const PROVIDER_DEFAULT_URLS = {
   gemini: 'https://generativelanguage.googleapis.com/v1beta/openai',
 }
 
-export default function SettingsModal({ onClose, onModeChanged, bookId }: { onClose: () => void; onModeChanged?: (mode: string) => void; bookId?: string }) {
+export default function SettingsModal({ onClose, onModeChanged, onExperimentalFeaturesChanged, onProjectTypeChanged, bookId }: { onClose: () => void; onModeChanged?: (mode: string) => void; onExperimentalFeaturesChanged?: (features: Record<string, boolean>) => void; onProjectTypeChanged?: (projectType: string) => void; bookId?: string }) {
   const [tab, setTab] = useState('providers')
   const [settings, setSettings] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -67,6 +67,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
 
   // Book override state
   const [bookOverrides, setBookOverrides] = useState(null)
+  const [bookProjectType, setBookProjectType] = useState('original')
   const [bookOverrideForm, setBookOverrideForm] = useState({
     mode: '', slot_pro_provider_id: '', slot_pro_model: '',
     slot_flash_provider_id: '', slot_flash_model: '',
@@ -104,6 +105,10 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
   // Load book overrides when bookId changes
   useEffect(() => {
     if (bookId) {
+      fetch(`/api/books/${bookId}`)
+        .then(r => r.json())
+        .then(data => setBookProjectType(data.projectType || 'original'))
+        .catch(() => {})
       fetch(`/api/books/${bookId}/settings`)
         .then(r => r.json())
         .then(data => {
@@ -392,9 +397,48 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
     setSaving(false)
   }
 
+  async function toggleAuthorDnaLab(enabled: boolean) {
+    setSaving(true)
+    try {
+      const res = await fetch('/api/settings/experimental', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ author_dna_lab: enabled }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '保存失败')
+      setSettings(data)
+      onExperimentalFeaturesChanged?.(data.experimental_features || {})
+      showToast(enabled ? '作者 DNA 实验室已开启' : '作者 DNA 实验室已关闭')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '保存失败')
+    }
+    setSaving(false)
+  }
+
+  async function changeProjectType(projectType: 'original' | 'continuation') {
+    if (!bookId || projectType === bookProjectType) return
+    setSaving(true)
+    try {
+      const res = await fetch(`/api/books/${bookId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ projectType }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.detail || '保存失败')
+      setBookProjectType(data.projectType || projectType)
+      onProjectTypeChanged?.(data.projectType || projectType)
+      showToast(projectType === 'continuation' ? '当前项目已标记为原作续写' : '当前项目已标记为从零原创')
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '保存失败')
+    }
+    setSaving(false)
+  }
+
   if (loading) {
     return (
-      <Modal open onClose={onClose} title="API 设置" size="md">
+      <Modal open onClose={onClose} title="设置" size="md">
         <div className="p-8 text-zinc-400 text-sm">
           <Icon name="loader" size={16} className="animate-spin mr-2 inline" />
           加载中...
@@ -407,11 +451,11 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
   const currentMode = settings?.mode || 'split'
 
   return (
-    <Modal open onClose={onClose} title="API 设置" size="lg" panelClassName="max-h-[85vh] flex flex-col">
+    <Modal open onClose={onClose} title="设置" size="lg" panelClassName="max-h-[85vh] flex flex-col">
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-zinc-800 shrink-0">
           <h2 className="text-sm font-semibold text-zinc-200 flex items-center gap-2">
-            <Icon name="settings" size={16} /> API 设置
+            <Icon name="settings" size={16} /> 设置
           </h2>
           <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-1 rounded-lg hover:bg-zinc-800" aria-label="关闭">
             <Icon name="x" size={16} />
@@ -419,7 +463,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-zinc-800 px-5 shrink-0">
+        <div className="flex shrink-0 overflow-x-auto border-b border-zinc-800 px-5">
           {[
             { key: 'providers', label: 'Provider', icon: 'globe' },
             { key: 'slots', label: '模型分配', icon: 'layers' },
@@ -427,6 +471,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
             { key: 'generation', label: '生成参数', icon: 'sliders' },
             ...(bookId ? [{ key: 'book', label: '书籍覆盖', icon: 'book-open' }] : []),
             { key: 'memory', label: '记忆系统', icon: 'database' },
+            { key: 'experiments', label: '实验性功能', icon: 'wrench' },
             { key: 'about', label: '关于', icon: 'info' },
           ].map(t => (
             <button
@@ -922,6 +967,18 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
           {/* ── Tab: Memory ── */}
           {tab === 'memory' && (
             <MemoryPanel bookId={bookId} onToast={showToast} />
+          )}
+
+          {/* ── Tab: Experimental Features ── */}
+          {tab === 'experiments' && (
+            <ExperimentalFeaturesPanel
+              authorDnaEnabled={Boolean(settings?.experimental_features?.author_dna_lab)}
+              bookId={bookId}
+              projectType={bookProjectType}
+              saving={saving}
+              onToggleAuthorDna={toggleAuthorDnaLab}
+              onProjectTypeChange={changeProjectType}
+            />
           )}
 
           {/* ── Tab: About / Update ── */}

@@ -23,7 +23,7 @@ import StyleAnalysisPanel from '../StyleAnalysisPanel'
 import PlotNormsPanel from '../PlotNormsPanel'
 import AuthorDnaPanel from '../AuthorDnaPanel'
 
-export default function PanelHost({ panelKey, bookId, sessionId, autoModeEnabled, transformSignal }) {
+export default function PanelHost({ panelKey, bookId, sessionId, autoModeEnabled, transformSignal, authorDnaAvailable = false }) {
   // ChatPanel always stays mounted to preserve SSE connection
   const chatVisible = panelKey === 'chat'
   // Metrics/Insights stay mounted to avoid expensive graph recomputation on tab switch
@@ -69,7 +69,12 @@ export default function PanelHost({ panelKey, bookId, sessionId, autoModeEnabled
       {panelKey === 'foreshadows' && <div className="h-full"><ForeshadowBoard bookId={bookId} /></div>}
       {panelKey === 'style-analysis' && <div className="h-full"><StyleAnalysisPanel bookId={bookId} /></div>}
       {panelKey === 'references' && <div className="h-full"><ReferenceBooksPanel bookId={bookId} /></div>}
-      {panelKey === 'author-dna' && <div className="h-full"><AuthorDnaPanel bookId={bookId} /></div>}
+      {panelKey === 'author-dna' && authorDnaAvailable && <div className="h-full"><AuthorDnaPanel bookId={bookId} /></div>}
+      {panelKey === 'author-dna' && !authorDnaAvailable && (
+        <div className="flex h-full items-center justify-center p-8 text-center text-sm text-zinc-500">
+          请先在“设置 → 实验性功能”中开启作者 DNA 实验室，并将当前项目标记为“原作续写”。
+        </div>
+      )}
       {panelKey === 'styles' && <div className="h-full"><StylesPanel bookId={bookId} /></div>}
       {panelKey === 'files' && <div className="h-full"><FileTree bookId={bookId} /></div>}
       {panelKey === 'search' && <div className="h-full"><SearchPanel bookId={bookId} /></div>}

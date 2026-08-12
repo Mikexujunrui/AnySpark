@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 
@@ -24,11 +26,77 @@ def dna_env(monkeypatch, tmp_path):
     monkeypatch.setattr(
         author_dna.json_store,
         "get_book",
-        lambda ref_id: {"id": ref_id, "title": "作者样本一"},
+        lambda ref_id: (
+            {"id": ref_id, "title": "当前续写", "projectType": "continuation"}
+            if ref_id == "project"
+            else {"id": ref_id, "title": "作者样本一", "projectType": "original"}
+        ),
+    )
+    monkeypatch.setattr(
+        author_dna,
+        "get_settings",
+        lambda: SimpleNamespace(experimental_features={"author_dna_lab": True}),
     )
     monkeypatch.setattr(author_dna.json_store, "load_chapters", lambda _ref_id: chapters)
     monkeypatch.setattr(author_dna.json_store, "_chapter_view", lambda chapter: chapter)
     return author_dna
+
+
+def test_author_dna_requires_global_opt_in_and_continuation_project(dna_env, monkeypatch):
+    monkeypatch.setattr(
+        dna_env,
+        "get_settings",
+        lambda: SimpleNamespace(experimental_features={"author_dna_lab": False}),
+    )
+    availability = dna_env.get_author_dna_availability("project")
+    assert availability["available"] is False
+    assert "实验性功能" in availability["reason"]
+
+    monkeypatch.setattr(
+        dna_env,
+        "get_settings",
+        lambda: SimpleNamespace(experimental_features={"author_dna_lab": True}),
+    )
+    monkeypatch.setattr(
+        dna_env.json_store,
+        "get_book",
+        lambda book_id: {"id": book_id, "projectType": "original"},
+    )
+    availability = dna_env.get_author_dna_availability("project")
+    assert availability["available"] is False
+    assert "只对标记为续写" in availability["reason"]
+
+    monkeypatch.setattr(
+        dna_env.json_store,
+        "get_book",
+        lambda book_id: {"id": book_id, "projectType": "continuation"},
+    )
+    assert dna_env.get_author_dna_availability("project")["available"] is True
+
+
+def test_author_dna_experiment_is_disabled_after_legacy_settings_upgrade():
+    from core.settings import AppSettings
+
+    settings = AppSettings.from_dict({"providers": []})
+    assert settings.experimental_features["author_dna_lab"] is False
+    settings.experimental_features["author_dna_lab"] = True
+    assert AppSettings.from_dict(settings.to_dict(mask_keys=False)).experimental_features["author_dna_lab"] is True
+
+
+def test_author_dna_api_is_blocked_when_experiment_is_unavailable(monkeypatch):
+    from fastapi import HTTPException
+
+    from routes import author_dna as author_dna_routes
+
+    monkeypatch.setattr(
+        author_dna_routes,
+        "get_author_dna_availability",
+        lambda _book_id: {"available": False, "reason": "实验功能未开启"},
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        author_dna_routes.get_author_dna("original-project")
+    assert exc_info.value.status_code == 403
+    assert "实验功能未开启" in str(exc_info.value.detail)
 
 
 def test_corpus_map_has_stable_evidence_ids_and_quartile_coverage(dna_env):
@@ -234,7 +302,13 @@ async def test_delegate_writing_uses_active_scene_instead_of_future_instruction(
     from tools.impl import writing
 
     monkeypatch.setattr(author_dna, "DNA_DIR", tmp_data_dir / "author-dna")
+    monkeypatch.setattr(
+        author_dna,
+        "get_settings",
+        lambda: SimpleNamespace(experimental_features={"author_dna_lab": True}),
+    )
     book = json_store.create_book("场景隔离测试", "")
+    json_store.update_book(book["id"], {"projectType": "continuation"})
     author_dna.save_scene_contract(
         book["id"],
         {
@@ -313,9 +387,15 @@ def test_spark_preserves_confirmed_dna_without_copying_reference_corpus(monkeypa
     from data.json_store import json_store
 
     monkeypatch.setattr(author_dna, "DNA_DIR", tmp_data_dir / "author-dna")
+    monkeypatch.setattr(
+        author_dna,
+        "get_settings",
+        lambda: SimpleNamespace(experimental_features={"author_dna_lab": True}),
+    )
     monkeypatch.setattr(SQLiteStore, "_db_dir", tmp_data_dir)
     source = json_store.create_book("DNA 来源项目", "")
     target = json_store.create_book("DNA 迁移项目", "")
+    json_store.update_book(source["id"], {"projectType": "continuation"})
     state = author_dna.load_state(source["id"])
     state["corpus"].update(
         {
@@ -349,6 +429,7 @@ def test_spark_preserves_confirmed_dna_without_copying_reference_corpus(monkeypa
         assert "sensitive-chunk" not in portable
 
     import_spark(target["id"], str(archive_path))
+    assert json_store.get_book(target["id"])["projectType"] == "continuation"
     restored = author_dna.load_state(target["id"])
     assert restored["book_id"] == target["id"]
     assert restored["corpus"]["status"] == "detached"

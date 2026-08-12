@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { Panel, Group, Separator } from 'react-resizable-panels'
 import { storage } from "../storage"
@@ -24,7 +24,7 @@ interface TabConfig { key: string; label: string; icon: string }
 interface TabGroup { label: string; tabs: TabConfig[] }
 interface LLMMode { key: string; label: string; badge: string }
 
-const TAB_GROUPS: TabGroup[] = [
+const BASE_TAB_GROUPS: TabGroup[] = [
   {
     label: '写作',
     tabs: [
@@ -55,7 +55,6 @@ const TAB_GROUPS: TabGroup[] = [
       { key: 'inspirations', label: '灵感', icon: 'lightbulb' },
       { key: 'style-analysis', label: '文风', icon: 'compass' },
       { key: 'references', label: '参考书', icon: 'book-open' },
-      { key: 'author-dna', label: '作者DNA', icon: 'microscope' },
     ],
   },
   {
@@ -68,8 +67,6 @@ const TAB_GROUPS: TabGroup[] = [
     ],
   },
 ]
-
-const ALL_TABS: TabConfig[] = TAB_GROUPS.flatMap(g => g.tabs)
 
 // Panels that are part of the 4D graph system — only these show the global time axis
 const TIME_PANELS = new Set(['knowledge', 'characters', 'map', 'timeline'])
@@ -108,6 +105,17 @@ export default function BookDetail() {
   const [showImport, setShowImport] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
   const [lastExportPath, setLastExportPath] = useState('')
+  const [experimentalFeatures, setExperimentalFeatures] = useState<Record<string, boolean>>({})
+
+  const authorDnaAvailable = Boolean(
+    experimentalFeatures.author_dna_lab && book?.projectType === 'continuation',
+  )
+  const tabGroups = useMemo(() => BASE_TAB_GROUPS.map(group => (
+    group.label === '辅助' && authorDnaAvailable
+      ? { ...group, tabs: [...group.tabs, { key: 'author-dna', label: '作者DNA', icon: 'microscope' }] }
+      : group
+  )), [authorDnaAvailable])
+  const allTabs = useMemo(() => tabGroups.flatMap(group => group.tabs), [tabGroups])
 
   useEffect(() => {
     let cancelled = false
@@ -138,7 +146,12 @@ export default function BookDetail() {
       }
     }
     load()
-    api.getSettings().then(d => { if (!cancelled) setLlmMode(d.mode || DEFAULT_MODE.key) }).catch(() => {})
+    api.getSettings().then(d => {
+      if (!cancelled) {
+        setLlmMode(d.mode || DEFAULT_MODE.key)
+        setExperimentalFeatures(d.experimental_features || {})
+      }
+    }).catch(() => {})
     return () => { cancelled = true }
   }, [bookId, retryKey])
 
@@ -146,12 +159,12 @@ export default function BookDetail() {
     function onKey(e: KeyboardEvent) {
       if (e.ctrlKey && !e.altKey) {
         const num = parseInt(e.key)
-        if (num >= 1 && num <= ALL_TABS.length) {
+        if (num >= 1 && num <= allTabs.length) {
           e.preventDefault()
           if (isSplit && e.shiftKey) {
-            switchSecondaryTab(ALL_TABS[num - 1].key)
+            switchSecondaryTab(allTabs[num - 1].key)
           } else {
-            switchTab(ALL_TABS[num - 1].key)
+            switchTab(allTabs[num - 1].key)
           }
         }
       }
@@ -171,7 +184,15 @@ export default function BookDetail() {
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bookId, isSplit])
+  }, [bookId, isSplit, allTabs])
+
+  useEffect(() => {
+    if (!authorDnaAvailable && (primaryTab === 'author-dna' || secondaryTab === 'author-dna')) {
+      setPrimaryTab('chat')
+      if (secondaryTab === 'author-dna') setSecondaryTab('chapters')
+      storage.setActiveTab(bookId!, 'chat')
+    }
+  }, [authorDnaAvailable, bookId, primaryTab, secondaryTab, setPrimaryTab, setSecondaryTab])
 
   function switchTab(t: string) {
     setPrimaryTab(t)
@@ -333,7 +354,7 @@ export default function BookDetail() {
           <button onClick={toggleMode} className={`text-xs px-2.5 py-1 rounded-md font-medium transition-colors shrink-0 ${modeConf.badge}`} title={`当前: ${modeConf.label} 模式 (点击循环切换)`} aria-label={`LLM 模式：${modeConf.label}，点击切换`}>
             {modeConf.label}
           </button>
-          <button onClick={() => setShowSettings(true)} className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors shrink-0" title="API 设置" aria-label="API 设置">
+          <button onClick={() => setShowSettings(true)} className="text-zinc-500 hover:text-zinc-300 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors shrink-0" title="设置" aria-label="设置">
             <Icon name="settings" size={16} />
           </button>
           <ThemeToggle />
@@ -356,12 +377,12 @@ export default function BookDetail() {
       </header>
 
       <nav className="flex border-b border-zinc-800 bg-zinc-950 shrink-0 overflow-x-auto" aria-label="功能区">
-        {TAB_GROUPS.map((group, gi) => (
+        {tabGroups.map((group, gi) => (
           <div key={group.label} className="flex items-stretch shrink-0">
             {gi > 0 && <div className="w-px bg-zinc-800/60 my-2" />}
             <div className="flex">
               {group.tabs.map(t => {
-                const idx = ALL_TABS.indexOf(t)
+                const idx = allTabs.indexOf(t)
                 const isPrimary = primaryTab === t.key
                 const isSecondary = isSplit && secondaryTab === t.key
                 return (
@@ -404,13 +425,13 @@ export default function BookDetail() {
         )}
         <Group orientation="horizontal">
           <Panel defaultSize={isSplit ? 50 : 100} minSize={25}>
-            <PanelHost panelKey={primaryTab} bookId={bookId!} sessionId={sessionId} autoModeEnabled={autoModeEnabled} transformSignal={transformSignal} />
+            <PanelHost panelKey={primaryTab} bookId={bookId!} sessionId={sessionId} autoModeEnabled={autoModeEnabled} transformSignal={transformSignal} authorDnaAvailable={authorDnaAvailable} />
           </Panel>
           {isSplit && (
             <>
               <Separator className="w-1 bg-zinc-800 hover:bg-sky-600 transition-colors cursor-col-resize shrink-0" />
               <Panel defaultSize={50} minSize={25}>
-                <PanelHost panelKey={secondaryTab} bookId={bookId!} sessionId={sessionId} autoModeEnabled={autoModeEnabled} transformSignal={transformSignal} />
+                <PanelHost panelKey={secondaryTab} bookId={bookId!} sessionId={sessionId} autoModeEnabled={autoModeEnabled} transformSignal={transformSignal} authorDnaAvailable={authorDnaAvailable} />
               </Panel>
             </>
           )}
@@ -419,7 +440,13 @@ export default function BookDetail() {
 
       <ConfirmModal open={!!deleteSessionId} title="删除会话" message="删除此会话？消息历史将永久删除。" confirmText="删除" danger onConfirm={handleDeleteSession} onCancel={() => setDeleteSessionId(null)} />
       <ShortcutsModal open={showShortcuts} onClose={() => setShowShortcuts(false)} />
-      {showSettings && <SettingsModal onClose={() => setShowSettings(false)} onModeChanged={(mode: string) => setLlmMode(mode)} bookId={bookId} />}
+      {showSettings && <SettingsModal
+        onClose={() => setShowSettings(false)}
+        onModeChanged={(mode: string) => setLlmMode(mode)}
+        onExperimentalFeaturesChanged={features => setExperimentalFeatures(features)}
+        onProjectTypeChanged={projectType => setBook(current => current ? { ...current, projectType } : current)}
+        bookId={bookId}
+      />}
       {showAutopilot && <AutopilotModal bookId={bookId!} onClose={() => setShowAutopilot(false)} onTaskCreated={(taskId: string) => setActiveTaskId(taskId)} onOpenTransform={() => { setShowAutopilot(false); setTransformSignal(v => v + 1) }} />}
       {activeTaskId && activeTaskId !== 'list' && (
         <div style={{ position: 'fixed', bottom: '20px', right: '20px', width: '380px', zIndex: 50 }}>
