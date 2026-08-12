@@ -206,6 +206,10 @@ class ModelRegistry:
                 cfg.is_active = count == 0  # 首条自动激活
             else:
                 cfg.is_active = existing.is_active  # 激活只由 activate 切换
+                # api_key 不回传给列表接口（to_dict 剔除）——编辑表单留空表示“不改 key”，
+                # 此时保留原 key，避免前端编辑其他参数把已有自定义 key 冲掉。
+                if cfg.api_key is None:
+                    cfg.api_key = existing.api_key
             self._insert(self._conn, cfg)
             self._conn.commit()
         return cfg

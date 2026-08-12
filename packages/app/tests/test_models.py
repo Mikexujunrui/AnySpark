@@ -248,6 +248,52 @@ def test_models_api_crud() -> None:
     assert client.delete("/api/models/default").status_code == 400
 
 
+def test_models_api_update_preserves_key() -> None:
+    """编辑更新：同 id 覆盖可改思考强度/温度/窗口；api_key 留空不冲掉原 key。"""
+    from anyspark.server.app import build_app
+
+    db = _db()
+    client = TestClient(build_app(db_path=db))
+    r = client.post(
+        "/api/models",
+        json={
+            "name": "Custom Key Model",
+            "model": "deepseek-v4-pro",
+            "api_key": "sk-custom-123",
+            "thinking": "medium",
+            "temperature": 0.5,
+        },
+    ).json()
+    mid = r["model"]["id"]
+
+    # 更新：改温度/思考强度，不传 api_key（列表接口不回传 key，编辑表单留空=不改）
+    r = client.post(
+        "/api/models",
+        json={
+            "id": mid,
+            "name": "Custom Key Model",
+            "model": "deepseek-v4-pro",
+            "thinking": "max",
+            "temperature": 0.2,
+            "context_window": 131072,
+            "max_tokens": 4096,
+        },
+    ).json()
+    assert r["ok"] is True
+    upd = r["model"]
+    assert upd["thinking"] == "max"
+    assert upd["temperature"] == 0.2
+    assert upd["context_window"] == 131072
+    assert upd["max_tokens"] == 4096
+    assert "api_key" not in upd  # 列表/响应不回传 key（安全）
+
+    # 底层注册表 key 未被冲掉
+    from anyspark.models.registry import ModelRegistry
+
+    reg = ModelRegistry(db)
+    assert reg.get(mid).api_key == "sk-custom-123"  # type: ignore[union-attr]
+
+
 def test_models_api_rejects_bad_thinking() -> None:
     from anyspark.server.app import build_app
 
