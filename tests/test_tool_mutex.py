@@ -106,7 +106,13 @@ def test_confirm_cancel_fuse_increments_and_warns(monkeypatch):
     assert len(prepared) == 0
     assert messages[-1]["content"] == "用户取消了 edit_chapter。"
 
-    asyncio.run(_run())  # second cancel → fuse trips
+    # A different proposed edit may legitimately ask again; two cancelled
+    # proposals trip the fuse.  An identical retry is blocked earlier by the
+    # mutation fingerprint guard and never opens another dialog.
+    response.tool_calls = [
+        ToolCall(id="t2", name="edit_chapter", arguments='{"chapter_id": "#1", "content": "另一版内容"}')
+    ]
+    asyncio.run(_run())  # second distinct cancel → fuse trips
     assert state.consecutive_confirm_cancels == 2
     assert "已连续 2 次确认被取消/超时" in messages[-1]["content"]
     assert "停止反复尝试" in messages[-1]["content"]

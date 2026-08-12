@@ -1,4 +1,4 @@
-from core.permissions import DANGEROUS_TOOLS, PermissionManager, PermissionRule
+from core.permissions import AUTONOMOUS_CONFIRM_TOOLS, DANGEROUS_TOOLS, PermissionManager, PermissionRule
 
 
 def test_default_allow():
@@ -48,3 +48,28 @@ def test_confirmation_message():
 def test_dangerous_tools_defined():
     assert "delete_all_chapters" in DANGEROUS_TOOLS
     assert "delete_chapter" in DANGEROUS_TOOLS
+
+
+def test_autonomous_mode_allows_recoverable_edits_but_not_deletions():
+    pm = PermissionManager()
+    scope = pm.scope_key("book", "session")
+    pm.set_autonomous(scope, True)
+
+    assert pm.check("patch_chapter", scope) == "allow"
+    assert pm.check("edit_chapter", scope) == "allow"
+    assert pm.check("batch_edit_chapters", scope) == "allow"
+    assert pm.check("delete_chapter", scope) == "ask"
+    assert pm.check("purge_chapter_history", scope) == "ask"
+    assert "delete_chapter" in AUTONOMOUS_CONFIRM_TOOLS
+
+
+def test_autonomous_mode_is_isolated_per_book_session():
+    pm = PermissionManager()
+    first = pm.scope_key("book-a", "session")
+    second = pm.scope_key("book-b", "session")
+    pm.set_autonomous(first, True)
+
+    assert pm.is_autonomous(first) is True
+    assert pm.is_autonomous(second) is False
+    assert pm.check("patch_chapter", first) == "allow"
+    assert pm.check("patch_chapter", second) == "ask"

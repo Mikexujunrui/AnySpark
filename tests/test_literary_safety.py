@@ -136,15 +136,15 @@ def test_style_only_reference_blocks_fact_migration(monkeypatch):
     assert "只学文风" in result
 
 
-def test_safe_autonomous_mode_still_asks_before_original_edits():
+def test_autonomous_mode_runs_recoverable_edits_but_still_asks_before_deletion():
     from core.permissions import PermissionManager
 
     manager = PermissionManager()
     manager.autonomous_mode = True
 
     assert manager.check("search_knowledge") == "allow"
-    assert manager.check("patch_chapter") == "ask"
-    assert manager.check("edit_chapter") == "ask"
+    assert manager.check("patch_chapter") == "allow"
+    assert manager.check("edit_chapter") == "allow"
     assert manager.check("delete_chapter") == "ask"
 
 

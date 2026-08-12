@@ -10,11 +10,27 @@ import re
 from contextvars import copy_context
 
 from core.config import config
+from core.content_guard import detect_model_refusal
 from core.llm_client import chat as llm_chat
 from core.thread_pools import llm_pool as _ai_executor
 from data.json_store import json_store
 
 logger = logging.getLogger(__name__)
+
+
+def _guard_generated_prose(text: object) -> dict | None:
+    """Reject provider refusal/safety notices before chapter persistence."""
+
+    reason = detect_model_refusal(text)
+    if not reason:
+        return None
+    return {
+        "type": "writing_result",
+        "text": f"写作失败·未保存：{reason}。请调整模型/提示词后重试，原章节没有被占位或覆盖。",
+        "error": reason,
+        "saved": False,
+        "retriable": True,
+    }
 
 
 def _post_write_constraint_check(kb, book_id: str) -> str:
@@ -297,8 +313,9 @@ def _guard_new_chapter_target(book_id: str, args: dict, instruction: str = "") -
         "type": "writing_result",
         "text": (
             f"⛔ 原稿保护：第{index}章“{view.get('title', '')}”已经存在，"
-            "新章写作工具拒绝覆盖。若用户明确要求修改旧章，请先展示修改方案，"
-            "再使用 patch_chapter；只有明确要求整章重写时才使用 edit_chapter。"
+            "新章写作工具拒绝覆盖。请改用 patch_chapter 做局部版本化修改；"
+            "只有用户明确要求整章重写时才使用 edit_chapter。"
+            "这两种工具都会保留历史版本，自主模式下可连续执行。"
         ),
         "chapter_id": view.get("id", ""),
         "chapter_title": view.get("title", ""),
@@ -323,6 +340,9 @@ async def _write_chapter(loop, args: dict, book_id: str, msg: str) -> str | dict
         )
 
     result = await loop.run_in_executor(_ai_executor, copy_context().run, writer_call)
+    refusal = _guard_generated_prose(result)
+    if refusal:
+        return refusal
     title = args.get("chapter_title", args.get("title", ""))
     is_extra = bool(args.get("is_extra", False))
     chapter_index = args.get("chapter_index", None)
@@ -406,6 +426,10 @@ async def _write_chapter_streaming(loop, args: dict, kb, book_id: str, msg: str,
             await queue.put({"_writing": chunk})
 
     full_text = "".join(chunks)
+
+    refusal = _guard_generated_prose(full_text)
+    if refusal:
+        return refusal
 
     if write_error and full_text and len(full_text) > 200:
         title = args.get("chapter_title", args.get("title", ""))
@@ -998,6 +1022,10 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
             enforce_segment_boundaries=enforce_segment_boundaries,
         )
 
+        refusal = _guard_generated_prose(full_text)
+        if refusal:
+            return refusal
+
         if write_error:
             if full_text:
                 title = args.get("chapter_title", "")
@@ -1130,6 +1158,9 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
             await queue.put({"_writing": chunk})
 
     full_text = "".join(chunks)
+    refusal = _guard_generated_prose(full_text)
+    if refusal:
+        return refusal
     if write_error:
         if len(full_text.strip()) >= 200:
             title = args.get("chapter_title", "")
@@ -1463,6 +1494,10 @@ async def _rewrite_by_chain_streaming(loop, args: dict, kb, book_id: str, msg: s
             if queue:
                 await queue.put({"_writing": sep})
 
+    refusal = _guard_generated_prose(full_text)
+    if refusal:
+        return refusal
+
     if write_error:
         # Store partial result if we have content
         if full_text:
@@ -1649,6 +1684,10 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
         0.7,
         "writing",
     )
+
+    refusal = _guard_generated_prose(result)
+    if refusal:
+        return refusal
 
     title = args.get("chapter_title", "")
     is_extra = bool(args.get("is_extra", False))

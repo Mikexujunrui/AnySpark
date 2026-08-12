@@ -187,6 +187,13 @@ class LoopState:
     # change and ask the user directly, instead of looping cancel→retry→ask.
     consecutive_confirm_cancels: int = 0
 
+    # Mutation retry fuse.  Reserving a signature before the confirmation
+    # prompt stops the model from asking for the exact same edit forever after
+    # a cancel, timeout, or invalid execution.  Different anchors remain
+    # available for a legitimate correction attempt.
+    mutation_fingerprints: set[str] = field(default_factory=set)
+    chapter_mutation_counts: dict[str, int] = field(default_factory=dict)
+
     # writing-mode / temperature
     has_writing_output: bool = False
     rounds_since_writing: int = 0

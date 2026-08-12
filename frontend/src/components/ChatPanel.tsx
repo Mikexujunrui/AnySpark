@@ -293,6 +293,30 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     }).catch(() => {})
   }, [])
 
+  // Autonomous mode belongs to this book/session.  Loading it explicitly
+  // avoids the button showing "off" after switching sessions while the
+  // backend is already running autonomously (or vice versa).
+  useEffect(() => {
+    if (!bookId || !sessionId) {
+      setAutonomousMode(false)
+      return
+    }
+    const controller = new AbortController()
+    setAutonomousMode(false)
+    fetch(`/api/books/${bookId}/sessions/${sessionId}/autonomous`, { signal: controller.signal })
+      .then(async response => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`)
+        return response.json()
+      })
+      .then(data => setAutonomousMode(Boolean(data?.autonomous)))
+      .catch(error => {
+        if (error?.name !== 'AbortError') {
+          console.error(`${DIAG_PREFIX} ChatPanel — 自主模式状态读取失败: %s`, error?.message || error)
+        }
+      })
+    return () => controller.abort()
+  }, [bookId, sessionId])
+
   // ── Project creative constitution (optional, never a gate) ──
   useEffect(() => {
     if (!bookId) return
@@ -828,15 +852,17 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   async function handleAutonomousToggle() {
     const next = !autonomousMode
     try {
-      await fetch(`/api/books/${bookId}/sessions/${sessionId}/autonomous`, {
+      const response = await fetch(`/api/books/${bookId}/sessions/${sessionId}/autonomous`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: next }),
       })
+      if (!response.ok) throw new Error(`HTTP ${response.status}`)
+      const data = await response.json()
+      setAutonomousMode(Boolean(data?.autonomous))
     } catch (e) {
       console.error(`${DIAG_PREFIX} ChatPanel — 自主模式切换失败: %s`, e.message)
     }
-    setAutonomousMode(next)
   }
 
   async function handleOpenTransform() {

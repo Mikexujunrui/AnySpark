@@ -30,6 +30,11 @@ CAPABILITY_PACKS: dict[str, set[str]] = {
         "prepare_writing",
         "delegate_writing",
         "write_chapter",
+        # A generated draft remains protected from accidental *new chapter*
+        # writers, but the same run must still be able to apply a versioned,
+        # recoverable correction when requested.
+        "patch_chapter",
+        "edit_chapter",
         "finalize_chapter",
         "verify_chapter",
         "get_detailed_outline",

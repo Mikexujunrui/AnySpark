@@ -63,10 +63,16 @@ def _build_pydantic_model(
 
         python_type = _resolve_python_type(ptype, items_schema, enum_values)
 
+        constraints: dict[str, Any] = {}
+        if spec.get("minItems") is not None:
+            constraints["min_length"] = int(spec["minItems"])
+        if spec.get("maxItems") is not None:
+            constraints["max_length"] = int(spec["maxItems"])
+
         if required:
-            fields[key] = (python_type, Field(..., description=description))
+            fields[key] = (python_type, Field(..., description=description, **constraints))
         else:
-            fields[key] = (python_type | None, Field(default=None, description=description))
+            fields[key] = (python_type | None, Field(default=None, description=description, **constraints))
 
     model_name = f"ToolParams_{len(_MODEL_CACHE)}"
     return cast(type[BaseModel], create_model(model_name, **fields))
@@ -234,6 +240,11 @@ def _fallback_validate(
                 errors.append(f"Parameter {key} must be one of {enum_values}, got '{value}'")
                 continue
             validated[key] = value
+
+        if expected_type == "array" and isinstance(validated.get(key), list):
+            min_items = spec.get("minItems")
+            if min_items is not None and len(validated[key]) < int(min_items):
+                errors.append(f"Parameter {key} must contain at least {int(min_items)} item(s)")
 
     for key in args:
         if key not in validated and key not in params_schema:

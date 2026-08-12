@@ -132,7 +132,7 @@ registry.register(
 registry.register(
     Tool(
         name="manage_permissions",
-        description="管理 Agent 权限模式。status(查看当前状态) / enable(启用自主模式，Agent 执行删除等危险操作无需确认) / disable(关闭自主模式，恢复确认机制)。⚠️ 启用后 Agent 可直接删除章节/实体/世界观条目等。",
+        description="管理当前书籍会话的 Agent 权限模式。status(查看) / enable(启用自主模式，让保留版本历史的编辑连续执行) / disable(关闭)。删除章节、删除版本、清理历史等不可逆操作始终需要确认。",
         parameters={
             "action": {
                 "type": "string",

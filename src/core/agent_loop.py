@@ -11,6 +11,7 @@ function so they can be tested and reasoned about independently.
 """
 
 import asyncio
+import hashlib
 import json
 import logging
 import traceback
@@ -1304,6 +1305,14 @@ async def _prepare_tool_calls(
 
     full_write_seen = False
     skill_step_seen = False
+    permission_scope = permission_manager.scope_key(agent_config.book_id, agent_config.session_id)
+    versioned_chapter_mutations = {
+        "patch_chapter",
+        "edit_chapter",
+        "rewrite_by_chain",
+        "reconstruct_chapter",
+        "revert_chapter",
+    }
     try:
         for tc in response.tool_calls:
             handle.check_cancelled()
@@ -1358,7 +1367,44 @@ async def _prepare_tool_calls(
                     continue
                 args = validated_args
 
-            perm_action = permission_manager.check(tc.name)
+            if tc.name in versioned_chapter_mutations:
+                canonical_args = json.dumps(args, ensure_ascii=False, sort_keys=True, default=str)
+                mutation_sig = f"{tc.name}:{hashlib.sha256(canonical_args.encode('utf-8')).hexdigest()}"
+                if mutation_sig in state.mutation_fingerprints:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": (
+                                f"⛔ 重复修改拦截：{tc.name} 的参数与本轮已尝试调用完全相同。"
+                                "请读取工具返回的失败原因并更换锚点/参数；不要再次请求相同确认。"
+                            ),
+                        }
+                    )
+                    processed_ids.add(tc.id)
+                    state.metrics.doom_loop_skips += 1
+                    continue
+                # Reserve before asking permission so a cancelled/expired
+                # prompt cannot be reissued forever with identical arguments.
+                state.mutation_fingerprints.add(mutation_sig)
+
+                chapter_ref = str(args.get("chapter_id") or args.get("chapter_title") or "unknown")
+                if state.chapter_mutation_counts.get(chapter_ref, 0) >= 4:
+                    messages.append(
+                        {
+                            "role": "tool",
+                            "tool_call_id": tc.id,
+                            "content": (
+                                f"⛔ 修改轮次保护：本轮已对 {chapter_ref} 尝试 4 次版本化修改。"
+                                "请停止继续打补丁，汇报当前结果并让用户决定是否开启新一轮。"
+                            ),
+                        }
+                    )
+                    processed_ids.add(tc.id)
+                    state.metrics.doom_loop_skips += 1
+                    continue
+
+            perm_action = permission_manager.check_for_session(tc.name, permission_scope)
             if perm_action == "deny":
                 messages.append({"role": "tool", "tool_call_id": tc.id, "content": f"工具 {tc.name} 被禁止。"})
                 processed_ids.add(tc.id)
@@ -1399,7 +1445,10 @@ async def _prepare_tool_calls(
                     processed_ids.add(tc.id)
                     continue
                 state.consecutive_confirm_cancels = 0
-                permission_manager.approve_once(tc.name)
+
+            if tc.name in versioned_chapter_mutations:
+                chapter_ref = str(args.get("chapter_id") or args.get("chapter_title") or "unknown")
+                state.chapter_mutation_counts[chapter_ref] = state.chapter_mutation_counts.get(chapter_ref, 0) + 1
 
             if tc.name in FULL_CHAPTER_GENERATION_TOOLS:
                 if full_write_seen:

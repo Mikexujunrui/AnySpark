@@ -94,8 +94,8 @@ export default function MessageInput({
           disabled={streaming || uploading}
           title={
             autonomousMode
-              ? '安全自主模式：常规步骤连续执行；删除和修改原稿仍需确认'
-              : '点击启用安全自主模式；不会关闭删除和原稿修改确认'
+              ? '自主模式：常规步骤和可回退编辑连续执行；删除与清空历史仍需确认'
+              : '点击启用自主模式；版本化编辑自动执行，不可逆删除仍会确认'
           }
           className={`rounded-lg px-2.5 h-7 text-[11px] font-medium transition-all shrink-0 flex items-center gap-1 ${
             autonomousMode

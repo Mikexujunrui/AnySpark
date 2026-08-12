@@ -208,6 +208,8 @@ registry.register(
             "chapter_id": {"type": "string", "description": "章节序号（如 #1）或完整ID"},
             "patches": {
                 "type": "array",
+                "items": {"type": "object"},
+                "minItems": 1,
                 "description": (
                     "patch 操作列表，按顺序依次应用。每项格式："
                     '{"op": "replace", "segment_id": 2, "confirm": "段内片段", "replace": "替换为"} 或 '

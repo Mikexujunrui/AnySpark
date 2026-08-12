@@ -127,13 +127,14 @@ class AutonomousToggle(BaseModel):
 def toggle_autonomous(book_id: str, session_id: str, data: AutonomousToggle):
     """Toggle safe autonomous mode.
 
-    Routine tools run continuously, while destructive and original-editing
-    tools retain their explicit confirmation gate.
+    Routine and versioned/recoverable editing tools run continuously, while
+    irreversible deletion tools retain their explicit confirmation gate.
     """
-    permission_manager.autonomous_mode = data.enabled
+    session_key = permission_manager.scope_key(book_id, session_id)
+    permission_manager.set_autonomous(session_key, data.enabled)
     return {
         "autonomous": data.enabled,
-        "message": "安全自主模式已启用 — 常规步骤连续执行，危险操作仍需确认"
+        "message": "自主模式已启用 — 常规步骤与可回退编辑连续执行，删除操作仍需确认"
         if data.enabled
         else "自主模式已关闭 — Agent 执行危险操作前需用户确认",
     }
@@ -141,4 +142,5 @@ def toggle_autonomous(book_id: str, session_id: str, data: AutonomousToggle):
 
 @router.get("/books/{book_id}/sessions/{session_id}/autonomous")
 def get_autonomous(book_id: str, session_id: str):
-    return {"autonomous": permission_manager.autonomous_mode}
+    session_key = permission_manager.scope_key(book_id, session_id)
+    return {"autonomous": permission_manager.is_autonomous(session_key)}

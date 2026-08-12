@@ -275,32 +275,39 @@ def _manage_scope(args: dict, book_id: str) -> str:
     return f"未知操作: {action}。可用: show/add/remove/forbid/allow/rules"
 
 
-def _manage_permissions(args: dict) -> str:
+def _manage_permissions(args: dict, book_id: str = "", session_id: str = "") -> str:
     """Toggle autonomous mode or view current permission status."""
     action = args.get("action", "status")
+    session_key = permission_manager.scope_key(book_id, session_id) if book_id or session_id else ""
+    autonomous = permission_manager.is_autonomous(session_key)
 
     if action == "status":
         lines = ["## 权限状态\n"]
-        lines.append(f"- 自主模式: {'✅ 已启用' if permission_manager.autonomous_mode else '❌ 已关闭'}")
+        lines.append(f"- 自主模式: {'✅ 已启用' if autonomous else '❌ 已关闭'}")
         lines.append(f"- 会话批准: {len(permission_manager._session_approved)} 个工具")
-        if permission_manager.autonomous_mode:
-            lines.append("\n✅ **安全自主模式启用中** — 常规步骤自动执行；删除、整章覆盖和批量改稿仍会确认。")
+        if autonomous:
+            lines.append("\n✅ **自主模式启用中** — 常规步骤及可回退编辑自动执行；不可逆删除仍会确认。")
         else:
             lines.append("\n💡 Agent 执行危险操作前会弹出确认提示。")
-            lines.append("开启自主模式可减少常规步骤打断，但不会关闭原稿保护。")
+            lines.append("开启自主模式可减少可回退编辑的打断，但不会关闭新章覆盖保护。")
         return "\n".join(lines)
 
     elif action == "enable":
-        permission_manager.autonomous_mode = True
+        if session_key:
+            permission_manager.set_autonomous(session_key, True)
+        else:
+            permission_manager.autonomous_mode = True
         return (
-            "✅ **安全自主模式已启用**\n\n"
-            "读取、分析、评审和创建新草稿可以连续执行；"
-            "删除、整章覆盖、批量修改和清理历史仍必须由你明确确认。"
+            "✅ **自主模式已启用**\n\n"
+            "读取、分析、评审、新草稿和保留版本历史的编辑可以连续执行；"
+            "删除章节、删除版本和清理历史仍必须由你明确确认。"
         )
 
     elif action == "disable":
-        permission_manager.autonomous_mode = False
-        permission_manager.reset_session()
+        if session_key:
+            permission_manager.set_autonomous(session_key, False)
+        else:
+            permission_manager.autonomous_mode = False
         return "🔒 **自主模式已关闭** — Agent 执行危险操作前将恢复确认提示。"
 
     else:
