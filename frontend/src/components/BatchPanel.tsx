@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useBatchStore } from "../stores/batchStore";
+import PanelHeader from "./ui/PanelHeader";
 import { listChapters } from "../api/chapters";
 import type { Chapter } from "../types";
 
@@ -85,14 +86,21 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
       {/* 面板 */}
       <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">批量操作</h2>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
-        </div>
+        <PanelHeader
+          compact
+          maxW={false}
+          icon="layers"
+          iconClass="text-emerald-400"
+          title="批量操作"
+          desc="多章统一改写 / 审读"
+          actions={
+            <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 p-1 rounded-lg hover:bg-zinc-800 transition-colors" title="关闭">
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          }
+        />
 
         {/* 章节选择 */}
         <div className="flex-1 overflow-y-auto px-4 py-3 space-y-1">

@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { listPlots, addPlotItem, updatePlot, deletePlot, generatePlot, type PlotPoint } from "../api/plot";
+import PanelHeader from "./ui/PanelHeader";
 
 const STATUS_COLORS: Record<string, string> = {
   open: "bg-yellow-500/20 text-yellow-400 border-yellow-500/30",
@@ -100,9 +101,15 @@ export default function PlotPanel({ bookId = "main" }: { bookId?: string }) {
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden p-4">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-medium text-zinc-200">关键点图谱 / 伏笔管理</h2>
-        <div className="flex gap-2">
+      <PanelHeader
+        compact
+        maxW={false}
+        icon="map"
+        iconClass="text-purple-400"
+        title="关键点图谱 / 伏笔管理"
+        desc="剧情承诺 · 埋设与回收"
+        actions={
+          <div className="flex gap-2">
           <button
             onClick={handleGenerate}
             disabled={generating}
@@ -116,8 +123,9 @@ export default function PlotPanel({ bookId = "main" }: { bookId?: string }) {
           >
             {showAdd ? "取消" : "+ 登记伏笔"}
           </button>
-        </div>
-      </div>
+          </div>
+        }
+      />
 
       {/* 新增表单 */}
       {showAdd && (
