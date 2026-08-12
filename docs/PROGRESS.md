@@ -26,6 +26,7 @@
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63）
 - **当前状态**：S0-S63 全部完成 + **S64 拟人化评审团扩展包**（YAML 人设评审员 + 并发评审 + 主席汇总裁决，与 check 硬伤层分工）+ **S65 互动推演扩展包**（推演树玩法，与 explore 平级）+ **S66 httpx2 迁移**（starlette 原生支持后落地，TestClient/CLI/benchmarks 全切，无回归），pytest 全量绿，总闸全绿
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
+> ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
 > 当前无会话声明。
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 

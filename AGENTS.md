@@ -63,7 +63,7 @@
 - `data/`、`chapters/`、`data_backup_*` 绝不入库
 - 依赖 pin `==` + 锁文件（uv.lock）
 - 每个 commit 标注阶段编号（如 `S7: ...`）
-- 每阶段跑门禁：`uv run python scripts/gate.py`（ruff + mypy + pytest；本仓库无前端，tsc/eslint/build 不再执行）
+- 提交前跑门禁：按改动面分层（见「并行协作纪律 → 提交前门禁（分层）」）；发布/大改动跑全量 `uv run python scripts/gate.py`
 - 对设计的任何偏离/新增：先停下，向主人确认，再更新 `docs/DESIGN.md`
 
 ## 并行协作纪律（多会话共享工作区，强制——S70 固化）
@@ -78,12 +78,15 @@
 3. 读 `docs/PROGRESS.md`「并行声明区」—— 若有会话声明在改某文件，**避开**或等它提交
 4. 要改共享大文件（app.py/toolkit.py/pyproject.toml 等）前，**先在声明区写**：
    `> [S6x] 正在改 app.py：<改动内容>（完成提交后删本行）`
-5. 提交前跑完整 gate（见下）+ `git status --short` 确认归属后显式 add
+5. 提交前跑门禁（分层，见下）+ `git status --short` 确认归属后显式 add
 
-### 提交前必跑完整门禁（不跑子集）
-- `uv run python scripts/gate.py` 全量（ruff check + format + mypy + pytest）
-- 禁止只跑 check/mypy/pytest 子集就提交——S67 实测漏 `ruff format --check` 导致遗留红
-- gate.py 已在开头输出「最近提交 + 工作区归属」核查块（S70），跑 gate 时顺便确认
+### 提交前门禁（分层——S81 主人拍板，替代旧「必跑全量」）
+- **自己改动面必须全绿**，不跑无关面（全量 pytest 423 例 ~12 分钟，前端一行改动去跑纯浪费）：
+  - 纯前端：`npm run typecheck` + `npm run lint` + `npm run build`（frontend/ 下）
+  - 纯 Python：`uv run ruff check . && uv run ruff format --check . && uv run mypy` + 相关 pytest 子集（`uv run pytest <改动相关路径>`）
+  - 前后端都有 / 发布（package_release）/ 大改动：`uv run python scripts/gate.py` 全量（含 pytest 全量）
+- S67 教训仍有效：**禁只跑 check 不跑 format --check**（漏 format 导致遗留红）——Python 改动面内两者都跑
+- 无论哪层，先看 gate.py 开头的「最近提交 + 工作区归属」核查块（S70），确认改动归属后再显式 add
 
 ### 新包注册清单（6 处，逐项勾，漏一处就逃检查/跑不起来）
 ```
