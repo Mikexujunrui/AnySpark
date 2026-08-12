@@ -45,6 +45,8 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
   const [view, setView] = useState<MindView>("bias");
   const [manual, setManual] = useState<ManualEntry[]>([]);
   const [manualLoading, setManualLoading] = useState(false);
+  // S103：说明书式目录——分类章节折叠状态
+  const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     if (open) fetchBias();
@@ -70,6 +72,17 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
       setManual(prev => prev.map(m => m.id === id ? { ...m, locked: !locked } : m))
     } catch { /* 静默 */ }
   }
+
+  // S103：说明书式目录——按分类分组（章节），每章可折叠
+  const CATALOG_SECTIONS = [
+    { key: "style", label: "文风", icon: "pen-tool", desc: "写作风格偏好", color: "text-purple-400", count: 0 },
+    { key: "habit", label: "习惯", icon: "zap", desc: "写作习惯/雷区", color: "text-amber-400", count: 0 },
+    { key: "collab", label: "协作", icon: "users", desc: "协作方式约定", color: "text-sky-400", count: 0 },
+  ] as const;
+  const catalog = CATALOG_SECTIONS.map(sec => ({
+    ...sec,
+    items: manual.filter(m => (m.category || "style") === sec.key),
+  })).map(sec => ({ ...sec, count: sec.items.length }));
 
   if (!open) return null;
 
@@ -184,27 +197,57 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
             ) : manual.length === 0 ? (
               <p className="text-zinc-600 text-sm text-center py-4">暂无记忆条目——AI 从你的写作反馈中学习</p>
             ) : (
-              manual.map((entry) => (
-                <div key={entry.id} className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-3 space-y-1.5">
-                  <div className="flex items-center justify-between">
-                    <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
-                      entry.category === "collab" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
-                      : entry.category === "style" ? "bg-purple-500/20 text-purple-400 border-purple-500/30"
-                      : "bg-green-500/20 text-green-400 border-green-500/30"
-                    }`}>
-                      {{ collab: "协作", style: "文风", habit: "习惯" }[entry.category as string] ?? entry.category}
-                    </span>
-                    <button onClick={() => toggleLock(entry.id, !!entry.locked)} className={`p-1 rounded ${entry.locked ? "text-yellow-500" : "text-zinc-600 hover:text-zinc-400"}`} title={entry.locked ? "已锁定" : "锁定（用户主权）"}>
-                      <Icon name={entry.locked ? "lock" : "lock"} size={12} />
-                    </button>
-                  </div>
-                  <p className="text-sm text-zinc-300 whitespace-pre-wrap">{entry.content}</p>
-                  <p className="text-[10px] text-zinc-600">
-                    {entry.activity ? `活跃度: ${entry.activity}` : ""}
-                    {entry.created_at ? ` · ${new Date(entry.created_at).toLocaleDateString()}` : ""}
-                  </p>
-                </div>
-              ))
+              /* S103：说明书式目录——章节=分类，条目=内容 */
+              <div className="space-y-3">
+                {catalog.map(section => {
+                  const collapsed = collapsedCats[section.key]
+                  return (
+                    <div key={section.key}>
+                      {/* 章节标题（可折叠） */}
+                      <button
+                        onClick={() => setCollapsedCats(prev => ({ ...prev, [section.key]: !prev[section.key] }))}
+                        className="w-full flex items-center gap-2 px-1 py-1.5 group"
+                      >
+                        <Icon name={collapsed ? "chevron-right" : "chevron-down"} size={11} className="text-zinc-600 group-hover:text-zinc-400 shrink-0" />
+                        <Icon name={section.icon} size={13} className={`${section.color} shrink-0`} />
+                        <span className="text-xs font-semibold text-zinc-300">{section.label}</span>
+                        <span className="text-[10px] text-zinc-600">{section.desc}</span>
+                        <span className="ml-auto text-[10px] text-zinc-500 bg-zinc-800 px-1.5 py-0.5 rounded-full shrink-0">{section.count} 条</span>
+                      </button>
+                      {!collapsed && (
+                        <div className="space-y-2 mt-1.5 pl-4">
+                          {section.items.length === 0 ? (
+                            <p className="text-[11px] text-zinc-700 italic pl-1">暂无条目</p>
+                          ) : section.items.map((entry) => (
+                            <div key={entry.id} className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-3 space-y-1.5">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
+                                    entry.category === "collab" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
+                                    : entry.category === "style" ? "bg-purple-500/20 text-purple-400 border-purple-500/30"
+                                    : "bg-green-500/20 text-green-400 border-green-500/30"
+                                  }`}>
+                                    {{ collab: "协作", style: "文风", habit: "习惯" }[entry.category as string] ?? entry.category}
+                                  </span>
+                                  {entry.locked && <Icon name="lock" size={10} className="text-yellow-500" />}
+                                </div>
+                                <button onClick={() => toggleLock(entry.id, !!entry.locked)} className={`p-1 rounded ${entry.locked ? "text-yellow-500" : "text-zinc-600 hover:text-zinc-400"}`} title={entry.locked ? "已锁定" : "锁定（用户主权）"}>
+                                  <Icon name="lock" size={12} />
+                                </button>
+                              </div>
+                              <p className="text-sm text-zinc-300 whitespace-pre-wrap">{entry.content}</p>
+                              <p className="text-[10px] text-zinc-600">
+                                {entry.activity ? `活跃度: ${entry.activity}` : ""}
+                                {entry.created_at ? ` · ${new Date(entry.created_at).toLocaleDateString()}` : ""}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </div>
             )
           ) : loading ? (
             <p className="text-zinc-600 text-sm text-center py-4">加载中...</p>
