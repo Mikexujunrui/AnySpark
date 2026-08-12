@@ -132,7 +132,7 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
         # 无会话时显式创建，保证 conversation_id 可回传（多轮续写）
         conv_id = req.conversation_id
         if not conv_id:
-            conv = agent.store.create()
+            conv = agent.store.create(book_id=req.book_id)  # S80：会话绑定项目
             conv_id = conv.id
 
         # S49 运行记录：完整上下文+思维链落 data/records/<conv>/（修 bug/训练素材）
@@ -219,6 +219,8 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
         事件帧格式：event: <type>\ndata: <json>\n\n（core 事件协议 → 传输层）。
         """
         events_queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
+        # S82：本轮 parts 累积（tool_call 卡片 + reasoning 思考过程）——done 帧附带给前端 attach
+        parts_acc: list[dict[str, Any]] = []
 
         def run_agent(agent: Agent, msg: str, conv_id: str) -> None:
             try:
@@ -292,7 +294,7 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
             )
             conv_id = req.conversation_id
             if not conv_id:
-                conv = agent.store.create()
+                conv = agent.store.create(book_id=req.book_id)  # S80：会话绑定项目
                 conv_id = conv.id
 
             # S49 运行记录（流式）
@@ -319,6 +321,25 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                 # S25：turn_start 帧带 conversation_id——客户端尽早知道会话 id，运行中可 steer
                 if e.type == "turn_start":
                     payload = {**payload, "conversation_id": conv_id}
+                elif e.type == "record":
+                    # S82：S49 record 帧不进 SSE（含完整 prompt 过大），只提取 reasoning 入 parts
+                    out = payload.get("output") or {}
+                    reasoning = str(out.get("reasoning") or "").strip()
+                    if reasoning:
+                        parts_acc.append({"type": "reasoning", "text": reasoning})
+                    return
+                elif e.type == "tool_call":
+                    # S82：带 arguments 的工具调用卡片（name[] + arguments[] zip）
+                    names = payload.get("name") or []
+                    args = payload.get("arguments") or []
+                    for i, n in enumerate(names):
+                        parts_acc.append(
+                            {
+                                "type": "tool_call",
+                                "name": n,
+                                "arguments": args[i] if i < len(args) else {},
+                            }
+                        )
                 events_queue.put((e.type, payload))
 
             # S21 流式核心：Agent 内部流式（model.respond_stream），text_delta 事件转 SSE 帧
@@ -330,6 +351,7 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                 "tool_execution_start",  # S25：前端显示"正在执行…"
                 "tool_execution_end",  # S25：前端显示耗时/结果
                 "tool_result",
+                "record",  # S82：仅供内部提取 reasoning（on_event 内 return，不转发 SSE）
                 "done",
                 "error",
             ):
@@ -345,7 +367,12 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                     yield _sse_frame("error", {"message": "流式超时（120s 无事件）"})
                     break
                 if etype == "done":
-                    yield _sse_frame("done", {"conversation_id": conv_id})
+                    # S82：done 帧附本轮 parts（工具调用卡片 + 思考过程），
+                    # 前端 attach 到最后一条 agent 消息
+                    done_payload: dict[str, Any] = {"conversation_id": conv_id}
+                    if parts_acc:
+                        done_payload["parts"] = parts_acc
+                    yield _sse_frame("done", done_payload)
                     break
                 if etype == "error":
                     yield _sse_frame("error", payload)

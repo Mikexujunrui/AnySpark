@@ -62,9 +62,7 @@ def copy_tree(src: Path, dst: Path) -> None:
 def build_frontend() -> None:
     """构建前端产物（frontend/dist）。"""
     print("  [1/4] 构建前端...")
-    r = subprocess.run(
-        ["npm", "run", "build"], cwd=str(ROOT / "frontend"), shell=True
-    )
+    r = subprocess.run(["npm", "run", "build"], cwd=str(ROOT / "frontend"), shell=True)
     if r.returncode != 0:
         print("  [错误] 前端构建失败")
         sys.exit(1)
@@ -106,7 +104,7 @@ def assemble(out_root: Path) -> None:
 
 def _write_start_bat(out_root: Path) -> None:
     """生产模式一键启动（后端 serve 前端 dist，单端口 8000）。"""
-    start = r'''@echo off
+    start = r"""@echo off
 rem ============================================
 rem  AnySpark v4 - 发布版一键启动（双击即用）
 rem  后端 serve 前端 dist（单端口 8000）
@@ -171,7 +169,7 @@ echo  退出时请关闭所有黑色窗口
 echo.
 pause
 exit /b 0
-'''
+"""
     (out_root / "start.bat").write_text(start, encoding="utf-8", newline="\r\n")
 
 
@@ -201,13 +199,25 @@ def copy_venv(out_root: Path) -> None:
     # 2. 第三方依赖（从根 uv.lock 导出，不含 workspace 成员）
     reqs = ROOT.parent / "pkg_reqs_tmp.txt"
     sp.run(
-        ["uv", "export", "--format", "requirements.txt", "--no-emit-workspace",
-         "--no-hashes", "-o", str(reqs)],
-        cwd=str(ROOT), check=True, capture_output=True,
+        [
+            "uv",
+            "export",
+            "--format",
+            "requirements.txt",
+            "--no-emit-workspace",
+            "--no-hashes",
+            "-o",
+            str(reqs),
+        ],
+        cwd=str(ROOT),
+        check=True,
+        capture_output=True,
     )
     r = sp.run(
         ["uv", "pip", "install", "--python", str(py), "-r", str(reqs)],
-        cwd=str(out_root), capture_output=True, text=True,
+        cwd=str(out_root),
+        capture_output=True,
+        text=True,
     )
     reqs.unlink(missing_ok=True)
     if r.returncode != 0:
@@ -216,8 +226,17 @@ def copy_venv(out_root: Path) -> None:
 
     # 3. 各包（--no-deps 真实安装；core 先，其余依赖 core 的随后，app 最后）
     order = [
-        "core", "align", "explore", "check", "template", "graph",
-        "workflow", "review", "play", "library", "app",
+        "core",
+        "align",
+        "explore",
+        "check",
+        "template",
+        "graph",
+        "workflow",
+        "review",
+        "play",
+        "library",
+        "app",
     ]
     for name in order:
         pkg = out_root / "packages" / name
@@ -225,7 +244,9 @@ def copy_venv(out_root: Path) -> None:
             continue
         r = sp.run(
             ["uv", "pip", "install", "--python", str(py), "--no-deps", str(pkg)],
-            cwd=str(out_root), capture_output=True, text=True,
+            cwd=str(out_root),
+            capture_output=True,
+            text=True,
         )
         if r.returncode != 0:
             print(f"  [警告] {name} 安装失败: {r.stderr[-200:]}")
@@ -233,8 +254,6 @@ def copy_venv(out_root: Path) -> None:
     exe = venv / "Scripts" / "anyspark-server.exe"
     if not exe.exists():
         print(f"  [警告] anyspark-server.exe 未生成: {exe}")
-
-
 
 
 def make_zip(out_dir: Path) -> Path:
@@ -257,7 +276,7 @@ def make_zip(out_dir: Path) -> Path:
                 continue
             zf.write(f, f"{out_dir.name}/{rel}")
             n += 1
-    print(f"  [zip] {out.name}：{n} 文件，{out.stat().st_size/1024/1024:.1f} MB")
+    print(f"  [zip] {out.name}：{n} 文件，{out.stat().st_size / 1024 / 1024:.1f} MB")
     return out
 
 
@@ -279,7 +298,7 @@ def main() -> None:
     # 统计
     size = sum(f.stat().st_size for f in out_dir.rglob("*") if f.is_file())
     n_files = sum(1 for f in out_dir.rglob("*") if f.is_file())
-    print(f"  [4/4] 完成：{n_files} 文件，{size/1024/1024:.1f} MB")
+    print(f"  [4/4] 完成：{n_files} 文件，{size / 1024 / 1024:.1f} MB")
     print(f"  → {out_dir}")
     if do_zip:
         make_zip(out_dir)

@@ -59,6 +59,7 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
         body: JSON.stringify({
           message: msg,
           conversation_id: sessionId || undefined,
+          book_id: bookId || undefined, // S80：智能体作用域=打开的项目
           // 不传 model_id：后端用默认激活模型（避免 'write' 等假模型名）
         }),
         signal: controller.signal,
@@ -77,7 +78,8 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
         switch (event.type) {
           case 'turn_start':
             if (data?.conversation_id) convIdRef.current = String(data.conversation_id)
-            onProgress?.({ type: 'thinking' })
+            // S82：步骤进度——告诉用户 AI 当前在干什么（ProgressIndicator 展示 stage/detail）
+            onProgress?.({ stage: '正在思考…', detail: 'AI 正在规划如何处理你的请求' })
             break
           case 'text_delta': {
             const text = typeof data === 'string' ? data : String((data as Record<string, unknown>)?.content || '')
@@ -93,15 +95,23 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
             break
           }
           case 'tool_call': {
-            const name = String((data as Record<string, unknown>)?.name || '')
+            const names = (data as Record<string, unknown>)?.name
+            const name = Array.isArray(names) ? names.join(', ') : String(names || '')
             toolCallsRef.current += 1
-            if (name) toolNamesRef.current[name] = (toolNamesRef.current[name] || 0) + 1
-            onMessage?.({ type: 'tool', text: `[工具调用: ${name}]` })
+            if (name) {
+              const nameList = Array.isArray(names) ? names : [name]
+              nameList.forEach((n: string) => { if (n) toolNamesRef.current[n] = (toolNamesRef.current[n] || 0) + 1 })
+              onMessage?.({ type: 'tool', text: `[工具调用: ${name}]` })
+              onProgress?.({ stage: '调用工具', detail: `${name}…` })
+            }
             break
           }
-          case 'tool_execution_start':
-            onMessage?.({ type: 'tool', text: `[正在执行: ${String((data as Record<string, unknown>)?.name || '')}…]` })
+          case 'tool_execution_start': {
+            const tname = String((data as Record<string, unknown>)?.name || '')
+            onMessage?.({ type: 'tool', text: `[正在执行: ${tname}…]` })
+            onProgress?.({ stage: '正在执行', detail: `${tname}…` })
             break
+          }
           case 'tool_execution_end':
             break
           case 'tool_result':
@@ -110,6 +120,11 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
             if (data?.conversation_id) convIdRef.current = String(data.conversation_id)
             if (mountedRef.current) {
               onProgress?.(null)
+              // S82：done 帧附本轮 parts（工具调用卡片 + 思考过程）——attach 到消息渲染
+              const parts = (data as Record<string, unknown>)?.parts
+              if (Array.isArray(parts) && parts.length > 0) {
+                onMessage?.({ type: 'attach_parts', text: '', parts })
+              }
               // 工具调用轨迹（RunLedger 展示）
               onMetrics?.({
                 rounds: 1,

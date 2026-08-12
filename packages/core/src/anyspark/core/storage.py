@@ -30,6 +30,7 @@ class Conversation:
     parent_id: str | None = None
     fork_point: str = ""
     title: str = ""  # 会话标题（用户可自定义）
+    book_id: str = "main"  # S80：会话绑定项目（智能体作用域=打开的项目）
 
 
 def _now() -> str:
@@ -40,8 +41,8 @@ class ConversationStore(ABC):
     """对话存储接口：支持创建会话、追加消息、按会话读取。"""
 
     @abstractmethod
-    def create(self, conversation_id: str | None = None) -> Conversation:
-        """创建并返回一个新会话。"""
+    def create(self, conversation_id: str | None = None, book_id: str = "main") -> Conversation:
+        """创建并返回一个新会话（S80：绑定项目）。"""
 
     @abstractmethod
     def get(self, conversation_id: str) -> Conversation | None:
@@ -84,19 +85,21 @@ class InMemoryConversationStore(ConversationStore):
     def __init__(self) -> None:
         self._conversations: dict[str, Conversation] = {}
 
-    def create(self, conversation_id: str | None = None) -> Conversation:
+    def create(self, conversation_id: str | None = None, book_id: str = "main") -> Conversation:
         cid = conversation_id or uuid.uuid4().hex
         if cid in self._conversations:
             raise ValueError(f"会话已存在: {cid}")
-        conv = Conversation(id=cid, created_at=_now())
+        conv = Conversation(id=cid, created_at=_now(), book_id=book_id)
         self._conversations[cid] = conv
         return conv
 
     def get(self, conversation_id: str) -> Conversation | None:
         return self._conversations.get(conversation_id)
 
-    def list_conversations(self) -> list[Conversation]:
-        return list(self._conversations.values())
+    def list_conversations(self, book_id: str | None = None) -> list[Conversation]:
+        if book_id is None:
+            return list(self._conversations.values())
+        return [c for c in self._conversations.values() if c.book_id == book_id]
 
     def append(self, conversation_id: str, message: Message) -> None:
         conv = self._conversations.get(conversation_id)

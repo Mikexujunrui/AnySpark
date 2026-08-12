@@ -28,6 +28,7 @@
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
 > 当前无会话声明。
+> [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 
 - **候选清单（下一步，按优先级）**：
@@ -2590,3 +2591,22 @@ typecheck/lint/build）。
 
 **验证**：总闸全绿（423 pytest + 前端全过）；端到端——PATCH 编辑 key_points/characters 生效、
 material_register 记录灵感卡入库（inspiration 可见）。
+
+
+## S81 会话绑定项目 + 智能体作用域隔离（已完成 ✅）
+
+**背景（主人拍板）**：会话不该全局共享——会话绑定书籍项目；智能体循环只看到
+打开项目的信息（图谱/设定/计划/资料/章节全按当前项目）。
+
+**交付**：
+- conversations 表加 book_id（幂等迁移，旧会话默认 main）+ Conversation dataclass 加字段
+- **新增 POST /api/conversations** {title, book_id}（前端 createSession 一直调 404，补齐）；
+  GET /api/conversations?book_id=（按项目过滤，缺省 main）；fork 继承源会话项目归属
+- chat 无会话创建时绑定 book_id（routes_chat 两处）；前端 streamChat/useSSE 传 book_id
+- 前端 getSessions/createSession 传 bookId（BookDetail 会话列表按书）
+
+**验证**：总闸全绿（424 pytest + 前端全过）；端到端——创建会话绑定 projectB / 按书过滤
+（B=1, main=120）/ 旧会话归 main / chat 无会话创建归属请求的 book_id。
+
+**遗留（非本次范围）**：部分 REST API（如 GET /api/graph/entities）仍硬编码 main——
+前端图谱面板跨项目显示问题，属图谱 UI 隔离（并行会话 S84b/S90 方向），后续单独立项。

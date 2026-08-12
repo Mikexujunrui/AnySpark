@@ -22,7 +22,12 @@ from anyspark.models.registry import (
 )
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
-from anyspark.server.schemas import ConversationRenameIn, MessagesSaveIn, ModelIn
+from anyspark.server.schemas import (
+    ConversationCreateIn,
+    ConversationRenameIn,
+    MessagesSaveIn,
+    ModelIn,
+)
 
 
 def make_conversations_router(deps: AppDeps) -> APIRouter:
@@ -30,9 +35,9 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/conversations", response_model=list[dict[str, Any]])
-    def list_conversations() -> list[dict[str, Any]]:
-        """会话列表（含继承链条：parent_id/fork_point，可追溯）。"""
-        convs = deps.store.list_conversations()
+    def list_conversations(book_id: str = "main") -> list[dict[str, Any]]:
+        """会话列表（S80：按项目过滤——会话绑定书籍，缺省 main）。"""
+        convs = deps.store.list_conversations(book_id)
         return [
             {
                 "id": c.id,
@@ -40,10 +45,28 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
                 "parent_id": c.parent_id,
                 "fork_point": c.fork_point,
                 "title": c.title,
+                "book_id": c.book_id,
                 "message_count": len(deps.store.messages(c.id)),
             }
             for c in reversed(convs)  # 新的在前
         ]
+
+    @router.post("/api/conversations", response_model=dict[str, Any])
+    def create_conversation(req: ConversationCreateIn) -> dict[str, Any]:
+        """S80：创建会话（绑定项目——会话归属 book_id，智能体作用域=该项目）。"""
+        conv = deps.store.create(book_id=req.book_id)
+        if req.title:
+            conv.title = req.title
+            deps.store.save(conv)
+        return {
+            "id": conv.id,
+            "created_at": conv.created_at,
+            "parent_id": conv.parent_id,
+            "fork_point": conv.fork_point,
+            "title": conv.title,
+            "book_id": conv.book_id,
+            "message_count": 0,
+        }
 
     @router.post("/api/conversations/{conv_id}/fork", response_model=dict[str, Any])
     def fork_conversation(conv_id: str, fork_point: str = "") -> dict[str, Any]:

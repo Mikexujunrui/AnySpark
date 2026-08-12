@@ -57,6 +57,13 @@ class ConversationRenameIn(BaseModel):
     title: str
 
 
+class ConversationCreateIn(BaseModel):
+    """S80：创建会话（绑定项目）。"""
+
+    title: str = ""
+    book_id: str = "main"
+
+
 class MessagePayload(BaseModel):
     """S80：单条消息（前端全量保存用）。"""
 

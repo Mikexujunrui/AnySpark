@@ -136,12 +136,15 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         if (event.parts || event.metrics) {
           setMessages(prev => {
             const updated = [...prev]
-            const last = updated[updated.length - 1] as any
-            if (last && last.role === 'agent') {
-              updated[updated.length - 1] = {
-                ...last,
-                parts: event.parts || last.parts,
-                metrics: event.metrics || last.metrics,
+            // S82：从末尾往前找最后一条 agent 消息（末尾可能是 tool 提示消息）
+            let idx = updated.length - 1
+            while (idx >= 0 && updated[idx].role !== 'agent') idx--
+            if (idx >= 0) {
+              const target = updated[idx] as any
+              updated[idx] = {
+                ...target,
+                parts: event.parts || target.parts,
+                metrics: event.metrics || target.metrics,
               }
             }
             return updated

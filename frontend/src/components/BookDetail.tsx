@@ -109,7 +109,7 @@ function BookDetail() {
     api.getBook(bookId!).then(data => { if (!cancelled) setBook(data as Record<string, any>) }).catch(() => {})
     async function load() {
       try {
-        const sess = await api.getSessions()
+        const sess = await api.getSessions(bookId!)
         if (cancelled) return
         setSessions(sess as Record<string, any>[])
         const savedSession = storage.getActiveSession(bookId!)

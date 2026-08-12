@@ -17,9 +17,11 @@ export const importSparkProject = async (..._args: unknown[]): Promise<{ ok: boo
 };
 
 // ── Sessions（对话会话）──
-export const getSessions = (): Promise<unknown[]> => get<unknown[]>("/api/conversations");
-export const createSession = (_bookId: string, title: string): Promise<unknown> =>
-  post("/api/conversations", { title });
+// S80：会话绑定项目——列表按书过滤、创建归属项目（智能体作用域=打开的项目）
+export const getSessions = (bookId?: string): Promise<unknown[]> =>
+  get<unknown[]>(`/api/conversations${bookId ? `?book_id=${bookId}` : ""}`);
+export const createSession = (bookId: string, title: string): Promise<unknown> =>
+  post("/api/conversations", { title, book_id: bookId });
 export const deleteSession = (_bookId: string, sessionId: string): Promise<unknown> =>
   del(`/api/conversations/${sessionId}`);
 

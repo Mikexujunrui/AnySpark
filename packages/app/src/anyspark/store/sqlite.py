@@ -24,13 +24,19 @@ def _now() -> str:
 
 
 def _conversation_from_row(row: tuple[Any, ...]) -> Conversation:
-    # 兼容旧库：可能只有 (id, created_at)，也可能是 (id, created_at, parent_id, fork_point, title)
+    # 兼容旧库：可能 (id, created_at) / (+parent_id, fork_point, title) / (+book_id)
     cid, created_at = row[0], row[1]
     parent_id = row[2] if len(row) > 2 else None
     fork_point = row[3] if len(row) > 3 else ""
     title = row[4] if len(row) > 4 else ""
+    book_id = row[5] if len(row) > 5 else "main"
     return Conversation(
-        id=cid, created_at=created_at, parent_id=parent_id, fork_point=fork_point, title=title
+        id=cid,
+        created_at=created_at,
+        parent_id=parent_id,
+        fork_point=fork_point,
+        title=title,
+        book_id=book_id,
     )
 
 
@@ -52,7 +58,8 @@ class SqliteConversationStore(ConversationStore):
                 created_at TEXT NOT NULL,
                 parent_id TEXT,  -- S58c 继承链条：源会话 id（继承自谁）
                 fork_point TEXT NOT NULL DEFAULT '',  -- S58c 继承来源描述（自然语言）
-                title TEXT NOT NULL DEFAULT ''  -- 会话标题
+                title TEXT NOT NULL DEFAULT '',  -- 会话标题
+                book_id TEXT NOT NULL DEFAULT 'main'  -- S80：会话绑定项目
             );
             CREATE TABLE IF NOT EXISTS messages (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -78,44 +85,58 @@ class SqliteConversationStore(ConversationStore):
             self._conn.execute(
                 "ALTER TABLE conversations ADD COLUMN title TEXT NOT NULL DEFAULT ''"
             )
+        if "book_id" not in cols:
+            self._conn.execute(
+                "ALTER TABLE conversations ADD COLUMN book_id TEXT NOT NULL DEFAULT 'main'"
+            )
         self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()
 
-    def create(self, conversation_id: str | None = None) -> Conversation:
+    def create(self, conversation_id: str | None = None, book_id: str = "main") -> Conversation:
         cid = conversation_id or uuid.uuid4().hex
         now = _now()
         with self._conn:
             self._conn.execute(
-                "INSERT OR IGNORE INTO conversations (id, created_at) VALUES (?, ?)",
-                (cid, now),
+                "INSERT OR IGNORE INTO conversations (id, created_at, book_id) VALUES (?, ?, ?)",
+                (cid, now, book_id),
             )
-        return self.get(cid) or Conversation(id=cid, created_at=now)
+        return self.get(cid) or Conversation(id=cid, created_at=now, book_id=book_id)
 
     def get(self, conversation_id: str) -> Conversation | None:
         row = self._conn.execute(
-            "SELECT id, created_at, parent_id, fork_point, title FROM conversations WHERE id = ?",
+            "SELECT id, created_at, parent_id, fork_point, title, book_id "
+            "FROM conversations WHERE id = ?",
             (conversation_id,),
         ).fetchone()
         return _conversation_from_row(row) if row else None
 
-    def list_conversations(self) -> list[Conversation]:
-        rows = self._conn.execute(
-            "SELECT id, created_at, parent_id, fork_point, title "
-            "FROM conversations ORDER BY created_at"
-        ).fetchall()
+    def list_conversations(self, book_id: str | None = None) -> list[Conversation]:
+        """S80：会话列表；book_id=None 返回全部（兼容），传了按项目过滤。"""
+        if book_id is None:
+            rows = self._conn.execute(
+                "SELECT id, created_at, parent_id, fork_point, title, book_id "
+                "FROM conversations ORDER BY created_at"
+            ).fetchall()
+        else:
+            rows = self._conn.execute(
+                "SELECT id, created_at, parent_id, fork_point, title, book_id "
+                "FROM conversations WHERE book_id=? ORDER BY created_at",
+                (book_id,),
+            ).fetchall()
         return [_conversation_from_row(row) for row in rows]
 
     def save(self, conversation: Conversation) -> None:
-        """更新会话元信息（title/parent_id/fork_point）。"""
+        """更新会话元信息（title/parent_id/fork_point/book_id）。"""
         with self._conn:
             self._conn.execute(
-                "UPDATE conversations SET title=?, parent_id=?, fork_point=? WHERE id=?",
+                "UPDATE conversations SET title=?, parent_id=?, fork_point=?, book_id=? WHERE id=?",
                 (
                     conversation.title,
                     conversation.parent_id,
                     conversation.fork_point,
+                    conversation.book_id,
                     conversation.id,
                 ),
             )
@@ -174,7 +195,7 @@ class SqliteConversationStore(ConversationStore):
         src = self.get(conversation_id)
         if src is None:
             return None
-        new_conv = self.create()
+        new_conv = self.create(book_id=src.book_id)  # S80：fork 继承源会话的项目归属
         with self._conn:
             self._conn.execute(
                 "UPDATE conversations SET parent_id=?, fork_point=? WHERE id=?",
