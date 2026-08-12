@@ -49,13 +49,13 @@ def make_plot_router(deps: AppDeps) -> APIRouter:
 
     @router.post("/api/plot", response_model=list[dict[str, object]])
     def generate_plot(req: PlotIn) -> list[dict[str, object]]:
-        """关键点图谱（T2 阶段 3 可选深入）：LLM 生成草案入库。"""
-        points = deps.plot_generator.generate("main", deps.plots, req.settings)
+        """关键点图谱（T2 阶段 3 可选深入）：LLM 生成草案入库（S82 按项目）。"""
+        points = deps.plot_generator.generate(req.book_id, deps.plots, req.settings)
         return [p.to_dict() for p in points]
 
     @router.get("/api/plot", response_model=list[dict[str, object]])
-    def list_plot() -> list[dict[str, object]]:
-        return [p.to_dict() for p in deps.plots.list_points()]
+    def list_plot(book_id: str = "main") -> list[dict[str, object]]:
+        return [p.to_dict() for p in deps.plots.list_points(book_id)]
 
     @router.patch("/api/plot/{plot_id}", response_model=dict[str, object])
     def update_plot_status(plot_id: str, req: PlotPatchIn) -> dict[str, object]:
@@ -77,7 +77,7 @@ def make_plot_router(deps: AppDeps) -> APIRouter:
         priority=must 表示这是作者对读者的主线承诺（剧情钩子，必须回收）；
         planted_order 记录登记时的章节序号（老龄化计算用）。"""
         p = deps.plots.add(
-            "main",
+            req.book_id,
             req.category,
             req.content,
             req.chapter_ref,
@@ -87,10 +87,10 @@ def make_plot_router(deps: AppDeps) -> APIRouter:
         return p.to_dict()
 
     @router.post("/api/plot/import-resolve")
-    def resolve_all_plots() -> dict[str, int]:
+    def resolve_all_plots(book_id: str = "main") -> dict[str, int]:
         """S31：完整书导入归档——所有 open 伏笔标 resolved（书已写完，线索已揭开）。
         只报告归档数量，不输出回收率（伏笔管理烂不影响作品伟大性，不做质量评分）。"""
-        n = deps.plots.resolve_all("main")
+        n = deps.plots.resolve_all(book_id)
         return {"resolved": n}
 
     @router.delete("/api/plot/{plot_id}")
@@ -109,7 +109,7 @@ def make_plot_router(deps: AppDeps) -> APIRouter:
         card.kind = req.kind if req.kind in ("inspiration", "copy") else "inspiration"
         # 图谱关联（机制 10 补齐）：摘要卡角色/设定/术语 → 图谱实体
         names = [*card.characters, *card.key_settings, *card.terms]
-        linked = deps.graph.resolve_names("main", names)
+        linked = deps.graph.resolve_names(req.book_id, names)
         card.graph_entities = [e.id for e in linked]
         deps.materials.save(card, book_id=req.book_id)
         return card.to_dict()

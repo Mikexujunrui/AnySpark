@@ -2610,3 +2610,21 @@ material_register 记录灵感卡入库（inspiration 可见）。
 
 **遗留（非本次范围）**：部分 REST API（如 GET /api/graph/entities）仍硬编码 main——
 前端图谱面板跨项目显示问题，属图谱 UI 隔离（并行会话 S84b/S90 方向），后续单独立项。
+
+
+## S82 图谱 API 项目隔离（已完成 ✅，接手遗留问题）
+
+**背景（遗留）**：图谱 REST API 硬编码 main（S72 遗留）——前端图谱面板/类型子视图
+打开任意项目都显示 main 数据；PATCH/DELETE 按 name 定位无书限定（跨书误删同名实体风险）。
+
+**交付**：
+- routes_graph.py 9 处 main 全部接线：GET types/entities/relations/events/context + book_id query；
+  PATCH/DELETE entities/{name_or_id} 按 name 限定书（id 回退按实体属主书更新）；
+  impact/extract 按 req.book_id
+- routes_plot.py：plot 生成/列表/登记/归档按书（知识库面板 foreshadows 泄漏修复）
+- schema：GraphExtractIn/ImpactIn/PlotIn/PlotItemIn 加 book_id
+- 前端：knowledge.ts deleteEntity/updateEntity 传 book_id；getSummary 的 plot 带 book_id
+
+**验证**（分层门禁：ruff+mypy+图谱/领域测试 35 passed+前端 build）：
+跨书隔离——B 书建实体 main 不可见；**跨书保护**——B 书 PATCH main 的实体 404（防误操作）；
+本书编辑正常；plot 按书过滤。

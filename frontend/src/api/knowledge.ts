@@ -24,7 +24,7 @@ export const getSummary = (bookId: string): Promise<Record<string, unknown>> => 
     get(`/api/graph/entities?book_id=${bid}`),
     get(`/api/graph/relations?book_id=${bid}`),
     get(`/api/graph/events?book_id=${bid}`),
-    get(`/api/plot`).catch(() => []),
+    get(`/api/plot?book_id=${bid}`).catch(() => []),
   ]).then(([entities, relations, events, foreshadows]) => ({
     entities: entities as unknown[],
     relations: relations as unknown[],
@@ -35,12 +35,12 @@ export const getSummary = (bookId: string): Promise<Record<string, unknown>> => 
 // 实体搜索（V4 支持 q 模糊 + entity_type 过滤）
 export const searchEntities = (q: string, entityType = "", bookId = "main"): Promise<unknown[]> =>
   get(`/api/graph/entities?q=${encodeURIComponent(q)}&entity_type=${encodeURIComponent(entityType)}&book_id=${bookId}`);
-// 删除实体（name 或 id 定位）
-export const deleteEntity = (_bookId: string, entityId: string): Promise<unknown> =>
-  del(`/api/graph/entities/${encodeURIComponent(entityId)}`);
-// 编辑实体（V4 PATCH：aliases/description/state/entity_type）
-export const updateEntity = (_bookId: string, entityId: string, payload: unknown): Promise<unknown> =>
-  patch(`/api/graph/entities/${encodeURIComponent(entityId)}`, payload);
+// 删除实体（name 或 id 定位；S82 按项目限定，防跨书误删同名实体）
+export const deleteEntity = (bookId: string, entityId: string): Promise<unknown> =>
+  del(`/api/graph/entities/${encodeURIComponent(entityId)}?book_id=${bookId || "main"}`);
+// 编辑实体（V4 PATCH：aliases/description/state/entity_type；S82 按项目）
+export const updateEntity = (bookId: string, entityId: string, payload: unknown): Promise<unknown> =>
+  patch(`/api/graph/entities/${encodeURIComponent(entityId)}?book_id=${bookId || "main"}`, payload);
 // 新建实体（V4 POST：name/entity_type/aliases/description/state）
 export const createEntity = (data: {
   name: string;

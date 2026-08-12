@@ -414,6 +414,7 @@ class MaterialPatchIn(BaseModel):
 class GraphExtractIn(BaseModel):
     chapter_ref: str
     text: str
+    book_id: str = "main"  # S82：抽取入库按项目
 
 
 class ReviewPanelRequest(BaseModel):
@@ -553,6 +554,7 @@ class ImpactIn(BaseModel):
 
     chapter_order: int
     entities: list[str] | None = None
+    book_id: str = "main"  # S82：影响分析按项目
 
 
 class WorkflowIn(BaseModel):
@@ -642,6 +644,7 @@ class TemplateIn(BaseModel):
 
 class PlotIn(BaseModel):
     settings: str = ""  # 作品设定/种子（可选，缺省用已写章节）
+    book_id: str = "main"  # S82：按项目
 
 
 class PlotPatchIn(BaseModel):
@@ -659,6 +662,7 @@ class PlotItemIn(BaseModel):
     chapter_ref: str = ""
     priority: str = "soft"  # must=剧情钩子（作者承诺必须回收）/ soft=细节线索
     planted_order: int = 0  # S31 老龄化：登记时的章节序号（开放时长 = 当前章 - planted_order）
+    book_id: str = "main"  # S82：按项目
 
 
 class CancelIn(BaseModel):
