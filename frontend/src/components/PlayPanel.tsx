@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import PanelHeader from "./ui/PanelHeader";
 import { usePlayStore } from "../stores/playStore";
 import { playExport } from "../api/play";
 import ConfirmModal from "./ui/ConfirmModal";
@@ -74,9 +75,15 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
       {/* 面板 */}
       <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-[560px] h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">互动推演</h2>
-          <div className="flex items-center gap-2">
+        <PanelHeader
+          compact
+          maxW={false}
+          icon="play"
+          iconClass="text-pink-400"
+          title="互动推演"
+          desc="玩法灵感 · 模型自由推演"
+          actions={{ 
+            <div className="flex items-center gap-2">
             <button
               onClick={() => setShowCreate(!showCreate)}
               className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded"
@@ -88,8 +95,9 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-          </div>
-        </div>
+            </div>
+          }}
+        />
 
         {/* 新建表单 */}
         {showCreate && (

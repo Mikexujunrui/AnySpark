@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import PanelHeader from "./ui/PanelHeader";
 import { useToolStore } from "../stores/toolStore";
 import ConfirmModal from "./ui/ConfirmModal";
 
@@ -66,22 +67,29 @@ export default function ToolsPanel({ open, onClose, embedded = false }: ToolsPan
       {/* 面板 */}
       <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-[480px] h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">扩展工具</h2>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowAdd(!showAdd)}
-              className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded"
-            >
-              {showAdd ? "取消" : "+ 登记"}
-            </button>
-            <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
-              <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-        </div>
+        <PanelHeader
+          compact
+          maxW={false}
+          icon="tool"
+          iconClass="text-emerald-400"
+          title="扩展工具"
+          desc="代码扩展 · 已批准生效"
+          actions={
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setShowAdd(!showAdd)}
+                className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded"
+              >
+                {showAdd ? "取消" : "+ 登记"}
+              </button>
+              <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+          }
+        />
 
         {/* 登记表单 */}
         {showAdd && (

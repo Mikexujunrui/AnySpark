@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import PanelHeader from "./ui/PanelHeader";
 import { useDimStore } from "../stores/dimStore";
 import ConfirmModal from "./ui/ConfirmModal";
 
@@ -69,9 +70,15 @@ export default function DimsPanel({ open, onClose, embedded = false }: DimsPanel
       {/* 面板 */}
       <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">探索维度</h2>
-          <div className="flex items-center gap-2">
+        <PanelHeader
+          compact
+          maxW={false}
+          icon="compass"
+          iconClass="text-sky-400"
+          title="探索维度"
+          desc="探索方向内容载体"
+          actions={{ 
+            <div className="flex items-center gap-2">
             <button
               onClick={() => setShowAdd(!showAdd)}
               className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded"
@@ -83,8 +90,9 @@ export default function DimsPanel({ open, onClose, embedded = false }: DimsPanel
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-          </div>
-        </div>
+            </div>
+          }}
+        />
 
         {/* 新增表单 */}
         {showAdd && (
