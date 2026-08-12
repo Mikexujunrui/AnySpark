@@ -497,7 +497,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
       fetch(`/api/conversations/${sessionId}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: messages.map(m => ({ role: m.role, content: m.text || '' })) }),
+        body: JSON.stringify({ messages: messages.map(m => ({ role: m.role === 'agent' ? 'assistant' : m.role, content: m.text || '' })) }),
       }).catch(e => console.error(`${DIAG_PREFIX} ChatPanel — 消息保存失败: %s`, e.message))
     }, 500)
     return () => clearTimeout(saveTimerRef.current)
