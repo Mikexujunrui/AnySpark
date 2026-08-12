@@ -32,6 +32,7 @@ const icons = {
   'send': <><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></>,
   'stop': <><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/></>,
   'arrow-left': <><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></>,
+  'arrow-right-circle': <><circle cx="12" cy="12" r="10"/><polyline points="12 16 16 12 12 8"/><line x1="8" y1="12" x2="16" y2="12"/></>,
   'chevron-down': <><polyline points="6 9 12 15 18 9"/></>,
   'chevron-up': <><polyline points="18 15 12 9 6 15"/></>,
   'chevron-right': <><polyline points="9 18 15 12 9 6"/></>,

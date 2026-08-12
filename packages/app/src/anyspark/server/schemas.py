@@ -674,6 +674,20 @@ class SteerIn(BaseModel):
     message: str = Field(..., min_length=1)
 
 
+class QueueIn(BaseModel):
+    """S99：消息入队（排队接力第一步——先存储/展示，自动消费=第二步）。"""
+
+    conversation_id: str
+    message: str = Field(..., min_length=1)
+
+
+class QueueItemIn(BaseModel):
+    """S99：定位一条排队消息（删除/转插入用）。"""
+
+    conversation_id: str
+    queue_item_id: str
+
+
 # ---------------------------------------------------------------------------
 # 应用装配
 

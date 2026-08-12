@@ -127,11 +127,13 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
 
     @router.delete("/api/conversations/{conv_id}", response_model=dict[str, bool])
     def delete_conversation(conv_id: str) -> dict[str, bool]:
-        """删除会话及其所有消息。"""
+        """删除会话及其所有消息（S99：顺带清空该会话的排队消息）。"""
         conv = deps.store.get(conv_id)
         if conv is None:
             raise HTTPException(status_code=404, detail="会话不存在")
         deps.store.delete(conv_id)
+        with deps.queue_lock:
+            deps.conv_queues.pop(conv_id, None)
         return {"ok": True}
 
     # -----------------------------------------------------------------------

@@ -111,7 +111,47 @@ export function getCandidates(prompt: string, n = 3): Promise<{ candidates: Cand
   });
 }
 
-// 运行中插话
+// ── S99 会话消息队列（排队接力第一步：排队/查看/删/转插入） ──
+export interface QueueItem {
+  id: string
+  text: string
+}
+
+export interface QueueStatus {
+  queues: Record<string, QueueItem[]>
+  running: string[]
+}
+
+// 查看所有会话的排队消息 + 运行中会话
+export function fetchQueues(): Promise<QueueStatus> {
+  return apiFetch<QueueStatus>("/api/chat/queues")
+}
+
+// 消息入队（接力执行：当前会话完成后自动消费——第二步 SSE 循环化）
+export function enqueueChat(conversationId: string, message: string): Promise<{ ok: boolean; queue: QueueItem[] }> {
+  return apiFetch("/api/chat/queue", {
+    method: "POST",
+    body: JSON.stringify({ conversation_id: conversationId, message }),
+  })
+}
+
+// 删除一条排队消息
+export function dequeueChat(conversationId: string, queueItemId: string): Promise<{ ok: boolean; queue: QueueItem[] }> {
+  return apiFetch(`/api/chat/queue/${conversationId}/${queueItemId}`, {
+    method: "DELETE",
+  })
+}
+
+// 排队消息转插入（steer 成功才移除；会话未运行则保留并提示）
+export function steerQueuedChat(
+  conversationId: string,
+  queueItemId: string
+): Promise<{ ok: boolean; queue?: QueueItem[]; reason?: string }> {
+  return apiFetch(`/api/chat/queue/${conversationId}/${queueItemId}/steer`, {
+    method: "POST",
+  })
+}
+
 export function steerChat(conversationId: string, message: string): Promise<void> {
   return apiFetch<void>("/api/chat/steer", {
     method: "POST",

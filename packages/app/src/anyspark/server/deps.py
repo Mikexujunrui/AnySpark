@@ -136,6 +136,11 @@ class AppDeps:
     active_tokens: dict[str, CancellationToken] = field(default_factory=dict)
     active_agents: dict[str, Agent] = field(default_factory=dict)
     active_lock: threading.Lock = field(default_factory=threading.Lock)
+    # S99：会话级消息队列（排队接力第一步；自动消费=第二步 SSE 循环化）
+    conv_queues: dict[str, list[dict[str, str]]] = field(
+        default_factory=dict
+    )  # conv_id -> [{id, text}]
+    queue_lock: threading.Lock = field(default_factory=threading.Lock)
     bg_queue: queue.Queue[BgTask] = field(default_factory=queue.Queue)
     batch_queue: queue.Queue[BgTask] = field(
         default_factory=queue.Queue

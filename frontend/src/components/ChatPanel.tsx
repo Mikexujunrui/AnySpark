@@ -14,6 +14,7 @@ import RunLedger from './chat/RunLedger'
 import AutopilotConsole from './chat/AutopilotConsole'
 import { api } from "../api"
 import { triggerRefresh } from "../store"
+import { enqueueChat, dequeueChat, steerQueuedChat, steerChat, fetchQueues, type QueueItem } from '../api/chat'
 
 const DIAG_PREFIX = '[CONN-DIAG]'
 
@@ -72,6 +73,8 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const [searchOpen, setSearchOpen] = useState(false)
   const [autonomousMode, setAutonomousMode] = useState(false)
   const [showToolCalls, setShowToolCalls] = useState(true)  // toggle for tool call / thinking display
+  // S99：会话消息队列（排队接力第一步——排队/查看/删/转插入；接力执行=第二步）
+  const [pendingQueue, setPendingQueue] = useState<QueueItem[]>([])
   const saveTimerRef = useRef(null)
   const hideTimerRef = useRef(null)
   const lastSentMsgRef = useRef('')
@@ -446,6 +449,14 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
       })
   }, [bookId, sessionId])
 
+  // S99：会话切换时拉取该会话的排队消息
+  useEffect(() => {
+    if (!sessionId) return
+    fetchQueues()
+      .then(s => setPendingQueue(s.queues[sessionId] || []))
+      .catch(() => { /* 静默：队列拉取失败不影响主流程 */ })
+  }, [sessionId])
+
   // Auto-save debounce
   useEffect(() => {
     if (!loaded || !sessionId) return
@@ -664,6 +675,54 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     setProgress(null)
   }
 
+  // ── S99 队列操作：排队（回车） / 插入指导 / 删队 / 转插入 ──
+  async function handleQueue() {
+    const msg = input.trim()
+    if (!msg || !sessionId) return
+    try {
+      const res = await enqueueChat(sessionId, msg)
+      setPendingQueue(res.queue)
+      setInput('')
+      setShowSlash(false)
+      setSlashFilter('')
+    } catch {
+      setMessages(prev => [...prev, { role: 'agent', text: '⚠️ 排队失败，请检查后端' }])
+    }
+  }
+
+  async function handleSteer() {
+    const msg = input.trim()
+    if (!msg || !sessionId) return
+    try {
+      await steerChat(sessionId, msg)
+      setInput('')
+      setShowSlash(false)
+      setSlashFilter('')
+      setMessages(prev => [...prev, { role: 'agent', text: `[已插入指导] ${msg}` }])
+    } catch {
+      setMessages(prev => [...prev, { role: 'agent', text: '⚠️ 插入失败：会话可能已结束（可等它完成后直接发送）' }])
+    }
+  }
+
+  async function handleDequeue(itemId: string) {
+    if (!sessionId) return
+    try {
+      const res = await dequeueChat(sessionId, itemId)
+      setPendingQueue(res.queue)
+    } catch { /* 静默 */ }
+  }
+
+  async function handleSteerQueued(itemId: string) {
+    if (!sessionId) return
+    try {
+      const res = await steerQueuedChat(sessionId, itemId)
+      if (res.queue) setPendingQueue(res.queue)
+      if (!res.ok) {
+        setMessages(prev => [...prev, { role: 'agent', text: `⚠️ 转插入失败：${res.reason || '未知原因'}（已保留在队列）` }])
+      }
+    } catch { /* 静默 */ }
+  }
+
   async function handleCancel() {
     // Flush any buffered chunks before cancelling
     if (chunkTimerRef.current) {
@@ -873,7 +932,12 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
                 uploading={uploading}
                 onSend={sendMessage}
                 onCancel={handleCancel}
+                onQueue={handleQueue}
+                onSteer={handleSteer}
                 onUpload={handleUpload}
+                queue={pendingQueue}
+                onDequeue={handleDequeue}
+                onSteerQueued={handleSteerQueued}
                 autonomousMode={autonomousMode}
                 onAutonomousToggle={handleAutonomousToggle}
                 showSlash={showSlash}
