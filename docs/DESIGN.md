@@ -1486,3 +1486,25 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 
 - 部分 REST API（GET /api/graph/entities 等）仍硬编码 main——前端图谱面板跨项目显示，
   属图谱 UI 隔离（并行会话 S84b/S90 方向），单独立项。
+
+### 12.42 图谱 API 项目隔离（S82：遗留问题接手，DESIGN §12.41 遗留项落地）
+
+> 背景：§12.41 遗留——图谱 REST API 硬编码 main，前端图谱面板/类型子视图跨项目串数据；
+> PATCH/DELETE 按 name 定位无书限定（跨书误删同名实体风险）。
+
+#### 交付
+
+- routes_graph 9 处 main 全部接线：读端点（types/entities/relations/events/context）加
+  book_id query；写端点（PATCH/DELETE entities/{name_or_id}）**按 name 限定书**，
+  id 回退时按实体属主书更新/删除（防跨书误操作）；impact/extract 按请求 book_id
+- routes_plot：伏笔生成/列表/登记/归档按书（知识库面板 foreshadows 跨项目泄漏同步修复）
+- 前端 knowledge.ts：delete/update 实体传 book_id，getSummary 的 plot 带书
+
+#### 隔离矩阵（S74+S81+S82 全链）
+
+| 层 | 隔离方式 | 状态 |
+|---|---|---|
+| 智能体工具（graph_query/plot/plan/settings/...） | ctx.book_id 装配（S74） | ✅ |
+| 会话归属 | conversations.book_id（S81） | ✅ |
+| 图谱 REST API | book_id query（S82） | ✅ |
+| 伏笔/知识库面板 | book_id query（S82） | ✅ |
