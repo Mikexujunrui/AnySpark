@@ -5,10 +5,13 @@ import Icon from './ui/Icon'
 import Modal from './ui/Modal'
 import Toggle from './ui/Toggle'
 
-interface ModelItem { id: string; name: string; base_url?: string; model?: string; context_window?: number; is_active?: boolean; thinking?: string | null; temperature?: number | null }
+interface ModelItem { id: string; name: string; base_url?: string; model?: string; context_window?: number; max_tokens?: number; is_active?: boolean; thinking?: string | null; temperature?: number | null }
 interface AgencyLevel { id: string; name: string; description: string; temperature: number; order: number; is_default?: boolean }
 
 const THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+
+// 模型表单空态（注册/编辑共用；编辑时回填 id 走同一 POST 覆盖更新）
+const EMPTY_MODEL_FORM = { id: '', name: '', model: '', base_url: '', api_key: '', thinking: 'medium', max_tokens: 16384, temperature: 0.7, context_window: 65536 }
 
 
 
@@ -92,7 +95,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
   const [toast, setToast] = useState('')
   // 模型注册表单
   const [showAddModel, setShowAddModel] = useState(false)
-  const [modelForm, setModelForm] = useState({ name: '', model: '', base_url: '', api_key: '', thinking: 'medium', max_tokens: 16384 })
+  const [modelForm, setModelForm] = useState(EMPTY_MODEL_FORM)
   const [savingModel, setSavingModel] = useState(false)
 
   const showToast = useCallback((msg: string, _type?: string) => {
@@ -138,7 +141,23 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
     } catch { showToast('激活失败', 'error') }
   }
 
-  // 注册/更新模型（POST /api/models，含思考强度）
+  // 编辑已注册模型：回填表单（含 id）进入编辑模式——同 id 走 POST /api/models 覆盖更新
+  function startEditModel(m: ModelItem) {
+    setModelForm({
+      id: m.id,
+      name: m.name || '',
+      model: m.model || '',
+      base_url: m.base_url || '',
+      api_key: '', // key 不回传（列表接口安全剔除）；留空=保留原 key（后端 upsert 语义）
+      thinking: m.thinking || 'medium',
+      max_tokens: m.max_tokens || 16384,
+      temperature: m.temperature != null ? m.temperature : 0.7,
+      context_window: m.context_window || 65536,
+    })
+    setShowAddModel(true)
+  }
+
+  // 注册/更新模型（POST /api/models；编辑=同 id 覆盖，可改思考强度/温度/窗口等）
   async function registerModel() {
     if (!modelForm.name.trim() || !modelForm.model.trim()) {
       showToast('模型名与模型标识必填', 'error')
@@ -150,24 +169,27 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          id: modelForm.id || undefined,
           name: modelForm.name.trim(),
           model: modelForm.model.trim(),
           base_url: modelForm.base_url.trim() || undefined,
           api_key: modelForm.api_key.trim() || undefined,
           thinking: modelForm.thinking,
           max_tokens: modelForm.max_tokens || undefined,
+          temperature: modelForm.temperature != null ? Number(modelForm.temperature) : undefined,
+          context_window: modelForm.context_window || undefined,
         }),
       })
       if (!res.ok) {
         const d = await res.json().catch(() => null)
         throw new Error(d?.detail || `HTTP ${res.status}`)
       }
-      showToast('模型已注册')
-      setModelForm({ name: '', model: '', base_url: '', api_key: '', thinking: 'medium', max_tokens: 16384 })
+      showToast(modelForm.id ? '模型已更新' : '模型已注册')
+      setModelForm(EMPTY_MODEL_FORM)
       setShowAddModel(false)
       await loadModels()
     } catch (e) {
-      showToast(e instanceof Error ? e.message : '注册失败', 'error')
+      showToast(e instanceof Error ? e.message : (modelForm.id ? '更新失败' : '注册失败'), 'error')
     }
     setSavingModel(false)
   }
@@ -192,7 +214,9 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
     try {
       const res = await fetch('/api/agency', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ level_id: levelId }) })
       const data = await res.json()
-      setCurrentAgency(data || currentAgency)
+      // 后端返回 {current, levels}；只取 current 作高亮，顺手同步 levels（后端可能重排/过滤）
+      setCurrentAgency(data.current || currentAgency)
+      if (Array.isArray(data.levels)) setAgency(data.levels)
       showToast('档位已切换')
     } catch { showToast('切换失败', 'error') }
   }
@@ -234,29 +258,36 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
             {tab === 'models' && (
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <p className="text-xs text-zinc-500">模型注册表（注册/删除/思考强度）</p>
+                  <p className="text-xs text-zinc-500">模型注册表（注册/编辑/删除/激活）</p>
                   <button
-                    onClick={() => setShowAddModel(!showAddModel)}
+                    onClick={() => { if (modelForm.id) setModelForm(EMPTY_MODEL_FORM); setShowAddModel(!showAddModel) }}
                     className="text-[11px] px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded"
                   >
                     {showAddModel ? '取消' : '+ 注册模型'}
                   </button>
                 </div>
 
-                {/* 注册表单 */}
+                {/* 注册/编辑表单 */}
                 {showAddModel && (
                   <div className="p-3 bg-zinc-900/60 rounded-lg border border-zinc-800 space-y-2">
+                    <p className="text-[11px] text-zinc-500">{modelForm.id ? `编辑模型（id: ${modelForm.id}）` : '注册新模型'}</p>
                     <input value={modelForm.name} onChange={e => setModelForm({ ...modelForm, name: e.target.value })} placeholder="显示名（如：DeepSeek Pro）" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
                     <input value={modelForm.model} onChange={e => setModelForm({ ...modelForm, model: e.target.value })} placeholder="模型标识（如：deepseek-v4-pro）" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
                     <input value={modelForm.base_url} onChange={e => setModelForm({ ...modelForm, base_url: e.target.value })} placeholder="API 端点（可选，默认 DashScope）" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
-                    <input value={modelForm.api_key} onChange={e => setModelForm({ ...modelForm, api_key: e.target.value })} placeholder="API Key（可选，默认环境变量）" type="password" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
+                    <input value={modelForm.api_key} onChange={e => setModelForm({ ...modelForm, api_key: e.target.value })} placeholder="API Key（编辑时留空=保留原 key；新增时留空=用环境变量）" type="password" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
                     <div className="flex items-center gap-2">
-                      <select value={modelForm.thinking} onChange={e => setModelForm({ ...modelForm, thinking: e.target.value })} className="bg-zinc-800 text-zinc-300 text-xs px-2 py-1.5 rounded border border-zinc-700">
-                        {THINKING_LEVELS.map(t => <option key={t} value={t}>{t === 'off' ? 'off（不思考）' : t}</option>)}
-                      </select>
-                      <input value={modelForm.max_tokens} onChange={e => setModelForm({ ...modelForm, max_tokens: Number(e.target.value) || 0 })} placeholder="max_tokens" type="number" className="w-28 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none" />
+                      <label className="flex items-center gap-1 text-[11px] text-zinc-500 shrink-0">思考
+                        <select value={modelForm.thinking} onChange={e => setModelForm({ ...modelForm, thinking: e.target.value })} className="bg-zinc-800 text-zinc-300 text-xs px-2 py-1.5 rounded border border-zinc-700">
+                          {THINKING_LEVELS.map(t => <option key={t} value={t}>{t === 'off' ? 'off（不思考）' : t}</option>)}
+                        </select>
+                      </label>
+                      <label className="flex items-center gap-1 text-[11px] text-zinc-500 shrink-0">温度
+                        <input value={modelForm.temperature} onChange={e => setModelForm({ ...modelForm, temperature: Number(e.target.value) })} type="number" step="0.1" min="0" max="2" className="w-16 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none" />
+                      </label>
+                      <input value={modelForm.max_tokens} onChange={e => setModelForm({ ...modelForm, max_tokens: Number(e.target.value) || 0 })} placeholder="max_tokens" title="max_tokens" type="number" className="w-24 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none" />
+                      <input value={modelForm.context_window} onChange={e => setModelForm({ ...modelForm, context_window: Number(e.target.value) || 0 })} placeholder="上下文窗口" title="context_window" type="number" className="w-24 bg-zinc-800 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200 focus:outline-none" />
                       <button onClick={registerModel} disabled={savingModel} className="ml-auto text-[11px] px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded disabled:opacity-50">
-                        {savingModel ? '注册中...' : '注册'}
+                        {savingModel ? (modelForm.id ? '保存中...' : '注册中...') : (modelForm.id ? '保存修改' : '注册')}
                       </button>
                     </div>
                   </div>
@@ -281,6 +312,9 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                         激活
                       </button>
                     )}
+                    <button onClick={() => startEditModel(m)} className="text-zinc-500 hover:text-sky-400 p-1 rounded shrink-0" title="编辑模型（思考强度/温度/窗口等）">
+                      <Icon name="edit" size={13} />
+                    </button>
                     <button onClick={() => deleteModel(m.id, m.name)} className="text-zinc-600 hover:text-red-400 p-1 rounded shrink-0" title="删除模型">
                       <Icon name="trash" size={13} />
                     </button>
