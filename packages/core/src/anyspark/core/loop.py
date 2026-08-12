@@ -442,6 +442,7 @@ class Agent:
                     "output": {
                         "text": output.text,
                         "reasoning": output.reasoning,
+                        "usage": output.usage,  # S99：token 消耗（prompt/completion/total）
                         "tool_calls": [
                             {"name": c.name, "arguments": c.arguments} for c in output.tool_calls
                         ],

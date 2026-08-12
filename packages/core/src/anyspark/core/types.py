@@ -92,3 +92,6 @@ class ModelOutput:
     tool_calls: list[ToolCall] = field(default_factory=list)
     truncated: bool = False
     reasoning: str = ""
+    # S99：token 消耗（模型适配器从 API usage 字段上报：prompt/completion/total_tokens）
+    # 只进运行记录/SSE 汇总（前端展示消耗），不参与任何上下文逻辑
+    usage: dict[str, int] | None = None

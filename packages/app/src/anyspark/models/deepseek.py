@@ -39,6 +39,17 @@ DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
 THINKING_VALUES: tuple[str, ...] = ("off", "low", "medium", "high", "xhigh", "max")
 
 
+def _usage_dict(usage: Any) -> dict[str, int] | None:
+    """S99：OpenAI 兼容 usage 对象 → 模型无关 dict（无 usage 返回 None）。"""
+    if usage is None:
+        return None
+    return {
+        "prompt_tokens": int(getattr(usage, "prompt_tokens", 0) or 0),
+        "completion_tokens": int(getattr(usage, "completion_tokens", 0) or 0),
+        "total_tokens": int(getattr(usage, "total_tokens", 0) or 0),
+    }
+
+
 def validate_thinking(thinking: str | None) -> str | None:
     """校验思考强度取值；非法值抛 ValueError（配置错误应尽早暴露）。"""
     if thinking is None:
@@ -258,14 +269,21 @@ class DeepSeekModel:
         - 同时兼容旧构造参数 on_delta（stream=True 旧路径）
         """
         kwargs["stream"] = True
+        # S99：流式 usage 上报——OpenAI 兼容流式末尾会发 choices 为空的 usage 帧
+        # （DeepSeek 支持 stream_options.include_usage，OpenAI 标准参数）
+        kwargs["stream_options"] = {"include_usage": True}
         stream = self._client.chat.completions.create(**kwargs)
         text_parts: list[str] = []
         reasoning_parts: list[str] = []  # S49：思维链（流式 delta.reasoning_content）
         tool_acc: dict[int, dict[str, str]] = {}  # index -> {name, arguments}
+        usage: dict[str, int] | None = None
         # S22（D3）：流式路径跟踪 finish_reason——"length" = 输出被截断
         truncated = False
         for chunk in stream:
             if not chunk.choices:
+                # usage 帧（choices 为空）：流式结束前携带累计 token
+                if getattr(chunk, "usage", None) is not None:
+                    usage = _usage_dict(chunk.usage)
                 continue
             choice = chunk.choices[0]
             delta = choice.delta
@@ -310,5 +328,9 @@ class DeepSeekModel:
         # （无工具终答/取消/错误）。若模型层发 done，SSE 端会收到"假 done"提前断开，
         # 后续 tool_call/tool_result/text 事件全丢（S25 修复：工具场景 SSE 提前断）。
         return ModelOutput(
-            text=text, tool_calls=tool_calls, truncated=truncated, reasoning=reasoning
+            text=text,
+            tool_calls=tool_calls,
+            truncated=truncated,
+            reasoning=reasoning,
+            usage=usage,  # S99：流式 usage（include_usage 末尾帧）
         )

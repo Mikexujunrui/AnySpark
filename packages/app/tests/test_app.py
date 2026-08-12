@@ -176,8 +176,13 @@ def test_chat_stream_done_payload_parts() -> None:
                             arguments={"title": "第一章", "content": "雨夜，陈渡抵达雾城站。"},
                         )
                     ],
+                    usage={"prompt_tokens": 1200, "completion_tokens": 300, "total_tokens": 1500},
                 )
-            return ModelOutput(text="第一章已写好。", reasoning="已核对设定，正文落盘完成。")
+            return ModelOutput(
+                text="第一章已写好。",
+                reasoning="已核对设定，正文落盘完成。",
+                usage={"prompt_tokens": 800, "completion_tokens": 200, "total_tokens": 1000},
+            )
 
     client = TestClient(build_app(model=ThinkingModel(), db_path=Path(tempfile.mkdtemp()) / "t.db"))
     r = client.post("/api/chat/stream", json={"message": "写第一章"})
@@ -200,6 +205,11 @@ def test_chat_stream_done_payload_parts() -> None:
     assert tc.get("arguments", {}).get("title") == "第一章"
     rn = next(p for p in parts if p.get("type") == "reasoning")
     assert "氛围" in rn["text"]
+    # S99：token 消耗汇总（每轮 usage 累加：1500 + 1000）
+    usage = parsed.get("token_usage", {})
+    assert usage.get("total_tokens") == 2500, f"token_usage 未正确累加: {usage}"
+    assert usage.get("prompt_tokens") == 2000
+    assert usage.get("completion_tokens") == 500
 
 
 def test_chat_stream_error_frame() -> None:

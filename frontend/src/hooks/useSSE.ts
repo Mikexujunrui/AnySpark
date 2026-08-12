@@ -149,12 +149,17 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
                 onMessage?.({ type: 'attach_parts', text: '', parts })
               }
               // 工具调用轨迹（RunLedger 展示）
+              const usage = (data as Record<string, unknown>)?.token_usage
               onMetrics?.({
                 rounds: 1,
                 llm_calls: toolCallsRef.current + 1,
                 tool_calls: toolCallsRef.current,
                 tool_names: toolNamesRef.current,
                 finish_reason: 'done',
+                // S99：token 消耗（后端汇总每轮 usage，如 {prompt_tokens, completion_tokens, total_tokens}）
+                tokens: usage && typeof usage === 'object'
+                  ? (usage as Record<string, number>)
+                  : undefined,
               })
               onKnowledgeChanged?.()
             }

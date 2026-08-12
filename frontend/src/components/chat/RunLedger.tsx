@@ -2,7 +2,7 @@ import { useState } from 'react'
 import Icon from '../ui/Icon'
 
 /**
- * @param {{ metrics: { llm_calls?: number, tool_calls?: number, rounds?: number, compactions?: number, finish_reason?: string, hallucination_hits?: Record<string, number>, drift_corrections?: number, subagent_spawned?: number } | null }} props
+ * @param {{ metrics: { llm_calls?: number, tool_calls?: number, rounds?: number, compactions?: number, finish_reason?: string, hallucination_hits?: Record<string, number>, drift_corrections?: number, subagent_spawned?: number, tokens?: { prompt_tokens?: number, completion_tokens?: number, total_tokens?: number } } | null }} props
  */
 export default function RunLedger({ metrics }) {
   const [expanded, setExpanded] = useState(false)
@@ -42,6 +42,12 @@ export default function RunLedger({ metrics }) {
           <MetricBadge label="LLM" value={String(metrics.llm_calls ?? 0)} />
           <span className="text-zinc-700">|</span>
           <MetricBadge label="工具" value={String(metrics.tool_calls ?? 0)} />
+          {(metrics.tokens as any)?.total_tokens ? (
+            <>
+              <span className="text-zinc-700">|</span>
+              <MetricBadge label="tokens" value={formatTokens((metrics.tokens as any).total_tokens)} />
+            </>
+          ) : null}
           {hasIssues && (
             <>
               <span className="text-zinc-700">|</span>
@@ -67,6 +73,7 @@ export default function RunLedger({ metrics }) {
           <MetricTile label="LLM 调用" value={metrics.llm_calls ?? 0} />
           <MetricTile label="工具调用" value={`${metrics.tool_calls ?? 0}${hasToolChain ? ' (' + topTools.length + '种)' : ''}`} />
           <MetricTile label="总轮次" value={metrics.rounds ?? 0} />
+          <MetricTile label="Token 消耗" value={(metrics.tokens as any)?.total_tokens ? formatTokens((metrics.tokens as any).total_tokens) : 0} />
           <MetricTile label="上下文压缩" value={metrics.compactions ?? 0} />
           <MetricTile label="漂移纠正" value={metrics.drift_corrections ?? 0} />
           <MetricTile label="子Agent" value={metrics.subagent_spawned ?? 0} />
@@ -110,6 +117,11 @@ function MetricBadge({ label, value }) {
       <span className="text-zinc-400 font-medium">{value}</span>
     </span>
   )
+}
+
+function formatTokens(n: number): string {
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(n)
 }
 
 function MetricTile({ label, value }) {

@@ -289,6 +289,8 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
         events_queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
         # S82：本轮 parts 累积（tool_call 卡片 + reasoning 思考过程）——done 帧附带给前端 attach
         parts_acc: list[dict[str, Any]] = []
+        # S99：token 消耗累积（每轮 record 的 usage 相加）——done 帧带给前端展示
+        usage_acc: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
 
         def run_agent(agent: Agent, msg: str, conv_id: str) -> None:
             try:
@@ -395,6 +397,13 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                     reasoning = str(out.get("reasoning") or "").strip()
                     if reasoning:
                         parts_acc.append({"type": "reasoning", "text": reasoning})
+                    # S99：累积 token 消耗（模型适配器上报的 usage）
+                    usage = out.get("usage")
+                    if isinstance(usage, dict):
+                        for k in usage_acc:
+                            v = usage.get(k)
+                            if isinstance(v, (int, float)):
+                                usage_acc[k] += int(v)
                     return
                 elif e.type == "tool_call":
                     # S82：带 arguments 的工具调用卡片（name[] + arguments[] zip）
@@ -440,6 +449,9 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                     done_payload: dict[str, Any] = {"conversation_id": conv_id}
                     if parts_acc:
                         done_payload["parts"] = parts_acc
+                    # S99：token 消耗汇总（前端 RunLedger 展示）
+                    if any(usage_acc.values()):
+                        done_payload["token_usage"] = usage_acc
                     yield _sse_frame("done", done_payload)
                     break
                 if etype == "error":
