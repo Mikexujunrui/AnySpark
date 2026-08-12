@@ -73,16 +73,27 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
     } catch { /* 静默 */ }
   }
 
-  // S103：说明书式目录——按分类分组（章节），每章可折叠
-  const CATALOG_SECTIONS = [
-    { key: "style", label: "文风", icon: "pen-tool", desc: "写作风格偏好", color: "text-purple-400", count: 0 },
-    { key: "habit", label: "习惯", icon: "zap", desc: "写作习惯/雷区", color: "text-amber-400", count: 0 },
-    { key: "collab", label: "协作", icon: "users", desc: "协作方式约定", color: "text-sky-400", count: 0 },
-  ] as const;
-  const catalog = CATALOG_SECTIONS.map(sec => ({
-    ...sec,
-    items: manual.filter(m => (m.category || "style") === sec.key),
-  })).map(sec => ({ ...sec, count: sec.items.length }));
+  // S103/S104：说明书式目录——**动态分组**（数据里有几类就显示几章，
+  // 未来 AI 提炼新类别自动出现新章节，契合「条目/类别非常多的说明书」设想）
+  const CATEGORY_META: Record<string, { label: string; icon: string; color: string; desc: string }> = {
+    style: { label: "文风", icon: "pen-tool", color: "text-purple-400", desc: "写作风格偏好" },
+    habit: { label: "习惯", icon: "zap", color: "text-amber-400", desc: "写作习惯/雷区" },
+    collab: { label: "协作", icon: "users", color: "text-sky-400", desc: "协作方式约定" },
+  };
+  // 稳定排序：collab/style/habit 在前，未知类别按出现顺序在后
+  const CATEGORY_ORDER = ["collab", "style", "habit"];
+  const seenCats = [...new Set(manual.map(m => m.category || "style"))];
+  const catalog = seenCats
+    .sort((a, b) => {
+      const ia = CATEGORY_ORDER.indexOf(a);
+      const ib = CATEGORY_ORDER.indexOf(b);
+      return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib);
+    })
+    .map(cat => {
+      const meta = CATEGORY_META[cat] || { label: cat, icon: "folder", color: "text-zinc-400", desc: "" };
+      const items = manual.filter(m => (m.category || "style") === cat);
+      return { key: cat, ...meta, items, count: items.length };
+    });
 
   if (!open) return null;
 
@@ -225,9 +236,10 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
                                   <span className={`text-[10px] px-1.5 py-0.5 rounded border ${
                                     entry.category === "collab" ? "bg-blue-500/20 text-blue-400 border-blue-500/30"
                                     : entry.category === "style" ? "bg-purple-500/20 text-purple-400 border-purple-500/30"
-                                    : "bg-green-500/20 text-green-400 border-green-500/30"
+                                    : entry.category === "habit" ? "bg-amber-500/20 text-amber-400 border-amber-500/30"
+                                    : "bg-zinc-600/20 text-zinc-400 border-zinc-600/30"
                                   }`}>
-                                    {{ collab: "协作", style: "文风", habit: "习惯" }[entry.category as string] ?? entry.category}
+                                    {(CATEGORY_META[entry.category as string] || {}).label ?? entry.category}
                                   </span>
                                   {entry.locked && <Icon name="lock" size={10} className="text-yellow-500" />}
                                 </div>
