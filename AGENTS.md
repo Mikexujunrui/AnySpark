@@ -80,13 +80,12 @@
    `> [S6x] 正在改 app.py：<改动内容>（完成提交后删本行）`
 5. 提交前跑门禁（分层，见下）+ `git status --short` 确认归属后显式 add
 
-### 提交前门禁（分层——S81 主人拍板，替代旧「必跑全量」）
-- **自己改动面必须全绿**，不跑无关面（全量 pytest 423 例 ~12 分钟，前端一行改动去跑纯浪费）：
-  - 纯前端：`npm run typecheck` + `npm run lint` + `npm run build`（frontend/ 下）
-  - 纯 Python：`uv run ruff check . && uv run ruff format --check . && uv run mypy` + 相关 pytest 子集（`uv run pytest <改动相关路径>`）
-  - 前后端都有 / 发布（package_release）/ 大改动：`uv run python scripts/gate.py` 全量（含 pytest 全量）
-- S67 教训仍有效：**禁只跑 check 不跑 format --check**（漏 format 导致遗留红）——Python 改动面内两者都跑
-- 无论哪层，先看 gate.py 开头的「最近提交 + 工作区归属」核查块（S70），确认改动归属后再显式 add
+### 提交前门禁（分层 + gate.py 自动判定——S96 升级，替代 S81 三档手动判定）
+- **直接跑 `uv run python scripts/gate.py`**：自动按 `git diff` 改动面判定——只改前端→前端层；只改 `.py`→后端层；前后端都有→全量；纯文档→跳过（不跑无关面，全量 pytest ~12 分钟不白烧）
+- 显式覆盖：`--all`（发布/复检/大改动）、`--python`、`--frontend`；`--pytest <路径>` 缩小子集（默认 pytest 全量）
+- **敏感文件强制全量**：命中 pyproject.toml / uv.lock / package.json / package-lock.json / .gitattributes / scripts/package_release.py / packages/*/pyproject.toml 时自动全量——S88b 打包脚本漏 format 事故的机制堵截（不再靠人脑判定"该不该跑全量"）
+- S67 教训仍有效：**禁只跑 check 不跑 format --check**（Python 层两者都跑，gate.py 已内置）
+- 无论哪层，先看 gate.py 开头的「最近提交 + 改动归属」核查块（S70+S96），**逐文件确认该文件的未提交 diff 是否全部属于本次任务**再显式 add——含并行会话改动的文件禁止 add（S81/S89 裹挟教训）
 
 ### 新包注册清单（6 处，逐项勾，漏一处就逃检查/跑不起来）
 ```

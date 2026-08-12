@@ -2628,3 +2628,27 @@ material_register 记录灵感卡入库（inspiration 可见）。
 **验证**（分层门禁：ruff+mypy+图谱/领域测试 35 passed+前端 build）：
 跨书隔离——B 书建实体 main 不可见；**跨书保护**——B 书 PATCH main 的实体 404（防误操作）；
 本书编辑正常；plot 按书过滤。
+
+
+## S96 门禁自动分层落地（已完成 ✅）
+
+**背景（主人拍板方向）**：S81b 分层门禁方向对（不跑无关面），但改动面判定靠人脑自觉——
+S88b 打包脚本漏 format 成全量 gate 唯一红；S81/S89 两次裹挟（前端改动被并行会话 commit 带走）
+证明门禁验证"代码对不对"管不住"提交了什么"。落地档位 1 三条机械机制：
+
+**交付**（scripts/gate.py）：
+- **自动分层**：`git diff --name-only HEAD` + 未跟踪文件（排除 .review_tmp/、.pi/ 临时目录）
+  机械判定 all/python/frontend/none（纯文档跳过）；`--all/--python/--frontend` 显式覆盖；
+  `--pytest <路径>` 缩 pytest 子集（默认全量）
+- **敏感文件强制全量**：pyproject.toml / uv.lock / package.json / package-lock.json /
+  .gitattributes / scripts/package_release.py / packages/*/pyproject.toml 命中即全量——
+  S88b 事故的机制堵截（不再靠人脑判"该不该跑全量"）
+- **核查块升级**：status --short + 改动文件清单（diff vs HEAD + 未跟踪）逐文件列出，
+  附"含并行会话改动的文件禁止 add"提示——S81/S89 裹挟的机制性提醒
+- AGENTS.md 门禁纪律段落同步新机制（S96 替换 S81 手动三档判定）
+
+**验证**：_classify 10 组用例全过（frontend/python/all/none/敏感文件矩阵）；ruff+format 全绿；
+`gate.py --python --pytest test_models.py` 实际跑通（15 passed，总闸 ✅）。
+
+**后续候选（未做，YAGNI）**：提交前自动 diff 审计脚本（gate.py 已给出清单，先手跑看收益）；
+git worktree 隔离（data/ 不入库 + merge 冲突风险，水土不服不做）。
