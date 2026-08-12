@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import PanelHeader from "./ui/PanelHeader";
 import { useBriefStore } from "../stores/briefStore";
 import { useApproval } from "./approval/ApprovalContext";
 
@@ -97,9 +98,15 @@ export default function BriefPanel({ open, onClose, embedded = false, bookId = "
       {/* 面板 */}
       <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">项目简介</h2>
-          <div className="flex items-center gap-2">
+        <PanelHeader
+          compact
+          maxW={false}
+          icon="file-text"
+          iconClass="text-amber-400"
+          title="项目简介"
+          desc="协作约定 · 项目上下文"
+          actions={{ 
+            <div className="flex items-center gap-2">
             {!editing && (
               <button
                 onClick={handleStartEdit}
@@ -127,8 +134,9 @@ export default function BriefPanel({ open, onClose, embedded = false, bookId = "
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-          </div>
-        </div>
+            </div>
+          }}
+        />
 
         {/* 操作条：AI 生成草案 */}
         <div className="flex items-center gap-2 px-4 py-2 border-b border-zinc-800">

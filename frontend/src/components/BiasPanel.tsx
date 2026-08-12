@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import PanelHeader from "./ui/PanelHeader";
 import { useBiasStore } from "../stores/biasStore";
 import ConfirmModal from "./ui/ConfirmModal";
 import Icon from "./ui/Icon";
@@ -143,9 +144,15 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
       {/* 面板 */}
       <div className={embedded ? "h-full w-full flex flex-col" : "relative ml-auto w-96 h-full bg-zinc-900 border-l border-zinc-800 flex flex-col shadow-xl"}>
         {/* 头部 */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-zinc-800">
-          <h2 className="text-sm font-medium text-zinc-200">心智</h2>
-          <div className="flex items-center gap-2">
+        <PanelHeader
+          compact
+          maxW={false}
+          icon="brain"
+          iconClass="text-violet-400"
+          title="心智"
+          desc="AI 倾向 · 心智记忆"
+          actions={{ 
+            <div className="flex items-center gap-2">
             <div className="flex bg-zinc-800 rounded-lg p-0.5">
               {(["bias", "memory"] as MindView[]).map(v => (
                 <button key={v} onClick={() => setView(v)} className={`px-2 py-0.5 rounded text-[11px] ${view === v ? "bg-zinc-600 text-zinc-100" : "text-zinc-500 hover:text-zinc-300"}`}>
@@ -166,8 +173,9 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
-          </div>
-        </div>
+            </div>
+          }}
+        />
 
         {/* 新增表单（倾向视图） */}
         {view === "bias" && showAdd && (
