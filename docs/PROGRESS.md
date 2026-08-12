@@ -33,6 +33,7 @@
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
 > 当前无会话声明。
+> [S102] 正在改 `tools_domain.py`（+make_batch_implementer：batch_rewrite/batch_review 提议工具）+ `toolkit.py`（注册）+ `useSSE.ts`/`ChatPanel.tsx`（批量工具调用→权限批准弹窗→执行→进度显示）+ 新测试 `test_batch_tool.py`——完成提交后删除本行
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
@@ -2772,3 +2773,23 @@ routes_play / routes_plot / routes_settings / routes_tools / tasks.py
 
 **验证**：全仓 pytest 445 passed（含并行会话 S99/S100 提交后）+ ruff/mypy 全绿；
 test_mode 13 + test_models 15 回归绿。
+
+## S101c 伏笔面板按书隔离 + main 语义定案（已完成 ✅）
+
+**背景（主人问询）**：main 是干什么的？理论上所有项目不是平等的吗？
+
+**main 语义定案**：main = 历史单项目时代的数据载体 + 显式全局默认项目 id，
+**非特权项目**（书架 API 对 main 无特殊处理，可删可改）。架构上项目平等：
+S74 数据隔离 + S81 作用域隔离 + S101b 简介隔离统一。历史惰性残留 = 88 处
+`book_id="main"` 默认值（任何忘传路径悄悄落 main）——前几轮修的 bug
+（图谱 S82/会话 S81/简介 S101b）全是它。处理原则：**API 层默认值保留**
+（前端仍有全局无参调用依赖，全收紧会 400），但逐个排查前端漏传点。
+
+**本轮修复**（前端漏传排查）：
+- PlotPanel（伏笔面板）：无 bookId prop，listPlots/addPlotItem/generatePlot
+  全无参 → 项目内读到 main 的伏笔。修复：api/plot.ts 全函数加 bookId 参数 +
+  PlotPanel 接 bookId（PanelHost 注入）+ 全部调用传参
+- graph.ts 死代码清理：listEntities/listRelations/listEvents/listGraphTypes
+  四个无参函数无任何调用方（图谱实际走 FullGraphView 直 fetch + getSummary）——删除
+
+**验证**：前端 tsc 全绿；PlotPanel 仅 PanelHost 一处实例化（已传 bookId）。

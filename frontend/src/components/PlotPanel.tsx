@@ -11,7 +11,8 @@ const PRIORITY_COLORS: Record<string, string> = {
   soft: "bg-zinc-700/50 text-zinc-400 border-zinc-600",
 };
 
-export default function PlotPanel() {
+// S101c：项目内伏笔面板——按 book_id 隔离（此前无参读 main 数据）
+export default function PlotPanel({ bookId = "main" }: { bookId?: string }) {
   const [plots, setPlots] = useState<PlotPoint[]>([]);
   const [loading, setLoading] = useState(false);
   const [showAdd, setShowAdd] = useState(false);
@@ -27,7 +28,7 @@ export default function PlotPanel() {
   const fetchPlots = async () => {
     setLoading(true);
     try {
-      const data = await listPlots();
+      const data = await listPlots(bookId);
       setPlots(data);
     } catch (e) {
       console.error("Failed to fetch plots:", e);
@@ -37,13 +38,14 @@ export default function PlotPanel() {
 
   useEffect(() => {
     fetchPlots();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookId]);
 
   const handleAdd = async () => {
     if (!content.trim()) return;
     setError(null);
     try {
-      await addPlotItem({ content: content.trim(), category, chapter_ref: chapterRef.trim(), priority });
+      await addPlotItem(bookId, { content: content.trim(), category, chapter_ref: chapterRef.trim(), priority });
       setContent("");
       setChapterRef("");
       setShowAdd(false);
@@ -56,7 +58,7 @@ export default function PlotPanel() {
   const handleGenerate = async () => {
     setGenerating(true);
     try {
-      await generatePlot();
+      await generatePlot(bookId);
       await fetchPlots();
     } catch (e) {
       console.error("Failed to generate plot:", e);

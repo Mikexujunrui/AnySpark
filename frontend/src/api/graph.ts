@@ -97,28 +97,6 @@ export interface UpdateEventRequest {
   involved?: string[];
 }
 
-/* ── List ── */
-
-export function listEntities(q?: string, entityType?: string): Promise<GraphEntity[]> {
-  const params = new URLSearchParams();
-  if (q) params.set("q", q);
-  if (entityType) params.set("entity_type", entityType);
-  const qs = params.toString();
-  return apiFetch<GraphEntity[]>(`/api/graph/entities${qs ? `?${qs}` : ""}`);
-}
-
-export function listRelations(): Promise<GraphRelation[]> {
-  return apiFetch<GraphRelation[]>("/api/graph/relations");
-}
-
-export function listEvents(): Promise<GraphEvent[]> {
-  return apiFetch<GraphEvent[]>("/api/graph/events");
-}
-
-export function listGraphTypes(): Promise<GraphType[]> {
-  return apiFetch<GraphType[]>("/api/graph/types");
-}
-
 /* ── Entity CRUD ── */
 
 export function createEntity(req: CreateEntityRequest): Promise<GraphEntity> {
