@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 
 from anyspark.align import (
     AgencyStore,
@@ -509,6 +510,12 @@ def build_app(
     def health() -> dict[str, str]:
         name = getattr(model, "model_name", "unknown")
         return {"status": "ok", "model": str(name), "log": log_path()}
+
+    # S88：生产模式——frontend/dist 存在时由后端同端口 serve（单端口全包）。
+    # /api/* 路由优先（FastAPI 先匹配路由后匹配 mount），静态资源走 dist。
+    frontend_dist = PROJECT_ROOT / "frontend" / "dist"
+    if (frontend_dist / "index.html").exists():
+        app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
 
     return app
 
