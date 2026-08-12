@@ -44,7 +44,7 @@ before（时间先于）, after（时间后于）, foreshadows（伏笔）, reso
     {{ "text": "原文暗示语句", "hint": "暗示了什么", "expected_resolution": "可能的后续" }}
   ],
   "timeline_events": [
-    {{ "time_order": 1, "label": "第1章 标题", "chapter_ref": "第1章", "characters": ["角色A", "角色B"] }}
+    {{ "time_order": 1, "label": "第1章 标题", "chapter_ref": "第1章", "characters": ["角色A", "角色B"], "temporal_layer": "main|flashback|flashforward|parallel", "absolute_start": "原文明示时间或空", "absolute_end": "原文明示时间或空", "narrative_time": "当晚/五日前", "relative_to": "相对事件", "source_evidence": "原文短句", "confidence": "high|medium|low" }}
   ]
 }}
 

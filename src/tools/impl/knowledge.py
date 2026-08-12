@@ -404,6 +404,13 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
                 evt_id = f"evt_ch{_to_str}"
                 if evt_id in existing_tl_ids:
                     continue
+                temporal_layer = te.get("temporal_layer", "main")
+                track_id, track_name, track_color = {
+                    "main": ("main", "主时间线", "#22d3ee"),
+                    "flashback": ("time-flashback", "回忆 / 过去", "#a78bfa"),
+                    "flashforward": ("time-flashforward", "预叙 / 未来", "#f59e0b"),
+                    "parallel": ("time-parallel", "同期支线", "#34d399"),
+                }.get(temporal_layer, ("main", "主时间线", "#22d3ee"))
                 kb.add_timeline_event(
                     TimelineEvent(
                         id=evt_id,
@@ -412,11 +419,19 @@ async def _extract_all_chapters(loop, args: dict, kb, book_id: str, msg: str = "
                         time_order=time_order,
                         description="",
                         chapter_ref=chapter_ref,
-                        track_id="main",
-                        track_name="主线",
-                        track_color="#22d3ee",
-                        time_label=chapter_ref or str(time_order),
+                        track_id=track_id,
+                        track_name=track_name,
+                        track_color=track_color,
+                        time_label=te.get("absolute_start") or te.get("narrative_time") or chapter_ref or str(time_order),
                         location_ref=location_name,
+                        arc_id=te.get("arc_id", ""),
+                        narrative_time=te.get("narrative_time", ""),
+                        temporal_layer=temporal_layer,
+                        absolute_start=te.get("absolute_start", ""),
+                        absolute_end=te.get("absolute_end", ""),
+                        relative_to=te.get("relative_to", ""),
+                        source_evidence=te.get("source_evidence", ""),
+                        confidence=te.get("confidence", "low"),
                     )
                 )
                 existing_tl_ids.add(evt_id)
@@ -894,12 +909,10 @@ async def _prepare_writing(loop, args: dict, kb, book_id: str, msg: str = "") ->
     # 5. Continuity cards — inject previous 3 chapters' end states
     cards = _js.get_recent_continuity_cards(book_id, chapter_index, count=3)
     if cards:
+        from core.continuity import format_continuity_cards
+
         lines.append(f"\n## 📌 前情连续性（前{len(cards)}章结束状态）")
-        for c in cards:
-            ci = c.get("chapter_index", "?")
-            ct = c.get("chapter_title", "")
-            text = c.get("text", "")[:300]
-            lines.append(f"\n### 第{ci}章{(' ' + ct) if ct else ''}结束时:\n{text}")
+        lines.append(format_continuity_cards(cards))
 
     # 6. Suggested delegate_writing call
     lines.append("\n---")
@@ -919,25 +932,59 @@ async def _prepare_writing(loop, args: dict, kb, book_id: str, msg: str = "") ->
     return "\n".join(lines)
 
 
-CONTINUITY_CARD_SYSTEM = """你是小说连续性分析助手。根据章节正文，提取本章结束时的关键状态，用于下一章写作时保持时间线、角色状态、伏笔的连续性。
+CONTINUITY_CARD_SYSTEM = """你是小说章节交接状态提取器。只记录正文中有短句证据的事实；无法确认就省略，禁止猜测。
 
-输出严格JSON格式：
+输出严格 JSON：
 {
-  "text": "本章结束时的状态摘要（200字以内），包括：\n- 每个主要角色本章结束时的位置、情绪、关键动作结果\n- 新揭露的信息或伏笔\n- 与前面章节的衔接点（如'第X章提到的XX在此处...'）"
+  "chapter_time": {
+    "start": "本章开头的绝对/相对时间或未知",
+    "end": "本章结尾时间或未知",
+    "elapsed": "明确经过的时间或未知",
+    "temporal_layer": "main|flashback|flashforward|parallel",
+    "confidence": "high|medium|low",
+    "evidence": "正文短句"
+  },
+  "start_state": {"characters": {
+    "角色名": {
+      "location": {"value":"地点","confidence":"high|medium|low","evidence":"短句"},
+      "physical_state": {"value":"身体/伤势状态","confidence":"...","evidence":"短句"},
+      "held_items": {"value":["明确持有物"],"confidence":"...","evidence":"短句"},
+      "unfinished_action": {"value":"承接中的动作","confidence":"...","evidence":"短句"}
+    }
+  }},
+  "end_state": {"characters": {"角色名": {"location":{},"physical_state":{},"held_items":{},"unfinished_action":{}}}},
+  "open_threads": ["结尾仍未完成的动作、问题或承诺"],
+  "revealed_facts": [{"fact":"新确认事实","confidence":"high|medium|low","evidence":"短句"}],
+  "text": "不超过160字的交接摘要"
 }
 
-只输出JSON，不要其他文字。"""
+规则：
+1. start_state 只看正文开头，end_state 只看正文结尾，不得用常识补齐。
+2. evidence 必须是正文中可定位的短句；没有证据的字段直接省略。
+3. 情绪、动机不能替代身体状态；未在结尾再次确认的持有物标 medium 或省略。
+4. 回忆、梦境、信件、预知必须标成非 main 层，不能当作当前绝对时间。
+5. 只输出 JSON，不写解释。"""
 
 
-async def _generate_continuity_card(loop, chapter_text: str, chapter_index: int, chapter_title: str) -> dict | None:
-    """Generate a continuity card from chapter text via LLM."""
+async def _generate_continuity_card(
+    loop,
+    chapter_text: str,
+    chapter_index: int,
+    chapter_title: str,
+    book_id: str = "",
+) -> dict | None:
+    """Generate an evidence-backed hand-off card and audit its boundary."""
     if not chapter_text or len(chapter_text) < 200:
         return None
     from datetime import datetime
 
     from core.llm_client import MODELS, get_client
 
-    prompt = f"## 第{chapter_index}章: {chapter_title}\n{chapter_text[:4000]}\n\n请提取本章结束时的连续性状体态:"
+    if len(chapter_text) <= 7000:
+        excerpt = chapter_text
+    else:
+        excerpt = f"{chapter_text[:1800]}\n\n……（中段省略）……\n\n{chapter_text[-4800:]}"
+    prompt = f"## 第{chapter_index}章: {chapter_title}\n{excerpt}\n\n请提取章节开头与结尾的交接状态："
 
     def _call():
         client = get_client()
@@ -948,7 +995,7 @@ async def _generate_continuity_card(loop, chapter_text: str, chapter_index: int,
                 {"role": "user", "content": prompt},
             ],
             temperature=0.1,
-            max_tokens=400,
+            max_tokens=900,
         )
         return r.choices[0].message.content or ""
 
@@ -962,9 +1009,19 @@ async def _generate_continuity_card(loop, chapter_text: str, chapter_index: int,
         if raw.endswith("```"):
             raw = raw[:-3]
         card = json.loads(raw.strip())
+        if not isinstance(card, dict):
+            return None
         card["chapter_index"] = chapter_index
         card["chapter_title"] = chapter_title
         card["generated_at"] = datetime.now().isoformat()
+        from core.continuity import audit_transition
+
+        previous_cards = (
+            json_store.get_recent_continuity_cards(book_id, chapter_index, count=1)
+            if book_id and chapter_index > 1
+            else []
+        )
+        card["transition_audit"] = audit_transition(previous_cards[-1] if previous_cards else None, card)
         return cast(dict, card)
     except Exception:
         return None
@@ -1069,10 +1126,19 @@ async def _finalize_chapter(loop, args: dict, kb, book_id: str, msg: str = "") -
         cur = json_store._get_current_version(chapter)
         content = cur.get("content", "")
         ch_idx = int(chapter_id.replace("#", "").split("E")[0]) if chapter_id else 0
-        card = await _generate_continuity_card(loop, content, ch_idx, title)
+        card = await _generate_continuity_card(loop, content, ch_idx, title, book_id)
         if card:
             json_store.save_continuity_card(book_id, ch_idx, card)
             lines.append(f"\n### 连续性卡片\n✅ 已生成第{ch_idx}章结束时的状态快照")
+            audit = card.get("transition_audit", {})
+            conflicts = audit.get("confirmed_conflicts", []) if isinstance(audit, dict) else []
+            if conflicts:
+                lines.append(f"⚠️ 发现 {len(conflicts)} 项有双向原文证据的章节交接冲突，请人工核对：")
+                for conflict in conflicts[:5]:
+                    lines.append(
+                        f"  - {conflict.get('subject', '?')} · {conflict.get('field', '?')}: "
+                        f"{conflict.get('previous', '?')} → {conflict.get('current', '?')}"
+                    )
     except Exception:
         pass
 

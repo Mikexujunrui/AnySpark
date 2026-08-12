@@ -50,6 +50,7 @@ const TAB_GROUPS: TabGroup[] = [
     label: '辅助',
     tabs: [
       { key: 'outline', label: '大纲', icon: 'list' },
+      { key: 'plot-norms', label: '剧情规范', icon: 'list' },
       { key: 'foreshadows', label: '伏笔', icon: 'target' },
       { key: 'inspirations', label: '灵感', icon: 'lightbulb' },
       { key: 'style-analysis', label: '文风', icon: 'compass' },
@@ -105,6 +106,7 @@ export default function BookDetail() {
   const [retryKey, setRetryKey] = useState(0)
   const [showImport, setShowImport] = useState(false)
   const [showCommandPalette, setShowCommandPalette] = useState(false)
+  const [lastExportPath, setLastExportPath] = useState('')
 
   useEffect(() => {
     let cancelled = false
@@ -238,16 +240,33 @@ export default function BookDetail() {
     }, 5000)
   }
 
-  function handleExport(format: string) {
+  async function handleExport(format: string) {
     setShowExportMenu(false)
     const title = book?.title || 'export'
     const ext = format === 'docx' ? 'docx' : format === 'epub' ? 'epub' : format === 'spark' ? 'spark' : 'txt'
+    const nativeExport = window.pywebview?.api?.export_book
+    if (nativeExport) {
+      try {
+        const result = await nativeExport(bookId!, format)
+        if (result.saved && result.path) {
+          setLastExportPath(result.path)
+          showToast(`已导出到：${result.path}`, 'success', 8000)
+        } else if (!result.cancelled) {
+          showToast(`导出失败：${result.error || '未知错误'}`, 'error')
+        }
+      } catch {
+        showToast('系统保存窗口调用失败', 'error')
+      }
+      return
+    }
     const a = document.createElement('a')
     a.href = `/api/books/${bookId}/export?format=${format}`
     a.download = `${title}.${ext}`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
+    setLastExportPath('浏览器下载目录（具体位置由浏览器设置决定）')
+    showToast('已交给浏览器下载；请在浏览器下载记录中查看路径', 'success', 6000)
   }
 
   if (loadingErr) {
@@ -367,6 +386,16 @@ export default function BookDetail() {
           </button>
         </div>
       </nav>
+
+      {lastExportPath && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-emerald-900/40 bg-emerald-950/20 px-4 py-1.5 text-[10px] text-emerald-300">
+          <Icon name="check" size={11} />
+          <span className="font-medium">最近导出：</span>
+          <span className="min-w-0 flex-1 truncate" title={lastExportPath}>{lastExportPath}</span>
+          <button onClick={() => navigator.clipboard?.writeText(lastExportPath)} className="text-emerald-500 hover:text-emerald-200">复制路径</button>
+          <button onClick={() => setLastExportPath('')} className="text-zinc-600 hover:text-zinc-300"><Icon name="x" size={11} /></button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-hidden flex flex-col">
         {(TIME_PANELS.has(primaryTab) || (isSplit && TIME_PANELS.has(secondaryTab))) && (

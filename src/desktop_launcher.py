@@ -12,6 +12,7 @@ import html
 import json
 import logging
 import os
+import re
 import sys
 import threading
 import time
@@ -179,6 +180,55 @@ class InstanceLock:
         self._file = None
 
 
+class DesktopApi:
+    """Small trusted bridge for native desktop-only operations."""
+
+    def __init__(self, controller: DesktopController) -> None:
+        self.controller = controller
+
+    def export_book(self, book_id: str, export_format: str) -> dict:
+        """Show the OS save panel, write the export, and return its exact path."""
+
+        import webview
+
+        from core.archive import export_spark
+        from core.exporter import export_docx, export_epub, export_txt
+        from data.json_store import json_store
+
+        allowed = {"txt", "docx", "epub", "spark"}
+        if export_format not in allowed:
+            return {"saved": False, "error": "不支持的导出格式"}
+        try:
+            book = json_store.get_book(book_id)
+            chapters = [json_store._chapter_view(ch) for ch in json_store.load_chapters(book_id)]
+            if not chapters:
+                return {"saved": False, "error": "暂无章节可导出"}
+            title = str(book.get("title", "未命名"))
+            safe_title = re.sub(r'[\\/:*?"<>|]+', "_", title).strip(" .") or "未命名"
+            filename = f"{safe_title}.{export_format}"
+            selected = self.controller.window.create_file_dialog(
+                webview.FileDialog.SAVE,
+                save_filename=filename,
+            )
+            if not selected:
+                return {"saved": False, "cancelled": True}
+            raw_path = selected[0] if isinstance(selected, (list, tuple)) else selected
+            path = Path(str(raw_path)).expanduser().resolve()
+
+            if export_format == "spark":
+                export_spark(book_id, output_path=str(path))
+            elif export_format == "docx":
+                path.write_bytes(export_docx(title, chapters))
+            elif export_format == "epub":
+                path.write_bytes(export_epub(title, chapters))
+            else:
+                path.write_bytes(export_txt(title, chapters))
+            return {"saved": True, "path": str(path), "filename": path.name}
+        except Exception as exc:
+            logger.exception("Native export failed")
+            return {"saved": False, "error": str(exc)[:300]}
+
+
 class DesktopController:
     """Own the FastAPI thread and the single visible desktop window."""
 
@@ -188,6 +238,7 @@ class DesktopController:
         self.window: Any = None
         self._shutdown_started = threading.Event()
         self._server_error = ""
+        self.desktop_api = DesktopApi(self)
 
     def start_server(self) -> None:
         self.server_thread = threading.Thread(target=self._run_server, name="AnySparkServer", daemon=True)
@@ -264,6 +315,7 @@ class DesktopController:
             background_color="#090b10",
             text_select=True,
             zoomable=True,
+            js_api=self.desktop_api,
         )
         self.window.events.closed += self.shutdown
         WEBVIEW_STORAGE.mkdir(parents=True, exist_ok=True)

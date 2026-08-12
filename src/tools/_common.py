@@ -73,6 +73,9 @@ PROGRESSIVE_EXTRACT_SYSTEM = """你是小说知识提取专家。你正在逐章
 - time_order 使用小数：整数部分=章节号，小数部分=章内序号（如第15章有3个事件：15.1, 15.2, 15.3）。
 - 如果本章只有一个关键时间点，time_order 用整数（如 15.0）。
 - 每个时间线事件可包含 location 字段（事件发生地点）。
+- 必须区分叙述顺序与故事时间：temporal_layer 只能是 main/flashback/flashforward/parallel。
+- absolute_start/absolute_end 仅在原文明确给出日期、时刻或可可靠换算时填写；“五日前”等放入 narrative_time，并用 relative_to 标记它相对哪个当前事件。
+- source_evidence 必须引用支持时间判断的原文短句；confidence 只能是 high/medium/low。没有证据时不得编造绝对日期。
 
 # 伏笔提取规则（极其重要）
 - 伏笔是指作者有意埋下的、在后续章节中会回收/揭晓的暗示或线索。
@@ -106,7 +109,7 @@ PROGRESSIVE_EXTRACT_SYSTEM = """你是小说知识提取专家。你正在逐章
     {"text": "伏笔原文", "hint": "暗示内容", "expected_resolution": "可能的揭晓方式", "plant_chapter": "#3", "confidence": "high", "resolve_keywords": ["关键词1", "关键词2"], "resolve_chapter": ""}
   ],
   "timeline_events": [
-    {"time_order": 15.1, "label": "事件名称", "chapter_ref": "#15", "characters": ["角色名"], "location": "地点名"}
+    {"time_order": 15.1, "label": "事件名称", "chapter_ref": "#15", "characters": ["角色名"], "location": "地点名", "temporal_layer": "main", "absolute_start": "", "absolute_end": "", "narrative_time": "当晚/五日前", "relative_to": "#15当前事件", "source_evidence": "原文短句", "confidence": "high"}
   ]
 }
 
@@ -247,7 +250,7 @@ def get_extraction_system_prompt() -> str:
     {{"text": "伏笔原文", "hint": "暗示内容", "expected_resolution": "可能的揭晓方式", "plant_chapter": "#3", "confidence": "high", "resolve_keywords": ["关键词1", "关键词2"], "resolve_chapter": ""}}
   ],
   "timeline_events": [
-    {{"time_order": 15.1, "label": "事件名称", "chapter_ref": "#15", "characters": ["角色名"], "location": "地点名"}}
+    {{"time_order": 15.1, "label": "事件名称", "chapter_ref": "#15", "characters": ["角色名"], "location": "地点名", "temporal_layer": "main|flashback|flashforward|parallel", "absolute_start": "原文明示时间或空", "absolute_end": "原文明示时间或空", "narrative_time": "当晚/五日前", "relative_to": "相对事件", "source_evidence": "原文短句", "confidence": "high|medium|low"}}
   ]
 }}
 

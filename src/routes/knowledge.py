@@ -704,7 +704,30 @@ def get_graph_timeline(book_id: str):
     Format: {tracks: [{id, name, color}], events: [{id, track_id, label, time_label, description, chapter_ref, order, characters}]}
     """
     kb = get_store(book_id)
-    return kb.get_timeline_for_view()
+    result = kb.get_timeline_for_view()
+    cards = json_store.load_continuity_cards(book_id).get("chapters", {})
+    chapter_ranges = []
+    for chapter_index, card in sorted(cards.items(), key=lambda item: int(item[0]) if item[0].isdigit() else 0):
+        if not isinstance(card, dict):
+            continue
+        chapter_time = card.get("chapter_time", {})
+        if not isinstance(chapter_time, dict):
+            continue
+        chapter_ranges.append(
+            {
+                "chapter_index": int(chapter_index) if chapter_index.isdigit() else chapter_index,
+                "chapter_title": card.get("chapter_title", ""),
+                "start": chapter_time.get("start", ""),
+                "end": chapter_time.get("end", ""),
+                "elapsed": chapter_time.get("elapsed", ""),
+                "temporal_layer": chapter_time.get("temporal_layer", "main"),
+                "confidence": chapter_time.get("confidence", "low"),
+                "evidence": chapter_time.get("evidence", ""),
+                "conflict_count": len(card.get("transition_audit", {}).get("confirmed_conflicts", [])),
+            }
+        )
+    result["chapter_ranges"] = chapter_ranges
+    return result
 
 
 @router.get("/books/{book_id}/graph/location-map")

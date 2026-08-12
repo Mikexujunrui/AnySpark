@@ -906,6 +906,12 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
     if scope.writing_rules:
         ext_inst += f"\n\n写作规则: {scope.writing_rules}"
 
+    from core.plot_norms import build_plot_norms_prompt
+
+    plot_norms_prompt = build_plot_norms_prompt(book_id)
+    if plot_norms_prompt:
+        ext_inst += f"\n\n{plot_norms_prompt}"
+
     # ── 长章剧情预算：先分段，再写正文 ──
     # A token/character cap alone makes models compress the whole chapter into
     # the first response.  Long tasks are converted to semantic contracts so
@@ -949,7 +955,9 @@ async def _delegate_writing_streaming(loop, args: dict, kb, book_id: str, msg: s
     if ch_num and ch_num > 1:
         cards = json_store.get_recent_continuity_cards(book_id, ch_num, count=3)
         if cards:
-            continuity_text = "\n".join(f"第{c.get('chapter_index', '?')}章结束时: {c.get('text', '')}" for c in cards)
+            from core.continuity import format_continuity_cards
+
+            continuity_text = format_continuity_cards(cards)
             ext_inst += f"\n\n## ⚠️ 前情连续性（请严格保持时间线和状态一致）\n{continuity_text}"
 
     # Build reference book context if specified
@@ -1632,11 +1640,19 @@ async def _delegate_writing(loop, args: dict, kb, book_id: str, session_id: str,
     if scope.writing_rules:
         extended_instruction += f"\n\n写作规则: {scope.writing_rules}"
 
+    from core.plot_norms import build_plot_norms_prompt
+
+    plot_norms_prompt = build_plot_norms_prompt(book_id)
+    if plot_norms_prompt:
+        extended_instruction += f"\n\n{plot_norms_prompt}"
+
     # ── 注入前3章连续性卡片 ──
     if ch_num and ch_num > 1:
         cards = json_store.get_recent_continuity_cards(book_id, ch_num, count=3)
         if cards:
-            continuity_text = "\n".join(f"第{c.get('chapter_index', '?')}章结束时: {c.get('text', '')}" for c in cards)
+            from core.continuity import format_continuity_cards
+
+            continuity_text = format_continuity_cards(cards)
             extended_instruction += f"\n\n## ⚠️ 前情连续性（请严格保持时间线和状态一致）\n{continuity_text}"
 
     # Build reference book context if specified

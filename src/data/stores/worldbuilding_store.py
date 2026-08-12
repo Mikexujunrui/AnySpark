@@ -5,6 +5,7 @@
 """Worldbuilding, outline, timeline, notes, and location map storage."""
 
 import logging
+import uuid
 from datetime import datetime
 from typing import cast
 
@@ -168,6 +169,9 @@ class WorldbuildingStoreMixin(BaseStore):
     def load_continuity_cards(self, book_id: str) -> dict:
         return self._read_json(self._continuity_cards_file(book_id), default={"chapters": {}})
 
+    def save_continuity_cards(self, book_id: str, cards: dict):
+        self._write_json(self._continuity_cards_file(book_id), cards)
+
     def save_continuity_card(self, book_id: str, chapter_index: int, card: dict):
         with book_lock(book_id):
             data = self.load_continuity_cards(book_id)
@@ -238,6 +242,61 @@ class WorldbuildingStoreMixin(BaseStore):
         tl = self.load_timeline(book_id)
         tl["tracks"] = [t for t in tl.get("tracks", []) if t.get("id") != track_id]
         self.save_timeline(book_id, tl)
+
+    # ── Reusable plot norms ──
+
+    def load_plot_norms(self, book_id: str) -> list[dict]:
+        return self._read_json(self._plot_norms_file(book_id), default=[])
+
+    def save_plot_norms(self, book_id: str, norms: list[dict]):
+        self._write_json(self._plot_norms_file(book_id), norms)
+
+    def add_plot_norm(self, book_id: str, data: dict) -> dict:
+        with book_lock(book_id):
+            norms = self.load_plot_norms(book_id)
+            now = datetime.now().isoformat()
+            norm = {
+                "id": f"pn_{uuid.uuid4().hex[:10]}",
+                "name": str(data.get("name", "未命名规范")).strip()[:80] or "未命名规范",
+                "description": str(data.get("description", "")).strip()[:500],
+                "rules": [str(item).strip()[:300] for item in data.get("rules", []) if str(item).strip()][:20],
+                "avoid": [str(item).strip()[:300] for item in data.get("avoid", []) if str(item).strip()][:20],
+                "active": bool(data.get("active", True)),
+                "createdAt": now,
+                "updatedAt": now,
+            }
+            norms.append(norm)
+            self.save_plot_norms(book_id, norms)
+            return norm
+
+    def update_plot_norm(self, book_id: str, norm_id: str, data: dict) -> dict:
+        with book_lock(book_id):
+            norms = self.load_plot_norms(book_id)
+            norm = self._resolve_by_id(norms, norm_id)
+            if not norm:
+                raise NotFoundError(f"剧情规范不存在: {norm_id}")
+            if "name" in data:
+                norm["name"] = str(data["name"]).strip()[:80] or norm.get("name", "未命名规范")
+            if "description" in data:
+                norm["description"] = str(data["description"]).strip()[:500]
+            for field in ("rules", "avoid"):
+                if field in data:
+                    value = data[field] if isinstance(data[field], list) else []
+                    norm[field] = [str(item).strip()[:300] for item in value if str(item).strip()][:20]
+            if "active" in data:
+                norm["active"] = bool(data["active"])
+            norm["updatedAt"] = datetime.now().isoformat()
+            self.save_plot_norms(book_id, norms)
+            return norm
+
+    def delete_plot_norm(self, book_id: str, norm_id: str) -> bool:
+        with book_lock(book_id):
+            norms = self.load_plot_norms(book_id)
+            resolved = self._resolve_by_id(norms, norm_id)
+            if not resolved:
+                return False
+            self.save_plot_norms(book_id, [norm for norm in norms if norm.get("id") != resolved.get("id")])
+            return True
 
     # ── Outline ──
 

@@ -618,6 +618,12 @@ def _parse_proposal(response: str) -> KnowledgeProposal:
                 "location": te.get("location", ""),
                 "arc_id": te.get("arc_id", ""),
                 "narrative_time": te.get("narrative_time", ""),
+                "temporal_layer": te.get("temporal_layer", "main"),
+                "absolute_start": te.get("absolute_start", ""),
+                "absolute_end": te.get("absolute_end", ""),
+                "relative_to": te.get("relative_to", ""),
+                "source_evidence": te.get("source_evidence", ""),
+                "confidence": te.get("confidence", "low"),
             }
         )
 
@@ -759,6 +765,13 @@ def accept_proposal(proposal: KnowledgeProposal, project_id: str = "default") ->
             from .knowledge import TimelineEvent
 
             loc_ref = te.get("location", "")
+            temporal_layer = te.get("temporal_layer", "main")
+            layer_track = {
+                "main": ("main", "主时间线", "#22d3ee"),
+                "flashback": ("time-flashback", "回忆 / 过去", "#a78bfa"),
+                "flashforward": ("time-flashforward", "预叙 / 未来", "#f59e0b"),
+                "parallel": ("time-parallel", "同期支线", "#34d399"),
+            }.get(temporal_layer, ("main", "主时间线", "#22d3ee"))
             store.add_timeline_event(
                 TimelineEvent(
                     id=evt_id,
@@ -767,13 +780,19 @@ def accept_proposal(proposal: KnowledgeProposal, project_id: str = "default") ->
                     time_order=time_order,
                     description="",
                     chapter_ref=chapter_ref,
-                    track_id="main",
-                    track_name="主线",
-                    track_color="#22d3ee",
-                    time_label=f"第{time_order}章",
+                    track_id=layer_track[0],
+                    track_name=layer_track[1],
+                    track_color=layer_track[2],
+                    time_label=te.get("absolute_start") or te.get("narrative_time") or f"第{time_order}章",
                     location_ref=loc_ref,
                     arc_id=te.get("arc_id", ""),
                     narrative_time=te.get("narrative_time", ""),
+                    temporal_layer=temporal_layer,
+                    absolute_start=te.get("absolute_start", ""),
+                    absolute_end=te.get("absolute_end", ""),
+                    relative_to=te.get("relative_to", ""),
+                    source_evidence=te.get("source_evidence", ""),
+                    confidence=te.get("confidence", "low"),
                 )
             )
             tl_created += 1

@@ -22,6 +22,7 @@ from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from core.emotion_analyzer import analyze_emotional_curve, load_emotional_curve
 from core.reference_analyzer import (
@@ -36,6 +37,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["analysis"])
 
 
+class ReferenceAnalysisJobRequest(BaseModel):
+    steps: list[str] | None = None
+    chunk_size: int = Field(default=20, ge=5, le=100)
+    force: bool = False
+
+
 def _resolve_ref_book_id(book_id: str, ref_book_id: str | None) -> str:
     """Resolve the reference book ID from query param or the book's first ref."""
     if ref_book_id:
@@ -44,6 +51,63 @@ def _resolve_ref_book_id(book_id: str, ref_book_id: str | None) -> str:
     if not ref_ids:
         raise HTTPException(400, "当前项目没有参考书。先用 set_reference_books 设置。")
     return ref_ids[0]
+
+
+# ── Resumable background analysis ──────────────────────────────────────
+
+
+@router.post("/books/{book_id}/analyses/jobs")
+async def start_reference_analysis_job(
+    book_id: str,
+    data: ReferenceAnalysisJobRequest,
+    ref_book_id: str | None = None,
+):
+    from core.reference_jobs import create_job, schedule_job
+
+    target_ref = _resolve_ref_book_id(book_id, ref_book_id)
+    if target_ref not in json_store.get_reference_books(book_id):
+        raise HTTPException(400, "指定项目不是当前书的参考书")
+    try:
+        job = create_job(
+            book_id,
+            target_ref,
+            steps=data.steps,
+            chunk_size=data.chunk_size,
+            force=data.force,
+        )
+        schedule_job(job["id"])
+        return job
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+
+@router.get("/books/{book_id}/analyses/jobs/latest")
+def get_latest_reference_analysis_job(book_id: str, ref_book_id: str | None = None):
+    from core.reference_jobs import latest_job
+
+    target_ref = _resolve_ref_book_id(book_id, ref_book_id)
+    return latest_job(book_id, target_ref) or {"status": "none", "progress": 0}
+
+
+@router.get("/books/{book_id}/analyses/jobs/{job_id}")
+def get_reference_analysis_job(book_id: str, job_id: str):
+    from core.reference_jobs import get_job
+
+    job = get_job(job_id)
+    if not job or job.get("book_id") != book_id:
+        raise HTTPException(404, "分析任务不存在")
+    return job
+
+
+@router.post("/books/{book_id}/analyses/jobs/{job_id}/retry")
+async def retry_reference_analysis_job(book_id: str, job_id: str):
+    from core.reference_jobs import get_job, prepare_retry, schedule_job
+
+    job = get_job(job_id)
+    if not job or job.get("book_id") != book_id:
+        raise HTTPException(404, "分析任务不存在")
+    prepare_retry(job_id)
+    return schedule_job(job_id)
 
 
 # ── Structure analysis ───────────────────────────────────────────────────

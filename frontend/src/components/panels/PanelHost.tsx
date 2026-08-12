@@ -21,6 +21,7 @@ import WorkflowView from '../WorkflowView'
 import ReviewPanel from '../ReviewPanel'
 import InspirationInbox from '../InspirationInbox'
 import StyleAnalysisPanel from '../StyleAnalysisPanel'
+import PlotNormsPanel from '../PlotNormsPanel'
 
 export default function PanelHost({ panelKey, bookId, sessionId, autoModeEnabled, transformSignal }) {
   // ChatPanel always stays mounted to preserve SSE connection
@@ -63,6 +64,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, autoModeEnabled
       {panelKey === 'worldbuilding' && <div className="h-full"><WorldbuildingPanel bookId={bookId} /></div>}
       {panelKey === 'knowledge' && <div className="h-full"><KnowledgePanel bookId={bookId} /></div>}
       {panelKey === 'outline' && <div className="h-full"><OutlinePanel bookId={bookId} /></div>}
+      {panelKey === 'plot-norms' && <div className="h-full"><PlotNormsPanel bookId={bookId} /></div>}
       {panelKey === 'timeline' && <div className="h-full"><TimelineView bookId={bookId} /></div>}
       {panelKey === 'foreshadows' && <div className="h-full"><ForeshadowBoard bookId={bookId} /></div>}
       {panelKey === 'style-analysis' && <div className="h-full"><StyleAnalysisPanel bookId={bookId} /></div>}

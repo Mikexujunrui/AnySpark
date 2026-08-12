@@ -10,7 +10,7 @@
   {"type": "event", "name": "事件"}],
  "relations": [{"from": "A", "to": "B", "type": "ally"}],
  "foreshadows": [{"text": "暗示语句", "hint": "暗示了什么", "expected_resolution": "可能后续"}],
- "timeline_events": [{"time_order": 1, "label": "第1章 标题", "chapter_ref": "第1章", "characters": ["角色A"]}]
+ "timeline_events": [{"time_order": 1, "label": "第1章 标题", "chapter_ref": "第1章", "characters": ["角色A"], "temporal_layer": "main|flashback|flashforward|parallel", "narrative_time": "原文时间表述", "relative_to": "相对事件", "source_evidence": "原文短句", "confidence": "high|medium|low"}]
 }
 
 只列明确出现的实体，不填充细节属性。不要输出无关解释。

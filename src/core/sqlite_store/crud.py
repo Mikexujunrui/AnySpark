@@ -513,6 +513,16 @@ class CrudMixin(_SQLiteBase):
     def add_timeline_event(self, event: TimelineEvent) -> TimelineEvent:
         self._ensure_project()
         now = datetime.now().isoformat()
+        timeline_data = {
+            "arc_id": event.arc_id,
+            "narrative_time": event.narrative_time,
+            "temporal_layer": event.temporal_layer,
+            "absolute_start": event.absolute_start,
+            "absolute_end": event.absolute_end,
+            "relative_to": event.relative_to,
+            "source_evidence": event.source_evidence,
+            "confidence": event.confidence,
+        }
         self._execute(
             """
             INSERT OR REPLACE INTO timeline_events
@@ -533,7 +543,7 @@ class CrudMixin(_SQLiteBase):
                 event.track_color,
                 event.time_label,
                 event.location_ref,
-                json.dumps({}, ensure_ascii=False),
+                json.dumps(timeline_data, ensure_ascii=False),
                 self.project_id,
                 now,
                 now,

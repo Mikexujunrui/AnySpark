@@ -16,6 +16,7 @@ from .materials import router as materials_router
 from .memory import router as memory_router
 from .narrative_logic import router as narrative_logic_router
 from .pacing import router as pacing_router
+from .plot_norms import router as plot_norms_router
 from .reviews import router as reviews_router
 from .scheduler import router as scheduler_router
 from .search import router as search_router
@@ -54,6 +55,7 @@ api_router.include_router(simulation_router)
 api_router.include_router(update_router)
 api_router.include_router(narrative_logic_router)
 api_router.include_router(pacing_router)
+api_router.include_router(plot_norms_router)
 api_router.include_router(inspiration_router)
 api_router.include_router(analysis_router)
 api_router.include_router(memory_router)

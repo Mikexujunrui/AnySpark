@@ -374,6 +374,17 @@ class _SQLiteBase:
 
     @staticmethod
     def _row_to_timeline_event(row: dict[str, Any]) -> TimelineEvent:
+        try:
+            raw_data = row["data"]
+        except (IndexError, KeyError):
+            raw_data = {}
+        if isinstance(raw_data, str):
+            try:
+                data = json.loads(raw_data)
+            except json.JSONDecodeError:
+                data = {}
+        else:
+            data = raw_data or {}
         return TimelineEvent(
             id=row["id"],
             time_point=row["time_point"],
@@ -386,6 +397,14 @@ class _SQLiteBase:
             track_color=row["track_color"],
             time_label=row["time_label"],
             location_ref=row["location_ref"],
+            arc_id=data.get("arc_id", ""),
+            narrative_time=data.get("narrative_time", ""),
+            temporal_layer=data.get("temporal_layer", "main"),
+            absolute_start=data.get("absolute_start", ""),
+            absolute_end=data.get("absolute_end", ""),
+            relative_to=data.get("relative_to", ""),
+            source_evidence=data.get("source_evidence", ""),
+            confidence=data.get("confidence", "low"),
         )
 
     # ════════════════════════════════════════════════════════════════

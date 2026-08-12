@@ -16,6 +16,8 @@ Archive layout (ZIP container)::
     volumes.json           — volume data (if any)
     location_map.json      — location map data (if any)
     timeline.json          — timeline data (if any)
+    continuity_cards.json — structured chapter hand-off state (if any)
+    plot_norms.json       — reusable plot constraints (if any)
 
 Usage::
 
@@ -40,7 +42,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .graph_store import GraphStore
-from .knowledge import Entity, Foreshadow, Relation, RelationType
+from .knowledge import Entity, Foreshadow, Relation, RelationType, TimelineEvent
 
 logger = logging.getLogger(__name__)
 
@@ -206,7 +208,9 @@ def _export_graph_to_sqlite(store: GraphStore, book_id: str, db_path: Path) -> N
             time_order REAL, description TEXT, chapter_ref TEXT,
             track_id TEXT, track_name TEXT, track_color TEXT,
             time_label TEXT, location_ref TEXT, arc_id TEXT,
-            narrative_time TEXT, book_id TEXT
+            narrative_time TEXT, temporal_layer TEXT,
+            absolute_start TEXT, absolute_end TEXT, relative_to TEXT,
+            source_evidence TEXT, confidence TEXT, book_id TEXT
         );
     """)
 
@@ -269,6 +273,37 @@ def _export_graph_to_sqlite(store: GraphStore, book_id: str, db_path: Path) -> N
     except Exception as exc:
         logger.warning("Failed to export foreshadows: %s", exc)
 
+    # Timeline events, including story-time evidence (not merely narrative order)
+    try:
+        for event in store.list_timeline_events():
+            conn.execute(
+                "INSERT OR REPLACE INTO timeline_events VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    event.id,
+                    event.time_point,
+                    event.label,
+                    event.time_order,
+                    event.description,
+                    event.chapter_ref,
+                    event.track_id,
+                    event.track_name,
+                    event.track_color,
+                    event.time_label,
+                    event.location_ref,
+                    event.arc_id,
+                    event.narrative_time,
+                    event.temporal_layer,
+                    event.absolute_start,
+                    event.absolute_end,
+                    event.relative_to,
+                    event.source_evidence,
+                    event.confidence,
+                    book_id,
+                ),
+            )
+    except Exception as exc:
+        logger.warning("Failed to export timeline: %s", exc)
+
     conn.commit()
     conn.close()
 
@@ -280,9 +315,13 @@ def _import_graph_from_sqlite(book_id: str, db_path: Path) -> dict:
     stats = {}
 
     conn = sqlite3.connect(str(db_path))
+    conn.row_factory = sqlite3.Row
 
     # Entities
-    rows = conn.execute("SELECT id, type, name, aliases, data FROM entities WHERE book_id=?", (book_id,)).fetchall()
+    # A project imported on another machine receives a fresh book id.  The
+    # archive itself contains exactly one project, so filtering by the target
+    # id would silently drop every graph row whose stored id is the source id.
+    rows = conn.execute("SELECT id, type, name, aliases, data FROM entities").fetchall()
     for row in rows:
         try:
             entity = Entity(
@@ -298,9 +337,7 @@ def _import_graph_from_sqlite(book_id: str, db_path: Path) -> dict:
     stats["entities"] = len(rows)
 
     # Relations
-    rows = conn.execute(
-        "SELECT id, from_entity, to_entity, type, data FROM relations WHERE book_id=?", (book_id,)
-    ).fetchall()
+    rows = conn.execute("SELECT id, from_entity, to_entity, type, data FROM relations").fetchall()
     for row in rows:
         try:
             rtype = RelationType(row[3])
@@ -324,8 +361,7 @@ def _import_graph_from_sqlite(book_id: str, db_path: Path) -> dict:
         "SELECT id, text, hint, expected_resolution, resolved, resolution_text, "
         "related_entities, related_events, source, status, plant_chapter, "
         "resolve_chapter, volume_ref, planned_resolve_arc, scheduled_chapter, "
-        "confidence, resolve_keywords FROM foreshadows WHERE book_id=?",
-        (book_id,),
+        "confidence, resolve_keywords FROM foreshadows",
     ).fetchall()
     for row in rows:
         try:
@@ -352,6 +388,42 @@ def _import_graph_from_sqlite(book_id: str, db_path: Path) -> dict:
         except Exception as exc:
             logger.warning("Failed to import foreshadow: %s", exc)
     stats["foreshadows"] = len(rows)
+
+    # Timeline (new fields are optional so old v1 archives remain importable)
+    timeline_columns = {row[1] for row in conn.execute("PRAGMA table_info(timeline_events)").fetchall()}
+    rows = conn.execute("SELECT * FROM timeline_events").fetchall()
+
+    def _timeline_value(row, key: str, default=""):
+        return row[key] if key in timeline_columns and row[key] is not None else default
+
+    for row in rows:
+        try:
+            store.add_timeline_event(
+                TimelineEvent(
+                    id=_timeline_value(row, "id"),
+                    time_point=_timeline_value(row, "time_point"),
+                    label=_timeline_value(row, "label"),
+                    time_order=_timeline_value(row, "time_order", 0),
+                    description=_timeline_value(row, "description"),
+                    chapter_ref=_timeline_value(row, "chapter_ref"),
+                    track_id=_timeline_value(row, "track_id", "main"),
+                    track_name=_timeline_value(row, "track_name", "主时间线"),
+                    track_color=_timeline_value(row, "track_color", "#22d3ee"),
+                    time_label=_timeline_value(row, "time_label"),
+                    location_ref=_timeline_value(row, "location_ref"),
+                    arc_id=_timeline_value(row, "arc_id"),
+                    narrative_time=_timeline_value(row, "narrative_time"),
+                    temporal_layer=_timeline_value(row, "temporal_layer", "main"),
+                    absolute_start=_timeline_value(row, "absolute_start"),
+                    absolute_end=_timeline_value(row, "absolute_end"),
+                    relative_to=_timeline_value(row, "relative_to"),
+                    source_evidence=_timeline_value(row, "source_evidence"),
+                    confidence=_timeline_value(row, "confidence", "low"),
+                )
+            )
+        except Exception as exc:
+            logger.warning("Failed to import timeline event: %s", exc)
+    stats["timeline_events"] = len(rows)
 
     conn.close()
     return stats
@@ -463,6 +535,26 @@ def _copy_json_data(book_id: str, tmp: Path) -> None:
     except Exception as exc:
         logger.warning("Failed to copy location map: %s", exc)
 
+    # Continuity hand-off cards
+    try:
+        cards = json_store.load_continuity_cards(book_id)
+        if cards.get("chapters"):
+            (tmp / "continuity_cards.json").write_text(
+                json.dumps(cards, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+    except Exception as exc:
+        logger.warning("Failed to copy continuity cards: %s", exc)
+
+    # Reusable plot norms
+    try:
+        norms = json_store.load_plot_norms(book_id)
+        if norms:
+            (tmp / "plot_norms.json").write_text(
+                json.dumps(norms, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+    except Exception as exc:
+        logger.warning("Failed to copy plot norms: %s", exc)
+
 
 def _restore_json_data(book_id: str, tmp: Path) -> int:
     """Restore JSON data files from the archive into the project data directory."""
@@ -560,5 +652,19 @@ def _restore_json_data(book_id: str, tmp: Path) -> int:
             json_store.save_location_map(book_id, loc_map)
         except Exception as exc:
             logger.warning("Failed to restore location map: %s", exc)
+
+    continuity_file = tmp / "continuity_cards.json"
+    if continuity_file.exists():
+        try:
+            json_store.save_continuity_cards(book_id, json.loads(continuity_file.read_text(encoding="utf-8")))
+        except Exception as exc:
+            logger.warning("Failed to restore continuity cards: %s", exc)
+
+    plot_norms_file = tmp / "plot_norms.json"
+    if plot_norms_file.exists():
+        try:
+            json_store.save_plot_norms(book_id, json.loads(plot_norms_file.read_text(encoding="utf-8")))
+        except Exception as exc:
+            logger.warning("Failed to restore plot norms: %s", exc)
 
     return chapter_count

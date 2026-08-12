@@ -43,6 +43,16 @@ interface EmotionalCurveData {
   emotional_volatility: number
 }
 
+interface ReferenceAnalysisJob {
+  id?: string
+  status: 'none' | 'queued' | 'running' | 'completed' | 'failed' | 'interrupted'
+  progress: number
+  message?: string
+  error?: string
+  source_chunks?: { index: number; chapter_start: number; chapter_end: number; status: string }[]
+  steps?: { name: string; status: string; error?: string }[]
+}
+
 export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
   const [references, setReferences] = useState<RefBook[]>([])
   const [allBooks, setAllBooks] = useState<RefBook[]>([])
@@ -57,6 +67,7 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
   const [deepStyleData, setDeepStyleData] = useState<Record<string, DeepStyleData> | null>(null)
   const [emotionalCurveData, setEmotionalCurveData] = useState<EmotionalCurveData | null>(null)
   const [analyzingDeep, setAnalyzingDeep] = useState<string | null>(null)
+  const [analysisJobs, setAnalysisJobs] = useState<Record<string, ReferenceAnalysisJob>>({})
 
   const loadData = useCallback(async () => {
     setLoading(true)
@@ -92,6 +103,60 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
   }, [bookId])
 
   useEffect(() => { loadData() }, [loadData])
+
+  useEffect(() => {
+    const active = Object.entries(analysisJobs).filter(([, job]) => job.id && ['queued', 'running'].includes(job.status))
+    if (active.length === 0) return
+    const timer = window.setInterval(async () => {
+      for (const [refId, job] of active) {
+        try {
+          const response = await fetch(`/api/books/${bookId}/analyses/jobs/${job.id}`)
+          if (!response.ok) continue
+          const next = await response.json()
+          setAnalysisJobs(current => ({ ...current, [refId]: next }))
+          if (next.status === 'completed') loadData()
+        } catch { /* keep the last visible checkpoint */ }
+      }
+    }, 1200)
+    return () => window.clearInterval(timer)
+  }, [analysisJobs, bookId, loadData])
+
+  async function loadLatestJob(refBookId: string) {
+    try {
+      const response = await fetch(`/api/books/${bookId}/analyses/jobs/latest?ref_book_id=${encodeURIComponent(refBookId)}`)
+      if (response.ok) {
+        const job = await response.json()
+        setAnalysisJobs(current => ({ ...current, [refBookId]: job }))
+      }
+    } catch { /* no prior job */ }
+  }
+
+  async function startAnalysisJob(refBookId: string, force = false) {
+    try {
+      const response = await fetch(`/api/books/${bookId}/analyses/jobs?ref_book_id=${encodeURIComponent(refBookId)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chunk_size: 20, force }),
+      })
+      if (!response.ok) throw new Error(await response.text())
+      const job = await response.json()
+      setAnalysisJobs(current => ({ ...current, [refBookId]: job }))
+      showToast('参考书分析已转入后台，可离开本页面', 'success')
+    } catch (error) {
+      showToast(`任务启动失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    }
+  }
+
+  async function retryAnalysisJob(refBookId: string) {
+    const job = analysisJobs[refBookId]
+    if (!job?.id) return startAnalysisJob(refBookId)
+    try {
+      const response = await fetch(`/api/books/${bookId}/analyses/jobs/${job.id}/retry`, { method: 'POST' })
+      if (!response.ok) throw new Error(await response.text())
+      const resumed = await response.json()
+      setAnalysisJobs(current => ({ ...current, [refBookId]: resumed }))
+    } catch (error) {
+      showToast(`恢复失败: ${error instanceof Error ? error.message : '未知错误'}`, 'error')
+    }
+  }
 
   async function addReference(refBookId: string) {
     const refIds = references.map(r => r.id).concat(refBookId)
@@ -232,6 +297,7 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
       setDeepStyleData(null)
       setEmotionalCurveData(null)
       loadCachedAnalysis(refId, 'structure')
+      loadLatestJob(refId)
     }
   }
 
@@ -284,6 +350,7 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
             const status = analysisStatus[book.id] || {}
             const isExpanded = expandedRef === book.id
             const isAnalyzing = analyzingRef === book.id
+            const job = analysisJobs[book.id]
             return (
               <div key={book.id}
                 className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden hover:border-zinc-700 transition-colors">
@@ -329,6 +396,31 @@ export default function ReferenceBooksPanel({ bookId }: { bookId: string }) {
 
                   {isExpanded && (
                     <div className="mt-4 pt-4 border-t border-zinc-800 space-y-4">
+                      <div className="rounded-xl border border-sky-900/50 bg-sky-950/10 p-3">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-medium text-sky-300">后台分块分析</p>
+                            <p className="mt-0.5 text-[10px] text-zinc-500">每 20 章建立输入检查点，逐维度缓存；关闭页面后仍继续，失败可从断点重试。</p>
+                          </div>
+                          {!job || ['none', 'completed'].includes(job.status) ? (
+                            <div className="flex gap-2">
+                              <button onClick={() => startAnalysisJob(book.id, false)} className="rounded-lg bg-sky-800 px-3 py-1.5 text-xs text-sky-100 hover:bg-sky-700">{job?.status === 'completed' ? '检查缓存并运行' : '分析全部'}</button>
+                              {job?.status === 'completed' && <button onClick={() => startAnalysisJob(book.id, true)} className="rounded-lg border border-zinc-700 px-2 py-1.5 text-[10px] text-zinc-400 hover:text-zinc-200">强制重跑</button>}
+                            </div>
+                          ) : ['failed', 'interrupted'].includes(job.status) ? (
+                            <button onClick={() => retryAnalysisJob(book.id)} className="rounded-lg bg-amber-800 px-3 py-1.5 text-xs text-amber-100 hover:bg-amber-700">从检查点继续</button>
+                          ) : <span className="text-[10px] text-sky-400">后台运行中</span>}
+                        </div>
+                        {job && job.status !== 'none' && (
+                          <div className="mt-3">
+                            <div className="h-1.5 overflow-hidden rounded-full bg-zinc-800"><div className={`h-full transition-all ${job.status === 'failed' ? 'bg-red-500' : job.status === 'completed' ? 'bg-emerald-500' : 'bg-sky-500'}`} style={{ width: `${Math.max(2, job.progress || 0)}%` }} /></div>
+                            <div className="mt-1.5 flex justify-between text-[10px] text-zinc-500"><span>{job.message || job.status}</span><span>{job.progress || 0}%</span></div>
+                            {job.error && <p className="mt-1 text-[10px] text-red-400 break-words">{job.error}</p>}
+                            {job.steps && <div className="mt-2 flex flex-wrap gap-1">{job.steps.map(step => <span key={step.name} className={`rounded px-1.5 py-0.5 text-[9px] ${step.status === 'completed' || step.status === 'cached' ? 'bg-emerald-950 text-emerald-400' : step.status === 'failed' ? 'bg-red-950 text-red-400' : step.status === 'running' ? 'bg-sky-950 text-sky-300' : 'bg-zinc-800 text-zinc-600'}`}>{step.name}</span>)}</div>}
+                          </div>
+                        )}
+                      </div>
+
                       <div className="flex gap-2 flex-wrap">
                         <button
                           onClick={() => runAnalysis(book.id, 'structure')}

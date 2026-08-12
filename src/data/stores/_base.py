@@ -108,6 +108,9 @@ class BaseStore:
     def _plot_chain_file(self, book_id: str) -> Path:
         return DATA_DIR / f"plot_chain_{self._safe_id(book_id)}.json"
 
+    def _plot_norms_file(self, book_id: str) -> Path:
+        return DATA_DIR / f"plot_norms_{self._safe_id(book_id)}.json"
+
     def _tasks_file(self, book_id: str) -> Path:
         return DATA_DIR / f"tasks_{self._safe_id(book_id)}.json"
 

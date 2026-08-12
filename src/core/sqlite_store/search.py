@@ -80,9 +80,23 @@ class SearchMixin(AnalyticsMixin):
         tracks: dict[str, dict] = {}
         result_events = []
         for evt in events:
-            tid = evt.track_id or "main"
+            layer = evt.temporal_layer or "main"
+            layer_defaults = {
+                "main": ("main", "主时间线", "#22d3ee"),
+                "flashback": ("time-flashback", "回忆 / 过去", "#a78bfa"),
+                "flashforward": ("time-flashforward", "预叙 / 未来", "#f59e0b"),
+                "parallel": ("time-parallel", "同期支线", "#34d399"),
+            }
+            default_id, default_name, default_color = layer_defaults.get(layer, layer_defaults["main"])
+            tid = evt.track_id or default_id
+            if layer != "main" and tid == "main":
+                tid = default_id
             if tid not in tracks:
-                tracks[tid] = {"id": tid, "name": evt.track_name or "主线", "color": evt.track_color or "#22d3ee"}
+                tracks[tid] = {
+                    "id": tid,
+                    "name": evt.track_name if evt.track_name and evt.track_name != "主线" else default_name,
+                    "color": evt.track_color if evt.track_color and layer == "main" else default_color,
+                }
             # Get involved character names
             involved = self.get_timeline_involved_entities(evt.id)
             char_names = []
@@ -100,6 +114,14 @@ class SearchMixin(AnalyticsMixin):
                     "chapter_ref": evt.chapter_ref,
                     "order": evt.time_order,
                     "characters": char_names,
+                    "location_ref": evt.location_ref,
+                    "narrative_time": evt.narrative_time,
+                    "temporal_layer": layer,
+                    "absolute_start": evt.absolute_start,
+                    "absolute_end": evt.absolute_end,
+                    "relative_to": evt.relative_to,
+                    "source_evidence": evt.source_evidence,
+                    "confidence": evt.confidence,
                 }
             )
 

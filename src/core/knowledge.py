@@ -177,3 +177,9 @@ class TimelineEvent:
     location_ref: str = ""  # location name where event occurred
     arc_id: str = ""  # narrative arc this event belongs to
     narrative_time: str = ""  # narrative time description (not chapter-based)
+    temporal_layer: str = "main"  # main | flashback | flashforward | parallel
+    absolute_start: str = ""  # explicit story-world start time; empty means unknown
+    absolute_end: str = ""  # explicit story-world end time; empty means unknown
+    relative_to: str = ""  # source event/chapter for relative markers such as “五日前”
+    source_evidence: str = ""  # short quote supporting the time placement
+    confidence: str = "low"  # high | medium | low

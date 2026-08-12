@@ -110,6 +110,7 @@ class BookStoreMixin(SessionStoreMixin):
                 self._material_subs_file,
                 self._tasks_file,
                 self._plot_chain_file,
+                self._plot_norms_file,
             ):
                 f = getter(book_id)
                 if f.exists():

@@ -427,7 +427,7 @@ async def generate_continuity_cards(book_id: str):
         if str(ch_num) in existing.get("chapters", {}):
             continue
         loop = asyncio.get_running_loop()
-        card = await _generate_continuity_card(loop, content, ch_num, title)
+        card = await _generate_continuity_card(loop, content, ch_num, title, book_id)
         if card:
             json_store.save_continuity_card(book_id, ch_num, card)
             generated += 1

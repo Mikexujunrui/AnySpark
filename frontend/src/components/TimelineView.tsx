@@ -239,6 +239,7 @@ export default function TimelineView({ bookId }) {
 
   const totalTracks = (data?.tracks || []).length
   const totalEvents = (data?.events || []).length
+  const chapterRanges = data?.chapter_ranges || []
 
   return (
     <div className="h-full flex flex-col">
@@ -251,6 +252,7 @@ export default function TimelineView({ bookId }) {
           <span>{totalTracks} 轨道</span>
           <span className="text-zinc-700">·</span>
           <span>{totalEvents} 事件</span>
+          {chapterRanges.length > 0 && <><span className="text-zinc-700">·</span><span>{chapterRanges.length} 章时间范围</span></>}
           <span className="text-zinc-700">·</span>
           <span>滚轮缩放 · 悬浮详情</span>
         </div>
@@ -266,6 +268,24 @@ export default function TimelineView({ bookId }) {
           <span className="text-zinc-500">知识库 4D 图谱的时间侧面——点击事件同步时间轴到全局</span>
         </div>
       </div>
+
+      {chapterRanges.length > 0 && (
+        <div className="shrink-0 border-b border-zinc-800 bg-zinc-950/80 px-4 py-2 overflow-x-auto">
+          <div className="flex gap-2 min-w-max" aria-label="章节主时间范围">
+            {chapterRanges.map((range: any) => (
+              <div key={range.chapter_index} className={`w-44 rounded-lg border px-3 py-2 ${range.conflict_count ? 'border-red-800/70 bg-red-950/20' : 'border-zinc-800 bg-zinc-900/60'}`}>
+                <div className="flex items-center justify-between text-[10px]">
+                  <span className="font-medium text-zinc-300">第{range.chapter_index}章</span>
+                  <span className={range.confidence === 'high' ? 'text-emerald-400' : 'text-zinc-600'}>{range.confidence || 'low'}</span>
+                </div>
+                <p className="mt-1 truncate text-[10px] text-cyan-400">{range.start || '未知'} → {range.end || '未知'}</p>
+                <p className="truncate text-[9px] text-zinc-600">{range.elapsed || range.temporal_layer || 'main'}</p>
+                {range.conflict_count > 0 && <p className="mt-1 text-[9px] text-red-400">{range.conflict_count} 项有证据的交接冲突</p>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 flex">
         <div ref={containerRef} className="flex-1 overflow-auto bg-zinc-950/60 relative">
@@ -299,6 +319,21 @@ export default function TimelineView({ bookId }) {
               )}
               {selected.chapter_ref && (
                 <p className="text-zinc-500">章节: <span className="text-zinc-300">{selected.chapter_ref}</span></p>
+              )}
+              {selected.temporal_layer && (
+                <p className="text-zinc-500">时间层: <span className="text-zinc-300">{selected.temporal_layer}</span></p>
+              )}
+              {(selected.absolute_start || selected.absolute_end) && (
+                <p className="text-zinc-500">绝对时间: <span className="text-zinc-300">{selected.absolute_start || '?'} → {selected.absolute_end || '?'}</span></p>
+              )}
+              {selected.relative_to && (
+                <p className="text-zinc-500">相对于: <span className="text-zinc-300">{selected.relative_to}</span></p>
+              )}
+              {selected.location_ref && (
+                <p className="text-zinc-500">地点: <span className="text-zinc-300">{selected.location_ref}</span></p>
+              )}
+              {selected.source_evidence && (
+                <p className="rounded bg-zinc-950/60 p-2 text-zinc-400">证据：“{selected.source_evidence}”</p>
               )}
               {selected.characters?.length > 0 && (
                 <p className="text-zinc-500">角色: <span className="text-zinc-300">{selected.characters.join(', ')}</span></p>
