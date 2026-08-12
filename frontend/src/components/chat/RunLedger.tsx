@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import Icon from '../ui/Icon'
+import { estimateCost, formatCost } from '../../lib/cost'
 
 /**
  * @param {{ metrics: { llm_calls?: number, tool_calls?: number, rounds?: number, compactions?: number, finish_reason?: string, hallucination_hits?: Record<string, number>, drift_corrections?: number, subagent_spawned?: number, tokens?: { prompt_tokens?: number, completion_tokens?: number, total_tokens?: number } } | null }} props
@@ -15,6 +16,8 @@ export default function RunLedger({ metrics }) {
     .sort(([,a], [,b]) => b - a)
     .slice(0, 5)
   const hasToolChain = topTools.length > 0
+  // S100：成本估算（按模型单价 × token 消耗）
+  const cost = estimateCost(metrics.model as string | undefined, (metrics.tokens as any) || undefined)
 
   const hallucinationCount: number = metrics.hallucination_hits
     ? (Object.values(metrics.hallucination_hits) as number[]).reduce((a: number, b) => a + b, 0)
@@ -48,6 +51,12 @@ export default function RunLedger({ metrics }) {
               <MetricBadge label="tokens" value={formatTokens((metrics.tokens as any).total_tokens)} />
             </>
           ) : null}
+          {cost > 0 && (
+            <>
+              <span className="text-zinc-700">|</span>
+              <span className="text-amber-400/80">{formatCost(cost)}</span>
+            </>
+          )}
           {hasIssues && (
             <>
               <span className="text-zinc-700">|</span>
@@ -74,6 +83,7 @@ export default function RunLedger({ metrics }) {
           <MetricTile label="工具调用" value={`${metrics.tool_calls ?? 0}${hasToolChain ? ' (' + topTools.length + '种)' : ''}`} />
           <MetricTile label="总轮次" value={metrics.rounds ?? 0} />
           <MetricTile label="Token 消耗" value={(metrics.tokens as any)?.total_tokens ? formatTokens((metrics.tokens as any).total_tokens) : 0} />
+          <MetricTile label="估算成本" value={cost > 0 ? formatCost(cost) : 0} />
           <MetricTile label="上下文压缩" value={metrics.compactions ?? 0} />
           <MetricTile label="漂移纠正" value={metrics.drift_corrections ?? 0} />
           <MetricTile label="子Agent" value={metrics.subagent_spawned ?? 0} />

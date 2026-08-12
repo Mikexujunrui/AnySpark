@@ -78,7 +78,7 @@ def is_retryable(exc: Exception) -> bool:
 def retry_with_backoff(
     fn: Callable[[], T],
     retries: int = 3,
-    base: float = 1.0,
+    base: float = 2.0,
     max_wait: float = 10.0,
     on_retry: Callable[[int, Exception], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
@@ -135,7 +135,7 @@ class RetryingModel:
         self,
         model: Model,
         retries: int = 3,
-        base: float = 1.0,
+        base: float = 2.0,
         max_wait: float = 10.0,
         on_retry: Callable[[int, Exception], None] | None = None,
     ) -> None:
