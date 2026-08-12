@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import sys
 from types import SimpleNamespace
 
 
@@ -129,9 +130,12 @@ def test_reference_job_checkpoints_chunks_and_completes(tmp_data_dir, monkeypatc
     assert all(step["status"] == "completed" for step in result["steps"])
 
 
-def test_desktop_native_export_returns_exact_path(tmp_data_dir, tmp_path):
+def test_desktop_native_export_returns_exact_path(tmp_data_dir, tmp_path, monkeypatch):
     from data.json_store import json_store
     from desktop_launcher import DesktopApi
+
+    # Backend CI intentionally omits the optional desktop GUI dependency.
+    monkeypatch.setitem(sys.modules, "webview", None)
 
     book = json_store.create_book("导出路径测试")
     json_store.add_chapter(book["id"], "第一章", "这是一段正文。")

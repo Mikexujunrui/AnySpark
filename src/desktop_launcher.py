@@ -41,6 +41,11 @@ ACTIVATE_URL = f"{APP_URL}/api/desktop/activate"
 LOCK_PATH = DATA_DIR.parent / ".anyspark.lock"
 WEBVIEW_STORAGE = DATA_DIR.parent / "webview"
 
+# pywebview exposes SAVE as IntEnum value 30.  Keep the trusted export bridge
+# usable in headless/backend environments where the optional desktop runtime is
+# deliberately not installed; packaged desktop builds still use the real enum.
+_FALLBACK_SAVE_DIALOG = 30
+
 STARTUP_HTML = """<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -189,11 +194,17 @@ class DesktopApi:
     def export_book(self, book_id: str, export_format: str) -> dict:
         """Show the OS save panel, write the export, and return its exact path."""
 
-        import webview
-
         from core.archive import export_spark
         from core.exporter import export_docx, export_epub, export_txt
         from data.json_store import json_store
+
+        save_dialog: Any
+        try:
+            import webview
+
+            save_dialog = webview.FileDialog.SAVE
+        except ModuleNotFoundError:
+            save_dialog = _FALLBACK_SAVE_DIALOG
 
         allowed = {"txt", "docx", "epub", "spark"}
         if export_format not in allowed:
@@ -207,7 +218,7 @@ class DesktopApi:
             safe_title = re.sub(r'[\\/:*?"<>|]+', "_", title).strip(" .") or "未命名"
             filename = f"{safe_title}.{export_format}"
             selected = self.controller.window.create_file_dialog(
-                webview.FileDialog.SAVE,
+                save_dialog,
                 save_filename=filename,
             )
             if not selected:
