@@ -466,9 +466,11 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         console.log(`${DIAG_PREFIX} ChatPanel — 历史消息解析完成 | isArray=%s | count=%d | type=%s`,
           isArray, count, typeof data)
         if (isArray && count > 0) {
+          // S107b：后端返回 {role, content}，前端渲染用 {role, text}——映射字段（历史恢复空气泡根因）
+          const mapped = data.map((m: any) => ({ ...m, text: (m.content ?? m.text ?? '') }))
           // Filter autopilot status messages (user text starts with "[autopilot]")
           // These are internal status records, not real user messages.
-          const filtered = filterAutopilotNoise(data)
+          const filtered = filterAutopilotNoise(mapped)
           if (filtered.length > 0) setMessages(filtered)
         }
         setLoaded(true)
