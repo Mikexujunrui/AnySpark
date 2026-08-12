@@ -79,9 +79,9 @@ class Agent:
     store: ConversationStore = field(default_factory=InMemoryConversationStore)
     events: EventEmitter = field(default_factory=EventEmitter)
     system_prompt: str = ""
-    max_tool_iterations: int = (
-        16  # 防无限循环硬上限（S21：读2章+写留足空间；pi 用智能终止替代硬上限）
-    )
+    # 防无限循环硬上限（S108：16→32——records 实测 6% 会话撞顶且均为递进式
+    # 真实任务非死循环；智能终止/取消仍是防死循环主力，此为最后防线）
+    max_tool_iterations: int = 32
     context_compressor: ContextCompressor | None = None  # 可选：token 预算压缩（app 注入）
     # S26：压缩持久化回写（pi compaction entry 语义）——压缩后的上下文写回 store，
     # 跨重启/续聊用压缩后上下文，store 不再无限膨胀。默认关（测试不干扰），app 装配开启。
