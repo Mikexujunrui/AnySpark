@@ -119,6 +119,32 @@ def test_max_iterations_guard() -> None:
     assert "达到最大工具迭代次数" in turn.text
 
 
+def test_loop_default_no_hard_limit_but_repeat_detection() -> None:
+    """S108：默认无硬上限（对齐 pi）；同参数重复调用被智能停止拦截（非硬限）。"""
+    from anyspark.core import ToolCall
+
+    # 同参数反复调用（真死循环模式）——重复检测应在 ~6 轮拦截
+    same = ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2})])
+    agent = _make_agent(ScriptedModel([same] * 100))
+    assert agent.max_tool_iterations is None  # 默认无硬上限
+    turn = agent.run("死循环测试")
+    assert "重复的工具调用" in turn.text
+    assert turn.error is not None
+
+    # 递进式任务（参数变化）不受限——20 轮后正常终答
+    from anyspark.core import ToolCall as TC
+
+    outputs: list[ModelOutput] = [
+        ModelOutput(tool_calls=[TC(name="add", arguments={"a": i, "b": i})]) for i in range(20)
+    ]
+    outputs.append(_no_tool("完成"))
+    agent2 = _make_agent(ScriptedModel(outputs))
+    turn2 = agent2.run("递进任务")
+    assert turn2.error is None
+    assert turn2.text == "完成"
+    assert len(agent2._call_signatures) == 20  # 20 轮都记录了但未触发重复检测
+
+
 def test_system_prompt_prepended_when_set() -> None:
     scripted = ScriptedModel([_no_tool("ok")])
     agent = _make_agent(scripted)

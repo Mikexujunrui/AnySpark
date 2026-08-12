@@ -14,6 +14,7 @@ anyspark.core.loop — Agent 循环（机制 1 的过程控制，硬编码）。
 
 from __future__ import annotations
 
+import json
 import logging
 import queue
 import threading
@@ -79,9 +80,9 @@ class Agent:
     store: ConversationStore = field(default_factory=InMemoryConversationStore)
     events: EventEmitter = field(default_factory=EventEmitter)
     system_prompt: str = ""
-    # 防无限循环硬上限（S108：16→32——records 实测 6% 会话撞顶且均为递进式
-    # 真实任务非死循环；智能终止/取消仍是防死循环主力，此为最后防线）
-    max_tool_iterations: int = 32
+    # 工具循环上限（S108：对齐 pi 无硬上限——None=不限制，靠智能终止/取消/
+    # 截断防护/重复检测退出；设数值仅作保守兜底，正常不触发）
+    max_tool_iterations: int | None = None
     context_compressor: ContextCompressor | None = None  # 可选：token 预算压缩（app 注入）
     # S26：压缩持久化回写（pi compaction entry 语义）——压缩后的上下文写回 store，
     # 跨重启/续聊用压缩后上下文，store 不再无限膨胀。默认关（测试不干扰），app 装配开启。
@@ -93,6 +94,8 @@ class Agent:
     after_tool_call: Callable[[ToolCall, ToolResult], ToolResult] | None = None
     # S104：工具执行耗时缓冲（name→ms 队列，record 事件消费——排查性能/卡死用）
     _tool_ms: list[tuple[str, int]] = field(default_factory=list, repr=False)
+    # S108：最近工具调用签名（重复检测——连续 N 轮相同判定死循环）
+    _call_signatures: list[str] = field(default_factory=list, repr=False)
     # S25：运行中插话/追问队列（线程安全，pi steering/followUp 移植）
     steer_queue: queue.SimpleQueue[Message] = field(default_factory=queue.SimpleQueue)
     followup_queue: queue.SimpleQueue[Message] = field(default_factory=queue.SimpleQueue)
@@ -145,7 +148,9 @@ class Agent:
         self._set_cancelled_hook(model=self.model, token=token)
 
         turn_index = 0
-        for _ in range(self.max_tool_iterations):
+        while True:
+            if self.max_tool_iterations is not None and turn_index >= self.max_tool_iterations:
+                break  # 保守兜底（默认无上限，不触发）
             turn_index += 1
             # 协作式取消检查（S21）：用户中断则提前终止。
             # S22（D5）：终止前 append assistant 消息——上下文永远平衡（user, assistant 成对），
@@ -246,6 +251,24 @@ class Agent:
                 self.events.emit(Event(type="text", payload={"content": output.text}))
                 self.events.emit(Event(type="done", payload={}))
                 return Turn(text=output.text, tool_calls=executed, tool_results=results)
+
+            # S108：重复调用检测（智能停止，非硬限——对齐 pi shouldStopAfterTurn 钩子位）：
+            # 连续 6 轮工具调用签名完全相同（name+参数）→ 判定死循环，停止报错。
+            # 递进式真实任务（每轮不同参数）永不误伤；真死循环（同一调用反复）拦截。
+            if output.tool_calls:
+                sig = json.dumps(
+                    sorted(
+                        (c.name, json.dumps(c.arguments, sort_keys=True)) for c in output.tool_calls
+                    ),
+                    ensure_ascii=False,
+                )
+                self._call_signatures.append(sig)
+                if len(self._call_signatures) >= 6 and len(set(self._call_signatures[-6:])) == 1:
+                    msg = "检测到连续重复的工具调用（可能死循环），已终止。"
+                    store.append(conversation_id, Message(role="assistant", content=msg))
+                    self.events.emit(Event(type="text", payload={"content": msg}))
+                    self.events.emit(Event(type="done", payload={}))
+                    return Turn(text=msg, tool_calls=executed, tool_results=results, error=msg)
 
             # 有工具调用：并行执行并把结果回填（S21 移植 pi 的 executeToolCallsParallel；
             # ThreadPoolExecutor 保持输入顺序，写工具内部有锁保证线程安全）

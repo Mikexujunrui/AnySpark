@@ -2913,3 +2913,24 @@ UnboundLocalError（Python 函数作用域规则）——删局部 import 保留
 给足复杂任务空间；智能终止/取消仍是防死循环主力，硬上限仅最后防线）。
 
 **验证**：14 passed + ruff 全绿。
+
+## S108b 对齐 pi：去硬上限 + 重复检测智能停止（已完成 ✅，修正 S108 的 16→32）
+
+**背景（主人定调）**：按 pi 的做法而不是硬防线——pi 的 agent-loop.js **无迭代硬上限**，
+防死循环靠：① shouldTerminateToolBatch 智能终止（工具声明 done 即停，S27 已移植）
+② stopReason=error|aborted ③ length 截断防护（S22 D3）④ shouldStopAfterTurn 钩子
+⑤ 用户取消。AnySpark 移植了 ①②③⑤，缺 ④、多余硬上限。
+
+**改动**（core/loop.py）：
+- max_tool_iterations 默认 **None（无硬上限）**，设值仅作保守兜底（不触发）
+- 循环 for-range → while True + 可选上限检查
+- **重复调用检测**（对齐 pi shouldStopAfterTurn 钩子位）：连续 6 轮工具调用签名
+  完全相同（name+参数）→ 判定死循环停止报错——智能停止非硬限：递进式任务
+  （每轮不同参数）永不误伤，真死循环拦截
+- 前端 ProgressIndicator：maxIterations=null 时显示"第 N 轮"不带百分比
+
+**验证**：死循环 5 轮被拦截（error 明确）；递进任务跑满 20 轮（超旧 16 上限）
+正常终答；core/app 37 测试 passed + 前端 tsc/build 全绿。
+
+**边界说明**：完全无上限后，模型故障（持续产出非重复工具调用且不终答）靠用户
+取消兜底（前端 stop 按钮 + 后端协作式取消）——与 pi 一致，非硬防线。
