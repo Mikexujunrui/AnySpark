@@ -37,7 +37,7 @@ from anyspark.server.schemas import (
     _now_iso_rec,
     _sse_frame,
 )
-from anyspark.server.stats import compute_stats
+from anyspark.server.stats import compute_stats, compute_writing_stats
 
 # S99 第二步：单连接接力执行的最大轮数（防队列无限消费失控；超限剩余队列保留）
 MAX_QUEUE_ROUNDS = 20
@@ -154,6 +154,11 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
     def stats() -> dict[str, Any]:
         """T7 验证指标（代理指标，纯 SQL 统计现有表，零新表）：修改率/提问率/完成率。"""
         return compute_stats(deps.db_path)
+
+    @router.get("/api/stats/writing")
+    def stats_writing() -> dict[str, Any]:
+        """S101：作者视角写作统计（纯 SQL 读现有表）：趋势/连续写作/版本质量/大纲完成度/线进度。"""
+        return compute_writing_stats(deps.db_path)
 
     @router.post("/api/chat", response_model=ChatResponse)
     def chat(req: ChatRequest) -> ChatResponse:
