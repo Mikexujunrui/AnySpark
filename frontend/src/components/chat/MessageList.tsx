@@ -10,7 +10,8 @@ import Icon from '../ui/Icon'
 
 const MemoizedMarkdown = memo(function MarkdownContent({ text }: { text: string }) {
   return (
-    <div className="markdown-body min-w-0 whitespace-pre-wrap break-words [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_code]:break-words">
+    // S80：去 whitespace-pre-wrap（它保留 markdown 渲染后 HTML 的换行，与段落间距叠加成双换行/大间隙）
+    <div className="markdown-body min-w-0 break-words [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_code]:break-words [&>p]:my-0.5 [&_li]:my-0">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
     </div>
   )
@@ -216,7 +217,7 @@ export default function MessageList({
             {msg.role === 'user' && (
               <span className="text-[10px] text-zinc-500 mb-1 mr-1">你</span>
             )}
-            <div className={`min-w-0 max-w-full rounded-xl px-4 py-3 text-sm leading-relaxed break-words [overflow-wrap:anywhere] ${
+            <div className={`min-w-0 max-w-full rounded-xl px-4 py-3 text-sm leading-normal break-words [overflow-wrap:anywhere] ${
               msg.autopilot
                 ? 'bg-purple-900/20 border border-purple-700/40 text-zinc-200'
                 : msg.role === 'user'

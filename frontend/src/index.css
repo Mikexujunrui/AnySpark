@@ -154,7 +154,7 @@ html, body {
 .markdown-body h1 { font-size: 1.25em; font-weight: 700; margin: 0.8em 0 0.4em; color: var(--color-content); }
 .markdown-body h2 { font-size: 1.125em; font-weight: 600; margin: 0.7em 0 0.35em; color: var(--color-content); }
 .markdown-body h3 { font-size: 1em; font-weight: 600; margin: 0.6em 0 0.3em; color: var(--color-zinc-300); }
-.markdown-body p { margin: 0.4em 0; }
+.markdown-body p { margin: 0.25em 0; }
 .markdown-body ul, .markdown-body ol { padding-left: 1.5em; margin: 0.4em 0; }
 .markdown-body li { margin: 0.2em 0; }
 .markdown-body code { background: var(--color-surface-raised); padding: 0.15em 0.4em; border-radius: 4px; font-size: 0.875em; color: var(--color-content-muted); }
