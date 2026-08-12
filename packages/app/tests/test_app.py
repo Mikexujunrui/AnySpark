@@ -210,6 +210,8 @@ def test_chat_stream_done_payload_parts() -> None:
     assert usage.get("total_tokens") == 2500, f"token_usage 未正确累加: {usage}"
     assert usage.get("prompt_tokens") == 2000
     assert usage.get("completion_tokens") == 500
+    # S100：done 帧带模型名（前端按模型定价估算成本）
+    assert parsed.get("model") == "thinking-model"
 
 
 def test_chat_stream_error_frame() -> None:
