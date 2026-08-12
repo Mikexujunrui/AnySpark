@@ -42,3 +42,32 @@ export function deleteSkill(id: string): Promise<void> {
     method: "DELETE",
   });
 }
+
+// ── S103 技能草稿（书库/资料提炼 → 人工确认转正） ──
+export interface SkillDraft {
+  id: string;
+  name: string;
+  description?: string;
+  content: string;
+  example?: string;
+  tags?: string;
+  target?: string;
+  source?: string;
+  created_at: string;
+}
+
+export function listSkillDrafts(): Promise<SkillDraft[]> {
+  return apiFetch<SkillDraft[]>("/api/skills/drafts");
+}
+
+export function promoteSkillDraft(draftId: string): Promise<Skill> {
+  return apiFetch<Skill>(`/api/skills/drafts/${draftId}/promote`, {
+    method: "POST",
+  });
+}
+
+export function deleteSkillDraft(draftId: string): Promise<void> {
+  return apiFetch<void>(`/api/skills/drafts/${draftId}`, {
+    method: "DELETE",
+  });
+}

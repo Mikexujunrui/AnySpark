@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import CreateBookModal from './CreateBookModal'
 import MaterialsPanel from './MaterialsPanel'
+import LibraryShelfPanel from './LibraryShelfPanel'
 import WorkflowPoolPanel from './WorkflowPoolPanel'
 import StatsDashboard from './StatsDashboard'
 import SettingsModal from './SettingsModal'
@@ -187,6 +188,16 @@ export default function Bookshelf() {
             <Icon name="folder" size={16} /> 资料库
           </button>
           <button
+            onClick={() => setTab('library')}
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
+              tab === 'library'
+                ? 'text-zinc-200 border-accent'
+                : 'text-zinc-500 border-transparent hover:text-zinc-400'
+            }`}
+          >
+            <Icon name="book" size={16} /> 书库
+          </button>
+          <button
             onClick={() => setTab('workflows')}
             className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
               tab === 'workflows'
@@ -215,6 +226,8 @@ export default function Bookshelf() {
         <WorkflowPoolPanel />
       ) : tab === 'materials' ? (
         <MaterialsPanel bookId="global" />
+      ) : tab === 'library' ? (
+        <LibraryShelfPanel />
       ) : (
         <div className="max-w-6xl mx-auto px-6 py-10">
           <header className="flex items-center justify-between mb-8">

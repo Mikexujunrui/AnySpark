@@ -543,6 +543,12 @@ class TemplateGenerateIn(BaseModel):
     max_items: int = 5
 
 
+class LibraryRefineIn(BaseModel):
+    """S103：书库 → skill 提炼（拆书模式）——hint 可选指引。"""
+
+    hint: str = ""
+
+
 class ChapterPatchIn(BaseModel):
     """S44：定点编辑操作列表。"""
 

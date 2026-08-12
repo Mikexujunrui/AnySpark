@@ -38,6 +38,14 @@ export async function deleteLibraryBook(bookId: string): Promise<{ ok: boolean }
   return apiDelete(`/api/library/${bookId}`);
 }
 
+// S103：书库 → skill 提炼（拆书模式，生成草稿待确认）
+export async function refineLibrarySkill(
+  bookId: string,
+  hint = "",
+): Promise<{ ok: boolean; draft: { id: string; name: string } }> {
+  return apiPost(`/api/library/${bookId}/refine-skill`, { hint });
+}
+
 // 项目-参考书关联
 export async function getReferences(bookId: string): Promise<RefItem[]> {
   return apiGet<RefItem[]>(`/api/books/${bookId}/references`);

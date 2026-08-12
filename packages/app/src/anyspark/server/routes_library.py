@@ -12,9 +12,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from anyspark.server.deps import AppDeps
+from anyspark.server.logging import logger
 from anyspark.server.schemas import (
     LibraryBookIn,
     LibraryImportIn,
+    LibraryRefineIn,
     LibraryRefsIn,
 )
 
@@ -70,5 +72,38 @@ def make_library_router(deps: AppDeps) -> APIRouter:
         """设置项目参考书（全量替换）：refs=[{type: library|project, id: ...}]。"""
         deps.library.set_references(book_id, req.refs)
         return {"ok": True, "book_id": book_id, "refs": deps.library.get_references(book_id)}
+
+    # -- S103 书库 → skill 提炼（拆书模式：多维拆解融合成「书名」skill 草稿） --
+    @router.post("/api/library/{book_id}/refine-skill", response_model=dict[str, Any])
+    def refine_skill_from_library(
+        book_id: str, req: LibraryRefineIn | None = None
+    ) -> dict[str, Any]:
+        """书库 → skill 提炼：取书库原文，mode=book 多维拆解（文风/节奏/结构/人设/
+        对白/信息投放/钩子），生成一条「书名」skill 草稿（人工确认后转正生效）。
+        """
+        hint = (req.hint if req else "").strip()
+        book = deps.library.get_book(book_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail=f"书库无此书: {book_id}")
+        source = deps.library.read_book(book_id, max_chars=200000)
+        if not source.strip():
+            raise HTTPException(status_code=400, detail="书库无内容（先导入文本）")
+        cands = deps.skill_generator.generate(source, hint, 1, mode="book")
+        if not cands:
+            raise HTTPException(status_code=502, detail="提炼失败（无有效候选）")
+        c = cands[0]
+        draft = deps.skills.add_draft(
+            name=str(c.get("name", book["name"])),
+            description=str(c.get("description", ""))[:500],
+            content=str(c.get("content", "")),
+            example=str(c.get("example", ""))[:2000],
+            tags=str(c.get("tags", "")),
+            target=str(c.get("target", "writing")),
+            source="library",
+        )
+        if draft is None:
+            raise HTTPException(status_code=409, detail="已存在同名草稿或技能（先确认/删除旧的）")
+        logger.info("书库→skill 提炼: book=%s skill=%s", book["name"], draft["name"])
+        return {"ok": True, "draft": draft}
 
     return router
