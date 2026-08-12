@@ -2874,3 +2874,26 @@ BatchPanel 保留（进度查看），checkbox 手动发起入口被对话触发
 BACKEND-MAP 工具表 23→27。
 
 **并行会话**：S103 书→技能链路（另一个智能体）与本次无冲突（skill_refine 区未碰）。
+
+## S107 日志审计补全（已完成 ✅）——请求访问日志 + 前端错误捕获 + record 耗时 + 异常堆栈
+
+**背景（主人问询）**：日志是否不全——上下文/思维链/工具调用参数与结果已有
+（records/events.jsonl），缺"跨层关联 + 耗时 + 错误传播"。落地前四项：
+
+- **① 请求级访问日志**（app.py middleware）：写操作 + 非 2xx + 慢读请求（≥2s）
+  记 方法/路径/状态码/耗时——前端报错时后端可查对应请求；异常由既有
+  _unhandled 兜底（traceback 落盘）。控制日志量（读请求不刷屏）
+- **② 前端错误捕获**（lib/errorLog.ts + main.tsx + 设置页）：window.onerror /
+  unhandledrejection → localStorage 环形缓冲（50 条），设置→关于 tab 可
+  查看/导出 JSON/清空——前端 bug 从零落盘变有痕
+- **③ record 加耗时**（core/loop.py）：model_ms（模型响应耗时）+ tool_results 每条
+  附 ms（工具执行耗时缓冲 _tool_ms，record 事件消费）——性能类 bug（哪个工具慢/
+  模型卡在哪轮）可定位
+- **④ 异常堆栈**：模型调用失败路径加 exc_info（此前 warning 无堆栈）；全局
+  _unhandled 已有（S 早期）
+
+**踩坑**：loop.py 函数内局部 `import time as _time` 会遮蔽顶部 import 导致
+UnboundLocalError（Python 函数作用域规则）——删局部 import 保留顶部。
+
+**验证**：test_tools_domain/test_retry 9 passed；前端 tsc+build 全绿；冒烟
+（404/写操作访问日志落盘；record 含 model_ms + 工具 ms——47ms/15ms 与模拟吻合）。

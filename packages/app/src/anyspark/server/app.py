@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -422,6 +423,32 @@ def build_app(
         此前 _make_agent 等 try 块外的异常静默 500 零日志，排查无据。"""
         logger.exception("未捕获异常: %s %s", request.method, request.url.path, exc_info=exc)
         return Response(status_code=500, content="Internal Server Error")
+
+    @app.middleware("http")
+    async def _access_log(request: Request, call_next: Any) -> Response:
+        """S104：请求级访问日志——写操作 + 非 2xx + 慢读请求（防刷屏）。
+
+        bug 定位用：前端报错时后端能查到这个端点/耗时/状态码；异常堆栈
+        由 _unhandled 兜底（此处只记访问行，不重复记异常）。
+        """
+        started = time.monotonic()
+        try:
+            response: Response = await call_next(request)
+        except Exception:
+            raise  # 交给 _unhandled 记堆栈
+        ms = int((time.monotonic() - started) * 1000)
+        is_write = request.method in ("POST", "PUT", "PATCH", "DELETE")
+        is_bad = response.status_code >= 400
+        if is_write or is_bad or ms >= 2000:
+            logger.info(
+                "请求 %s %s → %d（%dms）%s",
+                request.method,
+                request.url.path,
+                response.status_code,
+                ms,
+                f"?{request.url.query}" if request.url.query else "",
+            )
+        return response
 
     # S80b：组合根依赖契约（AppDeps 单例；router 拆分后各 make_xxx_router(deps) 注入）
     deps = AppDeps(

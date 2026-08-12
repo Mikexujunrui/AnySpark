@@ -17,6 +17,7 @@ from __future__ import annotations
 import logging
 import queue
 import threading
+import time as _time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -90,6 +91,8 @@ class Agent:
     # after_tool_call：执行后钩子，可改写结果（安全统一/信号采集挂点）。
     before_tool_call: Callable[[ToolCall], str | None] | None = None
     after_tool_call: Callable[[ToolCall, ToolResult], ToolResult] | None = None
+    # S104：工具执行耗时缓冲（name→ms 队列，record 事件消费——排查性能/卡死用）
+    _tool_ms: list[tuple[str, int]] = field(default_factory=list, repr=False)
     # S25：运行中插话/追问队列（线程安全，pi steering/followUp 移植）
     steer_queue: queue.SimpleQueue[Message] = field(default_factory=queue.SimpleQueue)
     followup_queue: queue.SimpleQueue[Message] = field(default_factory=queue.SimpleQueue)
@@ -193,6 +196,7 @@ class Agent:
             # 防御：output 先置 None——异常路径绝不读它（except 已 return）；
             # 成功路径才在 None 校验后进入 _emit_record，杜绝任何 UnboundLocalError 可能。
             output: ModelOutput | None = None
+            model_started = _time.monotonic()  # S104：模型响应耗时
             try:
                 if hasattr(self.model, "respond_stream"):
                     output = self.model.respond_stream(
@@ -203,7 +207,7 @@ class Agent:
                 else:
                     output = self.model.respond(prompt_messages, tools)
             except Exception as exc:  # 任何模型/网络异常都要保持上下文平衡
-                logger.warning("模型调用失败: %s", exc)
+                logger.warning("模型调用失败: %s", exc, exc_info=True)  # S104：异常堆栈落盘
                 err_text = f"（生成失败）{exc}"
                 store.append(conversation_id, Message(role="assistant", content=err_text))
                 self.events.emit(Event(type="text", payload={"content": err_text}))
@@ -217,7 +221,14 @@ class Agent:
                 )
 
             assert output is not None  # 走到此必然成功赋值（异常已 return）
-            self._emit_record(conversation_id, turn_index, prompt_messages, output, results)
+            self._emit_record(
+                conversation_id,
+                turn_index,
+                prompt_messages,
+                output,
+                results,
+                model_ms=int((_time.monotonic() - model_started) * 1000),
+            )
             if not output.tool_calls:
                 # 终答前统一检查插话/追问（对齐 pi：内层循环末尾检查 steering、
                 # 外层检查 followUp）——用户在模型生成期间插话时，即使本轮恰好是
@@ -345,8 +356,6 @@ class Agent:
                             payload={"name": c.name, "id": c.id},
                         )
                     )
-                import time as _time
-
                 started = _time.monotonic()
                 with ThreadPoolExecutor(max_workers=min(len(calls), 8)) as pool:
                     results_ordered = list(pool.map(_run_one, calls))
@@ -364,6 +373,10 @@ class Agent:
                             },
                         )
                     )
+                    # S104：耗时入缓冲（record 事件消费）
+                    self._tool_ms.append(
+                        (c.name, int((_time.monotonic() - started) * 1000 / max(len(calls), 1)))
+                    )
             else:
                 results_ordered = []
                 for c in calls:
@@ -373,8 +386,6 @@ class Agent:
                             payload={"name": c.name, "id": c.id},
                         )
                     )
-                    import time as _time
-
                     started = _time.monotonic()
                     r = _run_one(c)
                     self.events.emit(
@@ -388,6 +399,8 @@ class Agent:
                             },
                         )
                     )
+                    # S104：耗时入缓冲（record 事件消费）
+                    self._tool_ms.append((c.name, int((_time.monotonic() - started) * 1000)))
                     results_ordered.append(r)
             for call, result in zip(calls, results_ordered, strict=True):
                 executed.append(call)
@@ -427,17 +440,26 @@ class Agent:
         prompt_messages: list[Message],
         output: ModelOutput,
         results: list[ToolResult],
+        model_ms: int = 0,  # S104：模型响应耗时
     ) -> None:
         """S49 运行记录事件：完整轮次快照（上下文 + 输出含思维链 + 工具结果）。
 
         只发事件不落盘——存储由 app 层订阅（写 data/records/*.jsonl）；
         思维链 reasoning **不注入上下文**（只进记录，训练/复盘用）。
         """
+        # S104：tool_results 附执行耗时（与 _tool_ms 缓冲顺序对应；不足则 0）
+        tool_results = []
+        for r in results:
+            ms = 0
+            if self._tool_ms:
+                ms = self._tool_ms.pop(0)[1]
+            tool_results.append({"name": r.call.name, "ok": r.ok, "content": r.content, "ms": ms})
         self.events.emit(
             Event(
                 type="record",
                 payload={
                     "turn_index": turn_index,
+                    "model_ms": model_ms,
                     "prompt": [{"role": m.role, "content": m.content} for m in prompt_messages],
                     "output": {
                         "text": output.text,
@@ -448,14 +470,7 @@ class Agent:
                         ],
                         "truncated": output.truncated,
                     },
-                    "tool_results": [
-                        {
-                            "name": r.call.name,
-                            "ok": r.ok,
-                            "content": r.content,
-                        }
-                        for r in results
-                    ],
+                    "tool_results": tool_results,
                 },
             )
         )

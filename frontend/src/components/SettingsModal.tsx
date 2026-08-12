@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Icon from './ui/Icon'
 import Modal from './ui/Modal'
 import Toggle from './ui/Toggle'
+import { getErrorLog, exportErrorLog, clearErrorLog } from '../lib/errorLog'
 
 interface ModelItem { id: string; name: string; base_url?: string; model?: string; context_window?: number; max_tokens?: number; is_active?: boolean; thinking?: string | null; temperature?: number | null }
 interface AgencyLevel { id: string; name: string; description: string; temperature: number; order: number; is_default?: boolean }
@@ -152,6 +153,51 @@ function ModeSettings({ onModeChanged }: { onModeChanged?: (mode: string) => voi
         </button>
         {toast && <span className="text-xs text-emerald-400">{toast}</span>}
       </div>
+    </div>
+  )
+}
+
+// S104：前端错误日志查看（onerror/unhandledrejection 捕获——localStorage 环形缓冲）
+function FrontendErrorLog() {
+  const [logs, setLogs] = useState<any[]>(() => getErrorLog())
+  const [show, setShow] = useState(false)
+
+  const refresh = () => setLogs(getErrorLog())
+
+  return (
+    <div className="px-3 py-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-zinc-200 font-medium">前端错误日志</p>
+        <span className={`text-[10px] px-1.5 py-0.5 rounded ${logs.length > 0 ? 'bg-red-900/40 text-red-300' : 'bg-zinc-800 text-zinc-500'}`}>
+          {logs.length} 条
+        </span>
+      </div>
+      <p className="text-[11px] text-zinc-600 mt-1">
+        window.onerror / Promise 拒绝自动捕获（最多保留 50 条）——排查前端 bug 用
+      </p>
+      <div className="flex gap-2 mt-2">
+        <button onClick={() => { setShow(!show); refresh() }} className="text-[11px] px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded">
+          {show ? '收起' : '查看'}
+        </button>
+        <button onClick={exportErrorLog} disabled={logs.length === 0} className="text-[11px] px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded disabled:opacity-50">
+          导出
+        </button>
+        <button onClick={() => { clearErrorLog(); refresh() }} className="text-[11px] px-2.5 py-1 bg-zinc-800 hover:bg-red-900/40 text-zinc-300 rounded">
+          清空
+        </button>
+      </div>
+      {show && logs.length > 0 && (
+        <div className="mt-2 max-h-40 overflow-y-auto space-y-1 bg-zinc-950/60 rounded p-2">
+          {logs.slice().reverse().map((l, i) => (
+            <div key={i} className="text-[10px] font-mono leading-snug">
+              <span className="text-zinc-600">{l.ts?.slice(5, 19)}</span>{' '}
+              <span className={l.type === 'error' ? 'text-red-400' : 'text-amber-400'}>{l.type === 'error' ? 'ERR' : 'PRJ'}</span>{' '}
+              <span className="text-zinc-300">{l.msg}</span>
+              {l.src && <span className="text-zinc-600"> @ {l.src.split('/').pop()}:{l.line}</span>}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -517,6 +563,8 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                     <p>分屏时右键 tab — 设为次面板</p>
                   </div>
                 </div>
+                {/* S104：前端错误日志（localStorage 环形缓冲，找 bug 用） */}
+                <FrontendErrorLog />
               </div>
             )}
           </>
