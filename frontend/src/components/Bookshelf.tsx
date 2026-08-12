@@ -6,6 +6,7 @@ import MaterialsPanel from './MaterialsPanel'
 import LibraryShelfPanel from './LibraryShelfPanel'
 import WorkflowPoolPanel from './WorkflowPoolPanel'
 import StatsDashboard from './StatsDashboard'
+import SkillsShelfPanel from './SkillsShelfPanel'
 import SettingsModal from './SettingsModal'
 import ConfirmModal from './ui/ConfirmModal'
 import Modal from './ui/Modal'
@@ -217,11 +218,23 @@ export default function Bookshelf() {
           >
             <Icon name="bar-chart" size={16} /> 统计
           </button>
+          <button
+            onClick={() => setTab('skills')}
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
+              tab === 'skills'
+                ? 'text-zinc-200 border-accent'
+                : 'text-zinc-500 border-transparent hover:text-zinc-400'
+            }`}
+          >
+            <Icon name="pen-tool" size={16} /> 技能库
+          </button>
         </div>
       </div>
 
       {tab === 'stats' ? (
         <StatsDashboard />
+      ) : tab === 'skills' ? (
+        <SkillsShelfPanel />
       ) : tab === 'workflows' ? (
         <WorkflowPoolPanel />
       ) : tab === 'materials' ? (

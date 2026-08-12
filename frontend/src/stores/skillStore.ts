@@ -19,7 +19,7 @@ interface SkillState {
   fetchSkills: () => Promise<void>;
   fetchDrafts: () => Promise<void>;
   addSkill: (name: string, content: string, description?: string, target?: string) => Promise<void>;
-  editSkill: (id: string, data: { name?: string; content?: string; description?: string; target?: string; enabled?: boolean }) => Promise<void>;
+  editSkill: (id: string, data: { name?: string; content?: string; description?: string; tags?: string; target?: string; enabled?: boolean }) => Promise<void>;
   removeSkill: (id: string) => Promise<void>;
   // S104：草稿确认闸门（AI 生成候选 → 人工采纳/拒绝）
   approveDraft: (draftId: string) => Promise<void>;

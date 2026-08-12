@@ -5,6 +5,7 @@ export interface Skill {
   name: string;
   description?: string;
   content: string;
+  tags?: string;
   target?: string;
   enabled?: boolean;
   created_at: string;
