@@ -298,6 +298,19 @@ def test_bias_api_and_render() -> None:
     entries = client.get("/api/bias").json()
     assert len(entries) == 1
     assert entries[0]["source"] == "ai"
+    # S102：人类手动修改（内容 + 来源）
+    r2 = client.patch(
+        f"/api/bias/{bid}", json={"content": "改成：写作偏克制但描写放得开", "source": "user"}
+    )
+    assert r2.status_code == 200
+    updated = r2.json()
+    assert updated["content"] == "改成：写作偏克制但描写放得开"
+    assert updated["source"] == "user"
+    assert client.get("/api/bias").json()[0]["content"] == "改成：写作偏克制但描写放得开"
+    # 不存在的 id → 404
+    assert (
+        client.patch("/api/bias/nonexist", json={"content": "x", "source": "ai"}).status_code == 404
+    )
     client.delete(f"/api/bias/{bid}")
     assert client.get("/api/bias").json() == []
 

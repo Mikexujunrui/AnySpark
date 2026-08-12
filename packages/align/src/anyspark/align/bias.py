@@ -76,6 +76,26 @@ class BiasStore:
             self._conn.execute("DELETE FROM ai_bias WHERE id=?", (bias_id,))
             self._conn.commit()
 
+    def update(self, bias_id: str, content: str, source: str) -> dict[str, Any] | None:
+        """S102：人类手动修改倾向条目（内容/来源均可改）；id 不存在返回 None。"""
+        content = content.strip()
+        if not content:
+            return None
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE ai_bias SET content=?, source=? WHERE id=?",
+                (content, source, bias_id),
+            )
+            self._conn.commit()
+            if cur.rowcount == 0:
+                return None
+            row = self._conn.execute(
+                "SELECT id, content, source, created_at FROM ai_bias WHERE id=?", (bias_id,)
+            ).fetchone()
+        if row is None:
+            return None
+        return {"id": row[0], "content": row[1], "source": row[2], "created_at": row[3]}
+
     def render(self, limit: int = 10) -> str:
         """渲染成注入块（自然语言，模型无关）。"""
         entries = self.list(limit)

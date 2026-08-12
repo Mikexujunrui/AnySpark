@@ -30,12 +30,17 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
   const loading = useBiasStore((s) => s.loading);
   const fetchBias = useBiasStore((s) => s.fetchBias);
   const add = useBiasStore((s) => s.add);
+  const update = useBiasStore((s) => s.update);
   const remove = useBiasStore((s) => s.remove);
 
   const [showAdd, setShowAdd] = useState(false);
   const [newContent, setNewContent] = useState("");
   const [newSource, setNewSource] = useState<Source>("ai");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  // S102：人类手动编辑（内联编辑态：条目 id + 草稿）
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editContent, setEditContent] = useState("");
+  const [editSource, setEditSource] = useState<Source>("ai");
   // 记忆视图（心智条目，与倾向互为对立：记忆=AI 学到的，倾向=AI 自述的）
   const [view, setView] = useState<MindView>("bias");
   const [manual, setManual] = useState<ManualEntry[]>([]);
@@ -87,6 +92,23 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
     if (!pendingDelete) return;
     await remove(pendingDelete);
     setPendingDelete(null);
+  };
+
+  // S102：进入编辑态（回填草稿）
+  const startEdit = (entry: { id: string; content: string; source: string }) => {
+    setEditingId(entry.id);
+    setEditContent(entry.content);
+    setEditSource((entry.source as Source) || "ai");
+  };
+
+  const saveEdit = async () => {
+    if (!editingId || !editContent.trim()) return;
+    try {
+      await update(editingId, editContent.trim(), editSource);
+      setEditingId(null);
+    } catch {
+      // 保存失败保留编辑态，提示由 console 输出
+    }
   };
 
   return (
@@ -202,16 +224,62 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
                   >
                     {SOURCE_LABELS[entry.source as Source] ?? SOURCE_LABELS.ai}
                   </span>
-                  <button
-                    onClick={() => handleDelete(entry.id)}
-                    className="p-1 text-zinc-600 hover:text-red-400 rounded"
-                  >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                    </svg>
-                  </button>
+                  <div className="flex items-center gap-1">
+                    {/* S102：人类手动编辑 */}
+                    <button
+                      onClick={() => startEdit(entry)}
+                      className="p-1 text-zinc-600 hover:text-sky-400 rounded"
+                      title="编辑此倾向"
+                    >
+                      <Icon name="edit" size={12} />
+                    </button>
+                    <button
+                      onClick={() => handleDelete(entry.id)}
+                      className="p-1 text-zinc-600 hover:text-red-400 rounded"
+                    >
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                <p className="text-sm text-zinc-300 whitespace-pre-wrap">{entry.content}</p>
+                {editingId === entry.id ? (
+                  /* ── 内联编辑态（S102）── */
+                  <div className="space-y-2">
+                    <textarea
+                      value={editContent}
+                      onChange={(e) => setEditContent(e.target.value)}
+                      rows={3}
+                      className="w-full bg-zinc-900 text-zinc-200 text-sm px-3 py-2 rounded border border-zinc-600 focus:outline-none focus:border-sky-500 resize-none"
+                      autoFocus
+                    />
+                    <div className="flex items-center gap-2">
+                      <select
+                        value={editSource}
+                        onChange={(e) => setEditSource(e.target.value as Source)}
+                        className="bg-zinc-800 text-zinc-300 text-xs px-2 py-1 rounded border border-zinc-700"
+                      >
+                        <option value="ai">AI 自述</option>
+                        <option value="user">用户修正</option>
+                      </select>
+                      <button
+                        onClick={saveEdit}
+                        disabled={!editContent.trim()}
+                        className="text-xs px-2.5 py-1 bg-sky-600 hover:bg-sky-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded"
+                      >
+                        保存
+                      </button>
+                      <button
+                        onClick={() => setEditingId(null)}
+                        className="text-xs px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <p className="text-sm text-zinc-300 whitespace-pre-wrap">{entry.content}</p>
+                )}
                 <p className="text-[10px] text-zinc-600">
                   {entry.created_at ? new Date(entry.created_at).toLocaleString() : ""}
                 </p>

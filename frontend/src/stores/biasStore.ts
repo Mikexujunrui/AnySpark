@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { listBias, addBias, deleteBias, type BiasEntry } from "../api/bias";
+import { listBias, addBias, updateBias, deleteBias, type BiasEntry } from "../api/bias";
 
 interface BiasState {
   items: BiasEntry[];
@@ -7,6 +7,7 @@ interface BiasState {
 
   fetchBias: () => Promise<void>;
   add: (content: string, source: string) => Promise<void>;
+  update: (id: string, content: string, source: string) => Promise<void>;
   remove: (id: string) => Promise<void>;
 }
 
@@ -41,6 +42,17 @@ export const useBiasStore = create<BiasState>((set) => ({
       set((state) => ({ items: state.items.filter((e) => e.id !== id) }));
     } catch (error) {
       console.error("Failed to delete bias:", error);
+      throw error;
+    }
+  },
+
+  // S102：人类手动编辑倾向条目（内容/来源）
+  update: async (id, content, source) => {
+    try {
+      const entry = await updateBias(id, content, source);
+      set((state) => ({ items: state.items.map((e) => (e.id === id ? entry : e)) }));
+    } catch (error) {
+      console.error("Failed to update bias:", error);
       throw error;
     }
   },

@@ -146,4 +146,12 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
         deps.bias.delete(bias_id)
         return {"ok": True}
 
+    @router.patch("/api/bias/{bias_id}", response_model=dict[str, Any])
+    def update_bias(bias_id: str, req: BiasIn) -> dict[str, Any]:
+        """S102：人类手动修改倾向条目（内容/来源）。"""
+        updated = deps.bias.update(bias_id, req.content, req.source)
+        if updated is None:
+            raise HTTPException(status_code=404, detail="倾向条目不存在")
+        return updated
+
     return router
