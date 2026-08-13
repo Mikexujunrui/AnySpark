@@ -3185,3 +3185,46 @@ L116/L776 保留产品历史，注册层已默认可用。
 
 **结论**：YAGNI 后补清单清空——评审团/工作流/Skill 已实现满血（S114c）；Autopilot 被
 工作流吸收（S59）；创作宪法/叙事约束砍（反哲学+覆盖）。**无待做功能项遗留**。
+
+## S116-S119 DSH 借鉴四提案落地（已完成 ✅）——会话事件溯源/沙箱进程隔离/内容生态/子 Agent 内核
+
+**背景（主人驱动）**：对比 DeepSeek Harness（机器之心 8-13 报道，当日开源）后
+定稿四提案（docs/HARNESS-UPGRADE-PLAN.md），主人授权自主调研+实施。
+
+### S116 提案 C：codex 沙箱进程级隔离（实证 RCE 修复）
+- **调研实证 6 缺口**（scout 复现）：①白名单属性链逃逸→完全 RCE（os.system 实证）
+  ②超时不杀线程+GIL 饿死挂死进程 ③stdout 进程级污染 ④ws_read 前缀绕过→兄弟目录
+  越界 ⑤API 无鉴权+CORS\*→恶意网页远程触发 ⑥DESIGN §12.13"无逃逸"承诺不成立
+- **修复**：codex.py 重写——subprocess 独立子进程（超时杀进程/GIL 不挂主进程/pipe
+  无污染）；数据快照传入（子进程无 store 引用）；is_relative_to 严格路径校验；
+  环境变量最小集（剥离 DEEPSEEK_*）；白名单留第二层防线；runner 内嵌常量（纯
+  ASCII+UTF-8 bytes 全链路修 cp936 坑）；frozen 拒绝执行（失败关闭）
+- CORS `*`→localhost 白名单+ANYSPARK_CORS_ORIGINS 可配；enable_codex 默认 False
+- 诚实边界：逃逸代码在子进程内仍有本机用户权限，主进程密钥隔离/可杀/默认关
+
+### S117 提案 A：会话事件溯源（模型所见可重建，对齐 DSH Session Log）
+- core/events.py +5 系统事件；loop 压缩点 emit context_compressed（turn/before/
+  after msgs，不保留原文）；steer/followup 注入点 emit steering_injected
+  （source+content+at_turn，与 user_text 区分）
+- recorder 订阅 5 类系统事件落盘（event 字段区分）；GET /api/records/{conv_id}
+  回放端点；装配决策（skip/context_mode/model）由 meta.json 记录
+- 结论落定：JSONL 追加（不升 SQLite）；压缩只留 token/消息数
+
+### S118 提案 D：内容生态基础设施——skill 文件导入导出（生态货币打通）
+- 复用上传区+ingest 判别路由（主人定案）：skill 文件（front-matter 五段式）上传
+  → ingest 识别 → skill_drafts 草稿 → 人工确认转正；普通 md 不误判
+- skill_io.py：parse_skill_file（严格判别）+render_skill_file（导出=导入格式闭环）
+- GET /api/skills/{skill_id}/export + 前端 SkillPanel 导入/导出按钮
+- 生态意义：从单机工具到可共享平台第一步（分享 skill = 分享货币）
+
+### S119 提案 B 第一刀：workflow agent 节点 delegate（子 Agent 内核）
+- 主人洞察：调研/收集等固定流程重活应外包（不占主循环上下文）；workflow=通用
+  固定流程执行器（不只写作检测）
+- 子 Agent 内核（loop 层一份+两入口）：workflow delegate 优先落地——独立
+  InMemoryConversationStore（fresh 隔离）+完整 Agent 循环+scope.tools 白名单+
+  budget.max_turns 护栏+model_for_task(research) 槽位
+- 主循环 run_subagent 工具（对话即时委派）二期；调研工作流模板待建
+
+**验证**：四提案各自测试全绿（codex 12/recorder 3/skill_io 7/workflow_delegate 2）；
+app+align+core+workflow 全量绿；mypy/ruff 绿；真实链路模拟验证（压缩/steer 事件、
+skill 导入导出闭环、delegate 子 Agent 工具循环）。
