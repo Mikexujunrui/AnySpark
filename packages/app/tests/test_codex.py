@@ -106,12 +106,14 @@ def test_codex_api_and_switch() -> None:
     r = client.post("/api/codex/run", json={"code": "print(sum(range(101)))", "timeout": 5}).json()
     assert r["ok"] is True and "5050" in r["stdout"]
 
-    # 默认 enable_codex=False：run_code 不在工具集
+    # S114 翻转：默认 enable_codex=True——run_code 默认在工具集（安全靠沙箱兜底不靠隐藏）
     client.post("/api/chat", json={"message": "写《第1章》20字：雨夜。"})
-    assert "run_code" not in model.last_tools
-    # 点亮后可见
-    client.post("/api/chat", json={"message": "写《第2章》20字：灯塔。", "enable_codex": True})
     assert "run_code" in model.last_tools
+    # 显式禁用后不可见
+    client.post(
+        "/api/chat", json={"message": "写《第2章》20字：灯塔。", "enable_codex": False}
+    )
+    assert "run_code" not in model.last_tools
 
 
 # ---------------------------------------------------------------------------

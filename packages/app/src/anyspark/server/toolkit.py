@@ -59,13 +59,13 @@ def build_toolkit(
     ctx: ToolContext,
     *,
     enable_domain: bool = True,
-    enable_codex: bool = False,
-    enable_extras: bool = False,
-    enable_search: bool = False,
-    enable_workflow: bool = False,
-    enable_play: bool = False,
+    enable_codex: bool = True,
+    enable_extras: bool = True,
+    enable_search: bool = True,
+    enable_workflow: bool = True,
+    enable_play: bool = True,
 ) -> ToolRegistry:
-    """把全部工具装配进 registry（按 enable_* 开关分组点亮），返回同一注册表。
+    """把全部工具装配进 registry（S114：能力默认可用、按需选用；enable_* 可显式禁用）。
 
     ctx：ToolContext（全部 store/model 依赖，组合根构造注入）；enable_*：功能开关
     （增强默认关，点亮才挂——S15"你要什么再装什么"）。
@@ -220,7 +220,8 @@ def build_toolkit(
     for _ext in ctx.ext_tools.active_tools():
         registry.register(tool_spec_from_ext(_ext), _make_ext_impl(_ext, _ext_data_env))
 
-    # S48-P5 代码扩展（沙箱 run_code）：默认关，按需点亮（固定工具做不了的自定义处理）
+    # S48-P5 代码扩展（沙箱 run_code）：默认可用（S114 哲学：安全靠沙箱兜底不靠隐藏；
+    # 工具描述已写明"不可读写文件/访问网络"，显式 False 可禁用）
     if enable_codex:
         from anyspark.server.tools_domain import make_codex_implementer
 
@@ -233,7 +234,7 @@ def build_toolkit(
     # （review_chapter 能读章节全文+接改写循环，check_text 无图谱证据/需自传全文）。
     # S108：read_material 已挪到 enable_domain 默认开（AI 查看资料库是写作必需能力）。
 
-    # 网络搜索工具：按需注册（S15 起默认关——写作主链路不背考据能力，需要时点亮）
+    # 网络搜索工具：默认可用（S114 翻转——S15 曾默认关，S64 教训：默认关的工具=没人用的残废通道）
     # S111：enable_search 名下同时注册 search_web（搜索）+ fetch_page（抓正文）——搜索闭环
     if enable_search:
         from anyspark.server.tools_fetch import make_fetch_implementer
@@ -244,7 +245,7 @@ def build_toolkit(
         fetch_spec, fetch_impl = make_fetch_implementer()
         registry.register(fetch_spec, fetch_impl)
 
-    # S59 工作流 agent 工具：默认关，enable_workflow 点亮（Agent 可列/生成/运行/查进度）
+    # S59 工作流 agent 工具：默认可用，enable_workflow 可显式禁用（Agent 可列/生成/运行/查进度）
     if enable_workflow and ctx.workflow_store is not None:
         from anyspark.server.tools_workflow import make_workflow_tools
 
@@ -253,11 +254,14 @@ def build_toolkit(
         ):
             registry.register(_spec, _impl)
 
-    # S65 互动推演 agent 工具：默认关，enable_play 点亮（玩法/灵感：启动/选择/查看/导出）
+    # S65 互动推演 agent 工具：默认可用，enable_play 可显式禁用（玩法/灵感：启动/选择/查看/导出）
     if enable_play and ctx.play_engine is not None:
         from anyspark.server.tools_domain import make_play_implementer
 
-        for _spec, _impl in make_play_implementer(ctx.play_engine):
+        # S114：make_play_implementer 返回 (specs[], impls[]) 两个列表——
+        # 此前 enable_play 默认关从未触发，潜伏的解包 bug（S65 遗留）在此修复
+        _play_specs, _play_impls = make_play_implementer(ctx.play_engine)
+        for _spec, _impl in zip(_play_specs, _play_impls, strict=True):
             registry.register(_spec, _impl)
 
     # S64：拟人化评审团 agent 工具（无条件注册——用户喊"帮我看看这章"时 agent

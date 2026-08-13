@@ -20,13 +20,14 @@ class ChatRequest(BaseModel):
     system_prompt: str | None = None
     temperature: float = 0.7
     agency_level: int | None = None  # 能动级别 0-4（覆盖当前档位；缺省用已存档位）
-    # 增强按需装配（S15："你要什么再装什么"——默认关的增强，点亮才挂）
-    enable_search: bool = False  # 网络搜索工具按需注册（默认关：写作主链路不背考据能力）
-    enable_extras: bool = False  # S32 扩展工具（read_material）按需点亮；S63 check_text 退役
-    enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认开
-    enable_codex: bool = False  # S48-P5 代码扩展 run_code（沙箱，默认关：安全按需点亮）
-    enable_workflow: bool = False  # S59 工作流 agent 工具（list/run/status/generate）默认关
-    enable_play: bool = False  # S65 互动推演 agent 工具（play_start/choose/status/export）默认关
+    # 能力默认可用（S114 哲学：默认可用、按需选用——能力全注册进工具表，Agent 知道工具箱；
+    # 显式 False 可禁用：省工具表 token / 安全隔离极端场景）
+    enable_search: bool = True  # 网络搜索+抓取（search_web/fetch_page）默认可用
+    enable_extras: bool = True  # 扩展工具（read_material/material_*）默认可用；S63 check_text 退役
+    enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认可用
+    enable_codex: bool = True  # S48-P5 代码扩展 run_code（沙箱，默认可用——安全靠沙箱兜底不靠隐藏）
+    enable_workflow: bool = True  # S59 工作流 agent 工具（list/run/status/generate）默认可用
+    enable_play: bool = True  # S65 互动推演 agent 工具（play_start/choose/status/export）默认可用
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/plot 子集
     # S58b 上下文模式：auto(默认=干净,不继承场景记忆)/continue(显式继承场景记忆+计划)/fresh(同auto)

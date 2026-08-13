@@ -48,21 +48,22 @@ def test_explore_tool_always_registered() -> None:
     assert "explore_direction" in m.tool_names[0]
 
 
-def test_extra_tools_default_off_on_demand() -> None:
-    """S32 防干扰：read_material 默认不注册（主链路轻量，防无关调用）；
-    enable_extras=True 时点亮（能力即工具，按需装配）。S63：check_text 已退役。"""
+def test_extra_tools_default_available() -> None:
+    """S114 哲学：能力默认可用——read_material 默认注册（S108 归入 enable_domain 名下）；
+    explore_direction 无条件常驻（S32）；enable_domain=False 可显式禁用领域能力。"""
     m = ProbeModel()
     client = _client(m)
     client.post("/api/chat", json={"message": "写一段"})
     names = m.tool_names[0]
-    assert "read_material" not in names
-    # 点亮后可见
+    assert "read_material" in names
+    assert "explore_direction" in names
+    # enable_domain=False：领域能力（含 read_material）禁用；explore_direction 仍常驻
     m2 = ProbeModel()
     db = Path(tempfile.mkdtemp()) / "test.db"
     client2 = TestClient(build_app(model=m2, db_path=db))
-    client2.post("/api/chat", json={"message": "写一段", "enable_extras": True})
+    client2.post("/api/chat", json={"message": "写一段", "enable_domain": False})
     names2 = m2.tool_names[0]
-    assert "read_material" in names2
+    assert "read_material" not in names2
     assert "explore_direction" in names2
 
 

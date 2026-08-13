@@ -39,24 +39,25 @@ def _client(model: ProbeModel) -> TestClient:
     return TestClient(build_app(model=model, db_path=db))
 
 
-def test_search_tool_default_off() -> None:
-    """enable_search 默认关：写作 Agent 不带 search_web（主链路轻量）。"""
+def test_search_tool_default_on() -> None:
+    """S114 哲学：能力默认可用——enable_search 默认 True，写作 Agent 工具表含 search_web。"""
     m = ProbeModel()
     client = _client(m)
     resp = client.post("/api/chat", json={"message": "写一段"})
     assert resp.status_code == 200
     assert m.tool_names, "Agent 应调用过 respond"
-    assert "search_web" not in m.tool_names[0]
+    assert "search_web" in m.tool_names[0]
+    assert "fetch_page" in m.tool_names[0]
 
 
-def test_search_tool_on_demand() -> None:
-    """enable_search=true：search_web + fetch_page 注册进工具表（S111 搜索闭环）。"""
+def test_search_tool_explicit_disable() -> None:
+    """enable_search=False 可显式禁用（省工具表 token / 安全隔离极端场景）。"""
     m = ProbeModel()
     client = _client(m)
-    resp = client.post("/api/chat", json={"message": "考据一下", "enable_search": True})
+    resp = client.post("/api/chat", json={"message": "写一段", "enable_search": False})
     assert resp.status_code == 200
-    assert any("search_web" in names for names in m.tool_names)
-    assert any("fetch_page" in names for names in m.tool_names)
+    assert "search_web" not in m.tool_names[0]
+    assert "fetch_page" not in m.tool_names[0]
 
 
 def test_skip_inject_disables_all_blocks() -> None:
