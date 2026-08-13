@@ -17,7 +17,7 @@
 | 维度 | AnySpark 现状 | DSH 做法 | 差距 |
 |---|---|---|---|
 | 会话日志 | S49 RunRecorder：每轮快照（prompt/output/tool_results）落 JSONL | **Session Log 事件溯源**：一切模型所见可从日志重建（含压缩/路由/权限/steering 事件） | 有快照无"过程事件"——模型看见什么有了，**为什么是这份**（压缩了什么/注入了什么/切了什么模型）没有 |
-| 多 Agent | workflow agent 节点 = 干净单次 LLM 调用；评审团/推演是替代品 | **subagent 委派**：主 Agent 派任务给子 Agent（新建/Fork/ACP），作用域隔离，并行 | 无真正的委派执行——"多角色并行起草→评审→合并"的写作流水线做不了 |
+| 多 Agent | workflow agent 节点 = 干净单次调用（无工具循环）；评审团/推演是替代品 | **subagent 委派**：主 Agent 派任务给子 Agent，作用域隔离，并行；workflow=脚本驱动编排 | 无真正的子 Agent 执行——调研/收集/并行起草等“固定流程外包重活”做不了（不占主循环上下文） |
 | 沙箱安全 | codex run_code：白名单 + 只读数据环境 ws_* | **失败关闭原则**：无法确认隔离生效 → 拒绝执行（不静默降级） | 白名单是"允许清单"思路，缺"隔离确认"底线 |
 
 三项的共同点：都是**把“发生过什么”变成可审计、可复现的系统事实**——
@@ -126,73 +126,101 @@ EventType = Literal[
 
 ---
 
-## 2. 提案 B：子 Agent 委派写作流水线
+## 2. 提案 B：子 Agent 内核 + workflow 固定流程执行器
 
 ### 2.1 现状盘点（已核实）
 
-- workflow 包（S59）：节点 `agent/script/approval/gate/loop`——**agent 节点 = 干净单次 LLM 调用**（S56 干净写作理念），无"主 Agent 派任务给子 Agent"的委派语义
+- workflow 包（S59）：节点 `agent/script/approval/gate/loop`——**agent 节点 = 干净单次 LLM 调用**
+  （无工具循环；runner 在 app.py 是 instruction → 一次 respond → 返回）；script = 确定性函数
+  （read/review）
 - 评审团（S65）：拟人化面板，非执行委派
 - play 推演（S65）：角色多选推演，非执行委派
-- **结论**：AnySpark 没有真正的子 Agent 委派——无法做"多个子 Agent 并行起草不同章节 → 汇总"、"子 Agent 调查 → 主 Agent 综合"这类写作流水线
+- **结论（S114 定案）**：AnySpark 没有真正的子 Agent 执行能力——既不能主循环委派，
+  workflow 也干不了“搜索→读多页→提炼→整理”这类**多步工具活**（agent 节点无工具循环）
 
-### 2.2 目标场景（写作领域真实的委派需求）
+### 2.2 目标场景（S114 定案：workflow = 任何可固定流程的工作，不只是写作）
 
-1. **并行起草**：写 5 章时，5 个子 Agent 各起草一章（各自干净上下文，互不污染），主 Agent 汇总衔接
-2. **分工调查**：子 Agent A 查图谱+设定，子 Agent B 检索正文+提炼 skill，主 Agent 综合
-3. **多版本比稿**：3 个子 Agent 用不同技法 skill 写同一章，主 Agent/评审团选优（对齐 P4 角色推演的判别选优，但升级为真实执行）
-4. **批量审读**：子 Agent 各自审读一章（现有 batch_review 是"路由直调"，升级为委派后可带各自上下文）
+1. **调研/收集资料（主人提出，最高频）**：写小说前调研——子 Agent 用网络搜索
+   （search_web/fetch_page）+ 读参考书（library/read_book）收集资料 → 整理成报告
+   落项目资料池 → **不占主循环上下文**（fresh 隔离，产出物进 materials 按需检索）
+2. **并行起草**：写 5 章时，5 个子 Agent 各起草一章（各自干净上下文，互不污染），主 Agent 汇总衔接
+3. **分工调查**：子 Agent A 查图谱+设定，子 Agent B 检索正文+提炼 skill，主 Agent 综合
+4. **多版本比稿**：3 个子 Agent 用不同技法 skill 写同一章，主 Agent/评审团选优
+5. **批量审读**：子 Agent 各自审读一章（现有 batch_review 是“路由直调”，升级为委派后可带各自上下文）
 
-### 2.3 设计（最小可行委派）
+### 2.3 设计（S114 定案：机制一份，两个入口——workflow 优先落地）
 
-**A. 委派语义**：workflow agent 节点扩展 `delegate` 参数（或新增节点 kind `subagent`）：
+**核心统一（主人洞察）**：调研工作流（搜索/读书/收集 → 不占主循环）本质就是
+`run_subagent` 的模板化形态——**同一套子 Agent 内核，两个入口**，不是两个功能。
+
+**A. 子 Agent 内核（loop 层，机制一份，地基）**
+
+```python
+# core/loop.py（或新 core/subagent.py）
+run_subagent(
+    instruction: str,
+    context: {mode: "fresh"|"fork", inject: [...]},   # 上下文策略
+    scope: {tools: [...], books: [...]},               # 工具白名单/作用域
+    budget: {max_turns: 10},                           # 护栏
+) -> SubagentResult(output, output_key)
+```
+
+- 独立上下文（fresh 默认：不受父会话污染；fork：从父会话某边界派生，对齐 S58c）
+- 工具白名单（默认最小只读为主，写操作需显式授权）
+- 护栏：≤3 个/会话，每个 ≤10 轮（硬上限；S108b 智能停止保留）
+- 注入由父 Agent/模板点名（对齐 S60 主循环点名注入哲学）
+
+**B. workflow agent 节点升级（模板化子 Agent，第一个落地）**
+
+- agent 节点从“干净单次调用”升级为“**跑完整工具循环**”（调用子 Agent 内核）
+- 节点 params 增加 `delegate` 语义：`{instruction, context, scope, budget}`
+- **调研工作流模板**（首个真实场景，可复用可参数化）：
 
 ```yaml
 - id: n1
   kind: agent
-  delegate: true            # 委派执行：子 Agent 独立上下文跑完整工具循环
-  params:
-    instruction: "起草第 3 章：当前设定见附件"
-    context:                # 子 Agent 的上下文策略
-      mode: fresh           # fresh=干净（默认）/ fork=继承父会话快照
-      inject: [设定档, 技能索引]  # 可点名注入领域内容（复用现有注入装配）
-    scope:                  # 作用域隔离（S81 智能体作用域思路扩展）
-      tools: [read_chapter, search_chapters, write_chapter]  # 子 Agent 可见工具白名单
-      books: [main]         # 可见项目
+  delegate: {context: {mode: fresh}, scope: {tools: [search_web, fetch_page]}}
+  params: {instruction: "围绕主题搜索+抓取 3-5 页，输出来源清单+要点"}
+- id: n2
+  kind: agent
+  delegate: {context: {mode: fresh}, scope: {tools: [library_book, read_book]}}
+  params: {instruction: "从参考书库摘录相关章节，输出摘录"}
+- id: n3
+  kind: agent
+  params: {instruction: "合并 n1+n2 产出 → 结构化调研报告"}
+- id: n4
+  kind: agent
+  scope: {tools: [material_register]}
+  params: {instruction: "报告写入项目资料池（materials, kind=inspiration）"}
+- id: n5
+  kind: approval   # 人工确认 → 报告入项目池
 ```
 
-**B. 执行模型**：
-- 父 Agent 的 `run_subagent` 工具触发委派（工具=数据，机制在 loop 层）
-- 子 Agent 跑**完整 Agent Loop**（复用现有 loop.py，独立 conversation 上下文），不是单次调用
-- 子 Agent 产出：结构化结果（text + 可选 output_key）返回父 Agent，作为一条 tool_result 注入
-- 并行：多个委派节点可 `parallel: true`（复用 S28 后台队列/线程池思路，注意 SQLite 并发锁）
+主循环调用：`run_workflow("调研", {主题})` → 后台跑 → 完成回传一句
+“报告已入项目池（N 来源 + M 要点），未占用主循环上下文”。
 
-**C. 上下文策略**（关键设计，防毒化）：
-- 默认 `fresh`：子 Agent 不受父会话历史污染（对齐 S56 C 架构治毒化的理念）
-- `fork`：从父会话某边界派生（对齐 S58c 会话继承 fork），用于"延续同一思维"的子任务
-- 注入由父 Agent 点名（对齐 S60 主循环点名注入哲学，子 Agent 不自行选技能）
+**C. 主循环自由委派（对话即时用，二期）**
 
-**D. 安全与成本**：
-- 子 Agent 次数预算：默认 ≤3 个/会话，每个 ≤10 轮（硬上限，防失控；S108b 智能停止保留）
-- 作用域白名单：子 Agent 工具集默认最小（只读为主），写操作需父 Agent 明确授权
-- 成本提示：并行 N 个子 Agent = N 倍 token，前端委派前显示预估（可选）
+- `run_subagent` 注册为主循环工具：对话里随口“帮我查一下这个设定冲突”→ 主 Agent 直接委派
+- 复用同一内核与护栏，仅入口不同
 
-**E. 影响面**：
-- `core/loop.py`：+`run_subagent` 工具 + 委派生命周期
-- `core/agent.py` 或新 `core/subagent.py`：子 Agent 工厂（复用装配）
-- `workflow/engine.py`：agent 节点支持 delegate 语义
-- `tools_domain.py`：写作工具接入委派入口
-- 前端：工作流编辑器节点参数 + 委派状态展示（二期）
+**D. 并行**：多个委派节点可 `parallel: true`（复用 S28 后台队列/线程池思路；
+读并行 + 写串行队列，零新依赖）
 
 ### 2.4 验证标准
 
-- 单元：委派执行返回结构化结果；fresh 上下文隔离（父子 prompt 无交集）；工具白名单生效
-- 集成：真实 3 子 Agent 并行起草 3 章 → 主 Agent 汇总（记录 token 成本）
+- 单元：子 Agent 内核——委派返回结构化结果；fresh 上下文隔离（父子 prompt 无交集）；
+  工具白名单生效；预算护栏（超轮数停止）
+- 集成：调研工作流真实跑通——搜索+读书+整理 → 报告入项目池 → 主循环上下文无污染
+- 集成：3 子 Agent 并行起草 3 章 → 主 Agent 汇总（记录 token 成本）
 - 回归：现有 workflow/play 测试全绿
 
 ### 2.5 讨论点（已定结论）
 
-- Q4：委派入口——**先做 workflow 节点（已确认）**：复用 S59 断点/恢复/失败策略/模板化；
-  对话级委派二期（薄封装调 workflow 引擎）
+- Q4：委派入口——**机制一份（loop 层子 Agent 内核），两个入口（已确认）**：
+  workflow agent 节点升级（模板化子 Agent）**优先落地**——固定流程外包重活（调研/收集/批量）
+  是更高频真实需求，且白得 S59 断点恢复/失败策略/确认闸门；主循环 run_subagent 工具二期
+  （对话即时委派，复用同一内核）
 - Q5：子 Agent 心智档位——**不需要（已确认）**：子 Agent 自由度 ≤ 父命令边界
   （严格遵照委派指令，可显著低于父，上限天然由指令边界保证）；档位只在父会话层
   存在；子 Agent 要的是注入内容（设定档/技能），不是心智状态
@@ -310,7 +338,7 @@ skill 是**第三种判别结果**——上传区只加一个分支，不新建�
 | A 会话事件溯源 | 高（修 bug/复盘/训练素材升级） | 低（改发射点+事件类型，无 schema 变更） | 低 | **先做**（1-2 天） |
 | C 沙箱失败关闭 | 中（安全底线） | 低 | 低 | 可与 A 同批（0.5 天） |
 | D 内容生态（skill 导入导出） | 高（生态货币打通） | 低-中（ingest 分支 + 2 端点 + 薄 UI） | 低 | 与 A 同批或紧随（1-2 天） |
-| B 子 Agent 委派 | 高（写作流水线） | 中高（loop 新语义 + 成本护栏） | 中 | 讨论定案后单独排期（3-5 天） |
+| B 子 Agent 内核 + workflow 固定流程 | 高（调研/收集/并行起草等固定流程外包重活） | 中高（loop 子 Agent 内核 + workflow 节点升级 + 护栏） | 中（并行/成本失控需护栏） | 子 Agent 内核 + workflow 节点升级先做（3-5 天）；主循环 run_subagent 二期 |
 
 ## 6. 不做清单（YAGNI）
 
