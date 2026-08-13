@@ -4,7 +4,7 @@ anyspark.server.export — 全书导出（S48-P3：多格式 + 图片携带）�
 - txt/md：章节拼接（md 保留图片引用路径）
 - epub：EPUB 3 零依赖导出（zipfile + xhtml）——收集章节 md 内的图片引用，
   复制进 epub images/ 并改写 src；原始区图片（如 上传/xxx.png）随导出携带。
-  图片支持（主人拍板）：md 相对引用 → 导出带入，无需多模态理解。
+  图片支持（决策记录）：md 相对引用 → 导出带入，无需多模态理解。
 """
 
 from __future__ import annotations

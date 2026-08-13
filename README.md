@@ -4,9 +4,9 @@
 
 AnySpark 是一个 AI 小说创作引擎。**最终目的：AI 写小说。**
 
-v4 是一次**二次项目**——绿地独立建设，不复用旧代码（旧系统只作思想参考），**不做旧数据导入/转移，绿地空库起步**（主人 2026-08-02 决策A，旧系统仅作思想参考）。核心理念：**写作即对话**——用户说话，智能体直接写；智能体的第一能力不是守规矩，而是**懂你**。
+v4 是一次**二次项目**——绿地独立建设，不复用旧代码（旧系统只作思想参考），**不做旧数据导入/转移，绿地空库起步**（2026-08-02 决策记录：旧系统仅作思想参考）。核心理念：**写作即对话**——用户说话，智能体直接写；智能体的第一能力不是守规矩，而是**懂你**。
 
-本仓库为 **AnySpark v4 后端**（Python）。前端已独立（由他人基于后端 HTTP API 开发新创作台），本仓库不含前端代码。
+本仓库为 **AnySpark v4 全栈**（Python 后端 + React 前端创作台）。前端创作台位于 `frontend/`（S75 并入），通过后端 HTTP API 驱动。
 
 ## 快速开始（开发环境）
 
@@ -29,19 +29,14 @@ cd frontend && npm ci && npm run dev   # http://127.0.0.1:5173（/api 代理到�
 uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 ```
 
-## 文档导航（实现前必读）
+## 文档导航
+
+> 结构逻辑图随源码发布（理解系统运作的入口）；技术设计文档（设计规格/推进台账/审计等）不随源码发布。
 
 | 文档 | 内容 |
 |------|------|
-| [docs/DESIGN.md](docs/DESIGN.md) | **完整设计规格**（实现者的唯一主文档，覆盖全部设计，必须完整遵循；§12 为演进补记 S32-S63） |
-| [docs/AUDIT-V1.md](docs/AUDIT-V1.md) | **设计实现审计报告**（现状快照：哪些实现/哪些缺失/优先级，接手 AI 必读） |
-| [docs/PROGRESS.md](docs/PROGRESS.md) | 连续推进台账（各阶段完成情况 + 踩坑记录，最新到 S75） |
-| [docs/UPGRADE-DISCUSSION.md](docs/UPGRADE-DISCUSSION.md) | 讨论纪要与推理过程（查证设计意图用） |
-| [docs/HANDOFF-L-SERIES.md](docs/HANDOFF-L-SERIES.md) | 与旧仓库 L 系列收尾的边界交接 |
-| [docs/FRONTEND-HANDOFF.md](docs/FRONTEND-HANDOFF.md) | **前端开发交接**（API 全契约/现状盘点/设计意图——前端开发智能体必读） |
-| [docs/BACKEND-MAP.md](docs/BACKEND-MAP.md) | **后端业务逻辑地图**（分层/核心业务流/15 router/23 工具/数据载体/审计结论） |
+| [docs/BACKEND-MAP.md](docs/BACKEND-MAP.md) | **后端业务逻辑地图**（分层/核心业务流/router/工具/数据载体/审计结论） |
 | [docs/uml/](docs/uml/README.md) | **有向逻辑图全集**（架构/顺序图/状态机/活动图——看懂系统运作；改后端必须同步更新） |
-| [docs/EXTENDING.md](docs/EXTENDING.md) | **贡献者指南**（如何加能力：数据工具/独立包/改核心，含 workflow 模板） |
 
 ## 当前状态
 
@@ -51,14 +46,14 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
   - 超长书五场景（S37-S42）：图谱高频保底注入/批量灌入/理解/续写/批量任务/设定档（正典+提炼）
   - 编辑与连锁（S44-S46）：定点编辑/影响分析/剧情计划（计划→执行）
   - **运行时模型**（S47）：多模型配置注册表 + 思考强度；**V4 系列 1M 上下文**
-  - **特化路线 P1-P5（S48 系，主人拍板：小说特化版 pi）**：
+  - **特化路线 P1-P5（S48 系，项目定位：小说特化版 pi）**：
     - P1 工作区化：每项目一路径（上传存档/章节 md 权威/卡片）+ 双写 + import 同步
     - P2 领域工具化：图谱/伏笔/计划/设定查证全 agent 可自主调用（写作闭环实证）
     - P3 格式管线：零依赖提取（txt/md/docx/pdf）+ 规则拆章 + 摘要卡 + EPUB 导出携图
     - P4 角色推演：低成本多探索 + 判别选优；codex 只读数据环境（真实统计）
     - P5 代码扩展：沙箱 run_code + 扩展工具注册表（工具=数据，人工批准生效）
     - 正文检索实用化：search_chapters（词表批量/句级排除/regex/fragment 可调）+ read_context（锚点读段落）
-  - **架构深化（S53-S63，主人讨论驱动）**：
+  - **架构深化（S53-S63，设计讨论驱动）**：
     - **心智模型=会话规划器**（S50/S53b）：manual 分类 collab/style/habit——不再全量注入写作
     - **全项目内容化**（S53）：explore 维度 / graph 实体类型 / worldsettings 类别 内容载体化+CRUD
     - **叙事技巧生成器**（S54）：原文提炼 skill 五段式 + 人工确认闸门；**类型 skill 生成器**（S58，mode=main）
@@ -73,7 +68,7 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
     - **S60 skill 注入瘦身**（S60/S61）：主循环只注入全部技巧索引（名字+描述）+ `skill_lookup` 按需细看 + `write_chapter` 的 `skills` 点名参数——写作调用不自行选技巧，所有注入由主循环点名决定
     - **画蛇添足清理**（S63）：死代码 mood 删除 + role_play 双通道收敛 `load_role_card` + check_text 工具退役
     - **数据隔离审计**（S74）：book_id 贯穿上传/消化/图谱/资料 + 死数据清理 + 隔离边界定案
-    - **前端创作台整合**（S75）：合作者前端分支 f3-snapshot 并入——图谱实体双定位/会话/章节/资料/故事节点端点移植，以本地后端为准
+    - **前端创作台整合**（S75）：前端创作台 f3 分支并入——图谱实体双定位/会话/章节/资料/故事节点端点移植，以本地后端为准
 - **S79-S96 后端收敛与加固**：SQLite 连接收敛 + app.py 按领域拆 router（S79-S81）+ 双层资料库（全局池↔项目池 + kind 冷藏，S79）+ 会话绑定项目/智能体作用域隔离（S81）+ 图谱 API 项目隔离（跨书保护，S82）+ 约束机制/审计修复（S83/S85）+ 破限提示自编辑（S87）+ 打包发布（S88）+ 模型编辑功能（S89）+ **门禁自动分层**（S96：gate.py 按 diff 判定改动面 + 敏感文件强制全量 + diff 归属核查）
 - **实测验证**：pi 循环行为对照 7/7；长书压力有界；哈利波特/猎手准则颗粒度矩阵；猎手准则第一卷 164 章灌入+理解+续写；单元层 benchmark 17/17 回归；**上下文形态对比（S55）+ 多章毒化实证（S58）**；工作流真实链路（AI 生成→审读发现设定冲突→改写→3 轮复检→确认）
 - **知识分层**：图谱（自动事实+weight）/设定档（作者正典）/说明书（偏好）/写作技巧（skill 式，索引+点名注入）/剧情计划（执行蓝图）/心智（会话规划器）
@@ -86,7 +81,7 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 ## 技术栈
 
 - 后端：Python 3.11+ / FastAPI / SQLite / uv workspace
-- 前端（独立仓库，他人开发）：React 19 / TypeScript / Vite / Tailwind 4 / TipTap / Zustand
+- 前端（本仓库 `frontend/`，S75 并入）：React 19 / TypeScript / Vite / Tailwind 4 / TipTap / Zustand
 
 ## 仓库结构
 
@@ -104,7 +99,7 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 │   ├── app/              anyspark-app      组合根（FastAPI 服务/工具装配/模型适配）
 │   └── desktop/          anyspark-desktop  桌面包
 ├── data/                 # 运行时用户数据（.gitignore，不入库）
-├── docs/                 # 设计文档（DESIGN/PROGRESS/AUDIT/FRONTEND-HANDOFF）
+├── docs/                 # 文档（结构图 uml/ 随源码发布；设计/台账等内部不随源码发布）
 ├── benchmarks/           # 基准测试（代码/报告入库，产物不入库）
 ├── tests/
 └── scripts/              # 门禁 + 冒烟脚本
@@ -115,4 +110,4 @@ uv run python scripts/gate.py   # ruff + mypy + pytest + tsc + eslint + build
 - 禁 `git add -A`，显式路径
 - `data/` 不入库
 - 依赖 pin + 锁文件
-- 对设计的任何偏离/新增，先与主人确认，再更新 `docs/DESIGN.md`
+- 对设计的任何偏离/新增，先经设计决策确认，再更新设计文档

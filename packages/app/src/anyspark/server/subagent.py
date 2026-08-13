@@ -1,7 +1,7 @@
 """
 anyspark.server.subagent — 子 Agent 执行内核（S119/S121 提案 B）。
 
-主人定案（S115）：子 Agent 内核一份（loop 层），两个入口——① workflow agent
+设计定案（S115）：子 Agent 内核一份（loop 层），两个入口——① workflow agent
 节点 delegate（S119 已落地）② 主循环 run_subagent 工具（S121，对话即时委派）。
 
 核心（fresh 隔离，对齐 S56 干净写作治毒化）：

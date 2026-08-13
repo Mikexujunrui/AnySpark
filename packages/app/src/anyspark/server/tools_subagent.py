@@ -1,7 +1,7 @@
 """
 anyspark.server.tools_subagent — 主循环 run_subagent 工具（S121 提案 B 第二入口）。
 
-主人定案：子 Agent 内核一份（subagent.py），两个入口——workflow delegate（S119）
+设计定案：子 Agent 内核一份（subagent.py），两个入口——workflow delegate（S119）
 + 主循环 run_subagent 工具（本模块，对话即时委派）。
 
 场景：对话里随口"帮我查一下这个设定冲突""起草一章试试"——主 Agent 判断值得

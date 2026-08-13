@@ -69,7 +69,7 @@ def test_reviewers_list_api() -> None:
     ids = {x["id"] for x in reviewers}
     assert "screenwriter" in ids
     assert "thriller_reader" in ids
-    # 伏笔审计员 S114c 满血激活（主人拍板：已实现增强包不考虑商业化）
+    # 伏笔审计员 S114c 满血激活（决策记录：已实现增强包不考虑商业化）
     fa = next(x for x in reviewers if x["id"] == "foreshadow_auditor")
     assert fa["active"] is True
     # 编剧有评分维度

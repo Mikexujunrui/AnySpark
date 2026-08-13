@@ -130,7 +130,7 @@ def _completion_rate(db: sqlite3.Connection) -> dict[str, Any]:
     """完成率漏斗：方向固化（探索完成）→ 章节产出（第一章完成）。
 
     种子层当前无落盘（探索意图不持久化）；v1 用现有两层代理漏斗，不新增表（YAGNI）。
-    后续如需完整漏斗，可把种子数加进 explore intent 落盘（改动需主人确认）。
+    后续如需完整漏斗，可把种子数加进 explore intent 落盘（改动需决策确认）。
     """
     directions = db.execute("SELECT COUNT(*) AS c FROM archived_directions").fetchone()["c"]
     chapters = db.execute("SELECT COUNT(*) AS c FROM chapters").fetchone()["c"]

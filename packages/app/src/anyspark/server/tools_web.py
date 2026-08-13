@@ -13,7 +13,7 @@ S111 对齐 pi-web-toolkit 降级层水平：
   电商导购（ftxia/taobao/tmall/jd/1688）、短视频（douyin）一律剔除
 - cleanText 用 html.unescape 全量实体解码（对齐 Pi 手写实体表，Python 标准库更全）
 
-S112 补 MCP 层（主人指出：Exa MCP 无密钥可用，Pi 的 MCP 层并不需要 API key）：
+S112 补 MCP 层（观察发现：Exa MCP 无密钥可用，Pi 的 MCP 层并不需要 API key）：
 - `_mcp_call` urllib JSON-RPC 调 Exa/Parallel 公开 MCP 端点（实测加 UA 头即可过 Cloudflare）
 - Exa 返回人类可读块（Title/URL/Published/Author/Highlights），Parallel 返回 JSON（results[]）
 - 默认 auto：exa → parallel → 360/Bing 降级（对齐 Pi）；ANYSPARK_SEARCH_PROVIDER 可覆盖

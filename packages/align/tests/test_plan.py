@@ -56,7 +56,7 @@ def test_plan_api_and_injection() -> None:
     assert r.status_code == 200
     pid = r.json()["id"]
     assert len(client.get("/api/plan").json()) == 1
-    # 注入（S58b 主人偏好：默认不继承场景记忆/计划）：默认 chat 不含计划块
+    # 注入（S58b 设计偏好：默认不继承场景记忆/计划）：默认 chat 不含计划块
     client.post("/api/chat", json={"message": "写一段"})
     assert m.prompts, "应捕获 system prompt"
     assert "剧情计划" not in m.prompts[-1]

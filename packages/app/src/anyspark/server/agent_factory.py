@@ -157,7 +157,7 @@ def make_agent(
         m = deps.model  # 共享 deps.model（测试注入或默认真实）；温度由构造决定
     # 注入块装配：核心注入默认全开，skip_inject 可细粒度关闭（S15 增强按需）
     skip = skip_inject or set()
-    # S58b context_mode（主人偏好：默认不继承场景记忆）：
+    # S58b context_mode（设计偏好：默认不继承场景记忆）：
     # - auto/fresh（默认干净）：不注入场景记忆/剧情计划——新任务/探索不被上次对话绑架
     # - continue（显式继承）：注入场景记忆 + 剧情计划——跨会话续写时显式打开
     # 心智习惯/世界事实（简介/设定档）始终保留（行为底线，非进程状态）。
