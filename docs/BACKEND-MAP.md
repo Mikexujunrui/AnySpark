@@ -107,7 +107,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 
 | Router | 端点区 | 核心依赖 |
 |---|---|---|
-| routes_chat | chat/stream/cancel/steer/stats/direction/candidates/rewrite + S99 队列（queues 查看/queue 入队/queue 删/queue→steer 转插入） | model/store/chapters/active_*/bg_queue/conv_queues |
+| routes_chat | chat/stream/cancel/steer/stats/direction/candidates/rewrite + S99 队列（queues 查看/queue 入队/queue 删/queue→steer 转插入）+ S116 records/{conv_id}（会话运行记录回放：轮快照+系统事件） | model/store/chapters/active_*/bg_queue/conv_queues |
 | routes_conversations | 会话 CRUD/fork/rename + 模型注册表 CRUD/激活 | store/models |
 | routes_books | 书架（项目枚举/创建/删除） | workspace/chapters |
 | routes_chapters | 章节 CRUD/patch/export/wrapup | chapters/workspace/export |

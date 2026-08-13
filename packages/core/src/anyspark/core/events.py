@@ -21,13 +21,19 @@ GENERIC_EVENT_TYPES = {
     "done",  # 一轮完成
     "error",  # 出错
     "tool_call",  # 模型发起工具调用
-    "tool_execution_start",  # 工具开始执行（S25 对齐 pi：前端显示"正在执行"）
+    "tool_execution_start",  # 工具开始执行（S25 对齐 pi：前端显示“正在执行”）
     "tool_execution_end",  # 工具执行结束（S25：带 ok/耗时，前端显示结果）
     "tool_result",  # 工具执行结果
     "turn_start",  # 一轮开始
     "user_text",  # 用户消息入循环（S61 补声明：loop 实际发出，供记录/审计）
     "aborted",  # 本轮被取消（S61 补声明：loop 实际发出）
     "record",  # 运行记录快照（recorder 消费，S49）
+    # -- S116 事件溯源（提案 A：模型所见可重建）--
+    "context_compressed",  # 上下文压缩发生（{turn_index, before_msgs, after_msgs, kept}）
+    "steering_injected",  # steering/followup 插话注入（{source, content, at_turn}）
+    "inject_cut",  # 注入块被裁剪/降级（{block, reason}，app 层发射）
+    "model_switched",  # 模型路由切换（{task, old_id, new_id, reason}，app 层发射）
+    "runtime_warning",  # 非致命运行时告警（{origin, message}，app 层发射）
 }
 
 

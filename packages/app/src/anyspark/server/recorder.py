@@ -54,13 +54,36 @@ class RunRecorder:
         return f
 
     def attach(self, agent: Any, conv_id: str, meta: dict[str, Any]) -> None:
-        """订阅 Agent 的 record 事件：写 meta + 每轮事件追加 JSONL。"""
+        """订阅 Agent 事件：写 meta + 轮快照 + 系统事件（S116 事件溯源）追加 JSONL。
+
+        - record：每轮快照（prompt/output/tool_results）
+        - context_compressed / steering_injected / inject_cut / model_switched /
+          runtime_warning：系统事件（模型所见如何被改变的过程留痕）
+        """
         self.write_meta(conv_id, meta)
 
         def _on_record(e: Any) -> None:
             payload = dict(e.payload)
             payload["ts"] = _now_iso()
+            payload["event"] = "record"
             self.append(conv_id, payload)
+
+        # S116：系统事件统一落盘（与 record 同文件，event 字段区分）
+        for _t in (
+            "context_compressed",
+            "steering_injected",
+            "inject_cut",
+            "model_switched",
+            "runtime_warning",
+        ):
+
+            def _on_sys(e: Any, _t: str = _t) -> None:
+                payload = dict(e.payload)
+                payload["ts"] = _now_iso()
+                payload["event"] = _t
+                self.append(conv_id, payload)
+
+            agent.events.on(_t, _on_sys)
 
         agent.events.on("record", _on_record)
 

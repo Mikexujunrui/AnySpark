@@ -168,6 +168,13 @@ class Agent:
             for m in steer_msgs:
                 store.append(conversation_id, m)
                 self.events.emit(Event(type="user_text", payload={"content": m.content}))
+                # S116 事件溯源：steer 插话独立事件（与普通 user_text 区分）
+                self.events.emit(
+                    Event(
+                        type="steering_injected",
+                        payload={"source": "steer", "content": m.content, "at_turn": turn_index},
+                    )
+                )
             self.events.emit(
                 Event(
                     type="turn_start",
@@ -184,7 +191,22 @@ class Agent:
             ) + history
             # token 预算：可选压缩（prune/summarize 两阶段，实现由 app 注入）
             if self.context_compressor is not None:
+                before_msgs = len(prompt_messages)
                 prompt_messages = self.context_compressor(prompt_messages)
+                after_msgs = len(prompt_messages)
+                if after_msgs < before_msgs:
+                    # S116 事件溯源：压缩发生留痕（token 数+消息数，不保留原文——
+                    # 原文在历史轮 record 快照里可重放；存 token 数足够定位）
+                    self.events.emit(
+                        Event(
+                            type="context_compressed",
+                            payload={
+                                "turn_index": turn_index,
+                                "before_msgs": before_msgs,
+                                "after_msgs": after_msgs,
+                            },
+                        )
+                    )
                 # S26：压缩持久化回写——压缩后的上下文（去掉 system 指令）写回 store：
                 # 下一轮/下次会话读到的就是压缩后历史（摘要+保留段），跨重启不失效。
                 if self.persist_compression:
@@ -245,6 +267,17 @@ class Agent:
                     for m in queued:
                         store.append(conversation_id, m)
                         self.events.emit(Event(type="user_text", payload={"content": m.content}))
+                        # S116 事件溯源：终答前插话/追问独立事件
+                        self.events.emit(
+                            Event(
+                                type="steering_injected",
+                                payload={
+                                    "source": "followup",
+                                    "content": m.content,
+                                    "at_turn": turn_index,
+                                },
+                            )
+                        )
                     continue
                 # 真终答
                 store.append(conversation_id, Message(role="assistant", content=output.text))

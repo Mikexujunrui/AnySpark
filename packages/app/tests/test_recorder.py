@@ -76,3 +76,93 @@ def test_recorder_captures_full_turn_with_reasoning() -> None:
     # 思维链不注入上下文：store 里没有 reasoning
     msgs = agent.store.messages(conv.id)
     assert all("先看有没有章节" not in (m.content or "") for m in msgs)
+
+
+def _compress(msgs: list[Message]) -> list[Message]:
+    """模拟上下文压缩器：压掉中间历史，只留首尾（触发 context_compressed）。"""
+    if len(msgs) <= 2:
+        return msgs
+    return [msgs[0], Message(role="assistant", content="（摘要：前面的对话被压缩）"), msgs[-1]]
+
+
+def test_recorder_captures_system_events() -> None:
+    """S116 事件溯源：context_compressed + steering_injected 落盘（model 所见如何被改变）。"""
+    root = Path(tempfile.mkdtemp()) / "records"
+    rec = RunRecorder(root=root)
+
+    class _SteerModel:
+        model_name = "steer-probe"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+            self.calls += 1
+            if self.calls == 1:
+                return ModelOutput(tool_calls=[ToolCall(name="list_chapters", arguments={})])
+            return ModelOutput(text="终答。")
+
+    from anyspark.core import Agent, ToolRegistry
+    from anyspark.server.app import DEFAULT_SYSTEM
+    from anyspark.server.tools_writing import register_writing_tools
+    from anyspark.store import ChapterStore, SqliteConversationStore
+
+    reg = ToolRegistry()
+    register_writing_tools(reg, ChapterStore(_db()))
+    model = _SteerModel()
+    agent = Agent(
+        model=model,
+        registry=reg,
+        store=SqliteConversationStore(_db()),
+        system_prompt=DEFAULT_SYSTEM,
+        context_compressor=_compress,  # 每轮触发压缩（多轮后变短）
+        persist_compression=True,
+    )
+    conv = agent.store.create()
+    rec.attach(agent, conv.id, {"ts": "t0", "model": "steer-probe"})
+
+    # 工具轮后注入 steering，再继续
+    agent.run("写一章", conv.id)
+    agent.steer("别写太血腥")
+    agent.run("继续", conv.id)
+
+    lines = (root / conv.id / "events.jsonl").read_text(encoding="utf-8").strip().split("\n")
+    events = [json.loads(ln) for ln in lines]
+    kinds = {e.get("event", "record") for e in events}
+    assert "record" in kinds
+    assert "steering_injected" in kinds
+    steer_ev = next(e for e in events if e.get("event") == "steering_injected")
+    assert steer_ev["content"] == "别写太血腥"
+    assert steer_ev["source"] == "steer"
+
+
+def test_records_api_endpoint() -> None:
+    """S116：GET /api/records/{conv_id} 返回 meta + 事件序列（回放）。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    m = _Probe()
+    client = TestClient(build_app(model=m, db_path=_db()))
+    r = client.post(
+        "/api/chat",
+        json={"message": "写《第1章》10字：晨光。", "book_id": "main"},
+    )
+    assert r.status_code == 200
+    conv_id = r.json()["conversation_id"]
+    rr = client.get(f"/api/records/{conv_id}")
+    assert rr.status_code == 200
+    data = rr.json()
+    assert data["ok"] is True
+    assert data["meta"]["endpoint"] == "chat"
+    assert isinstance(data["events"], list)
+    assert any(e.get("event", "record") == "record" for e in data["events"])
+
+
+class _Probe:
+    """终答模型（build_app 装配用）。"""
+
+    model_name = "probe"
+
+    def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+        return ModelOutput(text="晨光洒落，新的一天。")

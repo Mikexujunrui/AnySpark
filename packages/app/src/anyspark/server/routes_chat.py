@@ -85,6 +85,41 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
         return {"ok": True}
 
     # -----------------------------------------------------------------------
+    # S116 会话运行记录查询（事件溯源：轮快照 + 系统事件回放）
+    # -----------------------------------------------------------------------
+    @router.get("/api/records/{conv_id}")
+    def get_records(conv_id: str, limit: int = 500) -> dict[str, Any]:
+        """S116：读取会话运行记录（data/records/<conv>/events.jsonl）。
+
+        返回 {ok, meta, events: [...]}——轮快照（event=record）与系统事件
+        （event=context_compressed/steering_injected/...）按时间顺序，
+        供前端回放面板展示"模型当时看到了什么 + 谁改了什么"。
+        """
+        import json as _json
+
+        meta: dict[str, Any] = {}
+        events: list[dict[str, Any]] = []
+        sdir = deps.recorder.session_dir(conv_id)
+        mf = sdir / "meta.json"
+        if mf.exists():
+            try:
+                meta = _json.loads(mf.read_text(encoding="utf-8"))
+            except Exception:
+                meta = {}
+        ef = sdir / "events.jsonl"
+        if ef.exists():
+            with ef.open(encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        events.append(_json.loads(line))
+                    except Exception:
+                        continue
+        return {"ok": True, "conv_id": conv_id, "meta": meta, "events": events[-limit:]}
+
+    # -----------------------------------------------------------------------
     # S99 会话消息队列（排队接力第一步——排队/查看/删/转插入；自动消费=第二步）
     # -----------------------------------------------------------------------
     @router.get("/api/chat/queues")
