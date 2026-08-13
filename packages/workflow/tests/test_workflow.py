@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -360,3 +361,25 @@ def test_generator_rejects_invalid() -> None:
     gen = WorkflowGenerator(_FakeModel(raw))  # type: ignore[arg-type]
     with pytest.raises(ValueError):
         gen.generate("坏需求")
+
+
+def test_seed_research_template() -> None:
+    """S121：空表播种「资料调研」模板；重复实例化不重复播。"""
+    from anyspark.workflow.store import WorkflowStore
+
+    db = Path(tempfile.mkdtemp()) / "wf_seed.db"
+    store = WorkflowStore(db)
+    tpls = store.list_templates()
+    assert any(t["name"] == "资料调研" for t in tpls)
+    wf = store.get_template(tpls[0]["id"])
+    assert wf is not None and not wf.validate()
+    # 结构：搜索→摘录→整理→落池→确认
+    kinds = [n.kind for n in wf.nodes]
+    assert kinds[-1] == "approval"
+    # delegate 节点带工具白名单
+    n1 = wf.nodes[0]
+    assert "search_web" in n1.params.get("delegate", {}).get("scope", {}).get("tools", [])
+
+    # 二次实例化不重复播
+    store2 = WorkflowStore(Path(tempfile.mkdtemp()) / "wf_seed2.db")
+    assert len(store2.list_templates()) == len(tpls)

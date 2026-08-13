@@ -91,6 +91,118 @@ class WorkflowStore:
         with self._lock:
             self._conn.executescript(SCHEMA)
             self._conn.commit()
+        self._seed_templates()
+
+    # ------------------------------------------------------------------
+    # S121 种子模板（空表时播入：调研工作流——提案 B 首个真实模板）
+    # ------------------------------------------------------------------
+    def _seed_templates(self) -> None:
+        """空表时播种内置模板（与书解耦、可迁移；用户可删/改）。"""
+        with self._lock:
+            n = self._conn.execute("SELECT COUNT(*) FROM workflow_templates").fetchone()[0]
+            if n > 0:
+                return
+            research = WorkflowDef.from_dict(
+                {
+                    "name": "资料调研",
+                    "description": (
+                        "子 Agent 调研：网络搜索 + 参考书摘录 → 整理报告 → 落项目资料池"
+                        "（fresh 上下文，不占主循环）"
+                    ),
+                    "nodes": [
+                        {
+                            "id": "n1",
+                            "kind": "agent",
+                            "label": "网络搜索",
+                            "params": {
+                                "instruction": (
+                                    "围绕主题进行网络调研：用 search_web 搜索 3-5 次（关键词"
+                                    "多角度），对重要结果用 fetch_page 抓取正文。输出："
+                                    "来源清单（标题/URL/要点），每来源 2-4 条要点。"
+                                ),
+                                "delegate": {
+                                    "scope": {"tools": ["search_web", "fetch_page"]},
+                                    "budget": {"max_turns": 12},
+                                },
+                                "output_key": "web_research",
+                            },
+                        },
+                        {
+                            "id": "n2",
+                            "kind": "agent",
+                            "label": "参考书摘录",
+                            "params": {
+                                "instruction": (
+                                    "从参考书库检索相关章节并摘录（reference_lookup "
+                                    "或 library 相关工具）。输出：相关章节/设定摘录，"
+                                    "无则输出（无参考书素材）。"
+                                ),
+                                "delegate": {
+                                    "scope": {"tools": ["reference_lookup"]},
+                                    "budget": {"max_turns": 8},
+                                },
+                                "output_key": "book_research",
+                            },
+                        },
+                        {
+                            "id": "n3",
+                            "kind": "agent",
+                            "label": "整理报告",
+                            "params": {
+                                "instruction": (
+                                    "合并网络调研与参考书摘录，整理成结构化调研报告："
+                                    "① 主题概述 ② 关键发现（分点）③ 可用素材（人物/设定/"
+                                    "情节灵感）④ 来源与可信度标注。引用具体内容。"
+                                ),
+                                "output_key": "report",
+                            },
+                        },
+                        {
+                            "id": "n4",
+                            "kind": "agent",
+                            "label": "落资料池",
+                            "params": {
+                                "instruction": (
+                                    "把调研报告写入项目资料池（material_register，"
+                                    "kind=inspiration）。报告标题用主题。"
+                                ),
+                                "delegate": {
+                                    "scope": {"tools": ["material_register"]},
+                                    "budget": {"max_turns": 5},
+                                },
+                                "output_key": "saved",
+                            },
+                        },
+                        {
+                            "id": "n5",
+                            "kind": "approval",
+                            "label": "人工确认",
+                            "params": {"prompt": "调研报告已生成，确认入库？"},
+                        },
+                    ],
+                    "edges": [
+                        {"source": "n1", "target": "n2"},
+                        {"source": "n2", "target": "n3"},
+                        {"source": "n3", "target": "n4"},
+                        {"source": "n4", "target": "n5"},
+                    ],
+                }
+            )
+            if not research.validate():
+                # 锁内直插（不调 add_template——同锁重入死锁）
+                self._conn.execute(
+                    "INSERT INTO workflow_templates"
+                    " (id, name, description, definition, created_at)"
+                    " VALUES (?, ?, ?, ?, ?)",
+                    (
+                        research.id,
+                        research.name,
+                        research.description,
+                        json.dumps(research.to_dict(), ensure_ascii=False),
+                        research.created_at,
+                    ),
+                )
+                self._conn.commit()
 
     # ------------------------------------------------------------------
     # 模板 CRUD
