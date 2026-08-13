@@ -52,6 +52,7 @@ class ToolContext:
     templates: list[str] = None  # type: ignore[assignment]  # S68 模板描述列表（explore_direction 注入）
     library: Any = None  # S86 参考书库（reference_lookup 工具：不注入，按需检索）
     book_id: str = "main"  # S74：当前项目 id——工具层多书隔离（此前各 implementer 硬编码 main）
+    subagent_deps: Any = None  # S121 提案 B：子 Agent 内核装配依赖（主循环 run_subagent 工具用）
 
 
 def build_toolkit(
@@ -209,6 +210,14 @@ def build_toolkit(
             mm_specs, mm_impls = make_mind_manage_implementer(ctx.manual)
             for _s, _i in zip(mm_specs, mm_impls, strict=True):
                 registry.register(_s, _i)
+        # S121 提案 B 第二入口：主循环 run_subagent 工具（对话即时委派子 Agent）
+        from anyspark.server.tools_subagent import make_subagent_implementer
+
+        sb_spec, sb_impl = make_subagent_implementer(
+            subagent_deps=ctx.subagent_deps,
+            book_id=ctx.book_id,
+        )
+        registry.register(sb_spec, sb_impl)
 
     # S48-P4/B 扩展工具注册表：已批准（active）的扩展注入工具集（无需重启生效）
     from anyspark.server.codex import make_data_env

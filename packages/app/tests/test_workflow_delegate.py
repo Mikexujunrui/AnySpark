@@ -134,3 +134,75 @@ def test_workflow_delegate_tool_whitelist() -> None:
     # 子 Agent 只见过白名单工具
     assert "list_chapters" in model.last_tools
     assert "write_chapter" not in model.last_tools
+
+
+# ---------------------------------------------------------------------------
+# S121 提案 B 第二入口：主循环 run_subagent 工具
+# ---------------------------------------------------------------------------
+
+
+class _ToolModel:
+    """主循环模型：第一轮调 run_subagent，第二轮终答。"""
+
+    model_name = "tool-probe"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+        self.calls += 1
+        if self.calls == 1:
+            return ModelOutput(
+                tool_calls=[
+                    ToolCall(
+                        name="run_subagent",
+                        arguments={"instruction": "查一下章节数", "tools": "list_chapters"},
+                    )
+                ]
+            )
+        return ModelOutput(text="已委派子Agent查完。")
+
+
+def test_chat_can_call_run_subagent_tool() -> None:
+    """对话中 Agent 可调 run_subagent（工具注册 + 子 Agent 执行链路）。"""
+    model = _ToolModel()
+    client = _client(model)
+    r = client.post(
+        "/api/chat",
+        json={"message": "帮我查一下章节情况", "enable_domain": True},
+    )
+    assert r.status_code == 200, r.text
+    data = r.json()
+    tool_events = [e for e in data.get("events", []) if e["type"] == "tool_call"]
+    assert any("run_subagent" in (e["payload"].get("name") or []) for e in tool_events)
+    # 子 Agent 实际执行（模型被调多次：主循环 2 次 + 子 Agent 至少 1 次）
+    assert model.calls >= 3, f"应有子Agent调用，实际 {model.calls} 次模型调用"
+
+
+def test_run_subagent_missing_instruction() -> None:
+    """缺 instruction → 工具报错（不崩溃）。"""
+    import tempfile
+
+    from anyspark.core.protocol import ToolRegistry
+    from anyspark.server.toolkit import ToolContext, build_toolkit
+    from anyspark.server.tools_extensions import ExtensionToolStore
+
+    registry = build_toolkit(
+        ToolRegistry(),
+        ToolContext(
+            chapters=None,
+            workspace=None,
+            model=None,
+            graph=None,
+            plots=None,
+            plans=None,
+            settings=None,
+            materials=None,
+            ext_tools=ExtensionToolStore(Path(tempfile.mkdtemp()) / "ext.db"),
+            book_id="main",
+        ),
+    )
+    spec, impl = registry.get("run_subagent") or (None, None)
+    assert spec is not None and impl is not None, "run_subagent 应注册"
+    res = impl(spec, {"tools": "list_chapters"})
+    assert res.ok is False and "instruction" in res.content

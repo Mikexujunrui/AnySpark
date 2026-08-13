@@ -93,6 +93,8 @@ def make_agent(
             # S105：工具层多书隔离（S74 已加字段但装配漏传——list_chapters 等
             # 全部落到默认 main，新项目会话读到旧项目章节，泄漏根因）
             book_id=book_id,
+            # S121：子 Agent 内核装配依赖（主循环 run_subagent 工具）
+            subagent_deps=deps,
             # S68：探索注入真实模板库（L2+L3 合并，agent 的 explore_direction 消费）
             templates=[f"{t.name}：{t.description}" for t in deps.templates_external.all()[:12]],
         ),
