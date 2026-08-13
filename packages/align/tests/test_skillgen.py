@@ -183,6 +183,117 @@ def test_generate_book_sampling_and_merge() -> None:
     assert len(_sample_blocks("x" * (16 * 12000 + 1), 16, 12000)) == 16
 
 
+def test_generate_book_structural_three_layer() -> None:
+    """S114：有章节结构的书走三层拆书——微观（选章拼批+归并）+ 骨架扫描 + 定点精读。
+
+    结构感知 vs S106 均匀抽样：抽样单位=整章（章节边界完整），选章按位置均匀
+    覆盖全书；骨架扫描从标题轨迹发现跨卷机关；精读先给原文（防案例幻觉）。
+    """
+    from anyspark.align.skillgen import _BATCH_SIZE, _MAX_SELECT
+
+    class ThreeLayerModel:
+        def __init__(self) -> None:
+            self.calls = 0
+            self.prompts: list[str] = []
+
+        def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+            self.calls += 1
+            prompt = next((m.content for m in messages if m.role == "system"), "")
+            self.prompts.append(prompt)
+            if "关键章节原文" in prompt:  # 定点精读（先原文后提问 + 骨架笔记作线索）
+                return ModelOutput(
+                    text='[{"name": "时间回环·闭环", "description": "d", "content": "负面：不要先验告知；正面：伏笔-揭示-回收-代价。", "example": "原文摘录", "tags": "科幻,悬疑"}]'
+                )
+            if "结构分析师" in prompt:  # 骨架扫描 → 结构笔记（含机关章号引用）
+                return ModelOutput(
+                    text="第85章到第90章揭示了时间回环结构。第100章主角最终目的：重启世界。"
+                )
+            if "汇总器" in prompt:  # 归并 → 书名方法论
+                return ModelOutput(
+                    text='[{"name": "测试书", "description": "整本书写法", "content": "开篇短句；中段节奏交替；结尾钩子。", "tags": "文风,结构"}]'
+                )
+            # 分批拆解 → 该批 skill
+            return ModelOutput(
+                text='[{"name": "批", "content": "某批特征技法。", "description": ""}]'
+            )
+
+    # 100 章（无卷标记 → 全局均匀选章）
+    lines = []
+    for i in range(100):
+        lines.append(f"第{i + 1}章 章节{i + 1}")
+        lines.append("这里是正文内容用于测试。" * 30)
+    text = "\n".join(lines)
+
+    model = ThreeLayerModel()
+    gen = SkillGenerator(model)
+    cands = gen.generate_book(text, hint="侧重悬念", book_name="测试书")
+
+    # 三层调用：选章拆解批 + 1 归并 + 1 骨架 + 1 精读
+    n_batches = -(-_MAX_SELECT // _BATCH_SIZE)  # ceil(24/4)=6
+    assert model.calls == n_batches + 3, f"三层调用数应 {n_batches + 3}，实际 {model.calls}"
+    # 产出：书名方法论 + 架构技法
+    assert len(cands) == 2
+    assert cands[0]["name"] == "测试书"  # name=书名（引用单位）
+    assert cands[0]["target"] == "both"
+    assert cands[1]["name"] == "时间回环·闭环"
+    assert cands[1]["target"] == "main"  # 架构机关给主循环
+    # 书名注入：拆解/骨架/精读 prompt 都带书名
+    assert any("测试书" in p and "代表批" in p for p in model.prompts)
+    # 骨架扫描：喂的是章标题轨迹（无正文）
+    skeleton_p = next(p for p in model.prompts if "结构分析师" in p)
+    assert "第1章 章节1" in skeleton_p and "第100章 章节100" in skeleton_p
+    # 精读：先给原文、后提问；骨架笔记仅作线索（标注需原文验证）——防案例幻觉
+    refine_p = next(p for p in model.prompts if "关键章节原文" in p)
+    head, _, tail = refine_p.partition("关键章节原文如下")
+    assert "仅供参考" in head  # 骨架笔记标注为需验证的线索
+    assert "第85章" in tail  # 原文里含机关章（笔记引用章排最前）
+    # hint 注入
+    assert any("侧重悬念" in p for p in model.prompts)
+
+
+def test_generate_book_book_name_injected_uniform() -> None:
+    """S114：无章节结构（回退均匀）时书名也注入（修复 name=书名引用单位）。"""
+    from anyspark.align.skillgen import _BOOK_SAMPLES
+
+    class NamedModel:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+            prompt = next((m.content for m in messages if m.role == "system"), "")
+            self.prompts.append(prompt)
+            if "汇总器" in prompt:
+                return ModelOutput(
+                    text='[{"name": "斗破", "content": "融合方法论", "description": ""}]'
+                )
+            return ModelOutput(text='[{"name": "斗破", "content": "段特征", "description": ""}]')
+
+    model = NamedModel()
+    cands = SkillGenerator(model).generate_book("雨夜，钟声。" * 300000, book_name="斗破苍穹")
+    assert cands and cands[0]["name"] == "斗破"
+    # 均匀抽样 prompt 含书名（此前 model 自编书名）
+    assert any("本书：《斗破苍穹》" in p for p in model.prompts)
+    assert len(model.prompts) == _BOOK_SAMPLES + 1  # 16 段 + 1 归并
+
+
+def test_sanitize_examples_removes_fabricated() -> None:
+    """S114：案例真实性机器校验——example 引号句不在精读片段 → 清空（宁缺毋滥）。"""
+    from anyspark.align.skillgen import _sanitize_examples
+
+    source = "赵光离拿起日记本。'天驱历四百一十二年，五月十二日，晴。'"
+    cands = [
+        {"name": "真实案例", "example": "原文说：“天驱历四百一十二年，五月十二日，晴。”——真实摘录"},
+        {"name": "编造案例", "example": "原文说：“赵光离！你骗了我！”——这是编造的句子"},
+        {"name": "无引号自述", "example": "开篇通过环境渲染建立压抑氛围。"},
+        {"name": "无案例", "example": "（无合适摘录）"},
+    ]
+    out = _sanitize_examples(cands, source)
+    assert out[0]["example"] != "（无合适摘录）"  # 真实摘录保留
+    assert out[1]["example"] == "（无合适摘录）"  # 编造 → 清空
+    assert out[2]["example"] == "开篇通过环境渲染建立压抑氛围。"  # 无引号不判
+    assert out[3]["example"] == "（无合适摘录）"  # 原样保留
+
+
 def test_generate_api_main_mode() -> None:
     """S58：API 传 mode=main 产出 target=main 候选。"""
     model = FakeSkillModel(GOOD_OUTPUT)

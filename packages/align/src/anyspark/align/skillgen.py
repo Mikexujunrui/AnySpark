@@ -18,6 +18,7 @@ anyspark.align.skillgen — 叙事技巧生成器（S54：文风提炼 → skill
 from __future__ import annotations
 
 import logging
+import re
 
 from anyspark.core import Message
 from anyspark.core.jsonutil import parse_json_array
@@ -146,6 +147,7 @@ GENERATE_PROMPT_BOOK = """你是小说拆书器。给定一部小说的代表性
 
 【可执行要求】
 - 每小节给：负面约束（不要XXX）+ 正面做法（怎么做）+ 原文摘录案例（为什么这样有效）。
+- 案例必须逐字摘录自给定原文片段；找不到合适摘录写"（无合适摘录）"，禁止自拟编造。
 - 拒绝抽象概括（"文风爽快"是无效的）——必须落到能照着写的动作。
 - content 会较长（500-1500 字），这是整本书方法论，值得；但每句仍要可执行。
 
@@ -207,10 +209,200 @@ MERGE_PROMPT_BOOK = """你是小说拆书汇总器。以下是同一本书多个
 - 合并重复维度（取最完整/最具体的表述），保留各段独有特征（开篇文风/中段节奏/结尾钩子逻辑都要覆盖）
 - 冲突时以出现频率高者为准，罕见的章节特征标注「（部分章节）」
 - 拒绝空洞概括——每句仍须落到可执行动作（负面约束 + 正面做法 + 原文摘录案例）
+- 案例必须逐字摘录自给定原文片段；找不到写"（无合适摘录）"，禁止自拟编造
 - 输出 JSON 数组（仅一条）：[{"name": 书名, "description": 一句话索引, "content": 融合后完整方法论, "tags": "文风,结构,节奏"}]
 
 以下为各段拆解结果：
 """
+
+# 骨架扫描 prompt（S114：全书机关发现——只看章节标题轨迹，不看正文）
+# 实测（猎手准则 367 万字）：仅凭 1281 章标题就发现「循环/重开/时间机器」机制 +
+# 主角最终目的（创造新世界）——抽样+局部提炼结构上做不到的全局关系，标题轨迹可见。
+SKELETON_PROMPT = """你是小说结构分析师。以下是《{book_name}》的全书骨架：全部章节标题（无正文）。
+请基于骨架证据（章节标题的走向、重复出现的关键词、主题变化）分析：
+
+1. **跨卷叙事机关**：这本书有没有独特的结构设计（如时间回环、双线并行、多重视角、
+   真相逐层揭示、结局反转开头）？请给出支撑的章节标题证据（引用具体章名）。
+2. **主角最终目的**：从标题轨迹推断，主角的最终目标/全书主线钩子是什么？
+3. **剧情大阶段**：全书分几个大阶段，各自的主题和转折点（以章为界）？
+4. **开篇与收尾设计**：开篇怎么立钩子，结局怎么收，首尾有什么呼应？
+
+要求：必须基于骨架推理并引用具体章节标题；无法从标题确定的内容明确说"标题看不出来"。
+不要编造、不要臆测正文内容。请用中文分点回答。
+
+骨架如下：
+"""
+
+# 定点精读 prompt（S114：从骨架笔记定位机关章 → 精读原文 → 提炼架构技法 skill）
+# 防案例幻觉（实测教训）：必须**先给原文、后提问**，不得预先告知答案——
+# 实验版先告诉模型"主角经历被过去的自己安排"，模型编造了"神国墙壁"等原文不存在的细节。
+REFINE_PROMPT = """你是小说拆书器。以下是《{book_name}》的若干关键章节原文（可能不连续，是全书不同位置的代表）。
+另附一份**结构分析师基于章节标题的推断**（仅供参考——可能在原文成立，也可能不成立）。
+请通读原文，找出这本书**最独特的架构级叙事设计**——跨章节/跨全书的叙事机关
+（时间循环/世界重置、宿命闭环、双线并行、多重视角、真相逐层揭示、结局反转开头等）。
+
+规则：
+- **优先提炼全书级/跨章节的叙事机关**（价值高于段落级技法），可输出 1-3 条
+- 附带的标题推断可作线索，但**必须用原文验证**：原文有支撑证据才提炼，原文不支持就忽略
+- 只提炼**原文中实际存在**、有原文证据支撑的设计；不要臆测
+- 提炼成**可执行的叙事技法 skill**（可迁移到任何故事的设计方法，不是本书剧情复述）
+- content 给出：负面约束（不要XXX）+ 正面做法（分步设计），可执行，150-400 字
+- example 必须**逐字摘录自给定原文**（引用原句，可标注出处章号）；找不到合适摘录写"（无合适摘录）"，**禁止编造或改写原文**
+
+输出（严格 JSON 数组，可多条）：
+[{{"name": "技法名", "description": "一句话索引", "content": "...", "example": "原文摘录 + 一句为何有效", "tags": "适用题材,逗号分隔", "target": "main"}}]
+
+关键章节原文如下：
+"""
+
+# S114 拆书三层参数
+_MIN_CHAPTERS = 5  # 章节数低于此 → 回退字符均匀抽样（S106 原逻辑）
+_PER_VOL = 4  # 每卷选 4 章（首/25%/75%/尾）
+_MAX_SELECT = 24  # 选章上限（拆解批数 = ceil(24/4) = 6 批）
+_BATCH_SIZE = 4  # 每批拼 4 整章（≈1.2 万字/批）
+_MAX_SKELETON_TITLES = 2000  # 骨架扫描标题上限
+_REFINE_LIMIT = 6  # 定点精读章节上限（机关章）+ 首尾 2 = 8 章
+_REFINE_CHARS = 4000  # 每章精读截断字符
+
+# 机关关键词（骨架笔记提到则定位其原文直接揭示段落，保证回环揭示点在精读片段）
+_MECHANISM_KEYWORDS = (
+    "回到过去",
+    "时间循环",
+    "时间回环",
+    "时间机器",
+    "重启",
+    "坏档",
+    "重开",
+    "造物主",
+    "时间线",
+    "轮回",
+    "改变过去",
+    "世界重置",
+)
+
+# 章节/卷标记（行首匹配防正文误切）
+_CHAPTER_LINE_RE = re.compile(r"^第[0-9一二三四五六七八九十百千]+章\s*([^\n]*)", re.MULTILINE)
+_HEADER_LINE_RE = re.compile(r"^【([^】]{1,40})】\s*$", re.MULTILINE)
+_VOL_LINE_RE = re.compile(r"第[一二三四五六七八九十百千0-9]+卷\s*([^\n]*)")
+_CHAPTER_NUM_RE = re.compile(r"第\s*(\d{1,5})\s*(?:[-~至到]\s*(\d{1,5}))?\s*章")
+
+
+def _parse_chapters(text: str) -> list[tuple[str, str]]:
+    """解析章节结构 → [(标题, 正文)]。优先【标题】行（书库格式），回退"第X章"行。
+
+    无结构（< _MIN_CHAPTERS 章）返回 []——调用方回退字符均匀抽样。
+    """
+    patterns = (_HEADER_LINE_RE, _CHAPTER_LINE_RE)
+    for pat in patterns:
+        matches = list(pat.finditer(text))
+        if len(matches) < _MIN_CHAPTERS:
+            continue
+        out: list[tuple[str, str]] = []
+        for i, m in enumerate(matches):
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
+            title = m.group(1).strip() or f"第{i + 1}章"
+            out.append((title, text[m.end() : end].strip()))
+        return out
+    return []
+
+
+def _select_structural_chapters(chapters: list[tuple[str, str]]) -> list[int]:
+    """按卷分层选代表章索引：每卷 首/25%/75%/尾 + 全书首尾。
+
+    卷边界 = 章标题或章正文开头含"第X卷"标记（书库格式：卷标记成独立章，
+    标题即卷名；txt 格式：卷标记常在章首）。卷标记 < 3 个 → 回退全局均匀选章
+    （实测与卷分层效果近似，且不依赖卷解析正确性）。
+    """
+    n = len(chapters)
+    if n <= _MAX_SELECT:
+        return list(range(n))  # 书不大 → 全选
+    vol_idx = [
+        i
+        for i, (title, body) in enumerate(chapters)
+        if _VOL_LINE_RE.search(title) or _VOL_LINE_RE.search(body[:500])
+    ]
+    if len(vol_idx) >= 3:
+        selected: list[int] = []
+        bounds = [*vol_idx, n]
+        for k in range(len(vol_idx)):
+            a, b = bounds[k], bounds[k + 1]
+            m = b - a
+            if m <= 0:
+                continue
+            idxs = sorted({a, a + int(m * 0.25), a + int(m * 0.75), b - 1})
+            selected.extend(i for i in idxs if a <= i < b)
+    else:
+        # 全局均匀（留 2 个名额给首尾章，防截断丢失）
+        selected = [int(i * n / (_MAX_SELECT - 2)) for i in range(_MAX_SELECT - 2)]
+    # 强制含全书首尾章（不因截断丢失）
+    selected = sorted(set([0, n - 1, *selected]))[:_MAX_SELECT]
+    return selected
+
+
+def _build_batches(
+    chapters: list[tuple[str, str]], selected: list[int], batch_size: int = _BATCH_SIZE
+) -> list[str]:
+    """选中整章按原顺序拼批（批内同卷、叙事相邻，章节边界完整）。"""
+    batches: list[str] = []
+    for i in range(0, len(selected), batch_size):
+        chunk = selected[i : i + batch_size]
+        parts = [f"【{chapters[j][0]}】\n{chapters[j][1]}\n" for j in chunk]
+        batches.append("\n".join(parts))
+    return batches
+
+
+def _extract_chapter_nums(note: str) -> list[tuple[int, int]]:
+    """从结构笔记提取章节号引用（"第85章" / "第85-90章" / "第85到90章"）。"""
+    return [
+        (int(m.group(1)), int(m.group(2) or m.group(1))) for m in _CHAPTER_NUM_RE.finditer(note)
+    ]
+
+
+def _locate_mechanism_passages(
+    chapters: list[tuple[str, str]], note: str, window: int = 1600
+) -> list[str]:
+    """骨架笔记提到的机关关键词 → 在原文定位直接揭示段落。
+
+    骨架扫描给的是"标题轨迹推断"（如时间循环/世界重置），但回环的直接揭示
+    （"想要回到过去""世界重启"）常在章的中后部，笔记引用的章头未必覆盖——
+    按关键词定位这些段落强制纳入精读片段，让模型看到证据后提炼技法。
+    """
+    kws = [kw for kw in _MECHANISM_KEYWORDS if kw in note]
+    out: list[str] = []
+    for kw in kws:
+        for _t, body in chapters:
+            i = body.find(kw)
+            if i >= 0:
+                start = max(0, i - window // 3)
+                out.append(f"【关键词「{kw}」定位段】\n{body[start : i + window]}")
+                break
+    return out
+
+
+# 精读示例机器校验（S114：防案例幻觉兜底——实测"先原文后提问"仍会编造，
+# 需硬校验：example 中引号内长句必须逐字出现在精读片段，否则清空）
+_EXAMPLE_QUOTE_RE = re.compile(r'[“"『]([^”"』]{8,80})[”"』]')
+
+
+def _sanitize_examples(cands: list[dict[str, str]], source: str) -> list[dict[str, str]]:
+    """案例真实性机器校验：example 中引号内长句必须在 source（精读片段）逐字出现。
+
+    不满足 → 清空 example 并记日志（宁缺毋滥：编造案例会误导写作模型）。
+    """
+    for c in cands:
+        ex = str(c.get("example", ""))
+        if not ex or ex == "（无合适摘录）":
+            continue
+        quoted = _EXAMPLE_QUOTE_RE.findall(ex)
+        if not quoted:
+            continue  # 无引号句（自述性案例）不判
+        bad = [q for q in quoted if q not in source]
+        if bad:
+            logger.warning(
+                "架构技法案例疑似编造，已清空 example: %s -> %r", c.get("name"), bad[0][:30]
+            )
+            c["example"] = "（无合适摘录）"
+    return cands
 
 
 def _sample_blocks(text: str, n: int, window: int) -> list[str]:
@@ -369,23 +561,57 @@ class SkillGenerator:
                 c["target"] = "main"
         return cands
 
-    def generate_book(self, source_text: str, hint: str = "") -> list[dict[str, str]]:
-        """S106：拆书（整本书）——分块抽样提炼 + 归并成一份「书名」skill。
+    def generate_book(
+        self, source_text: str, hint: str = "", book_name: str = ""
+    ) -> list[dict[str, str]]:
+        """S106+S114：拆书（整本书）——三层提炼成「书名」方法论 + 架构机关技法。
 
-        修复：原 mode=book 只取 source_text[:20000]（12MB 书仅开头 1.6%，
-        提炼结果等同失败）。现对齐 prompt 设计意图「开篇/中段/高潮拼接」：
-        全文均匀抽 _BOOK_SAMPLES 段 → 每段单独拆解（GENERATE_PROMPT_BOOK）→
-        MERGE_PROMPT_BOOK 归并去重成最终一份。
+        ① 微观技法（_generate_book_micro）：结构感知选章（按卷分层整章拼批）→
+           分批拆解 → 归并成一份「书名」skill（name=书名，一次点名拿到整本写法）
+        ② 骨架扫描（_scan_skeleton）：卷+章标题（无正文）→ 全书结构笔记
+           （跨卷叙事机关/主角目的/阶段——抽样+局部提炼结构上抓不到的全局关系）
+        ③ 定点精读（_refine_architecture）：从笔记定位机关章 → 精读原文
+           （先原文后提问，防案例幻觉）→ 提炼架构技法 skill（target=main）
+
+        book_name：书名（注入 prompt，修复 name=书名引用单位的准确性；
+        缺省空串=不注入，回退旧行为）。
+        无章节结构（< _MIN_CHAPTERS 章）回退字符均匀抽样（S106 原逻辑）。
         """
         if not source_text.strip():
             return []
+        self.last_error = ""
+        chapters = _parse_chapters(source_text)
+        if len(chapters) < _MIN_CHAPTERS:
+            return self._generate_book_uniform(source_text, hint, book_name)
+        micro = self._generate_book_micro(chapters, hint, book_name)
+        if not micro:
+            # 微观全失败（可能被审核拦截/key 无效/限流）——last_error 已在微观内汇总
+            return []
+        note = self._scan_skeleton(chapters, book_name)
+        arch = self._refine_architecture(chapters, note, book_name)
+        result = micro + arch
+        for c in result:
+            c.setdefault("target", "both")
+        return result
+
+    def _book_label(self, book_name: str) -> str:
+        """书名注入标签（name=书名引用单位的准确性）。"""
+        return f"（本书：《{book_name.strip()}》）" if book_name.strip() else ""
+
+    def _generate_book_uniform(
+        self, source_text: str, hint: str = "", book_name: str = ""
+    ) -> list[dict[str, str]]:
+        """S106 原逻辑（保留为无章节结构书的回退路径）：字符均匀抽样 + 归并。"""
         samples = _sample_blocks(source_text, _BOOK_SAMPLES, _BOOK_WINDOW)
         partials: list[str] = []
         fallback: list[dict[str, str]] = []
         # S113：收集各段失败原因（分类汇总，供 last_error 透出）
         err_reasons: list[str] = []
+        label = self._book_label(book_name)
         for i, sample in enumerate(samples, 1):
-            prompt = GENERATE_PROMPT_BOOK + f"\n（代表段 {i}/{len(samples)}）\n{sample[:20000]}\n"
+            prompt = (
+                GENERATE_PROMPT_BOOK + f"\n{label}（代表段 {i}/{len(samples)}）\n{sample[:20000]}\n"
+            )
             if hint.strip():
                 prompt += f"\n额外指引：{hint.strip()}\n"
             try:
@@ -413,7 +639,7 @@ class SkillGenerator:
             self.last_error = _summarize_errors(err_reasons)
             return []
         self.last_error = ""
-        merge_prompt = MERGE_PROMPT_BOOK + "\n\n".join(partials) + "\n"
+        merge_prompt = MERGE_PROMPT_BOOK + f"{label}\n" + "\n\n".join(partials) + "\n"
         try:
             merged = _parse_skills(
                 self._model.respond(  # type: ignore[attr-defined]
@@ -427,6 +653,137 @@ class SkillGenerator:
         for c in final:
             c["target"] = "both"  # 拆书方法论：文风给写作、结构给主循环
         return final
+
+    def _generate_book_micro(
+        self,
+        chapters: list[tuple[str, str]],
+        hint: str = "",
+        book_name: str = "",
+    ) -> list[dict[str, str]]:
+        """S114 微观技法层：按卷分层选整章 → 拼批 → 分批拆解 → 归并成书名方法论。
+
+        与 S106 均匀抽样的区别：抽样单位从"字符窗口"变"整章"（章节边界完整，
+        章末钩子可见），且按卷分层（每卷首/中/尾都覆盖，不靠均匀碰运气）。
+        """
+        selected = _select_structural_chapters(chapters)
+        batches = _build_batches(chapters, selected)
+        partials: list[str] = []
+        fallback: list[dict[str, str]] = []
+        err_reasons: list[str] = []
+        label = self._book_label(book_name)
+        for i, bt in enumerate(batches, 1):
+            prompt = GENERATE_PROMPT_BOOK + f"\n{label}（代表批 {i}/{len(batches)}，整章）\n{bt}\n"
+            if hint.strip():
+                prompt += f"\n额外指引：{hint.strip()}\n"
+            try:
+                output = self._model.respond(  # type: ignore[attr-defined]
+                    [Message(role="system", content=prompt)],
+                    [],
+                )
+                cands = _parse_skills(output.text)[:1]
+                if cands:
+                    partials.append(f"【代表批 {i}】\n{cands[0].get('content', '')}")
+                    if not fallback:
+                        fallback = cands
+                else:
+                    reason = f"批{i}: 模型输出解析失败（非 skill JSON）"
+                    err_reasons.append(reason)
+                    logger.warning("拆书批 %d: 输出解析失败（前 80 字: %r）", i, output.text[:80])
+            except Exception as exc:
+                reason = _classify_model_error(exc)
+                err_reasons.append(f"批{i}: {reason}")
+                logger.warning("拆书批 %d 失败: %s", i, reason)
+        if not partials:
+            self.last_error = _summarize_errors(err_reasons)
+            return []
+        self.last_error = ""
+        merge_prompt = MERGE_PROMPT_BOOK + f"{label}\n" + "\n\n".join(partials) + "\n"
+        try:
+            merged = _parse_skills(
+                self._model.respond(  # type: ignore[attr-defined]
+                    [Message(role="system", content=merge_prompt)], []
+                ).text
+            )[:1]
+        except Exception as exc:
+            logger.warning("拆书归并失败，降级用第一批: %s", _classify_model_error(exc))
+            merged = []
+        final = merged or fallback
+        for c in final:
+            c["target"] = "both"
+        return final
+
+    def _scan_skeleton(self, chapters: list[tuple[str, str]], book_name: str = "") -> str:
+        """S114 骨架扫描：全部章标题（无正文）→ 结构笔记（机关/目的/阶段）。
+
+        失败返回 ""（调用方跳过定点精读，仅保留微观方法论）。
+        """
+        n = len(chapters)
+        titles = [t for t, _ in chapters]
+        if n > _MAX_SKELETON_TITLES:
+            step = n / _MAX_SKELETON_TITLES
+            titles = [titles[int(i * step)] for i in range(_MAX_SKELETON_TITLES - 1)] + [titles[-1]]
+        skeleton = "\n".join(f"第{i + 1}章 {t}" for i, t in enumerate(titles))
+        name = book_name.strip() or "本书"
+        prompt = SKELETON_PROMPT.format(book_name=name) + skeleton
+        try:
+            out = self._model.respond(  # type: ignore[attr-defined]
+                [Message(role="system", content=prompt)], []
+            )
+            return str(out.text).strip()
+        except Exception as exc:
+            logger.warning("拆书骨架扫描失败: %s", _classify_model_error(exc))
+            return ""
+
+    def _refine_architecture(
+        self,
+        chapters: list[tuple[str, str]],
+        note: str,
+        book_name: str = "",
+    ) -> list[dict[str, str]]:
+        """S114 定点精读：从结构笔记提取机关章号 → 精读原文 → 架构技法 skill。
+
+        防案例幻觉：精读 prompt 先给原文、后中立提问（不预先告知答案），
+        example 强制逐字摘录。target 统一 main（架构机关给主循环规划用）。
+        """
+        if not note.strip():
+            return []
+        nums = _extract_chapter_nums(note)
+        idxs: set[int] = set()
+        for a, b in nums:
+            for k in range(a, min(b, a + 4) + 1):
+                if 1 <= k <= len(chapters):
+                    idxs.add(k - 1)
+        idxs.add(0)
+        idxs.add(len(chapters) - 1)
+        # 机关章（笔记引用的）排最前，首尾章兜底放最后（防精读注意力偏首章）
+        ref_idx = sorted(i for i in idxs if 0 < i < len(chapters) - 1)
+        ordered = ([*ref_idx, 0, len(chapters) - 1])[:_REFINE_LIMIT]
+        if len(ordered) < 2:
+            return []
+        parts = []
+        for i in ordered:
+            t, body = chapters[i]
+            parts.append(f"【第{i + 1}章 {t}】\n{body[:_REFINE_CHARS]}")
+        # 骨架笔记提到的机关关键词 → 原文直接揭示段落（放最前，保证回环证据可见）
+        passages = _locate_mechanism_passages(chapters, note)
+        excerpt = "\n\n".join([*passages, *parts])
+        name = book_name.strip() or "本书"
+        prompt = REFINE_PROMPT.format(book_name=name)
+        # 骨架笔记作线索（截断，标注需原文验证）——防精读注意力偏首章/缺机关章
+        note_head = note.strip()[:2500]
+        prompt += f"\n【结构分析师的标题推断（仅供参考，需原文验证）】\n{note_head}\n\n"
+        prompt += excerpt
+        try:
+            out = self._model.respond(  # type: ignore[attr-defined]
+                [Message(role="system", content=prompt)], []
+            )
+        except Exception as exc:
+            logger.warning("拆书定点精读失败: %s", _classify_model_error(exc))
+            return []
+        cands = _parse_skills(out.text)
+        for c in cands:
+            c["target"] = "main"  # 架构机关给主循环
+        return _sanitize_examples(cands, excerpt)
 
     def generate_main(
         self,

@@ -1622,7 +1622,9 @@ def make_skill_refine_implementer(
         try:
             if mode == "book":
                 # S78/S106 拆书：整本书多维拆解 → 一份「书名」skill（大书分块抽样+归并）
-                candidates = generator.generate_book(source_text, hint)
+                # S114：拆书三层（微观方法论 + 骨架扫描 + 定点精读架构技法）；书库场景注入书名
+                book_name = book.get("name", "") if library_book_id else ""
+                candidates = generator.generate_book(source_text, hint, book_name=book_name)
                 tag = "拆书 skill"
             else:
                 candidates = generator.generate(source_text, hint, 5, mode="writing")

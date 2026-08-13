@@ -78,18 +78,20 @@ def make_library_router(deps: AppDeps) -> APIRouter:
     def refine_skill_from_library(
         book_id: str, req: LibraryRefineIn | None = None
     ) -> dict[str, Any]:
-        """书库 → skill 提炼：取书库原文，mode=book 多维拆解（文风/节奏/结构/人设/
-        对白/信息投放/钩子），生成一条「书名」skill 草稿（人工确认后转正生效）。
+        """书库 → skill 提炼：取书库原文，三层拆解（S114）——微观方法论
+        （文风/节奏/结构/人设/对白/信息投放/钩子）+ 骨架扫描 + 定点精读架构技法，
+        生成多条 skill 草稿（人工确认后转正生效）。
         """
         hint = (req.hint if req else "").strip()
         book = deps.library.get_book(book_id)
         if book is None:
             raise HTTPException(status_code=404, detail=f"书库无此书: {book_id}")
         # S106：拆书需全文（12MB 级整本书）——不截断，抽样归并由 generate_book 内部做
+        # S114：拆书三层（微观方法论 + 骨架扫描 + 定点精读架构技法），book_name 注入
         source = deps.library.read_book(book_id, max_chars=None)
         if not source.strip():
             raise HTTPException(status_code=400, detail="书库无内容（先导入文本）")
-        cands = deps.skill_generator.generate_book(source, hint)
+        cands = deps.skill_generator.generate_book(source, hint, book_name=book["name"])
         if not cands:
             # S113：透出可读失败原因（此前静默“无有效候选”，用户不知真因）
             detail = "提炼失败（无有效候选）"
@@ -97,19 +99,23 @@ def make_library_router(deps: AppDeps) -> APIRouter:
             if err:
                 detail += f"：{err}"
             raise HTTPException(status_code=502, detail=detail)
-        c = cands[0]
-        draft = deps.skills.add_draft(
-            name=str(c.get("name", book["name"])),
-            description=str(c.get("description", ""))[:500],
-            content=str(c.get("content", "")),
-            example=str(c.get("example", ""))[:2000],
-            tags=str(c.get("tags", "")),
-            target=str(c.get("target", "writing")),
-            source="library",
-        )
-        if draft is None:
+        # S114：多候选存草稿（书名方法论 + 架构技法各自独立确认）
+        drafts: list[dict[str, Any]] = []
+        for c in cands:
+            draft = deps.skills.add_draft(
+                name=str(c.get("name", book["name"]))[:120],
+                description=str(c.get("description", ""))[:500],
+                content=str(c.get("content", "")),
+                example=str(c.get("example", ""))[:2000],
+                tags=str(c.get("tags", "")),
+                target=str(c.get("target", "writing")),
+                source="library",
+            )
+            if draft:
+                drafts.append(draft)
+        if not drafts:
             raise HTTPException(status_code=409, detail="已存在同名草稿或技能（先确认/删除旧的）")
-        logger.info("书库→skill 提炼: book=%s skill=%s", book["name"], draft["name"])
-        return {"ok": True, "draft": draft}
+        logger.info("书库→skill 提炼: book=%s drafts=%d", book["name"], len(drafts))
+        return {"ok": True, "drafts": drafts, "draft": drafts[0]}
 
     return router

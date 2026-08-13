@@ -94,9 +94,10 @@ def test_skill_refine_tool_library_source_creates_draft(tmp_path: Path) -> None:
             assert mode in ("writing", "main")
             return []
 
-        def generate_book(self, source_text, hint=""):  # type: ignore[no-untyped-def]
-            # S106：拆书走新接口（分块抽样+归并）；原文来自书库全文
+        def generate_book(self, source_text, hint="", book_name=""):  # type: ignore[no-untyped-def]
+            # S106/S114：拆书走三层接口（分块抽样+骨架扫描+定点精读）；原文来自书库全文
             assert "第一章" in source_text
+            assert book_name == "斗破苍穹"  # S114：书名注入（name=书名引用单位）
             return [
                 {
                     "name": "斗破苍穹写作法",

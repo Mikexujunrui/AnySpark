@@ -86,13 +86,21 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 固化：方向卡 → explore/archive（项目档案）；约束 = 设定档"世界观规则"类别条目直接注入（不匹配，模型判断）
 ```
 
-### 2.5 拆书链路（S78：参考书 → 「书名」skill → 点名注入）
+### 2.5 拆书链路（S78：参考书 → 「书名」skill + 架构技法 → 点名注入）
 ```
-用户"拆这本书" → skill_refine(mode=book, source_text=开篇+中段+高潮拼接)
-  → GENERATE_PROMPT_BOOK 多维拆解（文风/节奏/结构/人设/对白/信息投放/钩子）
-  → 融合成一份「书名」skill 候选（name=书名，target=both，人工确认闸门）
+用户"拆这本书" → skill_refine(mode=book) / POST /api/library/{book_id}/refine-skill
+  → S114 三层拆书（generate_book）：
+      ① 微观方法论：结构感知选章（按卷分层整章拼批，无章结构回退字符均匀）
+         → 分批拆解（GENERATE_PROMPT_BOOK 7 维）→ MERGE 归并成一份「书名」skill
+         （name=书名，book_name 注入修复自编书名；target=both）
+      ② 骨架扫描：卷+章标题轨迹（无正文）→ 全书结构笔记（跨卷机关/主角目的/阶段）
+      ③ 定点精读：笔记机关关键词定位原文揭示段 + 机关章 + 首尾章 → 精读
+         （骨架笔记仅作线索需原文验证；example 机器校验防编造）→ 架构技法
+         skill（target=main，如「坏档与重开：时间循环式叙事」）
+  → 多条候选存草稿（方法论 + 架构技法各自确认，人工闸门）
   → 确认后入库 skills 表
-  → 写"这本书风格"时 write_chapter 的 skills 点名「书名」→ 整本方法论注入
+  → 写"这本书风格"时 write_chapter 的 skills 点名「书名」→ 方法论注入；
+    主循环规划时点名架构技法 → 全书机关参考
 ```
 
 ## 3. 路由层职责表（16 router，~166 端点）
@@ -131,7 +139,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | setting_query | 设定档查证 | enable_domain |
 | search_chapters / read_context | 正文检索/锚点阅读 | enable_domain |
 | mind_register / mind_manage | 心智登记/管理 | enable_domain |
-| skill_refine | 技巧提炼候选 / 拆书（mode=book 整本书多维拆解→融合「书名」skill，S78） | enable_domain |
+| skill_refine | 技巧提炼候选 / 拆书（mode=book 三层：结构感知微观方法论 + 骨架扫描 + 定点精读架构技法，S78/S114） | enable_domain |
 | role_play | 角色推演 | enable_domain |
 | ingest_document | 资料消化（⚠️与端点重复见审计） | enable_domain |
 | register_tool | 扩展工具注册 | enable_domain |
