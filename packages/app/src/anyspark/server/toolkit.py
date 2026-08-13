@@ -174,9 +174,14 @@ def build_toolkit(
         sc_spec, sc_impl = make_search_chapters_implementer(ctx.chapters, book_id=ctx.book_id)
         registry.register(sc_spec, sc_impl)
         # S86：参考书检索（不注入，按需翻书——只读参考书库/其他项目）
+        # 分级：书库的书=低级（原文检索）；项目=高级（额外可检索图谱/设定，只读）
         if ctx.library is not None:
             rl_spec, rl_impl = make_reference_lookup_implementer(
-                ctx.library, ctx.chapters, book_id=ctx.book_id
+                ctx.library,
+                ctx.chapters,
+                book_id=ctx.book_id,
+                graph=ctx.graph,
+                settings=ctx.settings,
             )
             registry.register(rl_spec, rl_impl)
         rc_spec, rc_impl = make_read_context_implementer(ctx.chapters, book_id=ctx.book_id)

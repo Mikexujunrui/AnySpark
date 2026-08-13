@@ -1813,21 +1813,32 @@ def make_mind_manage_implementer(manual: Any, book_id: str = "main") -> tuple[li
 
 
 def make_reference_lookup_implementer(
-    library_store: Any, chapters: Any, book_id: str = "main"
+    library_store: Any,
+    chapters: Any,
+    book_id: str = "main",
+    graph: Any = None,
+    settings: Any = None,
 ) -> tuple[Any, Any]:
-    """参考书检索工具（S86）：搜当前项目已选的参考书（书库的书 + 其他项目）。
+    """参考书检索工具（S86 + 分级）：搜当前项目已选的参考书（书库的书 + 其他项目）。
 
-    参考书不注入任何信息——需要借鉴某本书的写法/设定/氛围时主动检索原文片段。
+    参考书分级（主人定案）：
+    - 低级参考书（书库的书）：只检索原文文本片段（现状）。
+    - 高级参考书（项目）：除原文片段外，还可检索该项目的知识层——图谱实体卡片
+      （名称/类型/状态/关系）与设定档条目（分类/内容），只读、不注入、按需检索。
+
+    参考书不注入任何信息——需要借鉴某本书的写法/设定/氛围时主动检索。
     """
 
     spec = ToolSpec(
         name="reference_lookup",
         description=(
             "检索本项目已选的参考书（书库的书或其他项目），按关键词返回原文片段"
-            "（含书名/章节）。需要借鉴某本参考书的写法、设定细节、氛围、结构时使用——"
-            "如模仿某书的群像描写、确认同世界观旧作的人物设定、参考同题材书的"
-            "官职/礼法细节。注意：参考书是借鉴来源，不是本项目正典——检索到后"
-            "对照自身剧情判断是否适用，不要照搬设定。"
+            "（含书名/章节）；项目型参考书是高级参考书，还会返回图谱实体卡片与设定档"
+            "条目（人物状态/关系/世界观规则）。需要借鉴某本参考书的写法、设定细节、"
+            "氛围、结构，或确认同世界观旧作/原作的人物设定时使用——如模仿某书的"
+            "群像描写、确认同人原作的人物关系与状态、参考同题材书的官职/礼法细节。"
+            "注意：参考书是借鉴来源，不是本项目正典——检索到后对照自身剧情判断"
+            "是否适用，不要照搬设定。"
         ),
         params=[
             ParamSpec(
@@ -1864,24 +1875,81 @@ def make_reference_lookup_implementer(
                 parts.append(f"【{ch.title}】\n{ch.content}")
             return "\n\n".join(parts)
 
+        def _project_knowledge(ref_book_id: str) -> list[str]:
+            """高级参考书（项目）知识层检索：图谱实体卡片 + 设定档条目（只读）。
+
+            返回人类可读行；无命中返回空列表。图谱实体带当前状态与关系，
+            设定档条目带分类——同人文/续写拿原作事实用，不注入、只按需返回。
+            """
+            lines: list[str] = []
+            if graph is not None:
+                try:
+                    ents = graph.list_entities(ref_book_id, q=keyword, limit=6)
+                    for e in ents:
+                        state = (e.state or e.description or "").strip()
+                        line = (
+                            f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）"
+                            + (f"：{state[:120]}" if state else "")
+                        )
+                        # 该实体的关系（从/到命中本实体）
+                        rels = [
+                            r
+                            for r in graph.list_relations(ref_book_id, limit=500)
+                            if r.from_name == e.name or r.to_name == e.name
+                        ][:3]
+                        for r in rels:
+                            line += f"\n  ↳ {r.from_name} {r.rel_type} {r.to_name}"
+                        lines.append(line)
+                except Exception:
+                    pass  # 知识层检索失败不阻断文本检索
+            if settings is not None:
+                try:
+                    for s in settings.list(ref_book_id):
+                        blob = f"{s.name} {s.content} {s.category}"
+                        if keyword.lower() in blob.lower():
+                            lines.append(
+                                f"设定[{s.category}] {s.name or s.content[:20]}"
+                                f"：{s.content[:150]}"
+                            )
+                except Exception:
+                    pass
+            return lines
+
         from anyspark.library.search import search_reference_books
 
         res = search_reference_books(
             library_store, book_id, keyword, project_files=_project_files, max_per_book=max_per
         )
-        if not res["results"]:
+        # 知识层命中（高级参考书=项目）：对每个 project 类型参考书追加图谱/设定条目
+        knowledge_hits = 0
+        knowledge_sections: list[str] = []
+        if library_store is not None:
+            for ref in library_store.get_references(book_id):
+                if ref.get("type") != "project":
+                    continue
+                klines = _project_knowledge(str(ref.get("id", "")))
+                if klines:
+                    knowledge_hits += len(klines)
+                    knowledge_sections.append(
+                        f"——项目「{ref.get('id', '?')}」（知识层：图谱/设定）——\n"
+                        + "\n".join(klines)
+                    )
+        if not res["results"] and not knowledge_sections:
             refs = library_store.get_references(book_id) if library_store else []
             names = "、".join(r.get("name", r.get("id", "?")) for r in refs) or "（未选参考书）"
             return ToolResult(
                 call=call,
                 ok=False,
-                content=f"参考书「{names}」中未命中「{keyword}」。",
+                content=f"参考书「{names}」中未命中「{keyword}」（含图谱/设定层）。",
             )
-        lines = [f"参考书命中「{keyword}」共 {res['total_hits']} 段："]
+        lines = [f"参考书命中「{keyword}」："]
         for r in res["results"]:
             lines.append(f"——{r['ref_name']}——")
-            for h in r["hits"]:
+            for h in r.get("hits", []):
                 lines.append(f"({h['count']}次) {h['snippet']}")
+        lines.extend(knowledge_sections)
+        if knowledge_hits:
+            lines.append(f"（含 {knowledge_hits} 条图谱/设定命中）")
         return ToolResult(call=call, ok=True, content="\n\n".join(lines))
 
     return spec, implementer
