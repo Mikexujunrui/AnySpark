@@ -319,3 +319,114 @@ def test_run_params_feed_agent_instruction() -> None:
         assert captured["instruction"] == "按风格指导【短句直给】续写"
     finally:
         client.close()
+
+
+def test_auto_write_full_chain() -> None:
+    """阶段3：完整自动续写链路（假模型）——读知识→写→落盘→审→质量门→循环。
+
+    链路：read_settings → read_graph → agent写下一章（{{var}}注入知识）→
+    write_chapter落盘 → review_chapter审读 → gate判断（无硬伤=done，有=loop重写）。
+    """
+    from anyspark.core import Message, ModelOutput
+    from anyspark.store.sqlite import ChapterStore
+
+    db = Path(tempfile.mkdtemp()) / "wf.db"
+    # 先写设定+图谱（同 db）
+    settings = WorldSettingStore(db)
+    settings.add("主角顾欣桐：冷静果断", category="人物卡", name="顾欣桐", book_id="main")
+    settings.close()
+    graph = GraphStore(db)
+    graph.upsert_entity("main", "顾欣桐", "角色", description="主角", state_delta="第3章达成同盟")
+    graph.close()
+    ChapterStore(str(db)).upsert("main", "第一章", "顾欣桐在雾城车站下车。", 1)
+
+    calls: list[str] = []
+
+    class _FakeModel:
+        model_name = "fake"
+
+        def respond(self, messages: list[Message], tools: object) -> ModelOutput:
+            instruction = messages[-1].content
+            calls.append(str(instruction)[:40])
+            if "审读" in str(instruction):
+                return ModelOutput(text="硬伤数: 0\n第一章无硬伤。", tool_calls=[])
+            return ModelOutput(
+                text="第二章 同盟者的代价\n顾欣桐在钟表铺与林默密谈，达成新的约定。",
+                tool_calls=[],
+            )
+
+    client = TestClient(build_app(model=_FakeModel(), db_path=db))
+    try:
+        wf = _make_workflow(
+            client,
+            [
+                {
+                    "id": "n1",
+                    "kind": "script",
+                    "params": {"function": "read_settings", "output_key": "settings_block"},
+                },
+                {
+                    "id": "n2",
+                    "kind": "script",
+                    "params": {"function": "read_graph", "output_key": "graph_block"},
+                },
+                {
+                    "id": "loop",
+                    "kind": "loop",
+                    "params": {
+                        "body": ["n3", "n4", "n5"],
+                        "max_iterations": 2,
+                        "continue_condition": "{{review}} contains '硬伤'",
+                    },
+                },
+                {
+                    "id": "n3",
+                    "kind": "agent",
+                    "params": {
+                        "instruction": "按设定{{settings_block}}与图谱{{graph_block}}续写下一章",
+                        "output_key": "chapter_text",
+                    },
+                },
+                {
+                    "id": "n4",
+                    "kind": "script",
+                    "params": {
+                        "function": "write_chapter",
+                        "chapter_title": "第二章",
+                        "text_key": "chapter_text",
+                    },
+                },
+                {
+                    "id": "n5",
+                    "kind": "script",
+                    "params": {
+                        "function": "review_chapter",
+                        "chapter_title": "第二章",
+                        "output_key": "review",
+                    },
+                },
+                {"id": "end", "kind": "script", "params": {"function": "noop"}},
+            ],
+            [
+                {"source": "n1", "target": "n2"},
+                {"source": "n2", "target": "loop"},
+                {"source": "loop", "target": "end"},
+            ],
+        )
+        r = client.post(f"/api/workflows/{wf}/run", json={"book_id": "main"})
+        assert r.status_code == 200
+        task_id = r.json()["task_id"]
+        for _ in range(60):
+            time.sleep(0.1)
+            t = client.get(f"/api/workflows/tasks/{task_id}").json()
+            if t.get("status") in {"done", "failed", "cancelled"}:
+                break
+        assert t["status"] == "done", t
+        # 第二章已落盘
+        chs = ChapterStore(str(db)).list_by_book("main")
+        titles = [c.title for c in chs]
+        assert "第二章" in titles
+        # agent 指令里注入了知识（设定/图谱）
+        assert any("顾欣桐" in c for c in calls)
+    finally:
+        client.close()

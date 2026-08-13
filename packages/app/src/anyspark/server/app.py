@@ -379,9 +379,10 @@ def build_app(
 
             content 缺失时取 params.text_key（缺省 'rewritten'）对应的上游输出——
             AI 生成的流程常用：改写 agent 输出 rewritten → write_chapter 脚本落盘。
+            chapter_title/content 支持 {{var}} 解析（如 {{chapter_title}} 来自 run params）。
             """
-            title = str(node.params.get("chapter_title") or "")
-            content = str(node.params.get("content") or "")
+            title = _wf_resolve(str(node.params.get("chapter_title") or ""), ctx)
+            content = _wf_resolve(str(node.params.get("content") or ""), ctx)
             if not content:
                 text_key = str(node.params.get("text_key") or "rewritten")
                 content = str(ctx.results.get(text_key, ""))

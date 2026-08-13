@@ -1,0 +1,86 @@
+{
+  "name": "自动续写（知识注入 + 审读门 + 人工出口）",
+  "description": "绑定项目自足运行：读设定/图谱/参考书 → 续写下一章 → 落盘 → 审读 → 质量门 → 每章人工确认",
+  "nodes": [
+    {
+      "id": "n1",
+      "kind": "script",
+      "label": "读设定档",
+      "params": { "function": "read_settings", "output_key": "settings_block" }
+    },
+    {
+      "id": "n2",
+      "kind": "script",
+      "label": "读图谱",
+      "params": { "function": "read_graph", "output_key": "graph_block" }
+    },
+    {
+      "id": "n3",
+      "kind": "script",
+      "label": "查参考书",
+      "params": {
+        "function": "query_reference",
+        "keyword": "{{ref_keyword}}",
+        "output_key": "ref_block"
+      }
+    },
+    {
+      "id": "n4",
+      "kind": "agent",
+      "label": "续写下一章",
+      "params": {
+        "instruction": "你是续写作者。依据以下项目知识续写下一章（标题：{{chapter_title}}）：\n\n【设定档】\n{{settings_block}}\n\n【图谱（人物/状态/关系）】\n{{graph_block}}\n\n【原作参考】\n{{ref_block}}\n\n写作要求：\n1. 遵循设定与人物状态，不 OOC、不设定冲突。\n2. 承接上一章结尾（自动续写场景会注入）。\n3. 到达剧情停止锚点即结束，不要提前完成未来事件。\n4. 只输出正文，不要解释。",
+        "output_key": "chapter_text"
+      }
+    },
+    {
+      "id": "n5",
+      "kind": "script",
+      "label": "落盘",
+      "params": {
+        "function": "write_chapter",
+        "chapter_title": "{{chapter_title}}",
+        "text_key": "chapter_text"
+      }
+    },
+    {
+      "id": "n6",
+      "kind": "script",
+      "label": "审读",
+      "params": {
+        "function": "review_chapter",
+        "chapter_title": "{{chapter_title}}",
+        "output_key": "review"
+      }
+    },
+    {
+      "id": "loop",
+      "kind": "loop",
+      "label": "质量门循环",
+      "params": {
+        "body": ["n4", "n5", "n6"],
+        "max_iterations": 3,
+        "continue_condition": "{{review}} contains '硬伤'"
+      }
+    },
+    {
+      "id": "ok",
+      "kind": "approval",
+      "label": "作者确认",
+      "params": { "prompt": "本章续写完成（审读通过）。是否继续下一章？" }
+    },
+    {
+      "id": "end",
+      "kind": "script",
+      "label": "结束",
+      "params": { "function": "noop" }
+    }
+  ],
+  "edges": [
+    { "source": "n1", "target": "n2" },
+    { "source": "n2", "target": "n3" },
+    { "source": "n3", "target": "loop" },
+    { "source": "loop", "target": "ok" },
+    { "source": "ok", "target": "end" }
+  ]
+}
