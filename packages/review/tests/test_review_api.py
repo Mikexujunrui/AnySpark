@@ -69,9 +69,9 @@ def test_reviewers_list_api() -> None:
     ids = {x["id"] for x in reviewers}
     assert "screenwriter" in ids
     assert "thriller_reader" in ids
-    # 伏笔审计员默认关（续写专项）
+    # 伏笔审计员 S114c 满血激活（主人拍板：已实现增强包不考虑商业化）
     fa = next(x for x in reviewers if x["id"] == "foreshadow_auditor")
-    assert fa["active"] is False
+    assert fa["active"] is True
     # 编剧有评分维度
     sw = next(x for x in reviewers if x["id"] == "screenwriter")
     assert len(sw["scoring_dimensions"]) == 5
@@ -105,7 +105,7 @@ def test_review_panel_api_text() -> None:
 
 
 def test_review_panel_api_all_active() -> None:
-    """POST /api/review/panel：不指定评审员 → 全部激活评审员（默认 5 位）。"""
+    """POST /api/review/panel：不指定评审员 → 全部激活评审员（S114c 满血：6 位）。"""
     model = _ReviewModel()
     client = TestClient(build_app(model=model, db_path=_db()))
     r = client.post(
@@ -114,8 +114,8 @@ def test_review_panel_api_all_active() -> None:
     )
     assert r.status_code == 200, r.text
     d = r.json()
-    assert d["reviewer_count"] == 5  # 5 位激活（伏笔审计员默认关）
-    assert model.reviewer_calls == 5
+    assert d["reviewer_count"] == 6  # 6 位全激活（含伏笔审计员）
+    assert model.reviewer_calls == 6
 
 
 def test_review_panel_api_empty_text_400() -> None:

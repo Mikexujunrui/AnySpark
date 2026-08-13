@@ -110,9 +110,7 @@ def test_codex_api_and_switch() -> None:
     client.post("/api/chat", json={"message": "写《第1章》20字：雨夜。"})
     assert "run_code" in model.last_tools
     # 显式禁用后不可见
-    client.post(
-        "/api/chat", json={"message": "写《第2章》20字：灯塔。", "enable_codex": False}
-    )
+    client.post("/api/chat", json={"message": "写《第2章》20字：灯塔。", "enable_codex": False})
     assert "run_code" not in model.last_tools
 
 

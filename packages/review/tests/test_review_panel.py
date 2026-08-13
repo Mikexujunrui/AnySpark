@@ -60,7 +60,7 @@ def test_context_keys_parsed() -> None:
     fa = panel.get_reviewer("foreshadow_auditor")
     assert fa is not None
     assert fa.context_keys == ["foreshadow"]
-    assert fa.active is False  # 续写专项默认关
+    assert fa.active is True  # S114c 满血激活
 
 
 def test_user_dir_overrides_system(tmp_path: Path) -> None:

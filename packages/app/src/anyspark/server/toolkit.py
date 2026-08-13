@@ -230,8 +230,8 @@ def build_toolkit(
         )
         registry.register(cx_spec, cx_impl)
 
-    # S63：check_text 退役——被 S59 workflow 的 review_chapter script 取代
-    # （review_chapter 能读章节全文+接改写循环，check_text 无图谱证据/需自传全文）。
+    # S63 曾退役 check_text（被 review_chapter 取代）；S104 重建为智能体自查工具
+    # （自然语言规则检测 + 硬伤检测，无需自传全文），默认可用（enable_domain 名下）。
     # S108：read_material 已挪到 enable_domain 默认开（AI 查看资料库是写作必需能力）。
 
     # 网络搜索工具：默认可用（S114 翻转——S15 曾默认关，S64 教训：默认关的工具=没人用的残废通道）
