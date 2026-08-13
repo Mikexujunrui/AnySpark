@@ -115,7 +115,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_settings | 设定档 categories/CRUD/uncensored/extract | settings/model/workspace |
 | routes_mode | 快速模式 GET/POST /api/settings/mode（模式/槽位/任务映射 S98） | mode_store/models |
 | — 任务分流（S98/S98b） | chat 写作→writing；explore/play 推演→planning；摘要/提炼/摄入→extraction；审读/改写/检测→editing；规则编译/后台杂项→general | model_for_task(deps, task) 全路由接入 |
-| routes_skills | 技巧 generate/CRUD/drafts + bias | skills/skill_generator/bias |
+| routes_skills | 技巧 generate/CRUD/drafts + S118 export（skill 文件导出）+ bias | skills/skill_generator/bias |
 | routes_agency | 能动性 CRUD/generate + 批量改写/审读 | agency/bias/batches/bg_queue |
 | routes_explore | intent/cards/path/dims/archive + check | dim_store/archive/explore |
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials | plots/templates_external/materials |

@@ -50,14 +50,18 @@ def ingest_pipeline(
     filename: str,
     mode: str = "auto",
     allowed_ext: set[str] | None = None,
+    skills: Any | None = None,
 ) -> IngestResult:
-    """消化上传区文件：长文拆章 / 短文本摘要卡（is_card 判别同原实现）。
+    """消化上传区文件：skill 文件判别 / 长文拆章 / 短文本摘要卡。
 
     - workspace/chapters/materials/model：组合根依赖（同原实现注入）
     - allowed_ext：扩展名校验（端点传 INGEST_ALLOWED_EXT；工具传 None 不校验）
+    - skills（S118）：传入 WritingSkillStore 时启用 skill 文件判别分支——
+      front-matter 五段式 → 解析 → skill_drafts 草稿（全局，人工确认转正）
     - 失败返回 IngestResult(ok=False, error_code, error, ...)；不抛异常
     """
     from anyspark.server.pipeline import chapterize, extract_text
+    from anyspark.server.skill_io import parse_skill_file
 
     path = workspace.read_upload(book_id, filename)
     if path is None:
@@ -83,6 +87,31 @@ def ingest_pipeline(
                 error_code="empty",
                 error="无法提取文本（扫描件 OCR 放未来计划），可先列上传区确认文件格式。",
             )
+        # S118 提案 D：skill 文件判别（front-matter 严格，不误判普通 md）
+        if skills is not None:
+            skill = parse_skill_file(text)
+            if skill is not None:
+                draft = skills.add_draft(
+                    name=skill["name"],
+                    description=skill["description"],
+                    content=skill["content"],
+                    example=skill["example"],
+                    tags=skill["tags"],
+                    target=skill["target"],
+                    source="import",
+                )
+                if draft is None:
+                    return IngestResult(
+                        ok=False,
+                        error_code="dup",
+                        error=f"skill「{skill['name']}」已存在同名草稿或技能（先确认/删除旧的）",
+                    )
+                return IngestResult(
+                    ok=True,
+                    kind="skill",
+                    title=skill["name"],
+                    material_id=str(draft.get("id", "")),
+                )
         chaps = chapterize(text, fallback_title=path.stem)
         # 判别：mode 强制 / 单章短文本 → 摘要卡；否则拆章（与原实现逐字一致）
         is_card = mode == "card" or (mode != "chapters" and len(chaps) == 1 and len(text) < 3000)

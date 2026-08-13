@@ -153,7 +153,12 @@ def build_toolkit(
             )
             registry.register(mr_spec, mr_impl)
         ig_spec, ig_impl = make_ingest_implementer(
-            ctx.workspace, ctx.chapters, ctx.materials, ctx.model, book_id=ctx.book_id
+            ctx.workspace,
+            ctx.chapters,
+            ctx.materials,
+            ctx.model,
+            book_id=ctx.book_id,
+            skills=ctx.skills_store,
         )
         registry.register(ig_spec, ig_impl)
         plot_specs, plot_impls = make_plot_implementer(ctx.plots, book_id=ctx.book_id)

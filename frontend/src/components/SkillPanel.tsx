@@ -1,5 +1,6 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useSkillStore } from "../stores/skillStore";
+import { exportSkillFile, importSkillFile } from "../api/skills";
 import ConfirmModal from "./ui/ConfirmModal";
 import PanelHeader from "./ui/PanelHeader";
 
@@ -52,6 +53,25 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
   const [editDescription, setEditDescription] = useState("");
   const [editTarget, setEditTarget] = useState("");
   const [pendingDelete, setPendingDelete] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [importMsg, setImportMsg] = useState("");
+
+  // S118 提案 D：导入 skill 文件（复用上传区 + ingest 判别路由 → 草稿待确认）
+  const handleImportFile = async (file: File) => {
+    setImportMsg("导入中…");
+    const r = await importSkillFile(file);
+    if (r.kind === "skill") {
+      setImportMsg(`已识别为 skill《${r.title}》→ 草稿待确认（草稿区可采纳）`);
+    } else {
+      setImportMsg(r.error || "未识别为 skill，已按普通文档消化");
+    }
+    await fetchDrafts();
+  };
+
+  // S118 提案 D：导出 skill 文件（front-matter 五段式，分享/备份）
+  const handleExport = (id: string) => {
+    exportSkillFile(id);
+  };
 
   useEffect(() => {
     if (open) {
@@ -135,6 +155,7 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
                 handleEdit={handleEdit}
                 handleToggleEnabled={handleToggleEnabled}
                 handleDelete={handleDelete}
+                handleExport={handleExport}
               />
             ))
           )}
@@ -170,6 +191,25 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
           desc="叙事技法 · 写作时按需注入"
           actions={
             <div className="flex items-center gap-2">
+              {/* S118：导入 skill 文件（复用上传区判别路由） */}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                title="导入 skill 文件（.md front-matter 五段式）"
+                className="text-xs px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
+              >
+                导入
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".md,.markdown,.txt"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void handleImportFile(f);
+                  e.target.value = "";
+                }}
+              />
               <button
                 onClick={() => setShowAdd(!showAdd)}
                 className="text-xs px-2.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg transition-colors"
@@ -252,6 +292,7 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
                 handleEdit={handleEdit}
                 handleToggleEnabled={handleToggleEnabled}
                 handleDelete={handleDelete}
+                handleExport={handleExport}
               />
             ))
           )}
@@ -290,6 +331,7 @@ function SkillCard({
   handleEdit,
   handleToggleEnabled,
   handleDelete,
+  handleExport,
 }: {
   skill: Skill;
   editingId: string | null;
@@ -305,6 +347,7 @@ function SkillCard({
   handleEdit: (id: string) => void;
   handleToggleEnabled: (id: string, enabled: boolean) => void;
   handleDelete: (id: string) => void;
+  handleExport: (id: string) => void;
 }) {
   return (
     <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-3 space-y-2">
@@ -321,6 +364,15 @@ function SkillCard({
             }`}
           >
             {skill.enabled ? "启用" : "禁用"}
+          </button>
+          <button
+            onClick={() => handleExport(skill.id)}
+            title="导出 skill 文件（分享/备份）"
+            className="p-1 text-zinc-600 hover:text-sky-400 rounded"
+          >
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+            </svg>
           </button>
           <button
             onClick={() => {

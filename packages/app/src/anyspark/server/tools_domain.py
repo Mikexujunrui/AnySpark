@@ -481,12 +481,18 @@ def make_setting_implementer(settings: Any, book_id: str = "main") -> tuple[Any,
 
 
 def make_ingest_implementer(
-    workspace: Any, chapters: Any, materials: Any, model: Any, book_id: str = "main"
+    workspace: Any,
+    chapters: Any,
+    materials: Any,
+    model: Any,
+    book_id: str = "main",
+    skills: Any | None = None,
 ) -> tuple[Any, Any]:
-    """上传消化工具（S48-P3）：把上传区原始文档消化成章节 md 或摘要卡。
+    """上传消化工具（S48-P3）：把上传区原始文档消化成章节 md / 摘要卡 / skill 草稿。
 
     Agent 在用户上传了原稿/设定文档后调用——拆章进格式化区（可继续写作），
-    或生成摘要卡（设定/资料，进卡片区 + 图谱关联）。
+    或生成摘要卡（设定/资料，进卡片区 + 图谱关联），或识别为 skill 文件
+    （S118：front-matter 五段式 → 草稿待人工确认）。
     """
 
     spec = ToolSpec(
@@ -522,7 +528,7 @@ def make_ingest_implementer(
         from anyspark.server.ingest import ingest_pipeline
 
         result = ingest_pipeline(
-            workspace, chapters, materials, model, book_id, filename, mode=mode
+            workspace, chapters, materials, model, book_id, filename, mode=mode, skills=skills
         )
         if not result.ok:
             return ToolResult(call=call, ok=False, content=result.error)
@@ -532,6 +538,14 @@ def make_ingest_implementer(
                 ok=True,
                 content=f"已消化「{filename}」为摘要卡《{result.title}》（{result.card_file}）。"
                 f"\n主题：{result.topic}\n要点：{'；'.join(result.key_points)}",
+            )
+        if result.kind == "skill":
+            # S118：skill 文件识别 → 草稿待人工确认
+            return ToolResult(
+                call=call,
+                ok=True,
+                content=f"识别到 skill 文件《{result.title}》，已存为草稿待确认"
+                f"（草稿区可查看/采纳/拒绝）。",
             )
         written = [
             f"{i + 1}. {ch['title']}（{ch['chars']}字）" for i, ch in enumerate(result.chapters)

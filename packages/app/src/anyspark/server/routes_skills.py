@@ -80,6 +80,39 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
         """全部写作技巧。"""
         return [s.to_dict() for s in deps.skills.list_skills()]
 
+    @router.get("/api/skills/{skill_id}/export", response_model=None)
+    def export_skill(skill_id: str) -> Any:
+        """S118 提案 D：导出 skill 为标准文件（front-matter 五段式，分享用）。
+
+        导出格式 = ingest 导入判别格式（闭环）——分享出去的 skill 文件
+        对方上传区可直接识别进草稿。
+        """
+        from urllib.parse import quote
+
+        from anyspark.server.skill_io import render_skill_file
+
+        s = deps.skills.get(skill_id)
+        if s is None:
+            raise HTTPException(status_code=404, detail="技巧不存在")
+        body = render_skill_file(
+            name=s.name,
+            description=s.description,
+            content=s.content,
+            example=s.example,
+            tags=s.tags,
+            target=s.target,
+        )
+        safe = quote(f"{s.name}.skill.md")
+        from fastapi.responses import PlainTextResponse
+
+        return PlainTextResponse(
+            content=body,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": (f"attachment; filename=skill.md; filename*=UTF-8''{safe}")
+            },
+        )
+
     @router.post("/api/skills", response_model=dict[str, Any])
     def add_skill(req: WritingSkillIn) -> dict[str, Any]:
         s = deps.skills.add(

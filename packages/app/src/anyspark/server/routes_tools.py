@@ -136,6 +136,7 @@ def make_tools_router(deps: AppDeps) -> APIRouter:
             req.filename,
             mode=req.mode,
             allowed_ext=INGEST_ALLOWED_EXT,
+            skills=deps.skills,
         )
         if not result.ok:
             if result.error_code == "not_found":
@@ -157,6 +158,14 @@ def make_tools_router(deps: AppDeps) -> APIRouter:
                 "title": result.title,
                 "card_file": result.card_file,
                 "material_id": result.material_id,
+            }
+        if result.kind == "skill":
+            # S118 提案 D：上传文件识别为 skill → 草稿待确认（前端刷新草稿区）
+            return {
+                "ok": True,
+                "kind": "skill",
+                "title": result.title,
+                "draft_id": result.material_id,
             }
         written = result.chapters
         logger.info("消化: %s → %d 章", req.filename, len(written))
