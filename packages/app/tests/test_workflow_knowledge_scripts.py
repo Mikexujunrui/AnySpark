@@ -219,3 +219,103 @@ def test_workflow_auto_write_chain() -> None:
         assert "怀表" in t["results"]["ref_block"]
     finally:
         client.close()
+
+
+def test_run_params_feed_gate_condition() -> None:
+    """阶段2：run 传 params → gate rule 条件引用 {{param}} 命中正确分支。"""
+    from anyspark.core import Message, ModelOutput
+
+    class _FakeModel:
+        model_name = "fake"
+
+        def respond(self, messages: list[Message], tools: object) -> ModelOutput:
+            return ModelOutput(text="ok", tool_calls=[])
+
+    db = Path(tempfile.mkdtemp()) / "wf.db"
+    client = TestClient(build_app(model=_FakeModel(), db_path=db))
+    try:
+        wf = _make_workflow(
+            client,
+            [
+                {"id": "n1", "kind": "script", "params": {"function": "noop"}},
+                {"id": "g", "kind": "gate", "params": {}},
+                {"id": "n_ok", "kind": "script", "params": {"function": "noop"}},
+                {"id": "n_fail", "kind": "script", "params": {"function": "noop"}},
+            ],
+            [
+                {"source": "n1", "target": "g"},
+                {
+                    "source": "g",
+                    "target": "n_ok",
+                    "condition": {
+                        "type": "rule",
+                        "expression": "{{style_guide}} == '简洁'",
+                    },
+                },
+                {"source": "g", "target": "n_fail"},
+            ],
+        )
+        # 传 params：{{style_guide}} 应为 '简洁' → 走 n_ok
+        r = client.post(
+            f"/api/workflows/{wf}/run", json={"book_id": "main", "params": {"style_guide": "简洁"}}
+        )
+        assert r.status_code == 200
+        task_id = r.json()["task_id"]
+        for _ in range(50):
+            time.sleep(0.1)
+            t = client.get(f"/api/workflows/tasks/{task_id}").json()
+            if t.get("status") in {"done", "failed", "cancelled"}:
+                break
+        assert t["status"] == "done", t
+        states = {s["node_id"]: s["status"] for s in t["node_states"]}
+        assert states["n_ok"] == "done"
+        assert states["n_fail"] == "pending"  # 条件命中 n_ok，n_fail 未执行
+    finally:
+        client.close()
+
+
+def test_run_params_feed_agent_instruction() -> None:
+    """阶段2：run 传 params → agent 节点 instruction 里 {{param}} 被解析为传值。"""
+    from anyspark.core import Message, ModelOutput
+
+    captured: dict[str, object] = {}
+
+    class _FakeModel:
+        model_name = "fake"
+
+        def respond(self, messages: list[Message], tools: object) -> ModelOutput:
+            captured["instruction"] = messages[-1].content
+            return ModelOutput(text="已写", tool_calls=[])
+
+    db = Path(tempfile.mkdtemp()) / "wf.db"
+    client = TestClient(build_app(model=_FakeModel(), db_path=db))
+    try:
+        wf = _make_workflow(
+            client,
+            [
+                {
+                    "id": "n1",
+                    "kind": "agent",
+                    "params": {
+                        "instruction": "按风格指导【{{style_guide}}】续写",
+                        "output_key": "out",
+                    },
+                }
+            ],
+            [],
+        )
+        r = client.post(
+            f"/api/workflows/{wf}/run",
+            json={"book_id": "main", "params": {"style_guide": "短句直给"}},
+        )
+        assert r.status_code == 200
+        task_id = r.json()["task_id"]
+        for _ in range(50):
+            time.sleep(0.1)
+            t = client.get(f"/api/workflows/tasks/{task_id}").json()
+            if t.get("status") in {"done", "failed", "cancelled"}:
+                break
+        assert t["status"] == "done", t
+        assert captured["instruction"] == "按风格指导【短句直给】续写"
+    finally:
+        client.close()

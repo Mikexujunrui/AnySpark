@@ -118,7 +118,9 @@ def make_workflow_router(deps: AppDeps) -> APIRouter:
         wf = deps.workflow_store.get_template(workflow_id)
         if wf is None:
             raise HTTPException(status_code=404, detail="工作流不存在")
-        task_id = deps.workflow_store.create_task(wf, book_id=req.book_id, template_id=workflow_id)
+        task_id = deps.workflow_store.create_task(
+            wf, book_id=req.book_id, template_id=workflow_id, params=req.params
+        )
 
         def _run() -> None:
             try:

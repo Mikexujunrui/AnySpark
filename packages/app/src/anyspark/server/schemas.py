@@ -581,9 +581,10 @@ class WorkflowGenerateIn(BaseModel):
 
 
 class WorkflowRunIn(BaseModel):
-    """S59：运行工作流（绑定书，快照冻结）。"""
+    """运行工作流：绑定书 + 可选运行时参数（params 作为初始变量，{{var}} 可引用）。"""
 
     book_id: str = "main"
+    params: dict[str, str] = {}
 
 
 class ChapterPlanIn(BaseModel):

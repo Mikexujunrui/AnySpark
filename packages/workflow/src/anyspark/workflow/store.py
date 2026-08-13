@@ -225,21 +225,25 @@ class WorkflowStore:
         *,
         book_id: str,
         template_id: str | None = None,
+        params: dict[str, Any] | None = None,
     ) -> str:
+        """创建任务：冻结定义快照 + 绑定书 + 初始变量（params 供 {{var}} 引用）。"""
         task_id = _gen("task")
         now = _now()
+        initial_results = json.dumps(params or {}, ensure_ascii=False)
         with self._lock:
             self._conn.execute(
                 "INSERT INTO workflow_tasks"
                 " (id, template_id, name, book_id, definition, status, current_node_id,"
                 "  results, error, created_at, updated_at)"
-                " VALUES (?, ?, ?, ?, ?, 'queued', '', '{}', '', ?, ?)",
+                " VALUES (?, ?, ?, ?, ?, 'queued', '', ?, '', ?, ?)",
                 (
                     task_id,
                     template_id,
                     definition.name,
                     book_id,
                     json.dumps(definition.to_dict(), ensure_ascii=False),
+                    initial_results,
                     now,
                     now,
                 ),
