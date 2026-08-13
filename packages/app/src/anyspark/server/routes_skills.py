@@ -70,7 +70,7 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
         )
         if not candidates:
             raise HTTPException(status_code=502, detail="提炼失败（无有效候选）")
-        # 去重：与现有模板库（L2+L3）名比对
+        # 去重：与现有模板库（精选默认库+外部扩展库）名比对
         existing_names = {t.name for t in deps.templates_external.all()}
         fresh = [c for c in candidates if c["name"] not in existing_names]
         return {"candidates": fresh, "existing_templates": sorted(existing_names)}

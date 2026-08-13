@@ -116,10 +116,10 @@ def default_library() -> list[Template]:
 
 
 class ExternalLibrary:
-    """L3 外部模式库（机制 6：用户导入/平台共享，SQLite）。
+    """外部扩展模式库（机制 6 原 L3：用户导入/平台共享，SQLite）。
 
-    与 L2 合并供给探索（模板是探索方向生成器，自然语言唯一介质）；
-    外部模板可删，L2 不可。
+    与精选默认库（原 L2）合并供给探索（模板是探索方向生成器，自然语言唯一介质）；
+    外部模板可删，精选默认库不可。
     """
 
     def __init__(self, db_path: str | Path) -> None:
