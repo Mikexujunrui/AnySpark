@@ -174,7 +174,7 @@ run_subagent(
 
 - agent 节点从“干净单次调用”升级为“**跑完整工具循环**”（调用子 Agent 内核）
 - 节点 params 增加 `delegate` 语义：`{instruction, context, scope, budget}`
-- **调研工作流模板**（首个真实场景，可复用可参数化）：
+- **调研工作流（预置）**（首个真实场景，可复用可参数化）：
 
 ```yaml
 - id: n1

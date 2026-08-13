@@ -3225,7 +3225,7 @@ L116/L776 保留产品历史，注册层已默认可用。
 - 子 Agent 内核（loop 层一份+两入口）：workflow delegate 优先落地——独立
   InMemoryConversationStore（fresh 隔离）+完整 Agent 循环+scope.tools 白名单+
   budget.max_turns 护栏+model_for_task(research) 槽位
-- 主循环 run_subagent 工具（对话即时委派）二期；调研工作流模板待建
+- 主循环 run_subagent 工具（对话即时委派）二期；调研工作流（预置）待建
 
 **验证**：四提案各自测试全绿（codex 12/recorder 3/skill_io 7/workflow_delegate 2）；
 app+align+core+workflow 全量绿；mypy/ruff 绿；真实链路模拟验证（压缩/steer 事件、
@@ -3241,8 +3241,9 @@ skill 导入导出闭环、delegate 子 Agent 工具循环）。
   + max_turns 护栏
 - 验证：test_workflow_delegate +2（chat 调 run_subagent 链路/缺 instruction 报错）
 
-### S122 调研工作流模板种子（提案 B 首个真实模板）
-- WorkflowStore._seed_templates 空表播种「资料调研」：网络搜索（delegate
+### S122 调研工作流（预置）——提案 B 首个真实场景
+- WorkflowStore._seed_templates 空表播种「资料调研」工作流（workflow_templates 表，
+  非剧情模式模板库——两者不同：工作流=流程编排，模板=探索方向生成器）：
   search_web,fetch_page）→ 参考书摘录（reference_lookup）→ 整理报告 →
   落资料池（material_register）→ 人工确认
 - 坑：种子持锁时调 add_template 同锁重入死锁（threading.Lock 非可重入）——
