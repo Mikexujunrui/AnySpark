@@ -17,8 +17,41 @@ anyspark.align.skillgen — 叙事技巧生成器（S54：文风提炼 → skill
 
 from __future__ import annotations
 
+import logging
+
 from anyspark.core import Message
 from anyspark.core.jsonutil import parse_json_array
+
+logger = logging.getLogger("anyspark.align.skillgen")
+
+
+def _classify_model_error(exc: Exception) -> str:
+    """S113：把模型调用异常分类成用户可读的原因（拆书/提炼诊断用）。"""
+    msg = str(exc)
+    low = msg.lower()
+    if "data_inspection_failed" in msg or "inappropriate content" in low:
+        return "书内容可能含敏感内容，被模型服务内容审核拦截（该段无法提炼）"
+    if "invalid_api_key" in msg or "authenticationerror" in low or "401" in msg:
+        return "API Key 无效或未配置（请检查 data/.env 的 DEEPSEEK_API_KEY）"
+    if "rate limit" in low or "429" in msg:
+        return "请求过于频繁被限流（请稍后重试）"
+    if "connection" in low or "timeout" in low or "network" in low:
+        return f"网络/连接异常：{msg[:120]}"
+    return f"{type(exc).__name__}: {msg[:150]}"
+
+
+def _summarize_errors(reasons: list[str], limit: int = 3) -> str:
+    """S113：汇总分段失败原因（去重 + 截断，last_error 透出用）。"""
+    if not reasons:
+        return "未知原因（各段模型调用均无输出）"
+    seen: list[str] = []
+    for r in reasons:
+        if r not in seen:
+            seen.append(r)
+    return "；".join(seen[:limit]) + (
+        f"（共 {len(reasons)} 段失败）" if len(reasons) > limit else ""
+    )
+
 
 # 提炼提示（S54b：引导而非禁止——不强制负面，不硬禁抽象；强调可执行性）
 # S67b：借鉴 creative-writing-skills（haowjy）——①维度扩充（8 类，先识别不硬凑）
@@ -275,6 +308,11 @@ class SkillGenerator:
 
     def __init__(self, model: object) -> None:
         self._model = model
+        # S113：最近一次提炼失败的诊断信息（供调用方透出给用户可读原因）。
+        # generate_book 分段提炼时每段独立 try，全部失败也不抛异常——
+        # 若吞掉原因，用户只看到「提炼失败（无有效候选）」而不知真因
+        # （如内容被模型审核拦截 / key 无效 / 限流）。
+        self.last_error = ""
 
     def generate(
         self,
@@ -344,6 +382,8 @@ class SkillGenerator:
         samples = _sample_blocks(source_text, _BOOK_SAMPLES, _BOOK_WINDOW)
         partials: list[str] = []
         fallback: list[dict[str, str]] = []
+        # S113：收集各段失败原因（分类汇总，供 last_error 透出）
+        err_reasons: list[str] = []
         for i, sample in enumerate(samples, 1):
             prompt = GENERATE_PROMPT_BOOK + f"\n（代表段 {i}/{len(samples)}）\n{sample[:20000]}\n"
             if hint.strip():
@@ -358,10 +398,21 @@ class SkillGenerator:
                     partials.append(f"【代表段 {i}】\n{cands[0].get('content', '')}")
                     if not fallback:
                         fallback = cands  # 归并失败时的降级：第一段结果
-            except Exception:
-                continue
+                else:
+                    reason = f"段{i}: 模型输出解析失败（非 skill JSON）"
+                    err_reasons.append(reason)
+                    logger.warning(
+                        "拆书提炼段 %d: 输出解析失败（前 80 字: %r）", i, output.text[:80]
+                    )
+            except Exception as exc:
+                reason = _classify_model_error(exc)
+                err_reasons.append(f"段{i}: {reason}")
+                logger.warning("拆书提炼段 %d 失败: %s", i, reason)
         if not partials:
+            # S113：全部失败——汇总原因透出（不静默）
+            self.last_error = _summarize_errors(err_reasons)
             return []
+        self.last_error = ""
         merge_prompt = MERGE_PROMPT_BOOK + "\n\n".join(partials) + "\n"
         try:
             merged = _parse_skills(
@@ -369,7 +420,8 @@ class SkillGenerator:
                     [Message(role="system", content=merge_prompt)], []
                 ).text
             )[:1]
-        except Exception:
+        except Exception as exc:
+            logger.warning("拆书归并失败，降级用第一段: %s", _classify_model_error(exc))
             merged = []
         final = merged or fallback
         for c in final:

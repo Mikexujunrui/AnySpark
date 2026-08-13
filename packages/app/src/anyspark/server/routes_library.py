@@ -91,7 +91,12 @@ def make_library_router(deps: AppDeps) -> APIRouter:
             raise HTTPException(status_code=400, detail="书库无内容（先导入文本）")
         cands = deps.skill_generator.generate_book(source, hint)
         if not cands:
-            raise HTTPException(status_code=502, detail="提炼失败（无有效候选）")
+            # S113：透出可读失败原因（此前静默“无有效候选”，用户不知真因）
+            detail = "提炼失败（无有效候选）"
+            err = getattr(deps.skill_generator, "last_error", "")
+            if err:
+                detail += f"：{err}"
+            raise HTTPException(status_code=502, detail=detail)
         c = cands[0]
         draft = deps.skills.add_draft(
             name=str(c.get("name", book["name"])),

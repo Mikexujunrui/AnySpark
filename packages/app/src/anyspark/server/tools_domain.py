@@ -1630,7 +1630,12 @@ def make_skill_refine_implementer(
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"提炼失败：{exc}")
         if not candidates:
-            return ToolResult(call=call, ok=False, content="提炼失败（无有效候选）。")
+            # S113：透出可读失败原因（generate_book 全段失败时 last_error 有分类汇总）
+            err = getattr(generator, "last_error", "")
+            content = "提炼失败（无有效候选）。"
+            if err:
+                content += f"原因：{err}"
+            return ToolResult(call=call, ok=False, content=content)
         # S103：候选存草稿（skills.add_draft）——前端草稿区人工确认转正，对话链路不再断链
         draft_ids: list[str] = []
         if skills is not None:
