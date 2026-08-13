@@ -300,7 +300,7 @@ def test_src_read_inside_sandbox() -> None:
     assert r["ok"] is True, r["error"]
     # 越界
     r2 = run_code("print(src_read('../../etc/passwd'))", data_env=env)
-    assert r2["ok"] is False and "越界" in r2["error"]
+    assert r2["ok"] is False and "bounds" in r2["error"]
 
 
 def test_search_chapters_batch_keywords() -> None:

@@ -25,7 +25,7 @@ class ChatRequest(BaseModel):
     enable_search: bool = True  # 网络搜索+抓取（search_web/fetch_page）默认可用
     enable_extras: bool = True  # 扩展工具（read_material/material_*）默认可用；S63 check_text 退役
     enable_domain: bool = True  # S48-P2 领域工具（图谱查证/伏笔登记/计划推进/设定查证）默认可用
-    enable_codex: bool = True  # S48-P5 代码扩展 run_code（沙箱，默认可用——安全靠沙箱兜底不靠隐藏）
+    enable_codex: bool = False  # S116 失败关闭：沙箱不可对抗级隔离，默认不开放
     enable_workflow: bool = True  # S59 工作流 agent 工具（list/run/status/generate）默认可用
     enable_play: bool = True  # S65 互动推演 agent 工具（play_start/choose/status/export）默认可用
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）

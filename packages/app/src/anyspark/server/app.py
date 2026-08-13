@@ -8,6 +8,7 @@ anyspark.server.app — FastAPI 后端（真实 API 层）。
 from __future__ import annotations
 
 import contextlib
+import os
 import queue
 import sys
 import threading
@@ -455,9 +456,8 @@ def build_app(
                 rels = []
             for e in ents:
                 state = (e.state or e.description or "").strip()
-                line = (
-                    f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）"
-                    + (f"：{state[:150]}" if state else "")
+                line = f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）" + (
+                    f"：{state[:150]}" if state else ""
                 )
                 for r in rels:
                     if r.from_name == e.name or r.to_name == e.name:
@@ -514,9 +514,7 @@ def build_app(
                 except Exception:
                     pass
             if len(lines) == 1:
-                return NodeResult(
-                    output=f"参考书中未命中「{keyword}」（含图谱/设定层）。"
-                )
+                return NodeResult(output=f"参考书中未命中「{keyword}」（含图谱/设定层）。")
             return NodeResult(output="\n\n".join(lines))
         return NodeResult(error=f"未注册的 script 函数: {fn}")
 
@@ -570,9 +568,16 @@ def build_app(
     play_engine = PlayEngine(play_store, model, workspace, graph)
 
     app = FastAPI(title="AnySpark v4 API", version="0.0.1")
+    # S116 安全收紧：CORS 从 "*" 改为 localhost 开发白名单（原 * 允许任意网页
+    # 跨域调本地 API——配合无鉴权可被恶意网页触发 codex RCE）。
+    # 前端 dev 走 Vite proxy（5173→8000，浏览器同源无需 CORS）；生产后端 serve
+    # dist（同源）。第三方前端可用 ANYSPARK_CORS_ORIGINS（逗号分隔）显式扩展。
+    _cors_origins = [
+        o.strip() for o in os.environ.get("ANYSPARK_CORS_ORIGINS", "").split(",") if o.strip()
+    ] or ["http://127.0.0.1:5173", "http://localhost:5173"]
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],  # 开发期；前端 Vite dev server 在此端口
+        allow_origins=_cors_origins,
         allow_methods=["*"],
         allow_headers=["*"],
     )

@@ -260,6 +260,17 @@ def test_manual_decay_api() -> None:
     db = Path(tempfile.mkdtemp()) / "tdecay.db"
     client = TestClient(build_app(model=m, db_path=db))
     client.post("/api/manual", json={"content": "旧条目"})
+    # 时间边界防 flaky：decay 用 updated_at < now——同秒插入会因相等不降级，
+    # 先把条目时间戳改为过去（直接改 db，测试专用）
+    import sqlite3
+    from datetime import UTC, datetime, timedelta
+
+    with sqlite3.connect(db) as conn:
+        conn.execute(
+            "UPDATE manual_entries SET updated_at=? WHERE content='旧条目'",
+            ((datetime.now(UTC) - timedelta(days=30)).isoformat(),),
+        )
+        conn.commit()
     r = client.post("/api/manual/decay", json={"days_high": 0, "days_medium": 0})
     assert r.status_code == 200
     data = r.json()

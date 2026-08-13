@@ -59,7 +59,7 @@ def build_toolkit(
     ctx: ToolContext,
     *,
     enable_domain: bool = True,
-    enable_codex: bool = True,
+    enable_codex: bool = False,  # S116 默认关（失败关闭：属性链逃逸存在，显式开启才可用）
     enable_extras: bool = True,
     enable_search: bool = True,
     enable_workflow: bool = True,
@@ -209,15 +209,18 @@ def build_toolkit(
     from anyspark.server.codex import make_data_env
     from anyspark.server.tools_extensions import execute_extension, tool_spec_from_ext
 
-    _ext_data_env = make_data_env(ctx.workspace, ctx.chapters, ctx.graph)
-
-    def _make_ext_impl(e: Any, env: dict[str, Any]) -> Any:
+    def _make_ext_impl(e: Any, env: dict[str, Any] | None) -> Any:
         def impl(spec_: Any, arguments: dict[str, Any]) -> Any:
             return execute_extension(e, arguments, env)
 
         return impl
 
+    # S116 惰性构造：无已批准扩展工具时不做数据快照（ToolContext 可能无 store，
+    # 测试/空表场景不触发）；有工具才物化（生产真实 store）
+    _ext_data_env: dict[str, Any] | None = None
     for _ext in ctx.ext_tools.active_tools():
+        if _ext_data_env is None:
+            _ext_data_env = make_data_env(ctx.workspace, ctx.chapters, ctx.graph)
         registry.register(tool_spec_from_ext(_ext), _make_ext_impl(_ext, _ext_data_env))
 
     # S48-P5 代码扩展（沙箱 run_code）：默认可用（S114 哲学：安全靠沙箱兜底不靠隐藏；

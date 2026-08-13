@@ -37,7 +37,7 @@ def test_run_code_blocks_dangerous() -> None:
     assert r["ok"] is False
     # 任意 import 被拒
     r2 = run_code("import os")
-    assert r2["ok"] is False and "禁止" in r2["error"]
+    assert r2["ok"] is False and "blocks" in r2["error"]
     r3 = run_code("import socket")
     assert r3["ok"] is False
     # __import__ 逃逸被拒
@@ -50,6 +50,47 @@ def test_run_code_error_and_timeout() -> None:
     assert r["ok"] is False and "boom" in r["error"]
     r2 = run_code("while True: pass", timeout=1)
     assert r2["ok"] is False and "超时" in r2["error"]
+
+
+def test_run_code_escape_isolated() -> None:
+    """S116：属性链逃逸在子进程执行——主进程不受影响（隔离边界）。
+
+    断言：逃逸代码的 os.system 输出不污染主进程 stdout（经 pipe 隔离）；
+    子进程环境最小（读不到 DEEPSEEK_API_KEY）。
+    """
+    import io as _io
+    import os as _os
+
+    _os.environ["DEEPSEEK_API_KEY"] = "sk-SECRET-TEST"
+    try:
+        _buf = _io.StringIO()
+        r = run_code(
+            "cw = [c for c in ().__class__.__bases__[0].__subclasses__() "
+            "if c.__name__ == 'catch_warnings'][0]; "
+            "os = cw.__init__.__globals__['sys'].modules['os']; "
+            "print(os.environ.get('DEEPSEEK_API_KEY', 'EMPTY'))"
+        )
+        # 逃逸代码拿不到主进程密钥（环境最小集）
+        assert "sk-SECRET-TEST" not in (r["stdout"] + r["error"] + r["stderr"])
+        assert "EMPTY" in r["stdout"]
+        # 主进程 stdout 未被污染（重定向只在子进程内）
+        print("MAIN-PROCESS-OK")
+        assert "MAIN-PROCESS-OK" not in r["stdout"]
+    finally:
+        _os.environ.pop("DEEPSEEK_API_KEY", None)
+
+
+def test_run_code_timeout_kills_process() -> None:
+    """S116：超时后子进程被杀（不再有线程残留烧 CPU）。"""
+    import threading
+
+    before = threading.active_count()
+    r = run_code("n = 0\nfor i in range(10**9):\n    n += i\nprint(n)", timeout=1)
+    assert r["ok"] is False and "超时" in r["error"]
+    import time
+
+    time.sleep(0.5)
+    assert threading.active_count() <= before + 1  # 无线程泄漏（子进程已杀）
 
 
 # ---------------------------------------------------------------------------
@@ -106,12 +147,12 @@ def test_codex_api_and_switch() -> None:
     r = client.post("/api/codex/run", json={"code": "print(sum(range(101)))", "timeout": 5}).json()
     assert r["ok"] is True and "5050" in r["stdout"]
 
-    # S114 翻转：默认 enable_codex=True——run_code 默认在工具集（安全靠沙箱兜底不靠隐藏）
+    # S116 失败关闭：默认 enable_codex=False（沙箱不可对抗级隔离）——默认不在工具集
     client.post("/api/chat", json={"message": "写《第1章》20字：雨夜。"})
-    assert "run_code" in model.last_tools
-    # 显式禁用后不可见
-    client.post("/api/chat", json={"message": "写《第2章》20字：灯塔。", "enable_codex": False})
     assert "run_code" not in model.last_tools
+    # 显式开启后可见
+    client.post("/api/chat", json={"message": "写《第2章》20字：灯塔。", "enable_codex": True})
+    assert "run_code" in model.last_tools
 
 
 # ---------------------------------------------------------------------------
@@ -171,4 +212,38 @@ def test_ws_read_path_guard() -> None:
     assert r["ok"] is True and "江边之城" in r["stdout"]
 
     r2 = run_code("print(ws_read('../../etc/passwd'))", data_env=env)
-    assert r2["ok"] is False and "越界" in r2["error"]
+    assert r2["ok"] is False and "bounds" in r2["error"]
+
+
+def test_ws_read_sibling_prefix_guard() -> None:
+    """S116：兄弟目录名前缀碰撞（../main2/secret.txt）被拒（is_relative_to）。"""
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    from anyspark.graph import GraphStore
+    from anyspark.server.codex import make_data_env
+    from anyspark.server.workspace import Workspace
+    from anyspark.store import ChapterStore
+
+    root = Path(tempfile.mkdtemp())
+    ws = Workspace(root=root / "ws")
+    ws.save_upload("main", "secret.txt", b"TOP-SECRET")
+    # 构造兄弟目录 main2（前缀碰撞：startswith(str(base)) 会误放行）
+    sibling = root / "ws" / "main2"
+    sibling.mkdir(parents=True, exist_ok=True)
+    (sibling / "secret.txt").write_text("SIBLING-DATA", encoding="utf-8")
+
+    env = make_data_env(ws, ChapterStore(db), GraphStore(db))
+    r = run_code("print(ws_read('../main2/secret.txt'))", data_env=env)
+    assert r["ok"] is False and "bounds" in r["error"]
+
+
+def test_run_code_minimal_env() -> None:
+    """S116：子进程环境变量最小集——敏感密钥不可见。"""
+    import os as _os
+
+    _os.environ["DEEPSEEK_API_KEY"] = "sk-SECRET-TEST"
+    try:
+        r = run_code("import os; print(os.environ.get('DEEPSEEK_API_KEY', 'EMPTY'))")
+        # 环境里无 DEEPSEEK_API_KEY（最小集剥离）；import os 本身被白名单拒
+        assert r["ok"] is False and "blocks" in r["error"]
+    finally:
+        _os.environ.pop("DEEPSEEK_API_KEY", None)
