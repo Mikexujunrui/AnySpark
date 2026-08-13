@@ -166,3 +166,25 @@ def test_reference_lookup_without_knowledge_sources() -> None:
         assert "雾城风云" in r.content
     finally:
         lib.close()
+
+
+def test_knowledge_retrieval_is_read_only() -> None:
+    """高级参考书检索只读：检索后参考书项目的图谱/设定档数据不变（隔离验证）。"""
+    lib, graph, settings, impl = _setup()
+    try:
+        # 检索前快照
+        before_ents = [e.to_dict() for e in graph.list_entities("雾城旧作")]
+        before_settings = [s.to_dict() for s in settings.list("雾城旧作")]
+
+        # 多次检索（图谱命中 + 设定命中 + 未命中）
+        _call(impl, keyword="陈渡")
+        _call(impl, keyword="钟表铺")
+        _call(impl, keyword="不存在的词xyz")
+
+        # 检索后快照：完全一致 = 零写入
+        after_ents = [e.to_dict() for e in graph.list_entities("雾城旧作")]
+        after_settings = [s.to_dict() for s in settings.list("雾城旧作")]
+        assert after_ents == before_ents
+        assert after_settings == before_settings
+    finally:
+        lib.close()
