@@ -335,7 +335,7 @@ def build_app(
             # 无操作（AI 生成流程常用来做循环体出口占位）
             return NodeResult(output=str(node.params.get("output_key") or "done"))
         if fn == "read_chapter":
-            title = str(node.params.get("chapter_title") or "")
+            title = _wf_resolve(str(node.params.get("chapter_title") or ""), ctx)
             chs = chapters.list_by_book(ctx.book_id)
             ch = next((c for c in chs if c.title == title), None)
             if ch is None:
@@ -363,7 +363,7 @@ def build_app(
                 )
             return NodeResult(output=ch.content)
         if fn == "review_chapter":
-            title = str(node.params.get("chapter_title") or "")
+            title = _wf_resolve(str(node.params.get("chapter_title") or ""), ctx)
             ch = next((c for c in chapters.list_by_book(ctx.book_id) if c.title == title), None)
             if ch is None:
                 return NodeResult(error=f"章节不存在: {title}")
@@ -467,9 +467,10 @@ def build_app(
         if fn == "query_reference":
             """查参考书（分级检索）：原文片段 + 高级参考书（项目）的图谱/设定知识层。
 
-            params: keyword 必填；max_per_book 缺省 3。复用 reference_lookup 分级检索。
+            params: keyword 必填（支持 {{var}} 解析，如 run params 传 ref_keyword）；
+            max_per_book 缺省 3。复用 reference_lookup 分级检索。
             """
-            keyword = str(node.params.get("keyword") or "").strip()
+            keyword = _wf_resolve(str(node.params.get("keyword") or ""), ctx).strip()
             if not keyword:
                 return NodeResult(error="query_reference 缺 keyword")
             try:
