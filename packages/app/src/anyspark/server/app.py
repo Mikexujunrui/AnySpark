@@ -284,10 +284,15 @@ def build_app(
     def _wf_run_agent(ctx: RunContext, node: Any) -> NodeResult:
         """agent 节点：干净单次 LLM 调用（无对话历史/工具记录——对齐 S56 干净写作）。
 
+        S115 提案 B：params.delegate 存在 → 子 Agent 执行（独立上下文跑完整工具循环，
+        工具白名单 scope.tools，预算 budget.max_turns）——工作流=通用固定流程执行器。
         变量插值：instruction/system_prompt 中的 {{var}} 从上游节点输出解析
         （如 {{chapter_text}} = 前序 read_chapter 脚本的产出）——真实链路暴露的
         接缝：AI 生成的流程若不插值，agent 拿不到章节内容。
         """
+        if node.params.get("delegate"):
+            return _wf_run_subagent(ctx, node)
+
         instruction = _wf_resolve(str(node.params.get("instruction") or ""), ctx)
         system = _wf_resolve(str(node.params.get("system_prompt") or ""), ctx)
         # 便捷注入：params.chapter_title 指定章节时自动附带正文
@@ -317,6 +322,89 @@ def build_app(
         usage = getattr(out, "usage", None)
         tokens = int(getattr(usage, "total_tokens", 0) or 0)
         return NodeResult(output=text, token_usage=tokens)
+
+    def _wf_run_subagent(ctx: RunContext, node: Any) -> NodeResult:
+        """S115 提案 B：子 Agent 执行（独立上下文跑完整工具循环）。
+
+        delegate 配置（节点 params.delegate）：
+            {
+              "scope": {"tools": [工具名...]},   # 工具白名单（空=全量）
+              "budget": {"max_turns": 10},       # 子 Agent 轮数护栏
+            }
+        - fresh 上下文：InMemoryConversationStore（不落库、不受父会话污染）
+        - 复用 core Agent 完整循环（含 S108b 重复检测/取消/工具执行）
+        - 产出：turn.text 作为 NodeResult.output（返回父流程，作为一条工具结果）
+        """
+        from anyspark.core import Agent, CancellationToken, ToolRegistry
+        from anyspark.core.storage import InMemoryConversationStore
+        from anyspark.server.agent_factory import model_for_task
+        from anyspark.server.toolkit import ToolContext, build_toolkit
+
+        instruction = _wf_resolve(str(node.params.get("instruction") or ""), ctx)
+        system = _wf_resolve(str(node.params.get("system_prompt") or ""), ctx)
+        delegate = node.params.get("delegate") or {}
+        scope = delegate.get("scope") or {}
+        scope_tools = list(scope.get("tools") or [])
+        budget = delegate.get("budget") or {}
+        max_turns = int(budget.get("max_turns") or 10)
+
+        # 工具白名单：从全量装配过滤（scope.tools 空 = 全量）
+        full_registry = build_toolkit(
+            ToolRegistry(),
+            ToolContext(
+                chapters=deps.chapters,
+                workspace=deps.workspace,
+                model=deps.model,
+                graph=deps.graph,
+                plots=deps.plots,
+                plans=deps.plans,
+                settings=deps.settings,
+                materials=deps.materials,
+                ext_tools=deps.ext_tools,
+                dim_store=deps.dim_store,
+                manual=deps.manual,
+                skills_store=deps.skills,
+                workflow_store=deps.workflow_store,
+                workflow_engine=deps.workflow_engine,
+                workflow_generator=deps.workflow_generator,
+                play_engine=deps.play_engine,
+                review_panel=deps.review_panel,
+                skill_generator=deps.skill_generator,
+                book_id=ctx.book_id,
+                templates=[
+                    f"{t.name}：{t.description}" for t in deps.templates_external.all()[:12]
+                ],
+            ),
+            enable_domain=True,
+            enable_search=True,  # 调研场景核心工具（search_web/fetch_page）
+            enable_codex=False,  # S116 失败关闭：子 Agent 不默认带代码沙箱
+            enable_workflow=False,  # 防递归委派
+            enable_play=False,
+        )
+        sub_registry = ToolRegistry()
+        if scope_tools:
+            for name in scope_tools:
+                got = full_registry.get(name)
+                if got is not None:
+                    spec, impl = got
+                    sub_registry.register(spec, impl)
+        else:
+            sub_registry = full_registry  # 无白名单 = 全量
+
+        sub_model = model_for_task(deps, "research")  # 调研槽位（未配回退激活）
+        sub_agent = Agent(
+            model=sub_model,
+            registry=sub_registry,
+            store=InMemoryConversationStore(),  # fresh：不落库、不受父污染
+            system_prompt=system or f"你是子任务执行者。任务：{instruction}",
+            max_tool_iterations=max_turns,
+        )
+        token = CancellationToken()
+        turn = sub_agent.run(instruction, token=token)
+        text = (turn.text or "").strip()
+        if not text:
+            return NodeResult(error="子 Agent 空输出")
+        return NodeResult(output=text, token_usage=0)
 
     def _wf_resolve(text: str, ctx: RunContext) -> str:
         """把 {{var}} 占位符替换为上游节点输出（缺失保留原样）。"""

@@ -121,7 +121,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials | plots/templates_external/materials |
 | routes_graph | 图谱 types/entities/relations/events/context/extract/impact | graph/graph_extractor/impact |
 | routes_story | 计划 plan/叙事树 nodes/threads/layout | plans/story_tree/story_threads |
-| routes_workflow | 工作流模板/草稿/任务 CRUD+run | workflow_store/engine/generator |
+| routes_workflow | 工作流模板/草稿/任务 CRUD+run（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115） | workflow_store/engine/generator |
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 
