@@ -52,6 +52,7 @@ from anyspark.explore import (
 )
 from anyspark.graph import GraphExtractor, GraphInjector, GraphStore, GraphVerifier
 from anyspark.library import LibraryStore
+from anyspark.library.search import search_reference_books
 from anyspark.models.mode import ModeResolver, ModeStore
 from anyspark.models.registry import (
     ModelProvider,
@@ -86,6 +87,7 @@ from anyspark.server.schemas import (
     DEFAULT_SYSTEM as DEFAULT_SYSTEM,  # re-export（test_recorder 兼容）
 )
 from anyspark.server.tasks import start_bg_worker
+from anyspark.server.tools_domain import render_reference_knowledge
 from anyspark.server.tools_extensions import (
     ExtensionToolStore,
 )
@@ -404,6 +406,116 @@ def build_app(
                 return NodeResult(output=f"已写回章节: {title}")
             except Exception as exc:
                 return NodeResult(error=f"写回失败: {exc}")
+        if fn == "read_settings":
+            """读本项目设定档（正典设定）→ 文本块（供 agent 注入，防 OOC）。
+
+            params: keyword 可选（过滤分类/名称/内容）；limit 缺省 40。
+            """
+            keyword = str(node.params.get("keyword") or "").strip()
+            try:
+                limit = max(1, min(200, int(str(node.params.get("limit") or "40"))))
+            except ValueError:
+                limit = 40
+            try:
+                items = settings.list(ctx.book_id)
+            except Exception as exc:
+                return NodeResult(error=f"读设定档失败: {exc}")
+            lines = []
+            for s in items:
+                if keyword and keyword.lower() not in f"{s.name} {s.content} {s.category}".lower():
+                    continue
+                lines.append(f"[{s.category}] {s.name or s.content[:20]}：{s.content[:200]}")
+                if len(lines) >= limit:
+                    break
+            if not lines:
+                return NodeResult(output=f"（项目「{ctx.book_id}」设定档无匹配条目）")
+            return NodeResult(output="\n".join(lines))
+        if fn == "read_graph":
+            """读本项目图谱（人物/地点/伏笔状态 + 关系）→ 文本块（供 agent 注入）。
+
+            params: keyword 可选（实体名/别名匹配）；limit 缺省 20（按出场章数取 Top N）。
+            """
+            keyword = str(node.params.get("keyword") or "").strip()
+            try:
+                limit = max(1, min(100, int(str(node.params.get("limit") or "20"))))
+            except ValueError:
+                limit = 20
+            try:
+                ents = graph.list_entities(ctx.book_id, q=keyword or None, limit=200)
+            except Exception as exc:
+                return NodeResult(error=f"读图谱失败: {exc}")
+            ents = sorted(ents, key=lambda e: -e.weight)[:limit]
+            if not ents:
+                return NodeResult(output=f"（项目「{ctx.book_id}」图谱无匹配实体）")
+            lines = []
+            try:
+                rels = graph.list_relations(ctx.book_id, limit=500)
+            except Exception:
+                rels = []
+            for e in ents:
+                state = (e.state or e.description or "").strip()
+                line = (
+                    f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）"
+                    + (f"：{state[:150]}" if state else "")
+                )
+                for r in rels:
+                    if r.from_name == e.name or r.to_name == e.name:
+                        line += f"\n  ↳ {r.from_name} {r.rel_type} {r.to_name}"
+                lines.append(line)
+            return NodeResult(output="\n".join(lines))
+        if fn == "query_reference":
+            """查参考书（分级检索）：原文片段 + 高级参考书（项目）的图谱/设定知识层。
+
+            params: keyword 必填；max_per_book 缺省 3。复用 reference_lookup 分级检索。
+            """
+            keyword = str(node.params.get("keyword") or "").strip()
+            if not keyword:
+                return NodeResult(error="query_reference 缺 keyword")
+            try:
+                max_per = max(1, min(5, int(str(node.params.get("max_per_book") or "3"))))
+            except ValueError:
+                max_per = 3
+
+            def _project_files(ref_book_id: str) -> str:
+                parts = []
+                for ch in chapters.list_by_book(ref_book_id):
+                    parts.append(f"【{ch.title}】\n{ch.content}")
+                return "\n\n".join(parts)
+
+            try:
+                res = search_reference_books(
+                    library,
+                    ctx.book_id,
+                    keyword,
+                    project_files=_project_files,
+                    max_per_book=max_per,
+                )
+            except Exception as exc:
+                return NodeResult(error=f"参考书检索失败: {exc}")
+            lines = [f"参考书命中「{keyword}」："]
+            for item in res.get("results", []):
+                lines.append(f"——{item['ref_name']}——")
+                for h in item.get("hits", []):
+                    lines.append(f"({h['count']}次) {h['snippet']}")
+            # 高级参考书（项目）知识层：图谱/设定
+            if library is not None:
+                try:
+                    for ref in library.get_references(ctx.book_id):
+                        if ref.get("type") != "project":
+                            continue
+                        klines = render_reference_knowledge(
+                            graph, settings, str(ref.get("id", "")), keyword
+                        )
+                        if klines:
+                            lines.append(f"——项目「{ref.get('id', '?')}」（知识层：图谱/设定）——")
+                            lines.extend(klines)
+                except Exception:
+                    pass
+            if len(lines) == 1:
+                return NodeResult(
+                    output=f"参考书中未命中「{keyword}」（含图谱/设定层）。"
+                )
+            return NodeResult(output="\n\n".join(lines))
         return NodeResult(error=f"未注册的 script 函数: {fn}")
 
     def _wf_run_approval(ctx: RunContext, node: Any) -> NodeResult:

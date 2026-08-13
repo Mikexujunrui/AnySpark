@@ -33,6 +33,17 @@ NODE_CATALOG = """可用节点类型（kind 字段）：
    params: {function: "read_chapter"（读章节正文，chapter_title=章名）
             或其他内置函数, output_key: 产出变量名}
    read_chapter 的产出用 output_key 命名（如 chapter_text），供 agent 引用。
+   其他内置函数：
+     read_settings — 读本项目设定档（正典设定）。params: {keyword? 过滤, limit? 缺省40}
+       产出：文本块（[分类] 名称：内容），供写作 agent 防 OOC/设定冲突。
+     read_graph — 读本项目图谱（人物/地点/状态 + 关系）。params: {keyword? 实体名过滤,
+       limit? 缺省20按出场章数取Top N}。产出：实体卡片文本块，供跨章一致/伏笔衔接。
+     query_reference — 查参考书（分级检索：原文片段 + 项目型参考书的图谱/设定知识层）。
+       params: {keyword 必填, max_per_book? 缺省3}。产出：命中文本块（含知识层）。
+     list_chapters — 列章节标题。params: 无。
+     review_chapter — 审读章节（检测网）。params: {chapter_title}。
+     write_chapter — 写回章节。params: {chapter_title, content 或 text_key}。
+     noop — 无操作（占位/出口）。
 3. approval — 人工确认点（流程暂停等作者判断/批准）。
    params: {prompt: 给作者看的确认问题}
 4. gate — 条件分支。出边（edges）带 condition 决定走向。

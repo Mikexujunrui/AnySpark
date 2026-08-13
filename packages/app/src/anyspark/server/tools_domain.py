@@ -1814,6 +1814,50 @@ def make_mind_manage_implementer(manual: Any, book_id: str = "main") -> tuple[li
     return [update_spec, delete_spec], [update, delete]
 
 
+def render_reference_knowledge(
+    graph: Any, settings: Any, ref_book_id: str, keyword: str, *, limit: int = 6
+) -> list[str]:
+    """高级参考书（项目）知识层检索：图谱实体卡片 + 设定档条目（只读）。
+
+    模块级公共函数——reference_lookup 工具与工作流 script（query_reference）共用。
+    返回人类可读行；无命中返回空列表。图谱实体带当前状态与关系，设定档条目
+    带分类——同人文/续写拿原作事实用，不注入、只按需返回。
+    """
+    lines: list[str] = []
+    if graph is not None:
+        try:
+            ents = graph.list_entities(ref_book_id, q=keyword, limit=limit)
+            for e in ents:
+                state = (e.state or e.description or "").strip()
+                line = (
+                    f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）"
+                    + (f"：{state[:120]}" if state else "")
+                )
+                # 该实体的关系（从/到命中本实体）
+                rels = [
+                    r
+                    for r in graph.list_relations(ref_book_id, limit=500)
+                    if r.from_name == e.name or r.to_name == e.name
+                ][:3]
+                for r in rels:
+                    line += f"\n  ↳ {r.from_name} {r.rel_type} {r.to_name}"
+                lines.append(line)
+        except Exception:
+            pass  # 知识层检索失败不阻断文本检索
+    if settings is not None:
+        try:
+            for s in settings.list(ref_book_id):
+                blob = f"{s.name} {s.content} {s.category}"
+                if keyword.lower() in blob.lower():
+                    lines.append(
+                        f"设定[{s.category}] {s.name or s.content[:20]}"
+                        f"：{s.content[:150]}"
+                    )
+        except Exception:
+            pass
+    return lines
+
+
 def make_reference_lookup_implementer(
     library_store: Any,
     chapters: Any,
@@ -1877,46 +1921,6 @@ def make_reference_lookup_implementer(
                 parts.append(f"【{ch.title}】\n{ch.content}")
             return "\n\n".join(parts)
 
-        def _project_knowledge(ref_book_id: str) -> list[str]:
-            """高级参考书（项目）知识层检索：图谱实体卡片 + 设定档条目（只读）。
-
-            返回人类可读行；无命中返回空列表。图谱实体带当前状态与关系，
-            设定档条目带分类——同人文/续写拿原作事实用，不注入、只按需返回。
-            """
-            lines: list[str] = []
-            if graph is not None:
-                try:
-                    ents = graph.list_entities(ref_book_id, q=keyword, limit=6)
-                    for e in ents:
-                        state = (e.state or e.description or "").strip()
-                        line = (
-                            f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）"
-                            + (f"：{state[:120]}" if state else "")
-                        )
-                        # 该实体的关系（从/到命中本实体）
-                        rels = [
-                            r
-                            for r in graph.list_relations(ref_book_id, limit=500)
-                            if r.from_name == e.name or r.to_name == e.name
-                        ][:3]
-                        for r in rels:
-                            line += f"\n  ↳ {r.from_name} {r.rel_type} {r.to_name}"
-                        lines.append(line)
-                except Exception:
-                    pass  # 知识层检索失败不阻断文本检索
-            if settings is not None:
-                try:
-                    for s in settings.list(ref_book_id):
-                        blob = f"{s.name} {s.content} {s.category}"
-                        if keyword.lower() in blob.lower():
-                            lines.append(
-                                f"设定[{s.category}] {s.name or s.content[:20]}"
-                                f"：{s.content[:150]}"
-                            )
-                except Exception:
-                    pass
-            return lines
-
         from anyspark.library.search import search_reference_books
 
         res = search_reference_books(
@@ -1929,7 +1933,9 @@ def make_reference_lookup_implementer(
             for ref in library_store.get_references(book_id):
                 if ref.get("type") != "project":
                     continue
-                klines = _project_knowledge(str(ref.get("id", "")))
+                klines = render_reference_knowledge(
+                    graph, settings, str(ref.get("id", "")), keyword
+                )
                 if klines:
                     knowledge_hits += len(klines)
                     knowledge_sections.append(
