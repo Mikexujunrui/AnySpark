@@ -256,6 +256,39 @@ class MaterialStore:
             self._conn.commit()
         return self.get(material_id) if cur.rowcount else None
 
+    def publish_to_global(self, card_id: str, from_book_id: str) -> MaterialCard | None:
+        """S123：项目 → 全局池发布（复制 + 标来源 + inspiration 可见）。
+
+        源卡必须在 from_book_id 池且 kind=inspiration（路由已校验）；
+        复制到 book_id='global'，kind=inspiration（非 copy 冷藏——发布=贡献），
+        source_ref='project:<书id>:<卡id>'（溯源贡献者项目）。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT 1 FROM materials WHERE id=? AND book_id=? AND kind='inspiration'",
+                (card_id, from_book_id),
+            ).fetchone()
+            if row is None:
+                return None
+        src = self.get(card_id)
+        if src is None:
+            return None
+        new_card = MaterialCard(
+            title=src.title,
+            topic=src.topic,
+            key_points=src.key_points,
+            key_settings=src.key_settings,
+            characters=src.characters,
+            terms=src.terms,
+            purpose=src.purpose,
+            source_text=src.source_text,
+            graph_entities=src.graph_entities,
+            kind="inspiration",
+            source_ref=f"project:{from_book_id}:{src.id}",
+        )
+        self.save(new_card, book_id="global")
+        return new_card
+
     def update(self, material_id: str, fields: dict[str, Any]) -> MaterialCard | None:
         """S80：局部编辑资料卡字段（只更新传入字段）。
 

@@ -17,6 +17,7 @@ from anyspark.server.schemas import (
     MaterialImportIn,
     MaterialIn,
     MaterialPatchIn,
+    MaterialPublishIn,
     PlotIn,
     PlotItemIn,
     PlotPatchIn,
@@ -121,6 +122,32 @@ def make_plot_router(deps: AppDeps) -> APIRouter:
         new_card = deps.materials.import_card(req.card_id, req.from_book_id, req.to_book_id)
         if new_card is None:
             raise HTTPException(status_code=404, detail="源资料卡不存在")
+        return new_card.to_dict()
+
+    @router.post("/api/materials/publish", response_model=dict[str, object])
+    def publish_material(req: MaterialPublishIn) -> dict[str, object]:
+        """S123：项目 → 全局池提交通道（写作者贡献回公共）。
+
+        把项目池的 inspiration 卡发布到全局池：复制 + 标来源（source_ref=
+        project:<书id>）+ 作为 inspiration（可见可检索，非 copy 冷藏）——
+        这是全局池的唯一写入来源（防项目随手内容污染公共区）。
+        """
+        from_book = req.from_book_id.strip()
+        if from_book == "global":
+            raise HTTPException(status_code=400, detail="全局卡无需再发布")
+        card = deps.materials.get(req.card_id)
+        if card is None:
+            raise HTTPException(status_code=404, detail="资料卡不存在")
+        if card.kind != "inspiration":
+            raise HTTPException(
+                status_code=400, detail="仅 inspiration 卡可发布（copy 冷藏卡先转灵感）"
+            )
+        # 池归属校验在 store.publish_to_global（SQL 按 book_id+kind 查源）
+        new_card = deps.materials.publish_to_global(req.card_id, from_book)
+        if new_card is None:
+            raise HTTPException(
+                status_code=400, detail=f"卡片不在项目「{from_book}」中，或发布失败"
+            )
         return new_card.to_dict()
 
     @router.get("/api/materials", response_model=list[dict[str, object]])

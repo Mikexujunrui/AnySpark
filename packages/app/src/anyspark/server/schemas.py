@@ -31,7 +31,7 @@ class ChatRequest(BaseModel):
     extract_graph: bool = True  # 章节落盘后图谱抽取（默认开保持现状；可关省 token）
     skip_inject: list[str] = []  # 细粒度跳过注入：manual/graph/agency/bias/plot 子集
     # S58b 上下文模式：auto(默认=干净,不继承场景记忆)/continue(显式继承场景记忆+计划)/fresh(同auto)
-    # 主人偏好：默认不继承——新任务/探索不受上次对话干扰；跨会话续写时显式 continue
+    # 设计偏好：默认不继承——新任务/探索不受上次对话干扰；跨会话续写时显式 continue
     context_mode: str = "auto"  # auto | continue | fresh
     # S47 运行时模型选择：缺省用注册表当前激活模型；thinking 覆盖该模型默认思考强度
     model_id: str | None = None  # 指定用哪个已配置模型（未配置/不存在 → 400）
@@ -398,6 +398,13 @@ class MaterialImportIn(BaseModel):
     card_id: str
     from_book_id: str
     to_book_id: str
+
+
+class MaterialPublishIn(BaseModel):
+    """S123：项目 → 全局池发布（贡献回公共，inspiration 可见）。"""
+
+    card_id: str
+    from_book_id: str
 
 
 class MaterialPatchIn(BaseModel):
