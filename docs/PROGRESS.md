@@ -2956,3 +2956,44 @@ UnboundLocalError（Python 函数作用域规则）——删局部 import 保留
 - 图谱事实查证 2000→8000
 
 **验证**：21 passed + ruff/mypy 全绿；当前最长章 5263 字 < 12000 摘要不再截断。
+
+## S110 单 exe 发布白屏修复（已完成 ✅）
+
+**背景（主人实测）**：S109 单 exe 双击后**白屏**。根因：webview 用 `file://` 协议
+加载 index.html，而 Vite 构建产物的 `/assets/*` 是**绝对路径**——file:// 下解析到
+磁盘根目录，JS/CSS 找不到 → 窗口白屏（后端其实已正常启动，data/ 已生成）。
+
+**修复**（packages/desktop/src/anyspark/desktop/__init__.py）：
+- 桌面壳改为**等待后端就绪后加载 `http://127.0.0.1:{port}/`**（后端同端口
+  mount StaticFiles serve 前端，`/assets/` 由 FastAPI 正确解析）——不再用 file://
+- 新增 `_wait_backend`：轮询 `/api/health` 就绪（超时 30s 也照常打开，
+  端口被占时页面仍可访问，用户看到明确错误而非静默无响应）
+
+**验证**：全新临时目录启动——`http://127.0.0.1:8790/` 返回完整 HTML、
+`/assets/index-*.js` 200（1.4MB）、窗口 "AnySpark v4" 正常创建 + webview 子进程；
+API 全通（health/chapters/explore-dims 200）。
+
+**同时清理**：上级目录 3 个过时发布产物（便携版 zip——S109 前 venv 路径绑定
+问题版；发布-exe 目录 + zip——S109 第一版白屏 bug 版），保留最新发布目录 + zip。
+
+**注意（勿回退）**：前端产物必须由后端 serve（http），禁止改回 file:// 加载。
+
+## S109b 发布方案改造——单 exe 发布（零依赖零路径绑定）+ frozen 路径兼容（已完成 ✅）
+
+**背景（主人）**：启动方案/发布包绑定固定路径，发给用户后要自己改路径才能打开。
+根因：便携版 zip 打包了 .venv，其中 pyvenv.cfg 写死本机 Python 路径
+（home=E:\environment.Windows），别人解压后 anyspark-server.exe 找不到解释器。
+
+**方案**：PyInstaller 打独立 exe（自包含 Python+前端+依赖，无路径依赖）+ 数据放 exe 同目录。
+
+- app.py：frozen 模式下资源根=_MEIPASS（只读：frontend dist/.env 模板/reviewers），
+  数据根=exe 同目录 /data（可写可拷贝）；.env 缺失时自动从模板生成到数据根
+- logging.py：frozen 日志路径=exe 同目录 data/logs
+- desktop/__init__.py：frozen 前端产物路径=_MEIPASS/frontend/dist
+- anyspark.spec：datas 补 .env.example + 系统评审员；tiktoken 编码表（cl100k_base）
+  收集（缺了 ValueError: Unknown encoding）；ROOT 改用 SPECPATH 直接解析
+- scripts/package_release.py：+--exe 模式（build 前端→pyinstaller→exe+使用说明→zip）
+
+**验证**：exe 在全新临时目录启动——data/ 自动创建、.env 模板自动生成、health ok、
+后端完整运行（chat 401 为模板 key 占位，符合预期）；发布 --exe --zip 产出
+AnySpark.exe 24.5MB + 使用说明 + zip 24.1MB。（S110 修复其 file:// 白屏缺陷）
