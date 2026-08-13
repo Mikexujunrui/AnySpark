@@ -3229,3 +3229,28 @@ L116/L776 保留产品历史，注册层已默认可用。
 **验证**：四提案各自测试全绿（codex 12/recorder 3/skill_io 7/workflow_delegate 2）；
 app+align+core+workflow 全量绿；mypy/ruff 绿；真实链路模拟验证（压缩/steer 事件、
 skill 导入导出闭环、delegate 子 Agent 工具循环）。
+
+## S121-S124 提案 B 补完 + 资料库闭环 + 命名消歧（已完成 ✅）
+
+### S121 提案 B 第二入口：主循环 run_subagent 工具（对话即时委派）
+- 子 Agent 内核共享化：subagent.py（run_subagent_task + build_subagent_registry）
+  ——S119 workflow delegate 与主循环工具共用同一内核（机制一份）
+- run_subagent 工具（enable_domain 默认开）：对话中 Agent 判断任务值得外包
+  （调研/起草/调查）即时委派，产出回传为工具结果；tools 白名单（逗号分隔）
+  + max_turns 护栏
+- 验证：test_workflow_delegate +2（chat 调 run_subagent 链路/缺 instruction 报错）
+
+### S122 调研工作流模板种子（提案 B 首个真实模板）
+- WorkflowStore._seed_templates 空表播种「资料调研」：网络搜索（delegate
+  search_web,fetch_page）→ 参考书摘录（reference_lookup）→ 整理报告 →
+  落资料池（material_register）→ 人工确认
+- 坑：种子持锁时调 add_template 同锁重入死锁（threading.Lock 非可重入）——
+  锁内直插修复
+
+### S123 项目→全局池提交通道（/api/materials/publish）
+- 资料库双层双向闭环：全局→项目（import/promote）+ 项目→全局（publish）
+- publish：复制 + kind=inspiration 可见 + source_ref='project:<书id>:<卡id>' 溯源；
+  校验（非全局/kind/池归属 store 层）
+
+### S124 L2/L3 命名消歧
+- 模板库 L1/L2/L3 → 模型内化层/精选默认库/外部扩展库（档位 L2/L3 已实现保留）
