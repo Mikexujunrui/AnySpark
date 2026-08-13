@@ -3254,3 +3254,32 @@ skill 导入导出闭环、delegate 子 Agent 工具循环）。
 
 ### S124 L2/L3 命名消歧
 - 模板库 L1/L2/L3 → 模型内化层/精选默认库/外部扩展库（档位 L2/L3 已实现保留）
+
+## S120 文档清洗——公开范围去个人化（已完成 ✅）
+
+**背景（主人 2026-08-13）**：主人决定未来可能开源，策略 = **代码公开 + 技术文档不公开
+（或只留结构逻辑图）**；指示当前只做文档清洗，不建仓库不声明 License。
+顺带更正：前端是主人自己做的（S75 并入），README 旧描述"由他人开发"过时。
+
+**清洗范围**（未来随源码公开的部分）：
+- README.md（公开版改写）：去"主人 2026-08-02 决策A"称谓 → 决策记录；前端描述更正
+  （全栈：Python 后端 + React 前端创作台 S75 并入）；文档导航只留结构图
+  （BACKEND-MAP + uml/），去内部文档链接（DESIGN/PROGRESS/AUDIT 等不随源码发布）；
+  "主人拍板→项目定位"、"主人讨论驱动→设计讨论驱动"、"合作者前端→前端创作台"；
+  技术栈"前端独立仓库他人开发"→"本仓库 frontend/"
+- 源码注释（22 文件）：主人拍板→决策记录 / 主人定案→设计定案 / 主人设计→设计决策 /
+  主人偏好→设计偏好 / 主人洞察→核心洞察 / 主人指出→观察发现 / 主人实测→实测 /
+  主人讨论→设计讨论 / 主人确认→决策确认 / 主人定夺→人工定夺 等
+- 结构图：docs/BACKEND-MAP.md（1 处"需主人定夺"→"需人工定夺"）；docs/uml/ 无残留
+- tests / packages/*/pyproject.toml / reviewers yaml：补齐清洗（第二轮）
+- 配置类（.env.example/anyspark.spec/start.bat/.gitignore）：无"主人"残留
+
+**保留原样**（不随源码发布）：docs/DESIGN.md、PROGRESS.md、AUDIT-V1.md、
+UPGRADE-DISCUSSION.md、HANDOFF-L-SERIES.md、DEV-AGENT.md、FRONTEND-*.md 等内部文档
+（含全部个人决策记录，内部继续使用）。
+
+**验证**：公开范围（README/packages/scripts/frontend/src/docs/uml/BACKEND-MAP/配置类）
+grep "主人" = 0；imports OK；review 测试 31 绿（注释改动无逻辑影响）。
+
+**注意**：清洗只动了注释/README，不含任何逻辑；未来开源时 git 历史需用新仓库快照
+导出（现有历史含内部文档），本轮已确认 .gitignore 隔离 data/.env/chapters 隐私。
