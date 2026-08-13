@@ -27,6 +27,49 @@ const KIND_LABEL: Record<WorkflowNodeKind, string> = {
   gate: "条件",
   loop: "循环",
 };
+
+/* ── script 函数目录（画布选择器） ── */
+const SCRIPT_FUNCTIONS: Record<string, { label: string; params: { key: string; label: string; placeholder?: string; type?: "number" }[] }> = {
+  read_chapter: {
+    label: "读章节正文",
+    params: [{ key: "chapter_title", label: "章名" }],
+  },
+  read_settings: {
+    label: "读设定档（正典）",
+    params: [
+      { key: "keyword", label: "关键词过滤", placeholder: "留空=全部" },
+      { key: "limit", label: "条数上限", type: "number" },
+    ],
+  },
+  read_graph: {
+    label: "读图谱（人物/状态/关系）",
+    params: [
+      { key: "keyword", label: "实体名过滤", placeholder: "留空=Top N" },
+      { key: "limit", label: "实体上限", type: "number" },
+    ],
+  },
+  query_reference: {
+    label: "查参考书（分级检索）",
+    params: [
+      { key: "keyword", label: "检索词" },
+      { key: "max_per_book", label: "每书段数", type: "number" },
+    ],
+  },
+  list_chapters: { label: "列章节", params: [] },
+  review_chapter: {
+    label: "审读章节（检测网）",
+    params: [{ key: "chapter_title", label: "章名" }],
+  },
+  write_chapter: {
+    label: "写回章节",
+    params: [
+      { key: "chapter_title", label: "章名" },
+      { key: "text_key", label: "内容变量", placeholder: "缺省 rewritten" },
+    ],
+  },
+  noop: { label: "无操作（占位）", params: [] },
+};
+const SCRIPT_FN_NAMES = Object.keys(SCRIPT_FUNCTIONS);
 const NODE_W = 148;
 const NODE_H = 56;
 const LAYER_GAP = 230;
@@ -290,10 +333,26 @@ export default function WorkflowPanel() {
   }, [draft]);
 
   /* ── 运行 ── */
+  const [runParamsText, setRunParamsText] = useState("");
+  const parseRunParams = (): Record<string, string> | null => {
+    const t = runParamsText.trim();
+    if (!t) return {};
+    try {
+      const obj = JSON.parse(t) as Record<string, unknown>;
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(obj)) out[k] = String(v);
+      return out;
+    } catch {
+      setError("运行参数不是合法 JSON");
+      return null;
+    }
+  };
   const handleRun = async (id: string) => {
     try {
       setError(null);
-      const taskId = await startRun(id);
+      const params = parseRunParams();
+      if (params === null) return;
+      const taskId = await startRun(id, params);
       const task = await refreshTask(taskId);
       setRunningTask(task);
       if (pollRef.current) clearInterval(pollRef.current);
@@ -398,6 +457,25 @@ export default function WorkflowPanel() {
         <span className="ml-auto text-[11px] text-zinc-600">
           {runningTask ? `运行中任务: ${runningTask.status}` : "滚轮缩放 · 拖背景平移 · 拖节点移动 · 点节点右侧◎连线"}
         </span>
+      </div>
+
+      {/* 运行参数输入条（可选 JSON：{{var}} 初始值，如 {"chapter_title":"第五章"}） */}
+      <div className="px-3 py-1.5 bg-zinc-900/30 border-b border-zinc-800/40 flex items-center gap-2 shrink-0">
+        <span className="text-[10px] text-zinc-600 whitespace-nowrap">运行参数 JSON（可选）</span>
+        <input
+          value={runParamsText}
+          onChange={(e) => setRunParamsText(e.target.value)}
+          placeholder={'{"chapter_title": "第五章", "ref_keyword": "怀表"}'}
+          className="flex-1 text-[11px] bg-zinc-800 border border-zinc-700 rounded px-2 py-0.5 text-zinc-300 outline-none focus:border-zinc-500 font-mono"
+        />
+        {runParamsText.trim() && (
+          <button
+            onClick={() => setRunParamsText("")}
+            className="text-[10px] text-zinc-500 hover:text-zinc-300"
+          >
+            清空
+          </button>
+        )}
       </div>
 
       {/* AI 生成输入条 */}
@@ -846,7 +924,7 @@ function NodeEditor({
         <span className="text-xs text-zinc-400">{KIND_LABEL[node.kind]}</span>
       </div>
 
-      {node.kind === "agent" || node.kind === "script" ? (
+      {node.kind === "agent" ? (
         <>
           <div>
             <label className="block text-[10px] text-zinc-500 mb-0.5">指令 instruction</label>
@@ -856,6 +934,49 @@ function NodeEditor({
               className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-200 outline-none focus:border-zinc-500 w-72 h-20 resize-none"
             />
           </div>
+          <div>
+            <label className="block text-[10px] text-zinc-500 mb-0.5">输出键 output_key</label>
+            <input
+              value={(node.params.output_key as string) ?? ""}
+              onChange={(e) => setParam("output_key", e.target.value)}
+              className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-200 outline-none focus:border-zinc-500"
+              style={{ width: 120 }}
+            />
+          </div>
+        </>
+      ) : node.kind === "script" ? (
+        <>
+          <div>
+            <label className="block text-[10px] text-zinc-500 mb-0.5">函数 function</label>
+            <select
+              value={(node.params.function as string) ?? ""}
+              onChange={(e) => setParam("function", e.target.value)}
+              className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-200 outline-none focus:border-zinc-500"
+              style={{ width: 220 }}
+            >
+              <option value="">（选择函数）</option>
+              {SCRIPT_FN_NAMES.map((fn) => (
+                <option key={fn} value={fn}>
+                  {SCRIPT_FUNCTIONS[fn].label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {SCRIPT_FUNCTIONS[(node.params.function as string) ?? ""]?.params.map((p) => (
+            <div key={p.key}>
+              <label className="block text-[10px] text-zinc-500 mb-0.5">{p.label}</label>
+              <input
+                type={p.type === "number" ? "number" : "text"}
+                value={(node.params[p.key] as string | number | undefined) ?? ""}
+                onChange={(e) =>
+                  setParam(p.key, p.type === "number" ? Number(e.target.value) : e.target.value)
+                }
+                placeholder={p.placeholder}
+                className="text-xs bg-zinc-800 border border-zinc-700 rounded px-2 py-1 text-zinc-200 outline-none focus:border-zinc-500"
+                style={{ width: 140 }}
+              />
+            </div>
+          ))}
           <div>
             <label className="block text-[10px] text-zinc-500 mb-0.5">输出键 output_key</label>
             <input

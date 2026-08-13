@@ -113,6 +113,16 @@ export default function LibraryPanel({ bookId }: { bookId: string }) {
             <p className="text-xs text-zinc-500 mt-0.5">
               仅作 AI 检索借鉴，不注入上下文——写作时可让 AI 按需翻书
             </p>
+            <div className="flex gap-3 mt-1.5 text-[10px] text-zinc-500">
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 rounded-full bg-sky-900/40 text-sky-300">书库·低级</span>
+                仅原文片段检索
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="px-1.5 py-0.5 rounded-full bg-amber-900/40 text-amber-300">项目·高级</span>
+                原文 + 图谱实体/关系 + 设定档条目（只读）
+              </span>
+            </div>
           </div>
           <button
             onClick={() => setShowPicker(!showPicker)}
@@ -151,7 +161,13 @@ export default function LibraryPanel({ bookId }: { bookId: string }) {
                     <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${
                       r.type === "library" ? "bg-sky-900/40 text-sky-300" : "bg-amber-900/40 text-amber-300"
                     }`}>
-                      {r.type === "library" ? "书库" : "项目"}
+                      {r.type === "library" ? "书库·低级" : "项目·高级"}
+                    </span>
+                    <span
+                      className="text-[10px] text-zinc-600 shrink-0"
+                      title={r.type === "library" ? "低级参考书：仅原文片段检索" : "高级参考书：原文 + 图谱实体/关系 + 设定档条目（只读）"}
+                    >
+                      {r.type === "library" ? "仅原文" : "图谱+设定"}
                     </span>
                   </div>
                   <button

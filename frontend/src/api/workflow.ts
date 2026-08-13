@@ -123,8 +123,15 @@ export function deleteDraft(draftId: string): Promise<{ ok: boolean }> {
   return apiDelete<{ ok: boolean }>(`/api/workflows/drafts/${draftId}`);
 }
 
-export function runWorkflow(id: string, bookId = "main"): Promise<{ task_id: string; status: string }> {
-  return apiPost<{ task_id: string; status: string }>(`/api/workflows/${id}/run`, { book_id: bookId });
+export function runWorkflow(
+  id: string,
+  bookId = "main",
+  params?: Record<string, string>
+): Promise<{ task_id: string; status: string }> {
+  return apiPost<{ task_id: string; status: string }>(`/api/workflows/${id}/run`, {
+    book_id: bookId,
+    ...(params && Object.keys(params).length ? { params } : {}),
+  });
 }
 
 export function listWorkflowTasks(): Promise<WorkflowTask[]> {

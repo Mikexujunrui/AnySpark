@@ -32,7 +32,7 @@ interface WorkflowState {
   aiGenerate: (goal: string) => Promise<void>;
   promote: (draftId: string) => Promise<void>;
   discardDraft: (draftId: string) => Promise<void>;
-  startRun: (id: string) => Promise<string>;
+  startRun: (id: string, params?: Record<string, string>) => Promise<string>;
   refreshTask: (taskId: string) => Promise<WorkflowTask>;
   decide: (taskId: string, decision: "ok" | "reject") => Promise<void>;
   setError: (msg: string | null) => void;
@@ -132,9 +132,9 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
   },
 
-  startRun: async (id) => {
+  startRun: async (id, params) => {
     try {
-      const res = await runWorkflow(id);
+      const res = await runWorkflow(id, undefined, params);
       return res.task_id;
     } catch (e) {
       set({ error: e instanceof Error ? e.message : "启动失败" });
