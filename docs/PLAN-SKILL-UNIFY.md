@@ -77,6 +77,12 @@ skill（统一知识容器）
 | 独立生成（generate writing/main）| 单条 skill（type=writing/main）|
 | 独立提炼（generate_plot）| 单条 skill（type=plot，四要素扩展字段）|
 
+### 3.5 消费延伸：workflow 节点导入 skill（与 PLAN-WORKFLOW-UNIFY 交汇）
+
+统一容器是 workflow 节点类型化引用 skill 的前提：节点按 type 注入（writing→生成节点、
+plot→探索节点）、书名包 = 整包风格参数（模板参数化换 skill 换风格）。
+单向依赖（workflow→skill），不反向。详见 PLAN-WORKFLOW-UNIFY §六。
+
 ## 四、与现状的迁移映射
 
 | 现状 | 统一后 |
