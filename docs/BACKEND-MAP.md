@@ -19,7 +19,7 @@
 │ 路由层  routes_*.py（15 个领域 router，~164 端点）        │
 │   HTTP 入口 → 校验 → 调领域逻辑/engine → 响应              │
 ├─────────────────────────────────────────────────────────┤
-│ Agent 工具层  toolkit.py + tools_*.py（23 个工具）        │
+│ Agent 工具层  toolkit.py + tools_*.py（24 个工具）        │
 │   Agent 循环内可调用的领域能力（按 enable_* 开关点亮）      │
 ├─────────────────────────────────────────────────────────┤
 │ 基础设施  deps/tasks/agent_factory/context/pipeline/      │
@@ -117,7 +117,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 
-## 4. Agent 工具层（27 工具 × 开关）
+## 4. Agent 工具层（28 工具 × 开关）
 
 | 工具 | 用途 | 开关 |
 |---|---|---|
@@ -137,7 +137,8 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | register_tool | 扩展工具注册 | enable_domain |
 | path_explore | 定向再探索 | enable_domain |
 | read_material | 读资料摘要卡 | enable_extras |
-| search_web | 网络搜索 | enable_search |
+| search_web | 网络搜索（360/Bing 按语言选引擎，低质过滤 + 跑偏拦截） | enable_search |
+| fetch_page | 网页正文抓取（搜索闭环：搜到线索 → 读全文，S111） | enable_search |
 | run_code | 代码沙箱 | enable_codex |
 | workflow_* | 工作流工具 | enable_workflow |
 | play_* | 互动推演工具 | enable_play |

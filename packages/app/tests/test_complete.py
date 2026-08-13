@@ -6,10 +6,16 @@ import tempfile
 from pathlib import Path
 
 from anyspark.core.types import Message, ModelOutput
+from anyspark.server.tools_fetch import html_to_text
 from anyspark.server.tools_web import (
     WebResult,
+    _decode_bing_target,
+    _detect_language,
+    _is_junk,
     _parse_bing_block,
     _parse_so_block,
+    _prefer_engine,
+    _results_relevant,
     render_results,
     search_web,
 )
@@ -19,6 +25,13 @@ SO_HTML = (
     '<li class="res-list"><h3 class="res-title"><a href="https://example.com/a" '
     'data-mdurl="https://real.example.com/a">雾城历史考据</a></h3>'
     '<div class="res-list-summary">这是一座海边城市，常年有雾。</div></li>'
+)
+# S111 真实 360 摘要结构：容器 `>` 前缀 + 高亮 <em> + </span> 后的 g-linkinfo（末尾域名垃圾源）
+SO_HTML_REAL = (
+    '<li class="res-list"><h3 class="res-title"><a href="https://example.com/a" '
+    'data-mdurl="https://real.example.com/a">雾城历史考据</a></h3>'
+    '<div class="res-list-summary">关注距离<em>2026年诺贝尔文学奖</em>揭晓还有数月。</span>'
+    '<p class="g-linkinfo"><cite><a href="https://www.so.com/link?m=xxx">news.sina.cn</a></cite></p></div></li>'
 )
 BING_HTML = (
     '<li class="b_algo"><h2><a href="https://cn.bing.com/ck/a?u=https%3A%2F%2Freal.example.com%2Fb">'
@@ -35,6 +48,72 @@ def test_parse_so_block() -> None:
     assert r.title == "雾城历史考据"
     assert r.url == "https://real.example.com/a"  # data-mdurl 优先
     assert "海边城市" in r.snippet
+
+
+def test_so_summary_no_prefix_garbage() -> None:
+    """S111：真实 360 摘要容器带 `>` 前缀 + g-linkinfo 尾部，不应残留进 snippet。"""
+    r = _parse_so_block(SO_HTML_REAL)
+    assert r is not None
+    assert r.snippet.startswith("关注")  # 容器 `>` 前缀被吃掉，无行首垃圾
+    assert ">关注" not in r.snippet
+    assert "news.sina.cn" not in r.snippet  # g-linkinfo 域名不混入
+    assert "2026年诺贝尔文学奖" in r.snippet  # <em> 高亮内容保留
+
+
+def test_detect_language() -> None:
+    assert _detect_language("2026年诺贝尔文学奖") == "zh"
+    assert _detect_language("Laszlo Krasznahorkai Nobel Prize") == "en"
+
+
+def test_prefer_engine() -> None:
+    assert _prefer_engine("2026年诺贝尔文学奖") == "so"  # 中文 → 360
+    assert _prefer_engine("quantum computing") == "bing"  # 英文 → Bing
+    assert _prefer_engine("quantum computing", "zh") == "so"  # 显式语言覆盖
+    assert _prefer_engine("中文", "en") == "bing"
+
+
+def test_decode_bing_target() -> None:
+    # 旧格式：URL 编码
+    assert _decode_bing_target("https%3A%2F%2Freal.example.com%2Fb") == "https://real.example.com/b"
+    # 新格式：base64（实测 cn.bing 的 ck/a 链接）
+    import base64 as b64
+
+    target = "https://www.reddit.com/r/fantasyfootball/hot/"
+    enc = b64.b64encode(target.encode()).decode().rstrip("=")
+    assert _decode_bing_target(enc) == target
+    # 无法解码 → 空
+    assert _decode_bing_target("not-a-url-or-base64!!") == ""
+
+
+def test_results_relevant() -> None:
+    # 相关：结果标题含 query 的 ≥2 个实词
+    assert _results_relevant(
+        "quantum computing breakthrough",
+        [WebResult("Google's Quantum Computing Breakthrough", "https://x.com", "s")],
+    )
+    # 跑偏：结果与 query 无共享词（cn.bing 英文长查询偶发现象）
+    assert not _results_relevant(
+        "Laszlo Krasznahorkai Nobel Prize",
+        [WebResult("/r/fantasyfootball - Good For Your Season", "https://reddit.com", "s")],
+    )
+    # 中文查询（无实词）不拦
+    assert _results_relevant(
+        "2026年诺贝尔文学奖", [WebResult("新浪新闻", "https://news.sina.cn", "s")]
+    )
+    # 空结果 → 不相关
+    assert not _results_relevant("anything", [])
+
+
+def test_is_junk() -> None:
+    # 低质域名剔除
+    assert _is_junk("https://ai.so.com/search/abc", "x")
+    assert _is_junk("https://wenku.so.com/d/123", "x")
+    assert _is_junk("https://www.ftxia.com/item.htm?id=1", "x")
+    assert _is_junk("https://www.douyin.com/qishui/song/1", "x")
+    assert _is_junk("https://www.so.com/s?q=重复搜索", "x")  # 站内重复搜索
+    # 正常结果不误杀
+    assert not _is_junk("https://news.sina.cn/sx/2026-04-09/a.dhtml", "x")
+    assert not _is_junk("https://en.wikipedia.org/wiki/2026", "x")
 
 
 def test_parse_bing_block() -> None:
@@ -56,6 +135,31 @@ def test_search_web_returns_or_empty() -> None:
     # 真实网络调用（360/Bing），失败应返回空列表而非抛异常
     results = search_web("AnySpark 小说写作", count=3)
     assert isinstance(results, list)
+    # S111：低质过滤后不应出现问答框/文库
+    assert not any("ai.so.com" in r.url or "wenku.so.com" in r.url for r in results)
+
+
+def test_fetch_html_to_text() -> None:
+    """S111：fetch_page 的 HTML→文本解析（噪音剔除/title 提取/实体解码）。"""
+    html = (
+        "<html><head><title>雾城设定 &amp; 考据</title><style>body{color:red}</style></head>"
+        "<body><nav>导航栏垃圾</nav><p>雾城是一座&lt;海边&gt;城市，常年有雾。</p>"
+        "<script>var x=1;</script><footer>版权信息</footer></body></html>"
+    )
+    title, text, truncated = html_to_text(html)
+    assert title == "雾城设定 & 考据"
+    assert "导航栏垃圾" not in text
+    assert "版权信息" not in text
+    assert "var x=1" not in text
+    assert "雾城是一座<海边>城市" in text
+    assert not truncated
+
+
+def test_fetch_html_to_text_truncated() -> None:
+    html = "<html><body>" + "字" * 500 + "</body></html>"
+    _, text, truncated = html_to_text(html, max_chars=100)
+    assert truncated
+    assert len(text) == 100
 
 
 # ---------------------------------------------------------------------------

@@ -2997,3 +2997,40 @@ API 全通（health/chapters/explore-dims 200）。
 **验证**：exe 在全新临时目录启动——data/ 自动创建、.env 模板自动生成、health ok、
 后端完整运行（chat 401 为模板 key 占位，符合预期）；发布 --exe --zip 产出
 AnySpark.exe 24.5MB + 使用说明 + zip 24.1MB。（S110 修复其 file:// 白屏缺陷）
+
+## S111 网络查询对齐 pi-web-toolkit（已完成 ✅）
+
+**背景（主人 2026-08-13）**：网络搜索是独立扩展（enable_search 按需注册，S15 解耦），
+既然解耦就该达到与 pi-web-toolkit 同等水平。实测对比发现差距：固定 360 优先
+（英文查询质量差）、摘要残留 `>关注` 前缀与末尾重复域名垃圾、混入低质结果
+（ai.so.com 问答框/wenku.so.com 文库模板/电商/抖音）、无抓正文工具（搜索不闭环）。
+
+**实现**：
+- `tools_web.py`（对齐 pi-web-toolkit search.ts 降级层 + 超越）：
+  - **按语言选引擎**：英文 → Bing 优先，中文 → 360 优先（`_detect_language` 按 CJK 占比，
+    `_prefer_engine` 显式 language 可覆盖；对齐 Pi `opts.language === "en" ? "bing" : "so"`）
+  - **摘要清洗**：正则吃掉容器 `>` 前缀 + 截到 `</span>`（消除 `>关注` 前缀垃圾与
+    g-linkinfo 末尾域名重复）；cleanText 用 html.unescape 全量实体解码（比 Pi 手写实体表更全）
+  - **低质过滤** `_is_junk`：ai.so.com（360 AI 问答框）/wenku.so.com/wenku.baidu.com
+    （文库模板）/ftxia/taobao/tmall/jd/1688（电商）/douyin（短视频）剔除
+  - **Bing ck/a 新格式 base64 解码** `_decode_bing_target`（旧格式 URL 编码 + 新格式 base64
+    双兼容；Pi 只处理 URL 编码格式，实测 cn.bing 已切 base64，这是 Pi 降级层的隐藏 bug）
+  - **跑偏拦截** `_results_relevant`：结果标题/URL 与 query 共享 ≥2 实词才放行——cn.bing
+    英文长查询偶发严重跑偏（实测 Krasznahorkai → Reddit 橄榄球、quantum → 词典定义），
+    拦截后降级另一引擎（Pi 降级层无此保护）
+- **新增 `tools_fetch.py`**（对齐 pi-web-toolkit webfetch）：`fetch_page` 抓网页正文转纯文本，
+  UA 伪装 + 5MB 上限 + 20s 超时 + 噪音标签（script/style/nav/footer/aside/iframe）剔除 +
+  title 提取 + 正文截断。**搜索闭环**：search_web 拿线索 → fetch_page 读全文
+- `toolkit.py`：enable_search 名下同时注册 search_web + fetch_page（一个开关点亮整套考据能力）
+
+**验证**：
+- 单测 21 全绿（新增：摘要前缀清洗/引擎选择/低质过滤/base64 解码/跑偏判定/HTML→文本/截断）
+- 实测中文查询（诺奖/DeepSeek）：摘要干净无垃圾、wenku/ai.so 低质结果消失，0.5~0.9s
+- 实测英文查询：Bing 跑偏自动降级 360 返回真实相关结果（Krasznahorkai→sohu/163/chinadaily；
+  quantum→odaily/新华/中国网），URL 正常（base64 已解）
+- fetch_page 实测抓中华网全文：标题 + 正文 800 字，1.3s
+- ruff + mypy 干净；app 全量 pytest 通过（仅 S108 遗留红 test_tools_extras 与本改动无关，
+  stash 验证 pre-existing）
+
+**说明**：Pi 的 MCP 层（Exa/Parallel，带 published/author 元数据）需外部服务密钥，
+AnySpark 零依赖设计不背（对齐目标 = Pi 的 360/Bing 降级层 + webfetch，已达成并超越）。

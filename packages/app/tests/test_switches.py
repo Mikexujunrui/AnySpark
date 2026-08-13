@@ -50,12 +50,13 @@ def test_search_tool_default_off() -> None:
 
 
 def test_search_tool_on_demand() -> None:
-    """enable_search=true：search_web 注册进工具表（需要考据时点亮）。"""
+    """enable_search=true：search_web + fetch_page 注册进工具表（S111 搜索闭环）。"""
     m = ProbeModel()
     client = _client(m)
     resp = client.post("/api/chat", json={"message": "考据一下", "enable_search": True})
     assert resp.status_code == 200
     assert any("search_web" in names for names in m.tool_names)
+    assert any("fetch_page" in names for names in m.tool_names)
 
 
 def test_skip_inject_disables_all_blocks() -> None:

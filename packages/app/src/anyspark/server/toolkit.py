@@ -229,11 +229,15 @@ def build_toolkit(
     # S108：read_material 已挪到 enable_domain 默认开（AI 查看资料库是写作必需能力）。
 
     # 网络搜索工具：按需注册（S15 起默认关——写作主链路不背考据能力，需要时点亮）
+    # S111：enable_search 名下同时注册 search_web（搜索）+ fetch_page（抓正文）——搜索闭环
     if enable_search:
+        from anyspark.server.tools_fetch import make_fetch_implementer
         from anyspark.server.tools_web import make_search_implementer
 
         search_spec, search_impl = make_search_implementer()
         registry.register(search_spec, search_impl)
+        fetch_spec, fetch_impl = make_fetch_implementer()
+        registry.register(fetch_spec, fetch_impl)
 
     # S59 工作流 agent 工具：默认关，enable_workflow 点亮（Agent 可列/生成/运行/查进度）
     if enable_workflow and ctx.workflow_store is not None:
