@@ -1,8 +1,9 @@
 """
 anyspark.server.tools_web — 网络搜索工具（写作 Agent 侧，模型局限弥补"做不到的动作"）。
 
-参考 pi-web-toolkit 搜索实现（思想借鉴）：360 搜索（so.com）主引擎 + Bing 兜底，
-CHROME UA 伪装 + 正则解析，失败自动降级。零第三方依赖（urllib 标准库）。
+参考 pi-web-toolkit 搜索实现（思想借鉴）：首选 Exa/Parallel MCP（无密钥公开端点，
+带日期/作者元数据），失败降级 360 搜索（so.com）→ Bing（按语言选引擎），
+CHROME UA 伪装 + 正则解析。零第三方依赖（urllib 标准库）。
 越界保护：只解析 http(s) 结果，单次结果数上限，摘要截断。
 
 S111 对齐 pi-web-toolkit 降级层水平：
@@ -11,12 +12,19 @@ S111 对齐 pi-web-toolkit 降级层水平：
 - 低质结果过滤：360 AI 问答框（ai.so.com）、文库模板（wenku.so.com / baidu wenku）、
   电商导购（ftxia/taobao/tmall/jd/1688）、短视频（douyin）一律剔除
 - cleanText 用 html.unescape 全量实体解码（对齐 Pi 手写实体表，Python 标准库更全）
+
+S112 补 MCP 层（主人指出：Exa MCP 无密钥可用，Pi 的 MCP 层并不需要 API key）：
+- `_mcp_call` urllib JSON-RPC 调 Exa/Parallel 公开 MCP 端点（实测加 UA 头即可过 Cloudflare）
+- Exa 返回人类可读块（Title/URL/Published/Author/Highlights），Parallel 返回 JSON（results[]）
+- 默认 auto：exa → parallel → 360/Bing 降级（对齐 Pi）；ANYSPARK_SEARCH_PROVIDER 可覆盖
 """
 
 from __future__ import annotations
 
 import base64
 import html as html_mod
+import json
+import os
 import re
 import urllib.parse
 import urllib.request
@@ -32,6 +40,11 @@ CHROME_UA = (
 )
 MAX_RESULTS = 8
 TIMEOUT = 12
+MCP_TIMEOUT = 12  # MCP 层超时（实测 Exa 1.9~4s 正常）
+
+# Exa/Parallel MCP 公开端点（无密钥；实测 urllib 加 UA 头即可过 Cloudflare）
+EXA_URL = "https://mcp.exa.ai/mcp"
+PARALLEL_URL = "https://search.parallel.ai/mcp"
 
 # 低质/噪音域名（考据场景用不到：问答框/文库模板/电商/短视频）
 _JUNK_DOMAINS = (
@@ -53,6 +66,8 @@ class WebResult:
     title: str
     url: str
     snippet: str
+    published: str = ""  # MCP 层元数据（Exa/Parallel 返回；360/Bing 无）
+    author: str = ""
 
 
 def _fetch(url: str, headers: dict[str, str]) -> str:
@@ -282,18 +297,175 @@ def _parse_bing_block(block: str) -> WebResult | None:
 
 
 # ---------------------------------------------------------------------------
-# 统一入口（按语言选引擎，空/全低质/失败自动降级另一引擎）
+# MCP 层（Exa/Parallel 公开端点，无密钥；对齐 Pi mcp.ts 的 auto 顺序）
+# ---------------------------------------------------------------------------
+def _mcp_call(url: str, tool: str, args: dict[str, Any], timeout: int = MCP_TIMEOUT) -> str | None:
+    """JSON-RPC 2.0 over HTTP 调 MCP 工具，返回 content[0].text 或 None。
+
+    支持纯 JSON 与 SSE 两种响应（对齐 Pi extractMcpText）。
+    实测：urllib 必须带 Chrome UA 头（默认 Python-urllib 被 Cloudflare 403）。
+    """
+    body = json.dumps(
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "tools/call",
+            "params": {"name": tool, "arguments": args},
+        }
+    ).encode()
+    req = urllib.request.Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "Accept": "application/json, text/event-stream",
+            "User-Agent": CHROME_UA,
+        },
+    )
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read().decode("utf-8", errors="ignore")
+    return _extract_mcp_text(raw)
+
+
+def _extract_mcp_text(body: str) -> str | None:
+    """从纯 JSON 或 SSE 响应中提取 content[0].text（对齐 Pi extractMcpText）。"""
+    candidates: list[str] = [body]  # 纯 JSON
+    for line in body.split("\n"):
+        if line.startswith("data: "):
+            candidates.append(line[6:])
+    for cand in candidates:
+        try:
+            data = json.loads(cand)
+        except Exception:
+            continue
+        content = (data or {}).get("result", {}).get("content") or []
+        for c in content:
+            if isinstance(c, dict) and c.get("type") == "text" and c.get("text"):
+                return str(c["text"])
+    return None
+
+
+def _parse_exa_text(text: str, count: int) -> list[WebResult]:
+    """Exa MCP 返回（人类可读块）：Title/URL/Published/Author/Highlights，`\n---\n` 分隔。"""
+    results: list[WebResult] = []
+    for block in text.split("\n---\n"):
+        if len(results) >= count:
+            break
+        lines = block.split("\n")
+        title = url = published = author = ""
+        highlights: list[str] = []
+        in_highlights = False
+        for ln in lines:
+            if in_highlights:
+                highlights.append(ln)
+            elif ln.startswith("Title: "):
+                title = ln[7:].strip()
+            elif ln.startswith("URL: "):
+                url = ln[5:].strip()
+            elif ln.startswith("Published: "):
+                published = ln[11:].strip()
+            elif ln.startswith("Author: "):
+                author = ln[8:].strip()
+            elif ln.startswith("Highlights:"):
+                in_highlights = True
+        url = url.replace("&amp;", "&")
+        if not title or not url.startswith(("http://", "https://")):
+            continue
+        published = "" if published in ("", "N/A") else published
+        author = "" if author in ("", "N/A") else author
+        snippet = " ".join(x.strip() for x in highlights if x.strip())[:400]
+        if not snippet:
+            snippet = title
+        results.append(
+            WebResult(title=title, url=url, snippet=snippet, published=published, author=author)
+        )
+    return results
+
+
+def _parse_parallel_text(text: str, count: int) -> list[WebResult]:
+    """Parallel MCP 返回（JSON 字符串）：{"results": [{url,title,publish_date,excerpts[]}]}。"""
+    try:
+        data = json.loads(text)
+    except Exception:
+        return []
+    results: list[WebResult] = []
+    for item in (data or {}).get("results") or []:
+        if len(results) >= count:
+            break
+        title = str(item.get("title") or "").strip()
+        url = str(item.get("url") or "").strip()
+        if not title or not url.startswith(("http://", "https://")):
+            continue
+        excerpts = item.get("excerpts") or []
+        snippet = " ".join(str(x).strip() for x in excerpts if str(x).strip())[:400]
+        published = str(item.get("publish_date") or "").strip()
+        results.append(
+            WebResult(title=title, url=url, snippet=snippet or title, published=published)
+        )
+    return results
+
+
+def _exa_search(query: str, count: int = MAX_RESULTS) -> list[WebResult]:
+    """Exa MCP 搜索（对齐 Pi exaSearch 参数：livecrawl fallback + contextMaxCharacters）。"""
+    text = _mcp_call(
+        EXA_URL,
+        "web_search_exa",
+        {
+            "query": query,
+            "type": "auto",
+            "numResults": count,
+            "livecrawl": "fallback",
+            "contextMaxCharacters": 8000,
+        },
+    )
+    return _parse_exa_text(text, count) if text else []
+
+
+def _parallel_search(query: str, count: int = MAX_RESULTS) -> list[WebResult]:
+    """Parallel MCP 搜索（对齐 Pi parallelSearch：objective + search_queries）。"""
+    text = _mcp_call(PARALLEL_URL, "web_search", {"objective": query, "search_queries": [query]})
+    return _parse_parallel_text(text, count) if text else []
+
+
+def _mcp_provider_order(provider: str | None) -> list[str]:
+    """provider 解析：auto 默认 exa → parallel；ANYSPARK_SEARCH_PROVIDER 环境变量可覆盖。"""
+    env = (os.environ.get("ANYSPARK_SEARCH_PROVIDER") or "").strip().lower()
+    p = (provider or env or "auto").lower()
+    if p == "exa":
+        return ["exa"]
+    if p == "parallel":
+        return ["parallel"]
+    if p == "web":
+        return []
+    return ["exa", "parallel"]
+
+
+# ---------------------------------------------------------------------------
+# 统一入口（MCP 优先 → 360/Bing 降级，空/全低质/失败自动降级）
 # ---------------------------------------------------------------------------
 def search_web(
-    query: str, count: int = MAX_RESULTS, language: str | None = None
+    query: str,
+    count: int = MAX_RESULTS,
+    language: str | None = None,
+    provider: str | None = None,
 ) -> list[WebResult]:
     """搜索并返回结果列表。
 
+    - provider: 'auto'（默认，exa→parallel→web）/ 'exa' / 'parallel' / 'web'（跳过 MCP）
     - language: 'zh'/'en' 显式指定；None 时按查询字符构成自动检测（对齐 Pi）
-    - 优先引擎失败/无结果/结果全为低质 → 自动降级另一引擎
-    - 双引擎均失败 → 返回空列表（不抛异常，设计上失败不挂）
+    - MCP 层失败/无结果 → 降级 360/Bing；双引擎均失败 → 返回空（不抛异常）
     """
     count = max(1, min(MAX_RESULTS, count))
+    # MCP 层（带日期/作者元数据，质量高于抓取降级层）
+    for p in _mcp_provider_order(provider):
+        try:
+            results = _exa_search(query, count) if p == "exa" else _parallel_search(query, count)
+            results = [r for r in results if not _is_junk(r.url, r.title)]
+            if results:
+                return results
+        except Exception:
+            continue
+    # 抓取降级层（360/Bing，按语言选引擎 + 跑偏拦截）
     preferred = _prefer_engine(query, language)
     fallback = "bing" if preferred == "so" else "so"
     for engine in (preferred, fallback):
@@ -319,7 +491,12 @@ def render_results(results: list[WebResult], query: str) -> str:
     lines = [f"网络搜索结果（{query}）："]
     for i, r in enumerate(results, 1):
         snippet = f" —— {r.snippet[:120]}" if r.snippet else ""
-        lines.append(f"{i}. {r.title}\n   {r.url}{snippet}")
+        meta = ""
+        if r.published:
+            meta += f"（发布于 {r.published[:10]}）"
+        if r.author:
+            meta += f" 作者：{r.author[:20]}"
+        lines.append(f"{i}. {r.title}{meta}\n   {r.url}{snippet}")
     return "\n".join(lines)
 
 
@@ -330,7 +507,8 @@ def make_search_implementer() -> Any:
     spec = ToolSpec(
         name="search_web",
         description=(
-            "搜索网络获取最新/参考资料（360 主引擎 + Bing 兜底，按查询语言自动选引擎）。"
+            "搜索网络获取最新/参考资料（首选 Exa/Parallel MCP 带日期作者，"
+            "降级 360/Bing 按语言选引擎）。"
             "用于写实细节考据、设定查证、真实地名/历史/科技等外部知识。"
             "返回标题/链接/摘要；需要完整正文时再用 fetch_page 抓取。"
         ),
@@ -341,6 +519,15 @@ def make_search_implementer() -> Any:
                 type="string",
                 required=False,
                 description="zh/en（可选；缺省按查询自动检测）",
+            ),
+            ParamSpec(
+                name="provider",
+                type="string",
+                required=False,
+                description=(
+                    "auto/exa/parallel/web（可选；缺省 auto，环境变量 "
+                    "ANYSPARK_SEARCH_PROVIDER 可覆盖）"
+                ),
             ),
         ],
     )
@@ -353,7 +540,10 @@ def make_search_implementer() -> Any:
         language = str(arguments.get("language") or "").strip() or None
         if language not in (None, "zh", "en"):
             language = None
-        results = search_web(query, language=language)
+        provider = str(arguments.get("provider") or "").strip() or None
+        if provider not in (None, "auto", "exa", "parallel", "web"):
+            provider = None
+        results = search_web(query, language=language, provider=provider)
         return ToolResult(call=call, ok=True, content=render_results(results, query))
 
     return spec, implementer

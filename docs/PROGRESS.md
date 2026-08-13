@@ -32,7 +32,7 @@
   - 测试现状：pytest 424 例全绿 + 前端 tsc/lint/build 全绿（分层门禁见 AGENTS.md）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
-> 当前无会话声明。
+ > 当前无会话声明。
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
@@ -3034,3 +3034,38 @@ AnySpark.exe 24.5MB + 使用说明 + zip 24.1MB。（S110 修复其 file:// 白�
 
 **说明**：Pi 的 MCP 层（Exa/Parallel，带 published/author 元数据）需外部服务密钥，
 AnySpark 零依赖设计不背（对齐目标 = Pi 的 360/Bing 降级层 + webfetch，已达成并超越）。
+
+## S112 补 MCP 层——Exa/Parallel 无密钥公开端点（已完成 ✅）
+
+**背景（主人 2026-08-13）**：主人指出"Pi 的 Exa MCP 不需要密钥"。核实 pi-web-toolkit
+`mcp.ts`：`EXA_URL` 未配 key 时直接落 `https://mcp.exa.ai/mcp`（公开端点），
+Parallel 同理 `https://search.parallel.ai/mcp`——Pi 的 MCP 层确实无密钥。
+AnySpark 零依赖约束下用 urllib 即可调（JSON-RPC over HTTP），不必背 MCP 就缺失。
+
+**踩坑（关键）**：urllib 直连 Exa/Parallel 报 403 Forbidden——根因不是密钥，是
+**默认 UA（Python-urllib/3.12）被 Cloudflare 拦截**；加 Chrome UA 头即 200。
+（Pi 注释说"curl 被 TLS 指纹拦截"——curl 与 urllib 的 TLS 指纹不同，urllib+UA 实测可直连）
+
+**实现**（tools_web.py，纯扩展文件）：
+- `_mcp_call`：urllib JSON-RPC 2.0 over HTTP，纯 JSON + SSE 双格式解析（对齐 Pi extractMcpText）
+- `_exa_search`：tool `web_search_exa`，参数对齐 Pi（type auto / numResults / livecrawl fallback /
+  contextMaxCharacters 8000）；返回人类可读块（Title/URL/Published/Author/Highlights）
+- `_parallel_search`：tool `web_search`（objective + search_queries）；返回 JSON results[]
+- `_parse_exa_text` / `_parse_parallel_text`：两块格式解析成 WebResult（新增 published/author 字段，
+  向后兼容默认空）；N/A 归一为空；只收 http(s) + 非空标题
+- `search_web` 流程升级：**MCP 优先（exa → parallel）→ 360/Bing 降级**（对齐 Pi auto 顺序）；
+  provider 参数 auto/exa/parallel/web + 环境变量 `ANYSPARK_SEARCH_PROVIDER` 覆盖（对齐
+  Pi 的 WEBTOOLKIT_SEARCH_PROVIDER）；MCP 失败/空/低质自动降级
+- `render_results`：带发布时间/作者元数据时渲染 `（发布于 2026-04-13）作者：xxx`
+
+**验证**：
+- 单测 25 绿（新增 4：Exa 块解析/Parallel JSON 解析/SSE+JSON 提取/provider 顺序）
+- 实测中文「2026年诺贝尔文学奖」：Wikipedia EN/ZH + 中华网（带发布时间 2026-04-13），1.8s
+  —— 与 Pi 今天返回的结果同源同档（nobelprize/wikipedia/中华网）
+- 实测英文「Krasznahorkai 2025 Nobel」：NobelPrize.org 官方源（带 2025-10-15 日期 + 作者），1.4s
+  —— 质量高于 360/Bing 降级层一个档次（官方权威源 + 元数据）
+- 降级路径未破坏：provider=web 强制 360/Bing 仍正常（0.8s，摘要干净低质过滤）
+- ruff + mypy + format 干净
+
+**对标结论**：至此 AnySpark 搜索 = Pi 完整三层（MCP exa→parallel → 360/Bing 降级 + 跑偏拦截/
+base64 解码等 Pi 降级层没有的增强），且**全程零依赖（urllib）无密钥**，与 Pi 持平并部分超越。

@@ -11,8 +11,12 @@ from anyspark.server.tools_web import (
     WebResult,
     _decode_bing_target,
     _detect_language,
+    _extract_mcp_text,
     _is_junk,
+    _mcp_provider_order,
     _parse_bing_block,
+    _parse_exa_text,
+    _parse_parallel_text,
     _parse_so_block,
     _prefer_engine,
     _results_relevant,
@@ -132,11 +136,83 @@ def test_render_results() -> None:
 
 
 def test_search_web_returns_or_empty() -> None:
-    # 真实网络调用（360/Bing），失败应返回空列表而非抛异常
+    # 真实网络调用（MCP/360/Bing），失败应返回空列表而非抛异常
     results = search_web("AnySpark 小说写作", count=3)
     assert isinstance(results, list)
     # S111：低质过滤后不应出现问答框/文库
     assert not any("ai.so.com" in r.url or "wenku.so.com" in r.url for r in results)
+
+
+# ---------------------------------------------------------------------------
+# S112 MCP 层解析（Exa/Parallel 公开端点，无密钥）
+# ---------------------------------------------------------------------------
+EXA_TEXT = (
+    "Title: 2026 Nobel Prize in Literature\n"
+    "URL: https://en.wikipedia.org/wiki/2026_Nobel_Prize_in_Literature\n"
+    "Published: N/A\n"
+    "Author: N/A\n"
+    "Highlights:\n"
+    "The 2026 Nobel Prize will be announced on 8 October.\n"
+    "\n---\n\n"
+    "Title: 加拿大文学双星领跑\n"
+    "URL: https://hea.china.com/articles/20260413.html\n"
+    "Published: 2026-04-13T00:00:00.000Z\n"
+    "Author: 看点时报\n"
+    "Highlights:\n"
+    "距离2026年诺奖揭晓尚有数月。\n"
+)
+
+
+def test_parse_exa_text() -> None:
+    results = _parse_exa_text(EXA_TEXT, count=8)
+    assert len(results) == 2
+    r0, r1 = results
+    assert r0.title == "2026 Nobel Prize in Literature"
+    assert r0.published == ""  # N/A 归一为空
+    assert "8 October" in r0.snippet
+    assert r1.published == "2026-04-13T00:00:00.000Z"  # 元数据保留
+    assert r1.author == "看点时报"
+
+
+def test_parse_parallel_text() -> None:
+    import json as _json
+
+    text = _json.dumps(
+        {
+            "search_id": "s1",
+            "results": [
+                {
+                    "url": "https://www.wsj.com/nobel-2025",
+                    "title": "Krasznahorkai Wins Nobel",
+                    "publish_date": "2025-10-09",
+                    "excerpts": ["A Hungarian novelist received the prize."],
+                },
+                {"url": "https://x.com", "title": "", "excerpts": []},
+            ],
+        }
+    )
+    results = _parse_parallel_text(text, count=8)
+    assert len(results) == 1  # 空标题被滤
+    assert results[0].title == "Krasznahorkai Wins Nobel"
+    assert results[0].published == "2025-10-09"
+    assert "Hungarian novelist" in results[0].snippet
+
+
+def test_extract_mcp_text() -> None:
+    # 纯 JSON
+    assert _extract_mcp_text('{"result":{"content":[{"type":"text","text":"hello"}]}}') == "hello"
+    # SSE
+    sse = 'event: message\ndata: {"result":{"content":[{"type":"text","text":"sse-ok"}]}}\n\n'
+    assert _extract_mcp_text(sse) == "sse-ok"
+    # 坏响应 → None
+    assert _extract_mcp_text("not json") is None
+
+
+def test_mcp_provider_order() -> None:
+    assert _mcp_provider_order(None) == ["exa", "parallel"]  # auto 默认
+    assert _mcp_provider_order("exa") == ["exa"]
+    assert _mcp_provider_order("web") == []  # 跳过 MCP
+    assert _mcp_provider_order("parallel") == ["parallel"]
 
 
 def test_fetch_html_to_text() -> None:
