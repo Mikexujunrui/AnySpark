@@ -50,6 +50,11 @@ def _wait_backend(port: int, timeout: float = 30.0) -> bool:
 def main() -> None:
     import webview
 
+    # S111：启用 WebView 下载（默认 False → 导出 txt/md/epub 被静默取消，
+    # 文件不保存）。开启后点导出弹「另存为」对话框（初始目录=系统下载夹，
+    # 文件名=服务端 Content-Disposition），保存位置由用户自己选。
+    webview.settings["ALLOW_DOWNLOADS"] = True
+
     port = 8790
     t = threading.Thread(target=_start_backend, args=(port,), daemon=True)
     t.start()
