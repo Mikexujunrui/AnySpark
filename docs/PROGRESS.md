@@ -3747,7 +3747,7 @@ docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回
 **背景**：PLAN-SCALE-SAFETY 阶段 C——验证 A（resume）+ B（回溯）在规模化场景真可用，
 才算"规模化可信赖"成立。自动化（可重复）+ 真实库冒烟（实战链路）双层验证。
 
-**交付（commit `TODO`）**：
+**交付（commit `eab2fbe`）**：
 
 1. **自动化测试（test_scale_phase_c.py 2 用例）**：
    - 20 章大 loop（图谱抽取，无 approval）全量跑完，引擎稳定；同名实体合并为 1 条
