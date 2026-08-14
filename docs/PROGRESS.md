@@ -42,6 +42,7 @@
 >   1. ~~SKILL 阶段 1/2/3~~ ✅（S127/S128/S130）；~~WORKFLOW 第 1/2/3 批 + 收尾~~ ✅（S129/S133/S134/S135）；~~加料模板~~ ✅（S137 非敏感指令验证）
 >   2. 本地 vLLM/LM Studio 适配文档 ✅（S137 已出 docs/LOCAL-LLM.md）
 >   3. WORKFLOW 收尾后续：/api/batch 内存实现可再收编（前端已工作流模式并存，按需）
+>   4. **质量债修复清单**（docs/REPAIR-LIST.md，S147 质询扫描产物）：A 死代码清理 → B 决策 → C 测试装配抽 helper → D _wf_run_script 拆分（docs/REPAIR-WF-SCRIPT-SPLIT.md）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
