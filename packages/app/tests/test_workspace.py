@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 
+from anyspark.core import ToolRegistry
 from anyspark.core.protocol import ToolImplementer, ToolSpec
 from anyspark.core.types import Message, ModelOutput
 from anyspark.server.app import build_app
@@ -258,7 +259,7 @@ def test_sandbox_api_lists_and_reads() -> None:
 
 
 def test_sandbox_human_edit_blocks_ai_overwrite(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, make_full_toolkit: Any
 ) -> None:
     """S143（AI 文件编辑闭环）：人工保存（PUT）→ 落标记 → write_file 不再覆盖。
 
@@ -290,7 +291,8 @@ def test_sandbox_human_edit_blocks_ai_overwrite(
     db = Path(tempfile.mkdtemp()) / "t.db"
     client = TestClient(build_app(model=_M(), db_path=db))
     # ① AI 先写（未人工改过 → 正常可写）
-    spec, impl = _writing_tool_pair(client, "write_file")
+    reg = make_full_toolkit(client.app.state.deps)  # type: ignore[attr-defined]
+    spec, impl = _writing_tool_pair(reg, "write_file")
     r1 = impl(spec, {"path": "notes/闭环测试.md", "content": "AI 初稿"})
     assert r1.ok and "已写入" in r1.content
     # ② 人工保存（PUT）→ 落标记
@@ -314,40 +316,8 @@ def test_sandbox_human_edit_blocks_ai_overwrite(
     assert all(not f["path"].startswith(".") for f in d["files"])
 
 
-def _writing_tool_pair(client: TestClient, name: str) -> tuple[ToolSpec, ToolImplementer]:
+def _writing_tool_pair(reg: ToolRegistry, name: str) -> tuple[ToolSpec, ToolImplementer]:
     """从真实装配的 registry 取工具 spec/impl（与 agent 循环同源）。"""
-    from anyspark.core import ToolRegistry
-    from anyspark.server.toolkit import ToolContext, build_toolkit
-
-    deps = client.app.state.deps  # type: ignore[attr-defined]
-    reg = build_toolkit(
-        ToolRegistry(),
-        ToolContext(
-            chapters=deps.chapters,
-            workspace=deps.workspace,
-            model=deps.model,
-            graph=deps.graph,
-            plots=deps.plots,
-            plans=deps.plans,
-            settings=deps.settings,
-            materials=deps.materials,
-            ext_tools=deps.ext_tools,
-            dim_store=deps.dim_store,
-            manual=deps.manual,
-            skills_store=deps.skills,
-            style_prefs=None,
-            workflow_store=deps.workflow_store,
-            workflow_engine=deps.workflow_engine,
-            workflow_generator=deps.workflow_generator,
-            play_engine=deps.play_engine,
-            review_panel=deps.review_panel,
-            skill_generator=deps.skill_generator,
-            signals=deps.signals,
-            book_id="main",
-            subagent_deps=deps,
-            templates=[],
-        ),
-    )
     pair = reg.get(name)
     assert pair is not None, f"工具 {name} 未注册"
     return pair

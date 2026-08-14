@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from fastapi.testclient import TestClient
 
@@ -179,29 +180,9 @@ def test_chat_can_call_run_subagent_tool() -> None:
     assert model.calls >= 3, f"应有子Agent调用，实际 {model.calls} 次模型调用"
 
 
-def test_run_subagent_missing_instruction() -> None:
+def test_run_subagent_missing_instruction(make_toolkit: Any) -> None:
     """缺 instruction → 工具报错（不崩溃）。"""
-    import tempfile
-
-    from anyspark.core.protocol import ToolRegistry
-    from anyspark.server.toolkit import ToolContext, build_toolkit
-    from anyspark.server.tools_extensions import ExtensionToolStore
-
-    registry = build_toolkit(
-        ToolRegistry(),
-        ToolContext(
-            chapters=None,
-            workspace=None,
-            model=None,
-            graph=None,
-            plots=None,
-            plans=None,
-            settings=None,
-            materials=None,
-            ext_tools=ExtensionToolStore(Path(tempfile.mkdtemp()) / "ext.db"),
-            book_id="main",
-        ),
-    )
+    registry = make_toolkit()
     spec, impl = registry.get("run_subagent") or (None, None)
     assert spec is not None and impl is not None, "run_subagent 应注册"
     res = impl(spec, {"tools": "list_chapters"})

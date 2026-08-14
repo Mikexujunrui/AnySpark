@@ -222,27 +222,8 @@ def test_reference_lookup_registered_in_production_toolkit() -> None:
     )
 
 
-def test_reference_lookup_absent_without_library() -> None:
+def test_reference_lookup_absent_without_library(make_toolkit: Any) -> None:
     """对照：library 为 None 时（未装配书库）该工具确实不注册（条件语义保持）。"""
-    from anyspark.core.protocol import ToolRegistry
-    from anyspark.server.toolkit import ToolContext, build_toolkit
-    from anyspark.server.tools_extensions import ExtensionToolStore
-
-    registry = build_toolkit(
-        ToolRegistry(),
-        ToolContext(
-            chapters=None,
-            workspace=None,
-            model=None,
-            graph=None,
-            plots=None,
-            plans=None,
-            settings=None,
-            materials=None,
-            ext_tools=ExtensionToolStore(_db()),
-            book_id="main",
-            # library 缺省 None
-        ),
-    )
+    registry = make_toolkit()  # library 缺省 None
     names = {s.name for s in registry.specs()}
     assert "reference_lookup" not in names

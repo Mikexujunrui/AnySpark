@@ -336,33 +336,16 @@ def test_responses_input_conversion() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_all_tool_schemas_valid_for_strict_apis() -> None:
+def test_all_tool_schemas_valid_for_strict_apis(make_toolkit: Any) -> None:
     """全部工具参数 schema 合法——DeepSeek/OpenAI 官方 API 严格校验 JSON Schema。
 
     回归 S136：mind_update.locked 曾用 type="bool"（JSON Schema 非法类型），
     DashScope 宽容不报错、官方 API 直接 400。此测试锁死：参数类型只能是
     string/integer/number/boolean（与 core ParamSpec 契约一致）。
     """
-    from anyspark.core.protocol import ToolRegistry
     from anyspark.models.deepseek import to_openai_tool
-    from anyspark.server.toolkit import ToolContext, build_toolkit
-    from anyspark.server.tools_extensions import ExtensionToolStore
 
-    registry = build_toolkit(
-        ToolRegistry(),
-        ToolContext(
-            chapters=None,
-            workspace=None,
-            model=None,
-            graph=None,
-            plots=None,
-            plans=None,
-            settings=None,
-            materials=None,
-            ext_tools=ExtensionToolStore(Path(tempfile.mkdtemp()) / "ext.db"),
-            book_id="main",
-        ),
-    )
+    registry = make_toolkit()
     valid = {"string", "integer", "number", "boolean"}
     specs = registry.specs()
     assert len(specs) > 20, "工具集应非空（装配失败会漏测）"
