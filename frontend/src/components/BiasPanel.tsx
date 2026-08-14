@@ -46,6 +46,12 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
   const [view, setView] = useState<MindView>("bias");
   const [manual, setManual] = useState<ManualEntry[]>([]);
   const [manualLoading, setManualLoading] = useState(false);
+  // S146（第三方评审 2.3）：心智条目用户编辑权落地——增/删/改（此前只有看+锁定）
+  const [manualShowAdd, setManualShowAdd] = useState(false);
+  const [manualNewContent, setManualNewContent] = useState("");
+  const [manualNewCategory, setManualNewCategory] = useState<"style" | "habit" | "collab">("style");
+  const [manualEditingId, setManualEditingId] = useState<string | null>(null);
+  const [manualEditContent, setManualEditContent] = useState("");
   // S103：说明书式目录——分类章节折叠状态
   const [collapsedCats, setCollapsedCats] = useState<Record<string, boolean>>({});
 
@@ -71,6 +77,46 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
     try {
       await fetch(`/api/manual/${id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ locked: !locked }) })
       setManual(prev => prev.map(m => m.id === id ? { ...m, locked: !locked } : m))
+    } catch { /* 静默 */ }
+  }
+
+  // S146：心智条目增/删/改（用户=最终编辑者，DESIGN §6 说明书设计落地）
+  const handleManualAdd = async () => {
+    if (!manualNewContent.trim()) return;
+    try {
+      await fetch("/api/manual", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: manualNewContent.trim(), category: manualNewCategory, confidence: 1.0, scope: "project" }),
+      })
+      setManualNewContent("");
+      setManualShowAdd(false);
+      loadManual();
+    } catch { /* 静默 */ }
+  }
+
+  const startManualEdit = (entry: ManualEntry) => {
+    setManualEditingId(entry.id);
+    setManualEditContent(entry.content);
+  }
+
+  const saveManualEdit = async (id: string) => {
+    try {
+      await fetch(`/api/manual/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: manualEditContent.trim() }),
+      })
+      setManualEditingId(null);
+      loadManual();
+    } catch { /* 静默 */ }
+  }
+
+  const handleManualDelete = async (id: string, content: string) => {
+    if (!window.confirm(`删除心智条目？\n“${content.slice(0, 50)}${content.length > 50 ? "…" : ""}”`)) return;
+    try {
+      await fetch(`/api/manual/${id}`, { method: "DELETE" })
+      setManual(prev => prev.filter(m => m.id !== id))
     } catch { /* 静默 */ }
   }
 
@@ -168,6 +214,14 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
                 {showAdd ? "取消" : "+ 新增"}
               </button>
             )}
+            {view === "memory" && (
+              <button
+                onClick={() => setManualShowAdd(!manualShowAdd)}
+                className="text-xs px-2 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded"
+              >
+                {manualShowAdd ? "取消" : "+ 新增"}
+              </button>
+            )}
             <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
               <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -199,6 +253,37 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
               <button
                 onClick={handleAdd}
                 disabled={!newContent.trim()}
+                className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded"
+              >
+                添加
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* 新增表单（心智记忆视图）——S146：用户增条目（最终编辑者） */}
+        {view === "memory" && manualShowAdd && (
+          <div className="px-4 py-3 border-b border-zinc-800 space-y-2">
+            <textarea
+              value={manualNewContent}
+              onChange={(e) => setManualNewContent(e.target.value)}
+              placeholder="输入偏好/习惯/雷区（如：避免大段心理描写、喜欢冷峻短句）..."
+              rows={3}
+              className="w-full bg-zinc-800 text-zinc-200 text-sm px-3 py-2 rounded border border-zinc-700 focus:outline-none focus:border-zinc-500 resize-none"
+            />
+            <div className="flex items-center gap-2">
+              <select
+                value={manualNewCategory}
+                onChange={(e) => setManualNewCategory(e.target.value as "style" | "habit" | "collab")}
+                className="bg-zinc-800 text-zinc-300 text-xs px-2 py-1 rounded border border-zinc-700"
+              >
+                <option value="style">文风</option>
+                <option value="habit">习惯/雷区</option>
+                <option value="collab">协作</option>
+              </select>
+              <button
+                onClick={handleManualAdd}
+                disabled={!manualNewContent.trim()}
                 className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded"
               >
                 添加
@@ -256,6 +341,46 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
                                 </button>
                               </div>
                               <p className="text-sm text-zinc-300 whitespace-pre-wrap">{entry.content}</p>
+                              {manualEditingId === entry.id ? (
+                                <div className="space-y-1.5">
+                                  <textarea
+                                    value={manualEditContent}
+                                    onChange={(e) => setManualEditContent(e.target.value)}
+                                    rows={2}
+                                    className="w-full bg-zinc-900 text-zinc-200 text-sm px-2 py-1.5 rounded border border-blue-500/40 focus:outline-none resize-none"
+                                  />
+                                  <div className="flex gap-2">
+                                    <button
+                                      onClick={() => saveManualEdit(entry.id)}
+                                      disabled={!manualEditContent.trim()}
+                                      className="text-[10px] px-2 py-0.5 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded"
+                                    >
+                                      保存
+                                    </button>
+                                    <button
+                                      onClick={() => setManualEditingId(null)}
+                                      className="text-[10px] px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded"
+                                    >
+                                      取消
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    onClick={() => startManualEdit(entry)}
+                                    className="text-[10px] px-2 py-0.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-400 rounded"
+                                  >
+                                    编辑
+                                  </button>
+                                  <button
+                                    onClick={() => handleManualDelete(entry.id, entry.content)}
+                                    className="text-[10px] px-2 py-0.5 bg-zinc-800 hover:bg-red-900/40 text-zinc-500 hover:text-red-400 rounded"
+                                  >
+                                    删除
+                                  </button>
+                                </div>
+                              )}
                               <p className="text-[10px] text-zinc-600">
                                 {entry.activity ? `活跃度: ${entry.activity}` : ""}
                                 {entry.created_at ? ` · ${new Date(entry.created_at).toLocaleDateString()}` : ""}
