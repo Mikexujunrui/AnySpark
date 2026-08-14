@@ -62,3 +62,7 @@ benchmarks/writing/hunter/
 # ---- pi 运行时产物 ----
 .pi-subagents/
 frontend_v4_backup/
+
+# ---- 第三方评审/临时排查产物（S145）----
+.review_tmp/
+.pi/
