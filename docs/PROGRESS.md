@@ -4063,7 +4063,7 @@ ruff+format+mypy strict 全绿；前端 tsc+build 绿；ChatPanel 1186→1055 �
 **背景**：主人实测报告三个现象：① 前端打开后空气泡（会话历史空消息）；② 批量任务
 "一直 running"（实际已完成）；③ 批量 done 后无结果输出。逐一查证根因并修复。
 
-**交付（commit `TODO`）**：
+**交付（commit `ec5ffd9`）**：
 
 1. **① 空气泡根治**：
    - 根因：工具调用轮 assistant 消息（content='' + metadata.tool_calls）落库
