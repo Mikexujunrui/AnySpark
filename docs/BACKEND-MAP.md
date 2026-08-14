@@ -138,7 +138,14 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 
-## 4. Agent 工具层（46 工具，S114 默认全注册 × 可显式禁用）
+> **S146 标注（无前端入口，设计内非遗漏）**：以下 6 个端点有测试无 UI——
+> `/api/graph/context`（图谱预览，S58 停注入后仅人可预览）、`/api/graph/types*`
+> （实体类型内容化 CRUD）、`/api/mind/agency-suggest`（L2 AI 建议档位，建议不
+> 自动应用）、`/api/mind/reconcile`（S132c 对账工具后端）、`/api/records/{conv_id}`
+> （S116 运行记录回放，注释承诺前端面板但未建）。主人明确前端 UI 不优先，
+> 均为设计内取舍；如需 UI 按需补（records 面板优先级最高，供复盘）。
+
+## 4. Agent 工具层（47 工具，S114 默认全注册 × 可显式禁用）
 
 > S114 语义：所有能力**默认可用**（注册进工具箱，Agent 知道有什么）；开关列 = 显式传
 > False 可禁用的开关名（省 token/安全隔离极端场景），不是"点亮才有"。
