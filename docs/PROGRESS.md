@@ -46,6 +46,7 @@
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
 > [S145] 已提交完成（6 commits：311e94b/5fdfa93/624a515/fd5acbb/1b3e36f/edc0984，第三方评审修复）——声明行随 S145 提交后删除
+> [S146] 已提交完成（7 commits：5976551/77417f9/090dc45/09ffa40/a4ad7f4/795cc9c/588de6c，评审未修项批 E-I）——声明行随 S146 提交后删除
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
@@ -4006,3 +4007,51 @@ AI 文件编辑闭环（人改 AI 笔记）；敏感指令加料按需实测。
 - 6 个后端端点前端零引用（有测试无 UI）
 
 **下一步**：按主人意向从上述未修项挑选继续；或回归超长书实证路径。
+
+## S146 第三方评审续修——报告未修项分批落地（已完成 ✅）
+
+**背景**：S145 修完评审报告的主问题后，主人指示把剩余未修项自行规划修复。
+共 5 批 7 commits（E/F/G/H×2/I×2），全部来自两份评审报告。
+
+**交付**：
+
+1. **批次 E（`5976551`）——对齐信号接线（哲学 2.3 实质）**：
+   - reportSignal 此前零调用方，5 种信号只剩 modified 活着（'操作即信号'退化为
+     '修改即信号'）。接入最高频判别场景：
+   - exploreStore.archiveCard：选卡固化 → accepted（方向标题+摘要）
+   - playStore.choose：选行动 → accepted；自定义行动 → custom
+
+2. **批次 F（`77417f9`）——心智模型用户编辑权（哲学 2.3 中等）**：
+   - DESIGN §6 承诺'用户是最终编辑者'（直接改/删除/新增/锁定），此前前端只有
+     看+锁定，createManual/updateManual/deleteManual API 零调用。
+   - BiasPanel 心智记忆视图：新增表单（content+分类 style/habit/collab）+
+     条目编辑（内联 textarea+保存/取消）+ 删除（confirm 防误删）
+
+3. **批次 G（`090dc45`）——图谱抽取质量后校验（哲学 4.1 中等）**：
+   - 真实库主角陈渡被抽为'设定'（应为角色）、last_chapter 脏数据（ref 传内容片段）
+   - extract.py：_normalize_type 别名归一（人物/主人公→角色、地方→地点、物品→
+     物件）；非法类型不再静默降级为'设定'——丢弃+计数（dropped_types 可观测）
+   - routes_graph.py：POST /api/graph/extract chapter_ref 校验（含换行/超长→400）
+
+4. **批次 H（`09ffa40` + `a4ad7f4`）——死代码清理 + 端点标注（P2-1/2-2）**：
+   - ChatPanel 删 138 行 Autopilot 死代码（mount 探测+桥接+SSE read+事件处理，
+     后端无此端点/无此事件/stub 恒 idle）；保留 filterAutopilotNoise 历史过滤
+   - BACKEND-MAP 标注 6 个无前端入口端点（设计内取舍）+ 工具数 47
+
+5. **批次 I（`795cc9c` + `588de6c`）——CJK 粗算修复 + 遗留项标注（评审轻微）**：
+   - _rough_count：注释声称'chars ≥ tokens 高估安全'实测相反（中文 1 字 ≈ 2
+     tokens）——改为按类型加权（ASCII 0.3/非 ASCII 2.0 保守上界），粗算不超则
+     实际必不超；测试 +1 防回归
+   - BACKEND-MAP 审计区标注两轻微项（检测网骨架可增删=功能扩展非 bug；
+     skills 索引无上限当前安全）——YAGNI 不落地
+
+**验证**：graph+app 64 绿；context 16 绿（含新增 CJK 测试）；test_review 10 绿；
+ruff+format+mypy strict 全绿；前端 tsc+build 绿；ChatPanel 1186→1055 行。
+
+**评审报告闭环**：两份报告全部问题已处理——P0×2 ✅ / P1×5 ✅ / P2×4 ✅
+（落地层）；实质×3 ✅ / 中等×3 ✅ / 轻微×3 ✅（哲学层，2 项 YAGNI 标注）。
+仅剩的"非 bug"：6 个无 UI 端点（设计内）+ 检测网骨架扩展（功能扩展）。
+
+**下一步**：报告闭环，无剩余缺口。候选：超长书实证路径（报告观察：32 章为
+最长真实运行，几百章设计假设未验证）、records 回放面板（按需）、模型地基
+风险兜底（报告观察：航向系统有效性依赖模型创造力上限）。
