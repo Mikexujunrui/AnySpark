@@ -7,8 +7,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
+from anyspark.core.protocol import ToolImplementer, ToolSpec
 from anyspark.core.types import Message, ModelOutput
 from anyspark.server.app import build_app
 from anyspark.server.tools_writing import WritingTools
@@ -253,3 +255,99 @@ def test_sandbox_api_lists_and_reads() -> None:
     # 不存在文件 404
     r3 = client.get("/api/sandbox/file", params={"path": "no_such_file_xyz.md"})
     assert r3.status_code == 404
+
+
+def test_sandbox_human_edit_blocks_ai_overwrite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S143（AI 文件编辑闭环）：人工保存（PUT）→ 落标记 → write_file 不再覆盖。
+
+    人改过的文件 AI 尊重：write_file 返回提示不写；未人工保存过的文件正常可写。
+    用 monkeypatch 隔离沙箱（真实 data/sandbox 与全量测试共享，避免污染）。
+    """
+    import json
+    import tempfile
+
+    from fastapi.testclient import TestClient
+
+    import anyspark.server.tools_writing as tw_mod
+    from anyspark.server.app import build_app
+
+    # 隔离沙箱：patch 模块级常量（函数内延迟 import 会读到新值）
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setattr(tw_mod, "SANDBOX_DIR", sandbox)
+    monkeypatch.setattr(tw_mod, "_HUMAN_EDIT_FILE", sandbox / ".human_edited.json")
+
+    class _M:
+        model_name = "fake"
+
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="好的。")
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=_M(), db_path=db))
+    # ① AI 先写（未人工改过 → 正常可写）
+    spec, impl = _writing_tool_pair(client, "write_file")
+    r1 = impl(spec, {"path": "notes/闭环测试.md", "content": "AI 初稿"})
+    assert r1.ok and "已写入" in r1.content
+    # ② 人工保存（PUT）→ 落标记
+    r2 = client.put(
+        "/api/sandbox/file",
+        json={"path": "notes/闭环测试.md", "content": "人工改过的版本"},
+    )
+    assert r2.status_code == 200
+    marks = json.loads((sandbox / ".human_edited.json").read_text(encoding="utf-8"))
+    assert "notes/闭环测试.md" in marks  # 标记落盘
+    # ③ AI 再写 → 被拦（不覆盖人工修改）
+    r3 = impl(spec, {"path": "notes/闭环测试.md", "content": "AI 想覆盖"})
+    assert not r3.ok and "人工修改" in r3.content
+    got = client.get("/api/sandbox/file", params={"path": "notes/闭环测试.md"}).json()
+    assert got["content"] == "人工改过的版本"  # 内容未被覆盖
+    # ④ 未人工保存过的文件：AI 正常写（标记不影响其他文件）
+    r4 = impl(spec, {"path": "notes/纯AI文件.md", "content": "AI 独占"})
+    assert r4.ok and "已写入" in r4.content
+    # ⑤ 沙箱列表不含隐藏标记文件
+    d = client.get("/api/sandbox").json()
+    assert all(not f["path"].startswith(".") for f in d["files"])
+
+
+def _writing_tool_pair(client: TestClient, name: str) -> tuple[ToolSpec, ToolImplementer]:
+    """从真实装配的 registry 取工具 spec/impl（与 agent 循环同源）。"""
+    from anyspark.core import ToolRegistry
+    from anyspark.server.toolkit import ToolContext, build_toolkit
+
+    deps = client.app.state.deps  # type: ignore[attr-defined]
+    reg = build_toolkit(
+        ToolRegistry(),
+        ToolContext(
+            chapters=deps.chapters,
+            workspace=deps.workspace,
+            model=deps.model,
+            graph=deps.graph,
+            plots=deps.plots,
+            plans=deps.plans,
+            settings=deps.settings,
+            materials=deps.materials,
+            ext_tools=deps.ext_tools,
+            dim_store=deps.dim_store,
+            manual=deps.manual,
+            skills_store=deps.skills,
+            style_prefs=None,
+            workflow_store=deps.workflow_store,
+            workflow_engine=deps.workflow_engine,
+            workflow_generator=deps.workflow_generator,
+            play_engine=deps.play_engine,
+            review_panel=deps.review_panel,
+            skill_generator=deps.skill_generator,
+            signals=deps.signals,
+            book_id="main",
+            subagent_deps=deps,
+            templates=[],
+        ),
+    )
+    pair = reg.get(name)
+    assert pair is not None, f"工具 {name} 未注册"
+    return pair

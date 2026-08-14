@@ -3893,3 +3893,40 @@ gate 不强制（不拖慢全量），靠阶段纪律主动重跑。
 
 **下一步**：无剩余审计缺口。候选：CURRENT-STATE 接入前端（--json 供状态面板）；
 AI 文件编辑闭环（人改 AI 笔记）；敏感指令加料按需实测。
+
+---
+
+## S143 AI 文件编辑闭环——人能编辑 + AI 不覆盖人工修改（S141 闭环补全）（已完成 ✅）
+
+**背景**：S141 只做到"AI 写的东西人能看到"（FilesPanel 只读），主人追问后确认
+"编辑闭环没实现"——人不能改 AI 笔记，AI 下次 write_file 会静默覆盖。补全
+"内容自然语言可编辑"完整闭环：**AI 写 → 人看 → 人改 → AI 不覆盖**。
+
+**交付（commit `TODO`）**：
+
+1. **PUT /api/sandbox/file**（routes_workspace）：人工保存——写内容 + 落
+   `.human_edited.json` 标记（{path: 人工保存时间}，隐藏文件不列列表）
+2. **write_file 防覆盖**（tools_writing）：写前查标记——人工保存过的文件不再
+   静默覆盖（返回提示"已被人工修改，停止写入"，agent 告知用户）；新文件/未
+   人工改过的文件正常写
+3. **FilesPanel 编辑**：编辑/保存/取消按钮 + textarea 编辑态；保存后提示
+   "此后 AI 不再覆盖此文件"
+4. 辅助：_read_human_edits/_mark_human_edit/_clear_human_edit（标记读写清理）
+
+**验证**：
+- 测试（test_workspace.py +1）：AI 先写→人工 PUT→标记落盘→AI 再写被拦→
+  内容未覆盖→其他文件正常→列表无隐藏文件；monkeypatch 隔离沙箱（真实
+  data/sandbox 与全量测试共享避免污染——首次用真实沙箱 + 固定文件名导致
+  残留标记污染，改为 tmp_path 隔离）
+- 全量 582 绿；ruff+format+mypy strict 全绿；前端 tsc/lint/build 绿
+- 真实链路 curl + registry 实证：PUT 保存 → write_file 工具被拦（提示人工修改）
+
+**踩坑**：
+- 测试首版用真实沙箱（SANDBOX_DIR 模块常量）+ 固定文件名 → 全量跑时残留
+  标记污染（第一次写就被拦）→ monkeypatch.setattr 隔离 tmp_path（函数内延迟
+  import 会读到 patch 后的值）
+- mypy strict：_writing_tool_pair 返回 tuple[object,object] 不可调用 → 类型化
+  tuple[ToolSpec, ToolImplementer]（import 提模块级）
+
+**下一步**：无剩余缺口。候选：CURRENT-STATE 接前端状态面板（--json）；敏感指令
+加料按需实测；文件删除入口（FilesPanel 暂无删除）。

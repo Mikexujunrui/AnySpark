@@ -865,6 +865,11 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   前端本地搜索只做关键词过滤的定位）；**③ delegate 激活**：generator 教学 prompt 补
   delegate 用法（scope.tools 白名单 + budget.max_turns，查证后写的复杂节点用委派子
   Agent）——S115 能力从"可跑但 AI 不会用"到"AI 生成模板会用"。
+- S143（AI 文件编辑闭环——S141 只做到"人能看到"，补"人能编辑 + AI 不覆盖人"）：
+  ① PUT /api/sandbox/file（人工保存：写内容 + 落 .human_edited.json 标记）；② write_file
+  工具写前查标记——人工保存过的文件不再静默覆盖（返回提示让 agent 告知用户，尊重
+  人的改动）；③ FilesPanel 加编辑/保存（textarea 编辑态）；④ 沙箱列表排除隐藏标记文件。
+  "内容自然语言可编辑"完整闭环：AI 写 → 人看 → 人改 → AI 不覆盖。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/

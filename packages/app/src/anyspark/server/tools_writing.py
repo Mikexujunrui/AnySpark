@@ -22,6 +22,9 @@ from anyspark.store import ChapterStore
 DEFAULT_BOOK_ID = "main"
 # 文件工具沙箱：只允许读写此目录下文件（越界保护：阻止绝对路径与 ..）
 SANDBOX_DIR = Path(__file__).resolve().parents[5] / "data" / "sandbox"
+# S143（AI 文件编辑闭环）：人工修改标记——人在前端保存过（PUT /api/sandbox/file）
+# 的文件，AI write_file 不再静默覆盖（内容自然语言可编辑：人改过的 AI 尊重）
+_HUMAN_EDIT_FILE = SANDBOX_DIR / ".human_edited.json"
 # 单次文件读写上限（越界保护：防注入超长/超大文件）
 MAX_FILE_CHARS = 50_000
 
@@ -48,6 +51,43 @@ def _resolve_sandbox_path(raw: str) -> Path | None:
     if not str(resolved).startswith(str(SANDBOX_DIR.resolve())):
         return None
     return resolved
+
+
+def _read_human_edits() -> dict[str, str]:
+    """读人工修改标记：{相对路径: 人工保存时间 ISO}。标记文件不存在=无人改过。"""
+    if not _HUMAN_EDIT_FILE.exists():
+        return {}
+    try:
+        import json as _json
+
+        data = _json.loads(_HUMAN_EDIT_FILE.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _mark_human_edit(rel_path: str) -> None:
+    """记录人工保存标记（PUT /api/sandbox/file 调用）。"""
+    import json as _json
+
+    marks = _read_human_edits()
+    from datetime import UTC, datetime
+
+    marks[rel_path] = datetime.now(UTC).isoformat()
+    _HUMAN_EDIT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _HUMAN_EDIT_FILE.write_text(_json.dumps(marks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _clear_human_edit(rel_path: str) -> None:
+    """清除人工修改标记（文件删除时清理，避免残留）。"""
+    import json as _json
+
+    marks = _read_human_edits()
+    if rel_path in marks:
+        del marks[rel_path]
+        _HUMAN_EDIT_FILE.write_text(
+            _json.dumps(marks, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
 
 
 def apply_patch(content: str, operations: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
@@ -372,6 +412,18 @@ class WritingTools:
         if path is None:
             return ToolResult(
                 call=call, ok=False, content="路径越界：只允许沙箱目录内相对路径（data/sandbox/）。"
+            )
+        # S143（AI 文件编辑闭环）：人工修改过的文件不静默覆盖——
+        # 人在前端保存过（PUT /api/sandbox/file）即标记；AI 再写被拦，
+        # 返回提示让 agent 告知用户（内容自然语言可编辑：人改过的 AI 尊重）。
+        if path.exists() and raw in _read_human_edits():
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=(
+                    f"文件 {raw} 已被人工修改（前端保存过），为不覆盖人工改动已停止写入。"
+                    "如需 AI 改写该文件，请用户在前端重新保存一次或改其他路径。"
+                ),
             )
         try:
             path.parent.mkdir(parents=True, exist_ok=True)

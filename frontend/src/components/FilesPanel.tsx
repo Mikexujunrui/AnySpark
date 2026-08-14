@@ -25,16 +25,16 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)}MB`
 }
 
-function fmtTime(ts: number): string {
-  return new Date(ts * 1000).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
-}
-
 export default function FilesPanel({ open = true, onClose, embedded = false }: Props) {
   const [files, setFiles] = useState<SandboxFile[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
   const [content, setContent] = useState('')
   const [contentLoading, setContentLoading] = useState(false)
+  // S143（AI 文件编辑闭环）：人可编辑 AI 笔记并保存（PUT 落人工修改标记，AI 不再覆盖）
+  const [editing, setEditing] = useState(false)
+  const [editText, setEditText] = useState('')
+  const [saving, setSaving] = useState(false)
   const [query, setQuery] = useState('')
   const [dirs, setDirs] = useState<string[]>([])
 
@@ -65,17 +65,41 @@ export default function FilesPanel({ open = true, onClose, embedded = false }: P
 
   const openFile = async (path: string) => {
     setSelected(path)
+    setEditing(false)
     setContentLoading(true)
     try {
       const r = await fetch(`/api/sandbox/file?path=${encodeURIComponent(path)}`)
       if (!r.ok) throw new Error((await r.json()).detail || '读取失败')
       const d = await r.json()
       setContent(d.content || '')
+      setEditText(d.content || '')
     } catch (e) {
       showToast(e instanceof Error ? e.message : '读取失败', 'error')
       setContent('')
     } finally {
       setContentLoading(false)
+    }
+  }
+
+  // S143：保存编辑（PUT → 落人工修改标记，AI write_file 不再静默覆盖）
+  const saveEdit = async () => {
+    if (!selected || saving) return
+    setSaving(true)
+    try {
+      const r = await fetch('/api/sandbox/file', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: selected, content: editText }),
+      })
+      if (!r.ok) throw new Error((await r.json()).detail || '保存失败')
+      setContent(editText)
+      setEditing(false)
+      showToast('已保存（此后 AI 不再覆盖此文件）')
+      void load()
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '保存失败', 'error')
+    } finally {
+      setSaving(false)
     }
   }
 
@@ -155,21 +179,49 @@ export default function FilesPanel({ open = true, onClose, embedded = false }: P
             )}
           </div>
 
-          {/* 内容预览 */}
+          {/* 内容预览 / 编辑（S143 闭环：人可编辑 AI 笔记） */}
           <div className="flex-1 min-h-0 flex flex-col">
             {selected ? (
               <>
                 <div className="flex items-center justify-between px-3 py-1.5 border-b border-zinc-800 shrink-0">
                   <span className="text-xs text-zinc-400 truncate">{selected}</span>
-                  {files.find(f => f.path === selected) && (
-                    <span className="text-[10px] text-zinc-600 shrink-0 ml-2">
-                      {fmtTime(files.find(f => f.path === selected)!.mtime)}
-                    </span>
-                  )}
+                  <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                    {!editing ? (
+                      <button
+                        onClick={() => { setEditText(content); setEditing(true) }}
+                        className="text-[11px] px-2 py-0.5 bg-sky-600/20 border border-sky-700/50 text-sky-300 hover:bg-sky-600/30 rounded transition-colors"
+                      >
+                        编辑
+                      </button>
+                    ) : (
+                      <>
+                        <button
+                          onClick={() => void saveEdit()}
+                          disabled={saving}
+                          className="text-[11px] px-2 py-0.5 bg-emerald-600/20 border border-emerald-700/50 text-emerald-300 hover:bg-emerald-600/30 rounded transition-colors disabled:opacity-50"
+                        >
+                          {saving ? '保存中…' : '保存'}
+                        </button>
+                        <button
+                          onClick={() => { setEditing(false); setEditText(content) }}
+                          className="text-[11px] px-2 py-0.5 bg-zinc-700/50 border border-zinc-600/50 text-zinc-400 hover:bg-zinc-700 rounded transition-colors"
+                        >
+                          取消
+                        </button>
+                      </>
+                    )}
+                  </div>
                 </div>
                 <div className="flex-1 overflow-y-auto p-3">
                   {contentLoading ? (
                     <p className="text-zinc-600 text-xs">读取中…</p>
+                  ) : editing ? (
+                    <textarea
+                      value={editText}
+                      onChange={e => setEditText(e.target.value)}
+                      className="w-full h-full min-h-[200px] bg-zinc-900/60 border border-sky-800/60 rounded p-2 text-xs text-zinc-200 leading-relaxed font-sans resize-none focus:outline-none focus:border-sky-600"
+                      spellCheck={false}
+                    />
                   ) : (
                     <pre className="text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed font-sans">{content}</pre>
                   )}
@@ -177,7 +229,7 @@ export default function FilesPanel({ open = true, onClose, embedded = false }: P
               </>
             ) : (
               <div className="flex-1 flex items-center justify-center">
-                <p className="text-zinc-600 text-xs">选择左侧文件查看内容</p>
+                <p className="text-zinc-600 text-xs">选择左侧文件查看 / 编辑内容</p>
               </div>
             )}
           </div>

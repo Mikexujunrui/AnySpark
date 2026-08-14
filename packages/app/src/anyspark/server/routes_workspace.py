@@ -96,7 +96,7 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
         files: list[dict[str, Any]] = []
         if SANDBOX_DIR.exists():
             for f in sorted(SANDBOX_DIR.rglob("*")):
-                if f.is_file():
+                if f.is_file() and not f.name.startswith("."):  # S143：隐藏标记文件不列
                     rel = str(f.relative_to(SANDBOX_DIR)).replace("\\", "/")
                     files.append(
                         {
@@ -123,5 +123,31 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
         except OSError as exc:
             raise HTTPException(status_code=500, detail=f"读取失败: {exc}") from exc
         return {"path": path, "name": p.name, "content": text}
+
+    @router.put("/api/sandbox/file", response_model=dict[str, Any])
+    def sandbox_save_file(req: dict[str, str]) -> dict[str, Any]:
+        """S143（AI 文件编辑闭环）：人工保存沙箱文件——写内容 + 记人工修改标记。
+
+        写标记后 AI write_file 不再静默覆盖该文件（人改过的 AI 尊重）；
+        新建文件（path 不存在）同样落标记（人建的归人管）。
+        """
+        from anyspark.server.tools_writing import _mark_human_edit, _resolve_sandbox_path
+
+        raw = str(req.get("path", "")).strip()
+        content = str(req.get("content", ""))
+        if not raw:
+            raise HTTPException(status_code=400, detail="path 不能为空")
+        if len(content) > 50_000:
+            raise HTTPException(status_code=400, detail="内容超过 50000 字上限")
+        p = _resolve_sandbox_path(raw)
+        if p is None:
+            raise HTTPException(status_code=400, detail="路径越界：仅允许沙箱内相对路径")
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            p.write_text(content, encoding="utf-8")
+            _mark_human_edit(raw)
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"保存失败: {exc}") from exc
+        return {"ok": True, "path": raw, "size": len(content)}
 
     return router
