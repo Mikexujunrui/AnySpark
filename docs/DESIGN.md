@@ -838,6 +838,11 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   skill_refine(mode=book) 拆书优先实例化「拆书提炼」模板同步跑（create_task + run_task），
   草稿由模板 finish 落库（不重复 add_draft）；模板缺失/engine 未装配回退 generate_book
   （向后兼容）。build_app 暴露 app.state.deps（测试/收编验证取 workflow 依赖）。
+- S137（规模化用例）：**章节加料模板**——遍历章节 + 定点插入（原文保留，区别于批量改写
+  整章覆盖）。enrich agent 用【插入】…【/插入】标记协议产出插入内容，stitch script
+  （enrich_stitch）原位并入原文（无标记则追加章末保原文）；重操作 loop 前 approval 闸门。
+  指令完全参数化（enrich_instruction）：非敏感指令（扩环境/内心/对白）与敏感指令走同一条
+  管道——**验证/演示用非敏感指令即可绕开模型内容审核坎**（S113 实测 data_inspection_failed）。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/

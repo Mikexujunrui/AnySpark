@@ -2,7 +2,7 @@
 
 > **用途**：后端 108 模块 / 22373 行的"导航图"——哪个机制在哪、数据怎么流、哪里可能重复/缺失。
 > **创建**：2026-08-11（S79-S81 架构收敛后，三 worker 侦察 + 主循环整合）
-> **配套**：DESIGN.md（设计规格）、PROGRESS.md（阶段台账）、DEV-AGENT.md（接入通道）、
+> **配套**：DESIGN.md（设计规格）、PROGRESS.md（阶段台账）、DEV-AGENT.md（接入通道）、LOCAL-LLM.md（本地 vLLM/LM Studio 适配）、
 > **docs/uml/**（有向逻辑图全集：architecture 骨架 + sequence_mind/graph/constraints/chat/explore/workflow 运作流
 > + activity_tasks 后台派发 + state_agent_loop/workflow 状态机）——新 AI 接入先看 uml/README.md 阅读路径
 
@@ -132,7 +132,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials（S128：模式库读 skill 表 type=plot） | plots/skills/materials |
 | routes_graph | 图谱 types/entities/relations/events/context/extract/impact | graph/graph_extractor/impact |
 | routes_story | 计划 plan/叙事树 nodes/threads/layout | plans/story_tree/story_threads |
-| routes_workflow | 工作流模板/草稿/任务 CRUD+run（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134（script 复用 tasks 函数，落库同源）） | workflow_store/engine/generator |
+| routes_workflow | 工作流模板/草稿/任务 CRUD+run（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134 + 章节加料 S137（enrich_stitch 定点插入）） | workflow_store/engine/generator |
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 

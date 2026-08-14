@@ -39,8 +39,8 @@
 >   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1 ✅ + S128 阶段 2 ✅ + S130 阶段 3 ✅ 三阶段全部完成（容器统一收官）
 >   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）——S129 第 1 批（拆书模板化打样）已实施
 > - **下一步开工（建议顺序）**：
->   1. ~~SKILL 阶段 1/2/3~~ ✅（S127/S128/S130）；~~WORKFLOW 第 1/2/3 批 + 收尾~~ ✅（S129/S133/S134/S135）
->   2. 加料模板（先实测 NSFW 审核坎）/ 本地 vLLM/LM Studio 适配文档（S131 接续）
+>   1. ~~SKILL 阶段 1/2/3~~ ✅（S127/S128/S130）；~~WORKFLOW 第 1/2/3 批 + 收尾~~ ✅（S129/S133/S134/S135）；~~加料模板~~ ✅（S137 非敏感指令验证）
+>   2. 本地 vLLM/LM Studio 适配文档 ✅（S137 已出 docs/LOCAL-LLM.md）
 >   3. WORKFLOW 收尾后续：/api/batch 内存实现可再收编（前端已工作流模式并存，按需）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
@@ -3662,3 +3662,36 @@ NSFW 审核坎）；本地 vLLM/LM Studio 适配文档（S131 接续）。
 - 前端：tsc 无新增错误（S130 遗留的 SkillsShelfPanel type/target 错误非本阶段引入）；
   mind 相关测试 7 个 + 工具/域/agent 测试 67 个全绿
 - 注：打包版需重新打包才生效（源码已修复）
+
+---
+
+## S137 章节加料模板（非敏感指令验证）+ 本地 vLLM/LM Studio 适配文档（已完成 ✅）
+
+**背景**：主人指示加料模板（WORKFLOW 规模化用例）与本地模型适配文档都做；并纠正——
+加料模板的机制验证**不需要 NSFW 内容**，用非敏感指令（扩环境/内心/对白）走同一条
+"遍历章节+定点插入"管道即可，正好绕开 S113 实测的模型审核拦截坎（data_inspection_failed）。
+
+**交付（commit `TODO`）**：
+
+1. **章节加料模板（app.py 种子，幂等）**：
+   - 「章节加料」：prep 收集章节 → approval 闸门（重操作写回，W2）→
+     loop[read → title → enrich agent → stitch script → write_chapter]
+   - **原文保留 + 定点插入**（区别于批量改写整章覆盖）：enrich agent 用
+     【插入】…【/插入】标记协议产出插入内容，enrich_stitch script 原位并入原文
+     （无标记则追加章末保原文）
+   - 指令完全参数化（enrich_instruction）：非敏感/敏感指令同一条管道，
+     验证演示用非敏感指令
+
+2. **测试（test_workflow_enrich.py 3 用例）**：模板种入+五步 body 断言 /
+   原文保留+插入内容并入+标记展开 / stitch 节点执行；全量 566+3 绿
+
+3. **本地模型适配文档（docs/LOCAL-LLM.md）**：
+   - vLLM/LM Studio/Ollama/llama.cpp 走 openai 协议（DeepSeekModel 即通用 OpenAI
+     客户端），运行时注册表热切换
+   - 3 步接入（启动服务→注册配置→激活）+ 验证 + 6 条踩坑（代理冲突/thinking/
+     上下文窗口/max_tokens/模型能力差异/Ollama 工具调用）+ 常见故障表
+
+**测试**：全量 566 绿；ruff+format+mypy strict 全绿。
+
+**下一步**：/api/batch 内存实现可再收编（按需）；本地模型与 DeepSeek 双轨使用指南
+（LOCAL-LLM.md 已覆盖）；无剩余规划项待拍板。

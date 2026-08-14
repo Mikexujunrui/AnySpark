@@ -202,6 +202,8 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
         _seed_signal_refine_template(workflow_store, WorkflowDef)
     if "会话摘要" not in existing:
         _seed_conversation_summarize_template(workflow_store, WorkflowDef)
+    if "章节加料" not in existing:
+        _seed_enrich_template(workflow_store, WorkflowDef)
 
 
 def _seed_graph_extract_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -314,6 +316,123 @@ def _seed_conversation_summarize_template(workflow_store: Any, wf_def_cls: Any) 
     errors = wf.validate()
     if errors:
         raise ValueError(f"会话摘要模板校验失败: {errors}")
+    workflow_store.add_template(wf)
+
+
+def _seed_enrich_template(workflow_store: Any, wf_def_cls: Any) -> None:
+    """S137：章节加料模板——遍历章节 + 定点插入（原文保留，区别于批量改写整章覆盖）。
+
+    加料 = 按自定义指令在章内合适位置插入新内容（扩写环境/内心/对白等），
+    不是重写——enrich agent 产出含【插入】标记的内容，stitch script 原位并入原文。
+    指令完全参数化（enrich_instruction 运行参数）：非敏感指令（如"扩充环境细节描写"）
+    与敏感指令（如"加入亲密场景"）走同一条管道——验证用非敏感指令即可绕开审核坎。
+    重操作（写回覆盖）→ loop 前 approval 闸门（W2）。
+    运行参数：chapter_ids（缺省全部）+ enrich_instruction=加料指令。
+    """
+    wf = wf_def_cls.from_dict(
+        {
+            "name": "章节加料",
+            "description": (
+                "按自定义指令在章节中定点插入新内容（扩写环境/心理/对白/细节等），"
+                "原文保留不重写。重操作带确认闸门；逐章集合遍历。"
+                "运行参数：chapter_ids=章节id数组或逗号串（缺省全部）；"
+                "enrich_instruction=加料指令（如'扩充环境细节描写'）。"
+            ),
+            "nodes": [
+                {
+                    "id": "prep",
+                    "kind": "script",
+                    "label": "收集章节",
+                    "params": {
+                        "function": "batch_prepare",
+                        "chapter_ids": "{{chapter_ids}}",
+                        "output_key": "chapter_ids",
+                    },
+                },
+                {
+                    "id": "gate_confirm",
+                    "kind": "approval",
+                    "label": "确认加料",
+                    "params": {"prompt": "章节加料将写回所选章节（旧版进版本历史），确认执行？"},
+                },
+                {
+                    "id": "loop",
+                    "kind": "loop",
+                    "label": "逐章加料",
+                    "params": {
+                        "body": ["read", "title", "enrich", "stitch", "save"],
+                        "max_iterations": 500,
+                        "collection_var": "chapter_ids",
+                        "item_var": "cid",
+                    },
+                },
+                {
+                    "id": "read",
+                    "kind": "script",
+                    "label": "读原文",
+                    "params": {
+                        "function": "chapter_by_id",
+                        "item_var": "cid",
+                        "output_key": "chapter_text",
+                    },
+                },
+                {
+                    "id": "title",
+                    "kind": "script",
+                    "label": "取标题",
+                    "params": {
+                        "function": "chapter_title_by_id",
+                        "item_var": "cid",
+                        "output_key": "chapter_title",
+                    },
+                },
+                {
+                    "id": "enrich",
+                    "kind": "agent",
+                    "label": "生成插入内容",
+                    "params": {
+                        "instruction": (
+                            "按加料指令在本章合适位置**定点插入**新内容，不重写原文。\n"
+                            "输出格式：在原文基础上，把要插入的新内容用【插入】…【/插入】标记"
+                            "标出（可多处，标在对应位置）；其余原文逐字保留。\n"
+                            "【加料指令】{{enrich_instruction}}\n【原章】\n{{chapter_text}}\n"
+                            "【插入后的完整正文】"
+                        ),
+                        "output_key": "enriched",
+                    },
+                },
+                {
+                    "id": "stitch",
+                    "kind": "script",
+                    "label": "合并原文",
+                    "params": {
+                        "function": "enrich_stitch",
+                        "source_var": "chapter_text",
+                        "insert_var": "enriched",
+                        "output_key": "merged",
+                    },
+                },
+                {
+                    "id": "save",
+                    "kind": "script",
+                    "label": "写回章节",
+                    "params": {
+                        "function": "write_chapter",
+                        "chapter_title": "{{chapter_title}}",
+                        "text_key": "merged",
+                        "output_key": "saved",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "prep", "target": "gate_confirm"},
+                {"source": "gate_confirm", "target": "loop"},
+            ],
+        }
+    )
+    errors = wf.validate()
+    if errors:
+        raise ValueError(f"章节加料模板校验失败: {errors}")
     workflow_store.add_template(wf)
 
 
@@ -1108,6 +1227,34 @@ def build_app(
                 return NodeResult(error="conversation_summarize 缺 conv_id")
             _tasks.summarize_conversation(deps, conv_id)
             return NodeResult(output=f"会话归档摘要完成: {conv_id}")
+        if fn == "enrich_stitch":
+            """S137：加料拼接——把 agent 生成的插入内容合并进原文（定点插入，原文保留）。
+
+            agent 输出含 【插入】...【/插入】 标记（可多处；带锚点说明）：
+              原文……【插入】新增内容【/插入】原文……
+            stitch 把标记块原位展开并入原文；未提供完整标记时把插入块追加到章末。
+            params：source_var（原章文本变量名，缺省 "chapter_text"）/ insert_var
+            （agent 输出变量名，缺省 "enriched"）。输出完整增强版正文。
+            """
+            import re as _re
+
+            src = str(ctx.var(str(node.params.get("source_var") or "chapter_text")) or "")
+            insert = str(ctx.var(str(node.params.get("insert_var") or "enriched")) or "")
+            if not src.strip():
+                return NodeResult(error="enrich_stitch 缺源章文本（source_var 上游未产出）")
+            if not insert.strip():
+                return NodeResult(error="enrich_stitch 缺插入内容（insert_var 上游未产出）")
+            # 方案 A：agent 已产出带【插入】标记的完整正文 → 直接合并标记块
+            if "【插入】" in insert:
+
+                def _expand(m: _re.Match[str]) -> str:
+                    return m.group(1)
+
+                merged = _re.sub(r"【插入】\s*(.*?)\s*【/插入】", _expand, insert, flags=_re.S)
+                if merged.strip():
+                    return NodeResult(output=merged)
+            # 方案 B：agent 只产出纯插入段 → 追加到章末（保原文不丢）
+            return NodeResult(output=f"{src.rstrip()}\n\n{insert.strip()}")
         if fn == "batch_prepare":
             """S133（WORKFLOW 第 2 批）：批量任务准备——收集章节 id 集合（遍历源）。
 
