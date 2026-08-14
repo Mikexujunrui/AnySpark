@@ -1,6 +1,6 @@
 # AnySpark v4 系统当前状态（自动生成）
 
-> 生成：2026-08-14 14:08 UTC · commit `3696140 docs: PROGRESS S147 补 commit hash（ec5ffd9）` · 阶段 S147 · **非手写**：
+> 生成：2026-08-14 14:32 UTC · commit `bca5128 S147b: 批量面板旧任务 fallback——顶层结果兜底显示（主人追问：旧任务 done 后仍无显示）` · 阶段 S147 · **非手写**：
 > 由 `scripts/current_state.py` 扫描真实代码/DB 产出，改动后重跑即更新
 
 ## 一、系统规模
