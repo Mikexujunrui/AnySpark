@@ -176,6 +176,170 @@ def _migrate_templates_to_skills(skills: WritingSkillStore, db_path: str | Path)
         lib.close()
 
 
+# S129（WORKFLOW 第 1 批）：预置拆书 workflow 模板。
+# skill_refine(mode=book) 的多步 LLM 管道声明化为 workflow：
+#   prep（script 选章分批）→ loop[decompose agent 拆批 + accumulate script 累计]
+#     → merge agent（归并书名方法论）→ skeleton agent（骨架扫描）
+#     → refine agent（定点精读架构技法）→ plot agent（剧情模式双落）
+#     → finish script（解析三路候选落草稿）
+# 确定性步骤（选章/分批/累计/精读输入组装/落草稿）作 script 节点；LLM 步骤作
+# agent 节点（可断点恢复/可重试/节点级记账）。prompt 文本种子时从 skillgen 常量
+# 内联进模板（模板=数据：用户改节点指令即改拆解要求，不碰代码）。
+def _seed_book_refine_template(workflow_store: Any) -> None:
+    from anyspark.align.skillgen import (
+        GENERATE_PROMPT_BOOK,
+        GENERATE_PROMPT_PLOT_FROM_SKELETON,
+        MERGE_PROMPT_BOOK,
+        REFINE_PROMPT,
+        SKELETON_PROMPT,
+    )
+    from anyspark.workflow import WorkflowDef
+
+    # 同名幂等：已存在（含用户改过）则跳过
+    existing = {t["name"] for t in workflow_store.list_templates()}
+    if "拆书提炼" in existing:
+        return
+    wf = WorkflowDef.from_dict(
+        {
+            "name": "拆书提炼",
+            "description": (
+                "从书库参考书提炼 skill：整本书方法论（文风/节奏/结构/人设/对白/信息投放/钩子）"
+                "+ 架构机关技法 + 剧情模式 plot 子条 → 落草稿（人工确认后生效）。"
+                "运行参数：library_book_id=书库书 id（reference_lookup 可查）。"
+            ),
+            "nodes": [
+                {
+                    "id": "prep",
+                    "kind": "script",
+                    "label": "选章分批",
+                    "params": {
+                        "function": "book_refine_prepare",
+                        "library_book_id": "{{library_book_id}}",
+                        "output_key": "prepared",
+                    },
+                },
+                {
+                    "id": "loop",
+                    "kind": "loop",
+                    "label": "分批拆解",
+                    "params": {
+                        "body": ["decompose", "accumulate"],
+                        "max_iterations": 24,  # 安全上限（实际=批次集合长度）
+                        "collection_var": "prepared",
+                        "item_var": "batch",
+                    },
+                },
+                {
+                    "id": "decompose",
+                    "kind": "agent",
+                    "label": "拆解本批",
+                    "params": {
+                        "instruction": GENERATE_PROMPT_BOOK + "\n（代表批，整章）\n{{batch}}\n",
+                        "output_key": "partial",
+                    },
+                },
+                {
+                    "id": "accumulate",
+                    "kind": "script",
+                    "label": "累计批次",
+                    "params": {
+                        "function": "book_refine_accumulate",
+                        "item_var": "partial",
+                        "list_var": "partials",
+                        "output_key": "partials",
+                    },
+                },
+                {
+                    "id": "merge",
+                    "kind": "agent",
+                    "label": "归并方法论",
+                    "params": {
+                        "instruction": MERGE_PROMPT_BOOK + "\n{{partials}}\n",
+                        "output_key": "merged",
+                    },
+                },
+                {
+                    "id": "titles",
+                    "kind": "script",
+                    "label": "取章标题",
+                    "params": {
+                        "function": "book_refine_titles",
+                        "library_book_id": "{{library_book_id}}",
+                        "output_key": "titles_text",
+                    },
+                },
+                {
+                    "id": "skeleton",
+                    "kind": "agent",
+                    "label": "骨架扫描",
+                    "params": {
+                        "instruction": SKELETON_PROMPT.format(book_name="本书")
+                        + "\n{{titles_text}}\n",
+                        "output_key": "skeleton_note",
+                    },
+                },
+                {
+                    "id": "refine_input",
+                    "kind": "script",
+                    "label": "精读输入",
+                    "params": {
+                        "function": "book_refine_refine_input",
+                        "note": "{{skeleton_note}}",
+                        "library_book_id": "{{library_book_id}}",
+                        "output_key": "refine_excerpt",
+                    },
+                },
+                {
+                    "id": "refine",
+                    "kind": "agent",
+                    "label": "定点精读",
+                    "params": {
+                        "instruction": REFINE_PROMPT.format(book_name="本书")
+                        + "\n{{refine_excerpt}}\n",
+                        "output_key": "arch_cands",
+                    },
+                },
+                {
+                    "id": "plot",
+                    "kind": "agent",
+                    "label": "剧情模式",
+                    "params": {
+                        "instruction": GENERATE_PROMPT_PLOT_FROM_SKELETON + "\n{{skeleton_note}}\n",
+                        "output_key": "plot_cands",
+                    },
+                },
+                {
+                    "id": "finish",
+                    "kind": "script",
+                    "label": "落草稿",
+                    "params": {
+                        "function": "book_refine_finish",
+                        "merge": "{{merged}}",
+                        "arch": "{{arch_cands}}",
+                        "plot": "{{plot_cands}}",
+                        "refine_excerpt": "{{refine_excerpt}}",
+                        "output_key": "finish_report",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "prep", "target": "loop"},
+                {"source": "loop", "target": "merge"},
+                {"source": "merge", "target": "titles"},
+                {"source": "titles", "target": "skeleton"},
+                {"source": "skeleton", "target": "refine_input"},
+                {"source": "refine_input", "target": "refine"},
+                {"source": "refine", "target": "plot"},
+                {"source": "plot", "target": "finish"},
+            ],
+        }
+    )
+    errors = wf.validate()
+    if errors:
+        raise ValueError(f"拆书模板校验失败: {errors}")
+    workflow_store.add_template(wf)
+
+
 # S55 #3 注入块分层缓存：stable 块（跨请求不变）按签名缓存，volatile 块每次组装。
 # 签名=底层数据内容（任何增删改 → 签名变 → 缓存失效），避免长会话重复渲染。
 
@@ -308,6 +472,10 @@ def build_app(
     # agent 节点=干净单次 LLM 调用；script 节点=确定性函数（read/review）；
     # approval=等待人工。
     workflow_store = WorkflowStore(real_db)
+    # S129（WORKFLOW 第 1 批）：预置拆书模板——把 skill_refine(mode=book) 的多步 LLM 管道
+    # 声明化为 workflow（确定性步骤=script 节点，LLM 步骤=agent 节点，可断点/可编辑）。
+    # prompt 文本在种子时从 skillgen 常量内联（模板=数据，用户可改拆解指令不碰代码）。
+    _seed_book_refine_template(workflow_store)
     workflow_generator = WorkflowGenerator(model)
     # S65 互动推演（独立扩展包 anyspark-play）：扮演角色多轮选择推进的推演树
     # S65：拟人化评审团面板（系统评审员随包分发 + 用户自定义覆盖 data/reviewers/）
@@ -597,6 +765,242 @@ def build_app(
             if len(lines) == 1:
                 return NodeResult(output=f"参考书中未命中「{keyword}」（含图谱/设定层）。")
             return NodeResult(output="\n\n".join(lines))
+        if fn == "book_refine_prepare":
+            """S129（WORKFLOW 第 1 批）：拆书准备——从书库读全书 → 选章 → 分批。
+
+            确定性步骤（复用 skillgen 选章/分批逻辑）：
+            params.library_book_id：书库书 id（支持 {{var}} 解析，如 run params 传入）
+            params.batch_size：每批章数（缺省 4，对齐 skillgen._BATCH_SIZE）
+            输出 JSON：{"batches": [...], "titles": [...]}——batches 供 loop collection_var
+            遍历，titles 供骨架扫描（章标题轨迹）。
+            """
+            import json as _json
+
+            from anyspark.align.skillgen import (
+                _BATCH_SIZE as _SK_BATCH,
+            )
+            from anyspark.align.skillgen import (
+                _build_batches as _build_batches_fn,
+            )
+            from anyspark.align.skillgen import (
+                _parse_chapters as _parse_chapters_fn,
+            )
+            from anyspark.align.skillgen import (
+                _select_structural_chapters as _select_fn,
+            )
+
+            bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
+            if not bid:
+                return NodeResult(error="book_refine_prepare 缺 library_book_id")
+            try:
+                batch_size = max(1, min(8, int(str(node.params.get("batch_size") or _SK_BATCH))))
+            except ValueError:
+                batch_size = _SK_BATCH
+            if library is None:
+                return NodeResult(error="书库不可用（未装配）")
+            book = library.get_book(bid)
+            if book is None:
+                return NodeResult(error=f"书库无此书：{bid}")
+            source = library.read_book(bid, max_chars=None).strip()
+            if not source:
+                return NodeResult(error=f"书库《{book['name']}》无内容（先导入文本）")
+            chaps = _parse_chapters_fn(source)
+            if len(chaps) < 5:  # 无章节结构回退均匀抽样（对齐 generate_book）
+                batches = [source]
+                titles = []
+            else:
+                selected = _select_fn(chaps)
+                batches = _build_batches_fn(chaps, selected, batch_size)
+                titles = [t for t, _ in chaps]
+            return NodeResult(
+                output=_json.dumps(
+                    {"batches": batches, "titles": titles, "book_name": book["name"]},
+                    ensure_ascii=False,
+                )
+            )
+        if fn == "book_refine_titles":
+            """S129：取全书章标题（骨架扫描输入——标题轨迹无正文）。
+
+            params.library_book_id：书库书 id。输出："第1章 标题\n第2章 标题..."
+            （超 _MAX_SKELETON_TITLES 抽稀，对齐 skillgen 骨架扫描）。
+            """
+            from anyspark.align.skillgen import (
+                _MAX_SKELETON_TITLES as _SK_TITLES,
+            )
+            from anyspark.align.skillgen import (
+                _parse_chapters as _parse_chapters_fn,
+            )
+
+            bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
+            if not bid:
+                return NodeResult(error="book_refine_titles 缺 library_book_id")
+            if library is None:
+                return NodeResult(error="书库不可用（未装配）")
+            book = library.get_book(bid)
+            if book is None:
+                return NodeResult(error=f"书库无此书：{bid}")
+            source = library.read_book(bid, max_chars=None).strip()
+            chaps = _parse_chapters_fn(source)
+            n = len(chaps)
+            if n < 1:
+                return NodeResult(output=f"《{book['name']}》（无章节标题）")
+            titles = [t for t, _ in chaps]
+            if n > _SK_TITLES:
+                step = n / _SK_TITLES
+                titles = [titles[int(i * step)] for i in range(_SK_TITLES - 1)] + [titles[-1]]
+            lines = [f"第{i + 1}章 {t}" for i, t in enumerate(titles)]
+            return NodeResult(output=f"《{book['name']}》\n" + "\n".join(lines))
+        if fn == "book_refine_accumulate":
+            """S129：累计单批拆解结果 → partials JSON 数组。
+            读 params.item_var（缺省 "partial"）对应的上游 agent 输出，append 进
+            params.list_var（缺省 "partials"）数组；输出更新后的数组（供归并 agent 读）。
+            """
+            import json as _json
+
+            item_var = str(node.params.get("item_var") or "partial")
+            list_var = str(node.params.get("list_var") or "partials")
+            item = str(ctx.var(item_var) or "")
+            if not item.strip():
+                return NodeResult(error=f"book_refine_accumulate 缺 {item_var}（上游未产出）")
+            current = ctx.var(list_var)
+            try:
+                arr = _json.loads(current) if isinstance(current, str) and current.strip() else []
+            except Exception:
+                arr = []
+            arr.append(item)
+            return NodeResult(output=_json.dumps(arr, ensure_ascii=False))
+        if fn == "book_refine_refine_input":
+            """S129：定点精读输入准备——从骨架笔记定位机关章 → 精读原文片段。
+
+            复用 skillgen 的 _extract_chapter_nums / _locate_mechanism_passages：
+            骨架笔记提到机关章号 → 拼机关章 + 首尾章 + 关键词定位段（确定性，防案例幻觉的
+            先给原文）。params.note：骨架笔记（{{var}} 解析）；params.library_book_id。
+            """
+            from anyspark.align.skillgen import (
+                _extract_chapter_nums as _ext_nums,
+            )
+            from anyspark.align.skillgen import (
+                _locate_mechanism_passages as _locate_passages,
+            )
+
+            note = _wf_resolve(str(node.params.get("note") or ""), ctx).strip()
+            bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
+            if not note or not bid:
+                return NodeResult(error="book_refine_refine_input 缺 note/library_book_id")
+            if library is None:
+                return NodeResult(error="书库不可用（未装配）")
+            book = library.get_book(bid)
+            if book is None:
+                return NodeResult(error=f"书库无此书：{bid}")
+            source = library.read_book(bid, max_chars=None).strip()
+            from anyspark.align.skillgen import _parse_chapters as _parse_chapters_fn
+
+            chaps = _parse_chapters_fn(source)
+            if len(chaps) < 2:
+                return NodeResult(output="（章节不足，跳过定点精读）")
+            nums = _ext_nums(note)
+            idxs: set[int] = set()
+            for a, b in nums:
+                for k in range(a, min(b, a + 4) + 1):
+                    if 1 <= k <= len(chaps):
+                        idxs.add(k - 1)
+            idxs.add(0)
+            idxs.add(len(chaps) - 1)
+            ref_idx = sorted(i for i in idxs if 0 < i < len(chaps) - 1)
+            ordered = ([*ref_idx, 0, len(chaps) - 1])[:6]
+            parts = []
+            for i in ordered:
+                t, body = chaps[i]
+                parts.append(f"【第{i + 1}章 {t}】\n{body[:4000]}")
+            passages = _locate_passages(chaps, note)
+            excerpt = "\n\n".join([*passages, *parts])
+            return NodeResult(output=f"{note[:2500]}\n\n{excerpt}")
+        if fn == "book_refine_finish":
+            """S129：拆书落草稿——解析三路 agent 候选 → skills.add_draft。
+
+            params：merge(书名方法论)/arch(架构技法)/plot(剧情模式) 三路文本
+            （{{var}} 解析）+ refine_excerpt（精读原文，供架构技法案例机器校验）。
+            确定性解析复用 skillgen._parse_skills/_parse_templates（含枚举校验回落）
+            + _sanitize_examples（防案例幻觉：引号句必须逐字在精读片段）。
+            类型映射对齐 generate_book：merge→both（文风给写作、结构给主循环）；
+            arch→main（架构机关给主循环）；plot→plot（四要素进 ext）。
+            """
+            import json as _json
+
+            from anyspark.align.skillgen import (
+                _parse_skills as _ps,
+            )
+            from anyspark.align.skillgen import (
+                _parse_templates as _pt,
+            )
+            from anyspark.align.skillgen import (
+                _sanitize_examples as _san,
+            )
+
+            merge_raw = _wf_resolve(str(node.params.get("merge") or ""), ctx).strip()
+            arch_raw = _wf_resolve(str(node.params.get("arch") or ""), ctx).strip()
+            plot_raw = _wf_resolve(str(node.params.get("plot") or ""), ctx).strip()
+            excerpt = _wf_resolve(str(node.params.get("refine_excerpt") or ""), ctx)
+            if skills is None:
+                return NodeResult(error="skills 未装配（无法落草稿）")
+            cands: list[dict[str, str]] = []
+            # 书名方法论（GENERATE_PROMPT_BOOK 单元素输出）→ both
+            for raw in _ps(merge_raw)[:1]:
+                raw["type"] = "both"
+                cands.append(raw)
+            # 架构技法（REFINE_PROMPT 多元素）→ main + 案例机器校验
+            arch_cands = _ps(arch_raw)
+            for ac in arch_cands:
+                ac["type"] = "main"
+            cands.extend(_san(arch_cands, excerpt))
+            # 剧情模式（骨架笔记版四要素）→ plot（content 由 description 派生）
+            for pc in _pt(plot_raw):
+                cands.append(
+                    {
+                        "name": pc["name"],
+                        "description": pc["description"],
+                        "content": f"剧情模式：{pc['description']}",
+                        "example": "",
+                        "tags": "剧情模式",
+                        "type": "plot",
+                        "granularity": pc["granularity"],
+                        "position": pc["position"],
+                        "function": pc["function"],
+                        "params": pc["params"],
+                    }
+                )
+            if not cands:
+                return NodeResult(output="（无有效候选）")
+            added = 0
+            for cd in cands:
+                typ = cd.get("type", "writing")
+                ext = ""
+                if typ == "plot":
+                    params: Any = cd.get("params", [])
+                    if isinstance(params, str):
+                        params = [p.strip() for p in params.split(",") if p.strip()]
+                    ext = _json.dumps(
+                        {
+                            "granularity": cd.get("granularity", "章"),
+                            "position": cd.get("position", "发展"),
+                            "function": cd.get("function", "主线"),
+                            "params": params or [],
+                        },
+                        ensure_ascii=False,
+                    )
+                d = skills.add_draft(
+                    name=str(cd.get("name", ""))[:120],
+                    description=str(cd.get("description", ""))[:500],
+                    content=str(cd.get("content", "")),
+                    example=str(cd.get("example", ""))[:2000],
+                    tags=str(cd.get("tags", "")),
+                    type=typ,
+                    ext=ext,
+                    source="workflow",
+                )
+                if d:
+                    added += 1
+            return NodeResult(output=f"已存 {added} 条 skill 草稿（人工确认后生效）")
         return NodeResult(error=f"未注册的 script 函数: {fn}")
 
     def _wf_run_approval(ctx: RunContext, node: Any) -> NodeResult:

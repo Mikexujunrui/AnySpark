@@ -204,7 +204,8 @@ class WorkflowDef:
             if syntax_errors:
                 errors.append(f"边 {e.id} 条件表达式语法错误: {'; '.join(syntax_errors)}")
         # gate 出边必须带 condition（无 condition 的边视为 default 分支）
-        # loop 必须有 body + max_iterations
+        # loop 必须有 body + max_iterations（S129：collection_var 模式迭代数=集合长度，
+        # max_iterations 仍作安全上限必填）
         for n in self.nodes:
             if n.kind == "loop":
                 body = n.params.get("body")
@@ -214,6 +215,14 @@ class WorkflowDef:
                     errors.append(f"loop 节点 {n.id} 的 body 引用未知节点")
                 if int(n.params.get("max_iterations", 0)) <= 0:
                     errors.append(f"loop 节点 {n.id} 缺 max_iterations（>0 防死循环）")
+                # S129：collection_var 模式与 continue_condition 模式二选一
+                cv = n.params.get("collection_var", "")
+                cc = str(n.params.get("continue_condition") or "")
+                if cv and cc:
+                    errors.append(
+                        f"loop 节点 {n.id} 同时声明 collection_var 与 continue_condition"
+                        "（集合遍历与条件循环二选一）"
+                    )
         return errors
 
     def is_valid(self) -> bool:

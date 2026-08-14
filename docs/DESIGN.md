@@ -811,6 +811,10 @@ ExternalLibrary 类保留在 template 包供独立测试，app 装配退役。�
   复用 codex 沙箱）/ `approval`（人工确认点）/ `gate`（条件分支）/ `loop`（循环）。
 - 边：`{source, target, condition?}`——condition 挂在边上表达分支
   （gate 出边多条件取第一个为真；loop 用 continue_condition + 最大迭代次数防死循环）。
+- S129（W3-A 落地）：**loop 集合遍历原语**——params.collection_var 指向上游 JSON 数组
+  （或 {batches: [...]} 对象），逐项写入 item_var（缺省 "item"）供 body 引用，迭代数=
+  集合长度（max_iterations 安全上限）；与 continue_condition 条件循环二选一（校验互斥）。
+  断点恢复：从 output 记录迭代数续跑，前几轮累计结果已持久化不重跑。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/

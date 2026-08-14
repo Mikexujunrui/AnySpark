@@ -274,11 +274,20 @@ class WorkflowEngine:
         self._store.update_node_state(task_id, node, "done", output="(end)")
 
     def _run_loop(self, ctx: RunContext, node: WorkflowNode) -> None:
-        """循环：按 body 顺序执行；continue_condition 为真继续，max_iterations 封顶。"""
+        """循环：按 body 顺序执行；continue_condition 为真继续，max_iterations 封顶。
+
+        S129（PLAN-WORKFLOW-UNIFY W3-A）：补**集合遍历原语**——loop 支持"对集合逐项"：
+        params.collection_var 非空时从上游结果读 JSON 数组，逐项写入 params.item_var
+        （缺省 "item"）供 body 节点 {{item}} 引用；迭代数 = 集合长度（max_iterations
+        作安全上限）。旧语义（continue_condition 循环）兼容保留。
+        断点恢复：从 output 记录的迭代数续跑（前几轮 body 的累计结果已持久化）。
+        """
         task_id = ctx.task_id
         params = node.params
         body_ids: list[str] = list(params.get("body") or [])
         max_iter = int(params.get("max_iterations") or 1)
+        collection_var = str(params.get("collection_var") or "")
+        item_var = str(params.get("item_var") or "item")
         cond = str(params.get("continue_condition") or "")
         # 断点恢复：从 output 记录的迭代数续跑
         try:
@@ -287,6 +296,50 @@ class WorkflowEngine:
             prev = {}
         start_iter = int(prev.get("iterations", 0))
         self._store.update_node_state(task_id, node, "running")
+
+        # 集合遍历模式：collection_var 指向 JSON 数组（或 {batches: [...]} 对象，S129 拆书
+        # 准备脚本输出对象含批次+书名+标题），逐项处理
+        collection: list[Any] = []
+        if collection_var:
+            raw = ctx.results.get(collection_var, [])
+            if isinstance(raw, str):
+                try:
+                    raw = json.loads(raw)
+                except Exception:
+                    raw = []
+            if isinstance(raw, dict) and isinstance(raw.get("batches"), list):
+                # 拆书准备脚本产出：{"batches": [...], "titles": [...], "book_name": ...}
+                raw = raw["batches"]
+            if isinstance(raw, list):
+                collection = raw
+            # 已执行轮次直接跳过（前几轮累计结果已在 results/partials 持久化）
+            iteration = start_iter
+            while iteration < len(collection) and iteration < max_iter:
+                if self._stop.is_set():
+                    raise _StopRequested()
+                ctx.results[item_var] = collection[iteration]
+                for nid in body_ids:
+                    body_node = ctx.definition.node(nid)
+                    if body_node is None:
+                        continue
+                    self._execute_node(ctx, body_node, force=True)
+                    if self._store.node_status(task_id, nid) == "failed":
+                        raise RuntimeError(f"loop 体节点 {nid} 失败")
+                iteration += 1
+                self._store.update_node_state(
+                    task_id,
+                    node,
+                    "running",
+                    output=json.dumps({"iterations": iteration}, ensure_ascii=False),
+                )
+            self._store.update_node_state(
+                task_id,
+                node,
+                "done",
+                output=json.dumps({"iterations": iteration}, ensure_ascii=False),
+            )
+            self._advance(ctx, node)
+            return
 
         iteration = start_iter
         while iteration < max_iter:

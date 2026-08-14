@@ -243,6 +243,137 @@ def test_engine_loop_break_early() -> None:
     assert runner.calls == 2  # 第二次无硬伤 → 退出
 
 
+def test_engine_loop_collection_iteration() -> None:
+    """S129（W3-A）：loop 集合遍历原语——对集合逐项处理。
+
+    collection_var 指向上游 JSON 数组，逐项写入 {{item}} 供 body 消费；
+    迭代数 = 集合长度；body 每轮拿到对应项。
+    """
+    seen: list[str] = []
+
+    class CollectionRunner:
+        def __call__(self, ctx: Any, node: WorkflowNode) -> NodeResult:
+            if node.params.get("instruction") == "准备批次":
+                # 上游 script：产出批次集合（JSON 字符串）
+                return NodeResult(output='["批1", "批2", "批3"]')
+            if node.params.get("instruction") == "处理单批":
+                seen.append(str(ctx.var("item")))  # 当前项注入
+                return NodeResult(output=f"处理完:{ctx.var('item')}")
+            return NodeResult(output="ok")
+
+    store, _ = _new_store()
+    wf = WorkflowDef.from_dict(
+        {
+            "name": "集合遍历",
+            "nodes": [
+                {
+                    "id": "prep",
+                    "kind": "agent",
+                    "params": {"instruction": "准备批次", "output_key": "batches"},
+                },
+                {
+                    "id": "l",
+                    "kind": "loop",
+                    "params": {
+                        "body": ["item"],
+                        "max_iterations": 10,  # 安全上限（实际 3 轮=集合长度）
+                        "collection_var": "batches",
+                        "item_var": "item",
+                    },
+                },
+                {
+                    "id": "item",
+                    "kind": "agent",
+                    "params": {"instruction": "处理单批", "output_key": "partial"},
+                },
+                {"id": "end", "kind": "agent", "params": {"instruction": "收尾"}},
+            ],
+            "edges": [
+                {"source": "prep", "target": "l"},
+                {"source": "l", "target": "end"},
+            ],
+        }
+    )
+    assert wf.is_valid(), wf.validate()
+    task_id = store.create_task(wf, book_id="main")
+    result = WorkflowEngine(store, CollectionRunner()).run_task(task_id)
+    assert result["status"] == "done"
+    assert seen == ["批1", "批2", "批3"]  # 逐项处理且顺序正确
+    # 迭代数 = 集合长度（3，不是 max_iterations 10）
+    loop_state = next(s for s in result["node_states"] if s["node_id"] == "l")
+    assert '"iterations": 3' in loop_state["output"]
+
+
+def test_engine_loop_collection_resume() -> None:
+    """S129：集合遍历断点恢复——中断后从记录迭代数续跑（前几轮累计已持久化）。"""
+    import json as _json
+
+    db = Path(tempfile.mkdtemp()) / "wf.db"
+    store = WorkflowStore(db)
+
+    class _R:
+        def __init__(self) -> None:
+            self.items: list[str] = []
+
+        def __call__(self, ctx: Any, node: WorkflowNode) -> NodeResult:
+            if node.params.get("instruction") == "准备批次":
+                return NodeResult(output=_json.dumps(["批1", "批2", "批3"]))
+            if node.params.get("instruction") == "处理单批":
+                self.items.append(str(ctx.var("item")))
+                return NodeResult(output=f"处理完:{ctx.var('item')}")
+            return NodeResult(output="ok")
+
+    wf = WorkflowDef.from_dict(
+        {
+            "name": "集合遍历恢复",
+            "nodes": [
+                {
+                    "id": "prep",
+                    "kind": "agent",
+                    "params": {"instruction": "准备批次", "output_key": "batches"},
+                },
+                {
+                    "id": "l",
+                    "kind": "loop",
+                    "params": {
+                        "body": ["item"],
+                        "max_iterations": 10,
+                        "collection_var": "batches",
+                        "item_var": "item",
+                    },
+                },
+                {
+                    "id": "item",
+                    "kind": "agent",
+                    "params": {"instruction": "处理单批", "output_key": "partial"},
+                },
+            ],
+            "edges": [{"source": "prep", "target": "l"}],
+        }
+    )
+    # 模拟中断：手工把 loop 进度记为 2 轮（前两轮已跑完并持久化）
+    task_id = store.create_task(wf, book_id="main")
+    r = _R()
+    eng = WorkflowEngine(store, r)
+    # 先完整跑一遍拿 node id 语义；再新建任务模拟恢复
+    eng.run_task(task_id)
+    assert r.items == ["批1", "批2", "批3"]
+
+    # 恢复场景：同一 loop 定义，progress=2 轮 → 只补跑第 3 项
+    task2 = store.create_task(wf, book_id="main")
+    conn = store._conn
+    conn.execute(
+        "UPDATE workflow_node_states SET output='{\"iterations\": 2}' "
+        "WHERE task_id=? AND node_id='l'",
+        (task2,),
+    )
+    conn.commit()
+    r2 = _R()
+    res = WorkflowEngine(store, r2).run_task(task2)
+    assert res["status"] == "done"
+    assert r2.items == ["批3"]  # 只补跑未完成项（前两轮不重跑）
+
+
 def test_engine_auto_retry() -> None:
     class RetryRunner:
         def __init__(self) -> None:

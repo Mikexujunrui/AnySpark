@@ -37,11 +37,11 @@
 > - **并行会话 S120-S126 已全部提交**（run_subagent/调研模板/资料库闭环/文档清洗），门禁红已清零
 > - **两个规划已拍板待实施**（12 决策点主人全部确认）：
 >   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1（type 字段+拆书双落）✅ + S128 阶段 2（templates 并入+探索改读）✅ 已实施
->   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）
+>   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）——S129 第 1 批（拆书模板化打样）已实施
 > - **下一步开工（建议顺序）**：
->   1. ~~SKILL 阶段 1：拆书双落~~ ✅（S127 已完成）；~~SKILL 阶段 2：templates 并入~~ ✅（S128 已完成）
->   2. WORKFLOW 第 1 批：**拆书模板化**——动 `skillgen.py`/拆书链路，同一 writer 顺序做（避同文件冲突）
->   3. 之后 SKILL 阶段 3（书名包 pack_id + 前端 type 分组）/ WORKFLOW 加料模板（先实测 NSFW 审核坎）
+>   1. ~~SKILL 阶段 1：拆书双落~~ ✅（S127）；~~SKILL 阶段 2：templates 并入~~ ✅（S128）；~~WORKFLOW 第 1 批：拆书模板化打样~~ ✅（S129）
+>   2. SKILL 阶段 3：书名包（pack_id 聚合 + 整包/单条引用路由，后端为主）——容器已完整，包是最后一步
+>   3. 或 WORKFLOW 第 2 批：批量改写/审读 → 模板（含 approval 闸门 + 集合遍历已验证）；加料模板（先实测 NSFW 审核坎）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
@@ -56,7 +56,7 @@
   4. **设定档渐进式披露**：条目多时分段/按需注入（当前全量）
   5. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
   6. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
-  7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路未实施）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书打样→批量→轻流程），每批对拍验证可回退
+  7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路；S129 第 1 批拆书打样已完成）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书打样 ✅→批量→轻流程），每批对拍验证可回退
   8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127 阶段 1 + S128 阶段 2 已完成：type 字段 + 拆书双落 + templates 并入）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（整包/单条引用），拆书一次产出整包（含剧情模式骨架派生）；templates 已并入 ✅；workflow（执行）保持独立——分三阶段迁移（加 type ✅ → 并 templates ✅ → 书名包），消除 skills/templates 归属竞争
 - ~~httpx2 迁移~~ ✅（S66 完成）；~~Autopilot~~ —— 已划掉：S59 工作流（loop+gate+approval+AI 生成流程）已吸收其全部机制价值，需要"全书自动连写"时用 workflow_generate + 人工确认 + 跑循环即可，不另起包（同评审团判断逻辑）
 - 纪律：每阶段开工前向主人确认；对设计的偏离/新增先确认再改 DESIGN.md
@@ -3394,3 +3394,52 @@ S127 拆书 plot 子条从此进入探索模板源，生产/消费闭环打通�
 
 **下一步（按计划）**：阶段 3（书名包 pack_id + 前端 type 分组/包视图）；或 WORKFLOW 第 1 批
 （拆书模板化——节点导入 skill 依赖统一容器，现在容器已完整）。
+
+---
+
+## S129 WORKFLOW 第 1 批——拆书模板化（预置模板 + 集合遍历原语 + 对拍）（已完成 ✅）
+
+**背景**：PLAN-WORKFLOW-UNIFY 第 1 批（W1-B/W3-A 已拍板）。目标：把 skill_refine(mode=book)
+的多步 LLM 管道声明化为预置 workflow 模板——确定性步骤作 script 节点、LLM 步骤作 agent
+节点；验证标准：模板结果与现工具同输入对拍一致（含骨架/精读/案例校验全链路）。
+
+**交付（commit `TODO`）**：
+
+1. **引擎补集合遍历原语（W3-A 落地，workflow/engine.py + definition.py）**：
+   - loop 支持 collection_var 指向上游 JSON 数组（或 {batches:[...]} 对象），逐项写入
+     item_var（缺省 "item"）供 body 引用；迭代数=集合长度（max_iterations 安全上限）
+   - 与 continue_condition 条件循环互斥（validate 校验）；断点恢复从记录迭代数续跑
+     （前几轮累计结果已持久化不重跑）；兼容旧条件循环语义
+
+2. **script 函数 5 个（app.py _wf_run_script）**：
+   - book_refine_prepare：读库→选章→分批（复用 skillgen 选章/分批）→ 批次 JSON+书名
+   - book_refine_titles：取章标题轨迹（骨架扫描输入，含书名头）
+   - book_refine_accumulate：累计单批拆解结果 → partials JSON 数组
+   - book_refine_refine_input：骨架笔记→机关章定位→精读原文片段（防案例幻觉先给原文）
+   - book_refine_finish：解析三路候选（_parse_skills/_parse_templates + _sanitize_examples
+     案例机器校验）→ 落草稿（type：merge→both / arch→main / plot→plot+ext 四要素）
+
+3. **预置模板「拆书提炼」（app.py _seed_book_refine_template，幂等种子）**：
+   - 11 节点有向无环链：prep(script) → loop[decompose agent 拆批 + accumulate script 累计]
+     → merge agent → titles script → skeleton agent → refine_input script → refine agent
+     → plot agent → finish script
+   - agent 节点指令=种子时从 skillgen prompt 常量内联（模板=数据，用户改节点指令即改
+     拆解要求，不碰代码）；运行参数 library_book_id
+
+4. **对拍验证（test_workflow_refine.py 3 用例）**：
+   - 模板已种入 + 节点结构（script/loop/agent/collection_var）断言
+   - 全链路运行 → 落草稿三种 type 齐（both/main/plot，双落打通）
+   - 同 fake 模型：模板落草稿与 SkillGenerator.generate_book 直出**同名同 type**（对拍一致）
+
+**测试**：workflow 全量 18（含集合遍历/断点恢复 2 新用例）+ app 3 对拍用例全绿；
+ruff+format+mypy strict 全绿。工具（skill_refine）保留——W1-B 归一不降级，
+第 2 批再做工具→模板路由化（含 approval 闸门）。
+
+**踩坑**：
+- 测试 fake 模型判定顺序：定点精读 prompt 内嵌骨架笔记（含"结构分析师"字样），必须
+  先判"关键章节原文"再判骨架——否则精读误命中骨架分支
+- workflow agent 节点指令放 user 消息（system 可选）——fake 模型要合并全消息判 prompt 特征
+- _wf_run_script 内局部变量不能叫 chapters（与外层 ChapterStore 同名 → mypy 类型污染）
+
+**下一步**：WORKFLOW 第 2 批（批量改写/审读→模板，集合遍历已验证）+ 加料模板
+（先实测 NSFW 审核坎）；或 SKILL 阶段 3（书名包 pack_id）。

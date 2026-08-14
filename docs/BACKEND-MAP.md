@@ -104,6 +104,11 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
   → 确认后入库 skills 表（type 字段：both/main/plot）
   → 写"这本书风格"时 write_chapter 的 skills 点名「书名」→ 方法论注入；
     主循环规划时点名架构技法 → 全书机关参考；探索（阶段 2）读 type=plot 派生方向
+
+  ✦ S129 同链路 workflow 化（预置模板「拆书提炼」，WORKFLOW 第 1 批打样）：
+    确定性步骤（选章/分批/累计/精读输入/落草稿）作 script 节点；LLM 步骤
+    （分批拆解/归并/骨架/精读/剧情模式）作 agent 节点，loop 集合遍历逐批拆解
+    （W3-A 遍历原语）——可断点/可编辑/可重试；与工具同输入对拍一致
 ```
 
 ## 3. 路由层职责表（16 router，~166 端点）
@@ -124,7 +129,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials（S128：模式库读 skill 表 type=plot） | plots/skills/materials |
 | routes_graph | 图谱 types/entities/relations/events/context/extract/impact | graph/graph_extractor/impact |
 | routes_story | 计划 plan/叙事树 nodes/threads/layout | plans/story_tree/story_threads |
-| routes_workflow | 工作流模板/草稿/任务 CRUD+run（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115） | workflow_store/engine/generator |
+| routes_workflow | 工作流模板/草稿/任务 CRUD+run（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置拆书模板 S129：script 函数 book_refine_prepare/titles/accumulate/refine_input/finish） | workflow_store/engine/generator |
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 
