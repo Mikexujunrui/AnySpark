@@ -88,7 +88,7 @@ def make_graph_query_implementer(graph: Any, book_id: str = "main") -> tuple[Any
         description=(
             "查询知识图谱：按关键词/名字查实体（角色/地点/事件/物件/设定，含当前状态）、"
             "实体间关系、时间线事件。写作前需要确认某人/某地/某设定的已知信息时使用"
-            "（系统已自动注入当前时空点已知事实，本工具用于查更细的细节）。"
+            "（图谱不常驻注入——早期设定/角色状态主动查，避免漏设定）。"
         ),
         params=[
             ParamSpec(

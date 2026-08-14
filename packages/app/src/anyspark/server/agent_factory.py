@@ -98,6 +98,11 @@ def make_agent(
             subagent_deps=deps,
             # S68→S128：探索注入真实模板库（skill 表 type=plot 类，L2+L3 物理并入）
             templates=[f"{s.name}：{s.description}" for s in deps.skills.plot_skills()[:12]],
+            # S145（第三方评审 P0-1）：参考书库装配补传——此前漏传 library，
+            # reference_lookup 工具因 ctx.library is None 在生产装配中永不注册
+            # （S86 声称"检索走 agent 工具"实际落空；仅 workflow query_reference
+            # script 可用）。原子查询应开放给 agent（决策点边界：单点查询留工具）。
+            library=deps.library,
         ),
         enable_domain=enable_domain,
         enable_codex=enable_codex,

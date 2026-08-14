@@ -186,3 +186,63 @@ def test_knowledge_retrieval_is_read_only() -> None:
         assert after_settings == before_settings
     finally:
         lib.close()
+
+
+def test_reference_lookup_registered_in_production_toolkit() -> None:
+    """S145（第三方评审 P0-1）：reference_lookup 必须出现在生产装配工具集中。
+
+    回归：agent_factory 曾漏传 library → ctx.library 恒 None → 该工具因
+    `if ctx.library is not None` 永不注册（S86 声称"检索走 agent 工具"落空，
+    仅 workflow query_reference script 可用）。原子查询应开放给 agent。
+    """
+    from anyspark.core.protocol import ToolRegistry
+    from anyspark.server.toolkit import ToolContext, build_toolkit
+    from anyspark.server.tools_extensions import ExtensionToolStore
+
+    registry = build_toolkit(
+        ToolRegistry(),
+        ToolContext(
+            chapters=None,
+            workspace=None,
+            model=None,
+            graph=None,
+            plots=None,
+            plans=None,
+            settings=None,
+            materials=None,
+            ext_tools=ExtensionToolStore(_db()),
+            book_id="main",
+            library=LibraryStore(_db()),  # 非 None → reference_lookup 注册
+        ),
+    )
+    names = {s.name for s in registry.specs()}
+    assert "reference_lookup" in names, (
+        "reference_lookup 未注册——agent_factory 装配漏传 library 会导致"
+        "S86 参考书检索能力对 agent 不可用"
+    )
+
+
+def test_reference_lookup_absent_without_library() -> None:
+    """对照：library 为 None 时（未装配书库）该工具确实不注册（条件语义保持）。"""
+    from anyspark.core.protocol import ToolRegistry
+    from anyspark.server.toolkit import ToolContext, build_toolkit
+    from anyspark.server.tools_extensions import ExtensionToolStore
+
+    registry = build_toolkit(
+        ToolRegistry(),
+        ToolContext(
+            chapters=None,
+            workspace=None,
+            model=None,
+            graph=None,
+            plots=None,
+            plans=None,
+            settings=None,
+            materials=None,
+            ext_tools=ExtensionToolStore(_db()),
+            book_id="main",
+            # library 缺省 None
+        ),
+    )
+    names = {s.name for s in registry.specs()}
+    assert "reference_lookup" not in names

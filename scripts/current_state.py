@@ -126,6 +126,9 @@ def collect_runtime() -> dict[str, object]:
             book_id="main",
             subagent_deps=deps,
             templates=[],
+            # S145：补传 library——此前与 agent_factory 同漏，生成的工具清单缺
+            # reference_lookup（审计装配自带缺陷，曾掩盖该工具生产缺席）
+            library=deps.library,
         ),
     )
     specs = reg.specs()
@@ -276,7 +279,7 @@ def render_md(
     md.append(f"| 后端代码 | **{total_lines}** 行（{line_detail}） |")
     md.append("")
     md.append("## 二、能力清单\n")
-    md.append("### Agent 工具（46 个，全量注入主循环 LLM）\n")
+    md.append(f"### Agent 工具（{len(tools)} 个，全量注入主循环 LLM）\n")
     for gname, items in groups.items():
         if items:
             md.append(f"- **{gname}（{len(items)}）**：`{'` `'.join(items)}`")
