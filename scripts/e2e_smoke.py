@@ -146,6 +146,36 @@ def main() -> None:
         md = export.read().decode()
         check("导出 md", md.startswith("# "))
 
+    # S147d：批量审读全流程（真实模型 1 章）——启动→执行→loop 迭代明细保留
+    try:
+        wfs = api("/api/workflows")
+        wf_id = next(w["id"] for w in wfs if w["name"] == "批量审读")
+        run = api(
+            f"/api/workflows/{wf_id}/run",
+            {"book_id": "main", "params": {"chapter_ids": json.dumps([chapters[0]["id"]])}},
+        )
+        tid = run["task_id"]
+        t = None
+        for _ in range(120):  # 真实模型审读最长 ~4 分钟
+            t = api(f"/api/workflows/tasks/{tid}")
+            if t.get("status") in ("done", "failed"):
+                break
+            time.sleep(2)
+        check("批量审读完成", t is not None and t.get("status") == "done", str(t)[:200])
+        if t and t.get("status") == "done":
+            loop = next(
+                (s for s in (t.get("node_states") or []) if s.get("node_id") == "loop"),
+                None,
+            )
+            items = json.loads(loop["output"] or "{}").get("items", []) if loop else []
+            check(
+                "批量审读 loop 迭代明细（每章结果保留）",
+                len(items) >= 1 and any("review" in it for it in items),
+                f"items={len(items)}",
+            )
+    except Exception as e:
+        check("批量审读链路", False, str(e)[:200])
+
     print(f"\n================ 结果: {ok} 通过 / {fail} 失败 ================")
     raise SystemExit(1 if fail else 0)
 

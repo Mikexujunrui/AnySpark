@@ -18,6 +18,7 @@ import { triggerRefresh } from "../store"
 import { enqueueChat, dequeueChat, steerQueuedChat, steerChat, fetchQueues, type QueueItem } from '../api/chat'
 import { listWorkflows, runWorkflow, getWorkflowTask } from '../api/workflow'
 import { listChapters } from '../api/chapters'
+import { normalizeHistoryMessages, correctStaleBatchMessages } from '../lib/workflowParse'
 import { runCheck } from '../api/check'
 import { listSkillDrafts, promoteSkillDraft, deleteSkillDraft } from '../api/skills'
 
@@ -327,24 +328,13 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         console.log(`${DIAG_PREFIX} ChatPanel — 历史消息解析完成 | isArray=%s | count=%d | type=%s`,
           isArray, count, typeof data)
         if (isArray && count > 0) {
-          // S107b：后端返回 {role, content}，前端渲染用 {role, text}——映射字段（历史恢复空气泡根因）
-          const mapped = data
-            .map((m: any) => ({ ...m, text: (m.content ?? m.text ?? '') }))
-            // S145b：过滤空文本消息（工具轮 assistant 声明/历史残留）——防空气泡兜底
-            .filter((m: any) => m.role !== 'agent' || (m.text && m.text.trim().length > 0))
+          // S107b+S145b：后端 {role,content} → 前端 {role,text}；过滤空文本 agent 消息（空气泡根治）
+          const mapped = normalizeHistoryMessages(data)
           // Filter autopilot status messages (user text starts with "[autopilot]")
           // These are internal status records, not real user messages.
           const filtered = filterAutopilotNoise(mapped)
-          // S145b：历史里陈旧的"[批量X执行中]"消息 = 轮询中断残留（任务实际早已结束，
-          // done 会更新为完成态；没更新说明刷新/切页中断了轮询）——纠正为结束提示，
-          // 避免重开后误以为任务还在 running
-          const corrected = filtered.map((m: any) => {
-            const t = String(m.text || '')
-            if (m.role === 'agent' && /^\[批量(改写|审读)执行中\]/.test(t)) {
-              return { ...m, text: t.replace(/^\[批量(改写|审读)执行中\]/, '[批量$1任务已结束（详情见批量面板）]') }
-            }
-            return m
-          })
+          // S145b：历史里陈旧的"[批量X执行中]"消息 = 轮询中断残留（任务实际早已结束）
+          const corrected = correctStaleBatchMessages(filtered)
           if (corrected.length > 0) setMessages(corrected)
         }
         setLoaded(true)

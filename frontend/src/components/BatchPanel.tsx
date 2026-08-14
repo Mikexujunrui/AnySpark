@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import PanelHeader from "./ui/PanelHeader";
 import { listChapters } from "../api/chapters";
+import { parseLoopItems, extractFallbackResult } from "../lib/workflowParse";
 import {
   approveTask,
   getWorkflowTask,
@@ -97,13 +98,7 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
           stopWfPoll();
           setWfBusy(false);
           // S145b：done 后从 loop 节点 output 解析每迭代明细（每章结果可看）
-          const loop = (t.node_states ?? []).find((s: any) => s.node_id === "loop")
-          try {
-            const parsed = loop && loop.output ? JSON.parse(loop.output) : null
-            setWfItems(Array.isArray(parsed?.items) ? parsed.items : [])
-          } catch {
-            setWfItems([])
-          }
+          setWfItems(parseLoopItems(t))
           // S147b：顶层 results 兜底（旧引擎任务无 items → 至少展示最后一章结果）
           setWfResults((t.results as Record<string, unknown> | undefined) ?? null)
         }
@@ -311,15 +306,14 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
               )}
               {/* S147b：旧引擎任务 fallback——无迭代明细时展示顶层结果（至少最后一章） */}
               {wfTask.status === "done" && wfItems.length === 0 && wfResults && (() => {
-                const keys = ["review_report", "review", "report", "rewritten", "fixed", "saved"]
-                const hit = keys.find((k) => wfResults[k] != null && String(wfResults[k]).trim())
-                return hit ? (
+                const fb = extractFallbackResult(wfResults)
+                return fb ? (
                   <div className="border-t border-emerald-800/40 pt-2 mt-1 space-y-1">
                     <p className="text-[10px] text-zinc-500 uppercase tracking-wide">结果（旧引擎任务，仅最后迭代）</p>
                     <details className="text-[11px]" open>
                       <summary className="cursor-pointer text-emerald-300/90 hover:text-emerald-200">最后结果</summary>
                       <pre className="mt-1 text-zinc-400 whitespace-pre-wrap leading-relaxed bg-zinc-900/50 rounded p-2 max-h-48 overflow-y-auto">
-                        {String(wfResults[hit]).slice(0, 3000)}
+                        {fb.text.slice(0, 3000)}
                       </pre>
                     </details>
                   </div>

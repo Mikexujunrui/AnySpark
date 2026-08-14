@@ -184,6 +184,9 @@ def main() -> int:
             failed |= rc != 0
             rc, _ = _run([NPM, "run", "build"], fe)
             failed |= rc != 0
+            # S147d：前端单元测试（vitest run；纯函数逻辑回归锚点）
+            rc, _ = _run([NPM, "run", "test"], fe)
+            failed |= rc != 0
 
     print("\n" + "=" * 40)
     if failed:
