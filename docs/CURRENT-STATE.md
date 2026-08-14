@@ -1,6 +1,6 @@
 # AnySpark v4 系统当前状态（自动生成）
 
-> 生成：2026-08-14 15:36 UTC · commit `f14b066 S147d: 前端测试框架（vitest）+ e2e 批量链路——测试体系补全（主人要求'都补充'）` · 阶段 S147 · **非手写**：
+> 生成：2026-08-14 16:49 UTC · commit `755e2d2 docs: REPAIR-WF-SCRIPT-SPLIT 实施记录（S151 D1 完成，D2 留待按需）` · 阶段 S147 · **非手写**：
 > 由 `scripts/current_state.py` 扫描真实代码/DB 产出，改动后重跑即更新
 
 ## 一、系统规模
@@ -12,8 +12,8 @@
 | Agent 工具 | **47** 个 |
 | Workflow 模板 | **8** 个 |
 | 前端入口 | **27** 个 tab |
-| 测试 | **604** 个 |
-| 后端代码 | **28268** 行（align 4446, app 16615, check 555, core 1529, explore 837, graph 1518, template 1083, workflow 1685） |
+| 测试 | **600** 个 |
+| 后端代码 | **28249** 行（align 4376, app 16666, check 555, core 1529, explore 837, graph 1518, template 1083, workflow 1685） |
 
 ## 二、能力清单
 
