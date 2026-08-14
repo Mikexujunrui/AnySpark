@@ -851,6 +851,12 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   按钮 + api.revertChapter 真实化）；B3 批级一键回滚（POST
   /api/workflows/tasks/{id}/rollback：按 note 聚合每章最早改前快照逐个恢复，内容幂等
   跳过防循环回滚）。规模化修改（几百章批量改写/加料）具备"中断能续跑 + 改错能反悔"。
+- S140（PLAN-SCALE-SAFETY 阶段 D）：**收编内存 batch**——/api/batch/* 路由、
+  deps batches/batch_queue/batch_lock、tasks run_batch_rewrite/review、后台批量 worker
+  全部移除；批量改写/审读唯一执行路径 = 预置 workflow 模板（「批量改写」「批量审读」，
+  断点/续跑/回滚安全网）。前端 BatchPanel 删旧内存模式只留工作流；ChatPanel
+  handleBatchProposal（agent 提议→批准）改走 runWorkflow 模板执行；batchStore/api/batch
+  死代码删除。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/

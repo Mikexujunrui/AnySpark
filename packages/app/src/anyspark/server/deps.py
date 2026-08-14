@@ -7,7 +7,7 @@ router 工厂函数 make_xxx_router(deps: AppDeps) 统一注入。行为零变�
 
 进程内共享状态（必须单例，随 deps 传递，不能每 router 重建）：
 - active_tokens / active_agents / active_lock：chat 取消与插话
-- bg_queue / batches / batch_lock：后台任务队列与批量状态
+- bg_queue：后台任务队列（章节抽取/提炼/摘要）
 """
 
 from __future__ import annotations
@@ -60,14 +60,13 @@ from anyspark.workflow import WorkflowEngine, WorkflowGenerator, WorkflowStore
 class BgTask:
     """后台任务（S62：取代元组魔法派发——kind 字段 + 类型化负载，新增任务类型只加一条）。"""
 
-    kind: str  # chapter|refine|skill_drafts|summarize|batch_rewrite|batch_review
+    kind: str  # chapter|refine|skill_drafts|summarize
     title: str = ""
     content: str = ""
     order: int = 0
     line: str = "main"
     book_id: str = "main"  # S85：章节抽取按书隔离（手动编辑挂任务用）
     conv_id: str = ""
-    batch_id: str = ""
     ids: list[str] = field(default_factory=list)
     instruction: str = ""
 
@@ -140,8 +139,3 @@ class AppDeps:
     )  # conv_id -> [{id, text}]
     queue_lock: threading.Lock = field(default_factory=threading.Lock)
     bg_queue: queue.Queue[BgTask] = field(default_factory=queue.Queue)
-    batch_queue: queue.Queue[BgTask] = field(
-        default_factory=queue.Queue
-    )  # S85：批量任务独立队列（用户同步等待，不与图谱抽取混排）
-    batches: dict[str, dict[str, Any]] = field(default_factory=dict)
-    batch_lock: threading.Lock = field(default_factory=threading.Lock)

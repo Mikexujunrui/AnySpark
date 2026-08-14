@@ -2104,9 +2104,11 @@ def make_reference_lookup_implementer(
 def make_batch_implementer(chapters: Any, book_id: str = "main") -> tuple[list[Any], list[Any]]:
     """S102：批量改写/批量审读**提议工具**（agent 自主发起，人工批准后执行）。
 
-    与 /api/batch/* 的关系：agent 工具只做"提议"——解析章节、返回待确认申请，
-    **不执行**（批量改写多章原稿是重操作，执行权在用户确认后由前端调 /api/batch/*）。
-    返回结构化待确认信息（匹配到的章节 + 指令），agent 转告用户等待批准。
+    与 workflow 模板的关系：agent 工具只做"提议"——解析章节、返回待确认申请，
+    **不执行**（批量改写多章原稿是重操作，执行权在用户确认后由前端工作流模式跑
+    「批量改写」「批量审读」预置模板——S140 收编 /api/batch/* 后唯一执行路径，
+    带断点/续跑/回滚）。返回结构化待确认信息（匹配到的章节 + 指令），agent 转告
+    用户等待批准。
     """
 
     def _parse_titles(raw: Any) -> list[str]:

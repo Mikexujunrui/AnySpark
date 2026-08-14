@@ -69,6 +69,13 @@ B 回溯安全网 ─┘
 - **S138**：阶段 A（resume 端点）+ 阶段 B（回溯三件套）实施完成（commit `c7afaa5`）。
 - **S139**：阶段 C 中规模实测完成（自动化 20 章中断→重启→续跑→不重复写回 + 真实库
   批量改写→rollback→逐字节还原→二次幂等）。**A+B+C 全绿，阶段 D 前置条件满足。**
-- 剩余：阶段 D（收编内存 batch）——删 routes_agency /api/batch/* + deps
-  batches/batch_queue/batch_lock + tasks run_batch_rewrite/review；前端 BatchPanel
-  只留工作流模式。
+- **S140**：阶段 D 收编内存 batch 完成（commit 见 PROGRESS）——
+  - 后端：删 routes_agency /api/batch/* 路由 + deps batches/batch_queue/batch_lock +
+    tasks run_batch_rewrite/review + 后台批量 worker；BgTask kind 注释/batch_id 字段清理
+  - 前端：BatchPanel 删旧内存模式（store 状态/开关/旧进度结果 UI）只留工作流；
+    ChatPanel handleBatchProposal（agent 提议→批准）改走 runWorkflow 模板执行；
+    batchStore.ts / api/batch.ts 死代码删除
+  - 测试：test_app batch API 测试改为验证收编（旧端点 405/404 + 模板仍在）
+  - 归一不降级验证：工具保留（申请型原子动作）+ 模板保留 + 安全网（断点/续跑/回滚）
+
+**PLAN-SCALE-SAFETY 全部完成。**

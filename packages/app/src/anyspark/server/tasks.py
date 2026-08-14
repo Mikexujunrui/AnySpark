@@ -12,92 +12,10 @@ import threading
 
 from anyspark.align import ManualEntry
 from anyspark.align.mindup import build_learning_review_prompt, parse_learning_review_result
-from anyspark.check import run_review
 from anyspark.core import Message
 from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
-
-
-def run_batch_rewrite(
-    deps: AppDeps, batch_id: str, chapter_ids: list[str], instruction: str
-) -> None:
-    """批量改写：逐章 LLM 按指令改写 → upsert（覆盖前旧版进版本历史）。"""
-    batch = deps.batches.get(batch_id)
-    if not batch:
-        return
-    for cid in chapter_ids:
-        try:
-            assert deps.model is not None  # 真实装配必有模型
-            ch = deps.chapters.get(cid)
-            if ch is None:
-                batch["results"].append({"id": cid, "ok": False, "error": "章节不存在"})
-            else:
-                # S109：批量改写全文给足（不截）；超长章（>20000）告知边界
-                ch_content = ch.content or ""
-                if len(ch_content) > 20000:
-                    ch_content = (
-                        f"【注意：本章全文 {len(ch.content)} 字，以下仅前 20000 字，"
-                        "末尾部分未展示】\n" + ch_content[:20000]
-                    )
-                prompt = (
-                    "按用户指令改写以下章节。保持剧情走向/人物/设定/时间线一致，"
-                    "只按指令调整（风格/情节/表达）。直接输出改写后的完整正文。\n"
-                    f"【指令】{instruction}\n【原章】\n{ch_content}\n【改写后正文】"
-                )
-                out = model_for_task(deps, "editing").respond(
-                    [Message(role="user", content=prompt)], []
-                )
-                new_text = (out.text or "").strip()
-                if new_text:
-                    deps.chapters.upsert(
-                        "main", ch.title, new_text, ch.order_index, ch.narrative_line
-                    )
-                    batch["results"].append(
-                        {"id": cid, "title": ch.title, "ok": True, "chars": len(new_text)}
-                    )
-                else:
-                    batch["results"].append(
-                        {"id": cid, "title": ch.title, "ok": False, "error": "空输出"}
-                    )
-        except Exception as exc:
-            batch["results"].append({"id": cid, "ok": False, "error": str(exc)[:150]})
-        batch["done"] += 1
-    batch["status"] = "done"
-
-
-def run_batch_review(deps: AppDeps, batch_id: str, chapter_ids: list[str]) -> None:
-    """批量审读：逐章检测网审读，汇总报告。"""
-    batch = deps.batches.get(batch_id)
-    if not batch:
-        return
-    for cid in chapter_ids:
-        try:
-            ch = deps.chapters.get(cid)
-            if ch is None:
-                batch["results"].append({"id": cid, "ok": False, "error": "章节不存在"})
-            else:
-                # S109：审读全文给足（不截）；超长章（>20000）告知边界
-                ch_content = ch.content or ""
-                if len(ch_content) > 20000:
-                    ch_content = (
-                        f"【注意：本章全文 {len(ch.content)} 字，以下仅前 20000 字，"
-                        "末尾部分未展示】\n" + ch_content[:20000]
-                    )
-                report = run_review(model_for_task(deps, "editing"), ch.title, ch_content)
-                batch["results"].append(
-                    {
-                        "id": cid,
-                        "title": ch.title,
-                        "ok": True,
-                        "hard": report.hard_count,
-                        "report": report.render(),
-                    }
-                )
-        except Exception as exc:
-            batch["results"].append({"id": cid, "ok": False, "error": str(exc)[:150]})
-        batch["done"] += 1
-    batch["status"] = "done"
 
 
 def _bg_worker_inner(
@@ -300,25 +218,7 @@ def review_for_learning(deps: AppDeps, book_id: str, title: str, content: str) -
         logger.warning("学习审查失败(不影响写作): %s", exc)
 
 
-def _batch_worker_inner(deps: AppDeps) -> None:
-    """批量任务 worker（S85 独立队列：用户同步等待的批量改写/审读，不与图谱抽取串行）。"""
-    while True:
-        try:
-            task = deps.batch_queue.get()
-            if task.kind == "batch_rewrite":
-                run_batch_rewrite(deps, task.batch_id, task.ids, task.instruction)
-            elif task.kind == "batch_review":
-                run_batch_review(deps, task.batch_id, task.ids)
-            else:
-                logger.warning("批量队列未知 kind: %r", getattr(task, "kind", task))
-        except Exception as exc:
-            logger.warning("批量任务异常: %s", exc)
-        finally:
-            deps.batch_queue.task_done()
-
-
 def start_bg_worker(deps: AppDeps) -> None:
     """启动后台任务 worker 单例线程（build_app 装配时调用一次）。"""
 
     threading.Thread(target=_bg_worker_inner, args=(deps,), daemon=True).start()
-    threading.Thread(target=_batch_worker_inner, args=(deps,), daemon=True).start()

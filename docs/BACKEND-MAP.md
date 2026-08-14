@@ -63,7 +63,8 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
   refine      信号→偏好提炼进 manual
   skill_drafts 心智联动+信号→skill 候选草稿（人工确认转正）
   summarize   会话结束→场景记忆归档
-  batch_rewrite / batch_review  批量改写/审读
+（S140：batch_rewrite / batch_review 后台任务已删——批量改写/审读收编为预置
+workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚安全网）
 ```
 
 ### 2.3 心智数据流（操作 → 提炼 → 注入）
@@ -127,7 +128,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_mode | 快速模式 GET/POST /api/settings/mode（模式/槽位/任务映射 S98） | mode_store/models |
 | — 任务分流（S98/S98b） | chat 写作→writing；explore/play 推演→planning；摘要/提炼/摄入→extraction；审读/改写/检测→editing；规则编译/后台杂项→general | model_for_task(deps, task) 全路由接入 |
 | routes_skills | 技巧 generate/CRUD/drafts + S118 export（skill 文件导出）+ bias（S127：type 字段 writing/main/plot/both，target 兼容） | skills/skill_generator/bias |
-| routes_agency | 能动性 CRUD/generate + 批量改写/审读 | agency/bias/batches/bg_queue |
+| routes_agency | 能动性 CRUD/generate（S140：/api/batch/* 收编移除——批量走预置模板） | agency/bias/bg_queue |
 | routes_explore | intent/cards/path/dims/archive + check | dim_store/archive/explore |
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials（S128：模式库读 skill 表 type=plot） | plots/skills/materials |
 | routes_graph | 图谱 types/entities/relations/events/context/extract/impact | graph/graph_extractor/impact |

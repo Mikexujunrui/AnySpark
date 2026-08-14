@@ -472,19 +472,6 @@ class ManualDecayIn(BaseModel):
     days_medium: int = 90  # medium → low 阈值（天）
 
 
-class BatchRewriteIn(BaseModel):
-    """S40：批量改写（全书变换）——多章统一指令改写。"""
-
-    chapter_ids: list[str]
-    instruction: str
-
-
-class BatchReviewIn(BaseModel):
-    """S40：批量审读——多章检测网审读。"""
-
-    chapter_ids: list[str]
-
-
 class WorldSettingIn(BaseModel):
     """S41：设定档条目。"""
 

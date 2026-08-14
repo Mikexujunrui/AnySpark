@@ -16,7 +16,7 @@ import AutopilotConsole from './chat/AutopilotConsole'
 import { api } from "../api"
 import { triggerRefresh } from "../store"
 import { enqueueChat, dequeueChat, steerQueuedChat, steerChat, fetchQueues, type QueueItem } from '../api/chat'
-import { batchRewrite, batchReview, getBatchStatus } from '../api/batch'
+import { listWorkflows, runWorkflow, getWorkflowTask } from '../api/workflow'
 import { listChapters } from '../api/chapters'
 import { listSkillDrafts, promoteSkillDraft, deleteSkillDraft } from '../api/skills'
 
@@ -835,17 +835,31 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         return
       }
       setMessages(prev => [...prev, { role: 'agent', text: `[${label}已提交] 共 ${ids.length} 章，正在执行…` }])
-      const { batch_id } = isRewrite
-        ? await batchRewrite(ids, instruction)
-        : await batchReview(ids)
+      // S140：/api/batch/* 已收编——agent 提议批准后走预置 workflow 模板执行
+      // （断点恢复/确认闸门/批级回滚，S138 安全网）；轮询任务状态替代旧内存 batch
+      const wfs = await listWorkflows()
+      const tmpl = wfs.find((w) => w.name === label)
+      if (!tmpl) {
+        setMessages(prev => [...prev, { role: 'agent', text: `⚠️ ${label}模板不存在` }])
+        return
+      }
+      const r = await runWorkflow(tmpl.id, 'main', {
+        chapter_ids: JSON.stringify(ids),
+        ...(isRewrite && instruction ? { instruction } : {}),
+      })
+      const taskId = r.task_id
       // 轮询进度 → 替换进度消息（找到以 [label 开头的最新 agent 消息）
       const timer = window.setInterval(async () => {
         try {
-          const st = await getBatchStatus(batch_id)
-          const text = st.status === 'done'
-            ? `[${label}完成] ${st.done}/${st.total} 章`
-              + (isRewrite ? '' : `（hard ${st.results.filter(r => (r as any).hard).length} 处）`)
-            : `[${label}执行中] ${st.done}/${st.total} 章…`
+          const t = await getWorkflowTask(taskId)
+          const states = t.node_states ?? []
+          const done = states.filter((s) => s.status === 'done').length
+          const total = states.length || 0
+          const text = ['done', 'failed', 'cancelled'].includes(t.status)
+            ? `[${label}完成] ${done}/${total} 节点`
+            : t.status === 'waiting_approval'
+              ? `[${label}待确认] 覆盖原稿需在批量操作面板确认`
+              : `[${label}执行中] ${done}/${total} 节点…`
           setMessages(prev => {
             const idx = prev.findIndex(m => m.role === 'agent' && m.text?.startsWith(`[${label}`))
             const msg = { role: 'agent', text }
@@ -854,7 +868,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
             }
             return [...prev, msg]
           })
-          if (st.status === 'done') window.clearInterval(timer)
+          if (['done', 'failed', 'cancelled'].includes(t.status)) window.clearInterval(timer)
         } catch {
           window.clearInterval(timer)
         }

@@ -1,32 +1,26 @@
 """
-anyspark.server.routes_agency — 能动性档位 + 批量任务路由（S80c 拆分）。
+anyspark.server.routes_agency — 能动性档位路由（S80c 拆分）。
 
-从 app.py build_app 搬移（行为零变化）：agency 档位 CRUD/生成/重置 +
-batch 批量改写/审读/状态。闭包引用 → deps.xxx。
+从 app.py build_app 搬移（行为零变化）：agency 档位 CRUD/生成/重置。
+S140（PLAN-SCALE-SAFETY 阶段 D）：批量改写/审读路由移除——已收编为预置
+workflow 模板（「批量改写」「批量审读」），前端 BatchPanel 工作流模式执行
+（S133 归一不降级；断点/续跑/回滚由 workflow 提供）。闭包引用 → deps.xxx。
 """
 
 from __future__ import annotations
-
-import uuid
 
 from fastapi import APIRouter, HTTPException
 
 from anyspark.align import build_agency_gen_prompt, parse_agency_gen_result
 from anyspark.core import Message
 from anyspark.server.agent_factory import model_for_task
-from anyspark.server.deps import AppDeps, BgTask
+from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
-from anyspark.server.schemas import (
-    AgencyGenerateIn,
-    AgencyIn,
-    AgencyLevelIn,
-    BatchReviewIn,
-    BatchRewriteIn,
-)
+from anyspark.server.schemas import AgencyGenerateIn, AgencyIn, AgencyLevelIn
 
 
 def make_agency_router(deps: AppDeps) -> APIRouter:
-    """能动性档位 + 批量任务路由（依赖：deps.agency / model / bg_queue / batches / batch_lock）。"""
+    """能动性档位路由（依赖：deps.agency / model）。"""
     router = APIRouter()
 
     @router.get("/api/agency", response_model=dict[str, object])
@@ -110,69 +104,6 @@ def make_agency_router(deps: AppDeps) -> APIRouter:
         return {
             "current": deps.agency.get_current().to_dict(),
             "levels": [lv.to_dict() for lv in levels],
-        }
-
-    # ------------------------------------------------------------------
-    # S40 批量任务（场景 4 全书变换核心）：批量改写 / 批量审读
-    # 后台队列执行（不阻塞请求），GET /api/batch/{id} 查进度；状态内存级（会话内）
-    # ------------------------------------------------------------------
-    @router.post("/api/batch/rewrite", response_model=dict[str, object])
-    def batch_rewrite(req: BatchRewriteIn) -> dict[str, object]:
-        """批量改写：多章统一指令改写（改文风/改情节），覆盖前旧版进版本历史。"""
-        if not req.chapter_ids:
-            raise HTTPException(status_code=400, detail="chapter_ids 不能为空")
-        if not req.instruction.strip():
-            raise HTTPException(status_code=400, detail="instruction 不能为空")
-        bid = uuid.uuid4().hex
-        with deps.batch_lock:
-            deps.batches[bid] = {
-                "status": "queued",
-                "done": 0,
-                "total": len(req.chapter_ids),
-                "results": [],
-                "kind": "rewrite",
-                "instruction": req.instruction,
-            }
-        deps.batch_queue.put(
-            BgTask(
-                kind="batch_rewrite",
-                batch_id=bid,
-                ids=req.chapter_ids,
-                instruction=req.instruction,
-            )
-        )
-        return {"batch_id": bid, "total": len(req.chapter_ids)}
-
-    @router.post("/api/batch/review", response_model=dict[str, object])
-    def batch_review(req: BatchReviewIn) -> dict[str, object]:
-        """批量审读：多章检测网审读（一致性/动机因果/情感连贯等 7 类）。"""
-        if not req.chapter_ids:
-            raise HTTPException(status_code=400, detail="chapter_ids 不能为空")
-        bid = uuid.uuid4().hex
-        with deps.batch_lock:
-            deps.batches[bid] = {
-                "status": "queued",
-                "done": 0,
-                "total": len(req.chapter_ids),
-                "results": [],
-                "kind": "review",
-            }
-        deps.batch_queue.put(BgTask(kind="batch_review", batch_id=bid, ids=req.chapter_ids))
-        return {"batch_id": bid, "total": len(req.chapter_ids)}
-
-    @router.get("/api/batch/{batch_id}", response_model=dict[str, object])
-    def batch_status(batch_id: str) -> dict[str, object]:
-        """批量任务状态/进度/结果。"""
-        with deps.batch_lock:
-            batch = deps.batches.get(batch_id)
-        if batch is None:
-            raise HTTPException(status_code=404, detail="批量任务不存在")
-        return {
-            "batch_id": batch_id,
-            "status": batch["status"],
-            "done": batch["done"],
-            "total": batch["total"],
-            "results": batch["results"],
         }
 
     return router

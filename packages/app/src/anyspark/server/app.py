@@ -844,10 +844,6 @@ def build_app(
     # ("batch_review", batch_id, ids) 批量审读（S40）。
 
     _bg_queue: queue.Queue[BgTask] = queue.Queue()  # 后台任务队列（S28/S40）
-    _batch_queue: queue.Queue[BgTask] = queue.Queue()  # S85：批量任务独立队列（用户同步等待）
-    # S40 批量任务状态（内存会话级）：id → {status, done, total, results}
-    _batches: dict[str, dict[str, Any]] = {}
-    _batch_lock: threading.Lock = threading.Lock()
 
     mind_planner = MindPlanner(manual)  # S50 心智模型=会话规划器（不从写作循环注入）
     signal_collector = SignalCollector(signals)
@@ -1710,9 +1706,6 @@ def build_app(
         active_agents=_active_agents,
         active_lock=_active_lock,
         bg_queue=_bg_queue,
-        batch_queue=_batch_queue,
-        batches=_batches,
-        batch_lock=_batch_lock,
         workspace=workspace,
         recorder=recorder,
     )

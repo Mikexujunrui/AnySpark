@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { useBatchStore } from "../stores/batchStore";
 import PanelHeader from "./ui/PanelHeader";
 import { listChapters } from "../api/chapters";
 import {
@@ -23,24 +22,14 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 export default function BatchPanel({ open, onClose, embedded = false }: BatchPanelProps) {
-  const batchId = useBatchStore((s) => s.batchId);
-  const status = useBatchStore((s) => s.status);
-  const done = useBatchStore((s) => s.done);
-  const total = useBatchStore((s) => s.total);
-  const results = useBatchStore((s) => s.results);
-  const loading = useBatchStore((s) => s.loading);
-  const error = useBatchStore((s) => s.error);
-  const startRewrite = useBatchStore((s) => s.startRewrite);
-  const startReview = useBatchStore((s) => s.startReview);
-
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showRewrite, setShowRewrite] = useState(false);
   const [instruction, setInstruction] = useState("");
 
-  // S133：工作流模式（W1-B 归一不降级）——批量改写/审读走预置 workflow 模板
-  // （可断点恢复/失败重试/改写带人工确认闸门），与旧内存任务并存
-  const [wfEnabled, setWfEnabled] = useState(false);
+  // S133/S140：批量改写/审读统一走预置 workflow 模板（归一不降级）——
+  // 断点恢复/失败重试/改写人工确认闸门/批级回滚（S138）由 workflow 提供；
+  // 旧内存 /api/batch/* 已收编移除（S140 阶段 D）。
   const [wfTask, setWfTask] = useState<{
     id: string;
     status: string;
@@ -144,24 +133,21 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
 
   const handleReview = async () => {
     if (selected.size === 0) return;
-    if (wfEnabled && wfTemplates.review) {
-      setWfBusy(true);
-      try {
-        const r = await runWorkflow(wfTemplates.review, "main", {
-          chapter_ids: JSON.stringify([...selected]),
-        });
-        startWfPoll(r.task_id);
-      } catch (e) {
-        console.error(e);
-        setWfBusy(false);
-      }
-      return;
+    if (!wfTemplates.review) return;
+    setWfBusy(true);
+    try {
+      const r = await runWorkflow(wfTemplates.review, "main", {
+        chapter_ids: JSON.stringify([...selected]),
+      });
+      startWfPoll(r.task_id);
+    } catch (e) {
+      console.error(e);
+      setWfBusy(false);
     }
-    await startReview([...selected]);
   };
 
-  // S133：工作流模式执行改写（模板 loop 前带人工确认闸门）
-  const handleRewriteWorkflow = async () => {
+  // 工作流模式执行改写（模板 loop 前带人工确认闸门）
+  const handleRewrite = async () => {
     if (selected.size === 0 || !instruction.trim() || !wfTemplates.rewrite) return;
     setWfBusy(true);
     setShowRewrite(false);
@@ -175,17 +161,6 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
       console.error(e);
       setWfBusy(false);
     }
-    setInstruction("");
-  };
-
-  const handleRewrite = async () => {
-    if (selected.size === 0 || !instruction.trim()) return;
-    if (wfEnabled && wfTemplates.rewrite) {
-      await handleRewriteWorkflow();
-      return;
-    }
-    await startRewrite([...selected], instruction.trim());
-    setShowRewrite(false);
     setInstruction("");
   };
 
@@ -269,18 +244,6 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
 
         {/* 底部操作区 */}
         <div className="px-4 py-3 border-t border-zinc-800 space-y-2">
-          {error && <p className="text-xs text-red-400">{error}</p>}
-
-          {/* S133：工作流模式开关（归一不降级：可断点/带确认闸门，与旧内存任务并存） */}
-          <label className="flex items-center gap-2 text-xs text-zinc-400 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              checked={wfEnabled}
-              onChange={(e) => setWfEnabled(e.target.checked)}
-              className="accent-emerald-500"
-            />
-            工作流模式（可断点恢复；改写带确认闸门）
-          </label>
 
           {/* 工作流任务进度/状态 */}
           {wfTask && (
@@ -340,54 +303,6 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
             </div>
           )}
 
-          {/* 进度显示 */}
-          {batchId && status && (
-            <div className="bg-zinc-800/50 border border-zinc-700/50 rounded-lg p-3 space-y-1">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-zinc-400">
-                  {STATUS_LABELS[status] || status}
-                </span>
-                <span className="text-zinc-500">
-                  {done}/{total}
-                </span>
-              </div>
-              <div className="w-full h-1.5 bg-zinc-700 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-blue-500 transition-all"
-                  style={{ width: total > 0 ? `${(done / total) * 100}%` : "0%" }}
-                />
-              </div>
-            </div>
-          )}
-
-          {/* 结果列表 */}
-          {results.length > 0 && (
-            <div className="space-y-1 max-h-48 overflow-y-auto">
-              {results.map((r) => (
-                <div
-                  key={r.id}
-                  className="text-xs px-2 py-1.5 rounded bg-zinc-800/50 border border-zinc-700/50"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-zinc-300 truncate">
-                      {r.title || r.id}
-                    </span>
-                    {r.ok ? (
-                      <span className="text-green-500 shrink-0 ml-2">
-                        {r.chars != null ? `✓ ${r.chars}字` : r.hard != null ? `✓ ${r.hard}处硬伤` : "✓"}
-                      </span>
-                    ) : (
-                      <span className="text-red-400 shrink-0 ml-2">✗</span>
-                    )}
-                  </div>
-                  {!r.ok && r.error && (
-                    <p className="text-red-400/80 mt-0.5 truncate">{r.error}</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
-
           {/* 改写指令输入 */}
           {showRewrite && (
             <div className="space-y-2">
@@ -401,7 +316,7 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
               <div className="flex gap-2">
                 <button
                   onClick={handleRewrite}
-                  disabled={selected.size === 0 || !instruction.trim() || loading || wfBusy}
+                  disabled={selected.size === 0 || !instruction.trim() || wfBusy}
                   className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded"
                 >
                   执行
@@ -421,14 +336,14 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
             <div className="flex gap-2">
               <button
                 onClick={() => setShowRewrite(true)}
-                disabled={selected.size === 0 || loading || wfBusy}
+                disabled={selected.size === 0 || wfBusy}
                 className="flex-1 text-xs px-3 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded"
               >
                 批量改写
               </button>
               <button
                 onClick={handleReview}
-                disabled={selected.size === 0 || loading || wfBusy}
+                disabled={selected.size === 0 || wfBusy}
                 className="flex-1 text-xs px-3 py-2 bg-purple-600 hover:bg-purple-500 disabled:bg-zinc-700 disabled:text-zinc-500 text-white rounded"
               >
                 批量审读

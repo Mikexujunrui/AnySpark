@@ -3774,3 +3774,43 @@ docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回
 
 **下一步**：阶段 D 收编内存 batch（A+B+C 全绿，前提满足）——删 routes_agency batch
 路由 + deps batches/queue/lock + tasks run_batch_*；前端 BatchPanel 只留工作流模式。
+
+---
+
+## S140 阶段 D 收编内存 batch——批量改写/审读唯一执行路径 = workflow 模板（PLAN-SCALE-SAFETY 收官）（已完成 ✅）
+
+**背景**：PLAN-SCALE-SAFETY 阶段 D——A（resume）+ B（回溯）+ C（实测）全绿后，
+收编内存 batch 是无风险减法。归一不降级：能力（批量改写/审读）保留在 workflow 模板，
+且带断点/续跑/回滚安全网。
+
+**交付（commit `TODO`）**：
+
+1. **后端删除（routes_agency/deps/tasks/app）**：
+   - routes_agency：/api/batch/rewrite、/api/batch/review、/api/batch/{id} 路由移除
+   - deps：batches/batch_queue/batch_lock 字段移除；BgTask kind 注释去 batch_*、batch_id 字段删
+   - tasks：run_batch_rewrite/run_batch_review 函数 + 后台批量 worker（_batch_worker_inner）移除
+   - app：_batch_queue/_batches/_batch_lock 初始化 + deps 装配移除；schemas Batch*In 移除
+
+2. **前端收编（BatchPanel/ChatPanel）**：
+   - BatchPanel：删旧内存模式（useBatchStore 状态/工作流开关/旧进度结果 UI），
+     只留工作流模式（预置模板执行 + 轮询 + approval 闸门）
+   - ChatPanel：handleBatchProposal（agent 提议→批准）从 /api/batch/* 改走
+     runWorkflow 模板执行 + getWorkflowTask 轮询
+   - batchStore.ts / api/batch.ts 死代码删除
+
+3. **测试**：test_app batch API 测试改为验证收编——旧端点 405/404（SPA mount 对
+   不存在 POST 返回 405）+ 预置模板仍在（归一不降级）
+
+**验证**：全量 579 绿；ruff+format+mypy strict 全绿（211 文件）；前端 tsc/lint/build 绿；
+服务重启后 /api/batch/review 405、8 个模板在线。
+
+**踩坑**：
+- 不存在 POST 端点返回 405（StaticFiles mount 固有行为）而非 404——测试断言
+  in (404, 405)
+- ChatPanel 的 agent 提议执行路径（batch_rewrite/batch_review 工具配套）也必须改走
+  workflow——否则工具提议后无处执行（S102 工具保留，执行收编）
+
+**里程碑**：**PLAN-SCALE-SAFETY 全部完成**——规模化修改（几百章批量改写/加料）具备
+"中断能续跑 + 改错能反悔"，且唯一执行机制（workflow 模板）带安全网。
+
+**下一步**：无剩余规划项。候选：加料模板敏感指令按需实测；本地模型双轨（文档已覆盖）。
