@@ -122,6 +122,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | routes_chat | chat/stream/cancel/steer/stats/direction/candidates/rewrite + S99 队列（queues 查看/queue 入队/queue 删/queue→steer 转插入）+ S116 records/{conv_id}（会话运行记录回放：轮快照+系统事件） | model/store/chapters/active_*/bg_queue/conv_queues |
 | routes_conversations | 会话 CRUD/fork/rename + 模型注册表 CRUD/激活（protocol 字段透传 S131） | store/models |
 | routes_books | 书架（项目枚举/创建/删除） | workspace/chapters |
+| routes_workspace | 工作区总览/章节 import/上传/上传区读取 + S141 AI 沙箱浏览（GET /api/sandbox 文件树 + GET /api/sandbox/file 读内容，read_file/write_file 产物人类可见） | workspace |
 | routes_chapters | 章节 CRUD/patch/restore（S138 版本回溯：POST /{id}/restore 恢复到历史版本）/export/wrapup | chapters/workspace/export |
 | routes_manual→routes_mind | manual/brief/signals/mind 全部 | manual/signals/workspace/mind_planner |
 | routes_settings | 设定档 categories/CRUD/uncensored/extract | settings/model/workspace |
@@ -137,7 +138,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 
-## 4. Agent 工具层（45 工具，S114 默认全注册 × 可显式禁用）
+## 4. Agent 工具层（46 工具，S114 默认全注册 × 可显式禁用）
 
 > S114 语义：所有能力**默认可用**（注册进工具箱，Agent 知道有什么）；开关列 = 显式传
 > False 可禁用的开关名（省 token/安全隔离极端场景），不是"点亮才有"。

@@ -514,3 +514,21 @@ def test_seed_research_template() -> None:
     # 二次实例化不重复播
     store2 = WorkflowStore(Path(tempfile.mkdtemp()) / "wf_seed2.db")
     assert len(store2.list_templates()) == len(tpls)
+
+
+def test_generator_teaches_delegate() -> None:
+    """S141（审计③修复）：AI 生成模板的教学 prompt 含 delegate 说明。
+
+    此前 generator 只教 agent 干净单次调用，delegate 子 Agent 能力（S115）虽可跑
+    但 AI 生成的模板不会用它——补教后生成的复杂节点可带工具白名单。
+    """
+    from anyspark.workflow.generator import GENERATE_PROMPT, NODE_CATALOG
+
+    # 节点目录教 delegate 格式（scope.tools 白名单 + budget.max_turns）
+    assert "delegate" in NODE_CATALOG
+    assert "scope" in NODE_CATALOG and "budget" in NODE_CATALOG
+    assert "max_turns" in NODE_CATALOG
+    assert "graph_query" in NODE_CATALOG  # 给了具体工具名示例
+    # 生成规则教何时用 delegate（查证后写）vs 普通 agent（纯文本生成）
+    assert "delegate" in GENERATE_PROMPT
+    assert "查证后再写" in GENERATE_PROMPT or "查图谱" in GENERATE_PROMPT

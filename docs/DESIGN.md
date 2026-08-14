@@ -857,6 +857,14 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   断点/续跑/回滚安全网）。前端 BatchPanel 删旧内存模式只留工作流；ChatPanel
   handleBatchProposal（agent 提议→批准）改走 runWorkflow 模板执行；batchStore/api/batch
   死代码删除。
+- S141（审计缺口修复——主人质询"功能是否符合哲学/链路是否真实/人类能否看到"驱动）：
+  **① AI 文件沙箱人类可见**：GET /api/sandbox（文件树）+ /api/sandbox/file（读内容，
+  防穿越）——read_file/write_file 产物（笔记/灵感/资料）前端 FilesPanel 新 tab 可浏览，
+  "AI 写的东西人能看到"（内容自然语言可编辑闭环）；**② 搜索能力对称**：SearchPanel
+  加 "AI 精确检索" 入口（切到对话让 AI 用 search_chapters 词表/排除/正则高级检索，
+  前端本地搜索只做关键词过滤的定位）；**③ delegate 激活**：generator 教学 prompt 补
+  delegate 用法（scope.tools 白名单 + budget.max_turns，查证后写的复杂节点用委派子
+  Agent）——S115 能力从"可跑但 AI 不会用"到"AI 生成模板会用"。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/

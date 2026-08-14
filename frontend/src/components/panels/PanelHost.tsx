@@ -29,6 +29,7 @@ import DimsPanel from '../DimsPanel'
 import ImpactPanel from '../ImpactPanel'
 import LibraryPanel from '../LibraryPanel'
 import UploadPanel from '../UploadPanel'
+import FilesPanel from '../FilesPanel'
 
 export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }: { panelKey: string; bookId: string; sessionId: string; onPanelClose?: () => void }) {
   // ChatPanel 常驻挂载以保持 SSE 连接
@@ -63,6 +64,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {panelKey === 'dims' && <div className="h-full min-h-0 flex flex-col"><DimsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'codex' && <div className="h-full min-h-0 flex flex-col"><CodexPanel /></div>}
       {panelKey === 'upload' && <div className="h-full min-h-0 flex flex-col"><UploadPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
+      {panelKey === 'files' && <div className="h-full min-h-0 flex flex-col"><FilesPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
     </div>
   )
 }

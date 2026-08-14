@@ -3814,3 +3814,42 @@ docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回
 "中断能续跑 + 改错能反悔"，且唯一执行机制（workflow 模板）带安全网。
 
 **下一步**：无剩余规划项。候选：加料模板敏感指令按需实测；本地模型双轨（文档已覆盖）。
+
+---
+
+## S141 审计缺口修复——AI 文件可见性 + 搜索对称 + delegate 激活（主人质询驱动）（已完成 ✅）
+
+**背景**：主人质询"研发的功能是否符合哲学写作领域 / 链路是否真实 / 智能体能调用吗 /
+哪些是人类需要看的、能看到吗"——系统性审计结论：
+- 哲学契合 ✅（机制硬编码/内容自然语言/模型无关/core 无依赖/单向依赖全保持）
+- 链路真实 ✅（loop.py 实证 46 工具全量注入 LLM；workflow agent 节点干净单次 + delegate
+  子 Agent 工具循环；子 Agent 全量 build_toolkit + 白名单）
+- 人类可见性 ⚠️ 44/46 可见，2 个缺口：read_file/write_file 产物（AI 笔记）无前端浏览；
+  搜索高级能力（词表/exclude/regex）前端不对等；+ delegate 能力"可跑但 AI 生成不用"
+
+**交付（commit `TODO`）**：
+
+1. **缺口①：AI 文件沙箱人类可见**（routes_workspace + FilesPanel）：
+   - GET /api/sandbox：沙箱文件树（路径/大小/修改时间）
+   - GET /api/sandbox/file?path=：读文本内容（_resolve_sandbox_path 防穿越 400/404）
+   - 前端 FilesPanel 新组件 + 'AI文件' tab（工具组）：文件列表 + 目录树 + 内容预览
+   - 实测：3 个 AI 笔记文件可见可读（notes/wucheng.md 等），防穿越 400
+
+2. **缺口②：搜索能力对称**（SearchPanel）：
+   - 本地搜索只做关键词过滤（定位用）；加"AI 精确检索"入口 → 切到对话
+     让 AI 用 search_chapters 高级检索（词表批量/exclude/regex/fragment）
+   - 分层：即时定位用本地，精确检索用 AI（对话流展示，最自然）
+
+3. **③ delegate 激活**（workflow/generator.py）：
+   - NODE_CATALOG 教 delegate 格式（scope.tools 白名单 + budget.max_turns，带
+     graph_query/search_chapters 示例）；GENERATE_PROMPT 规则 9 教何时用 delegate
+     （查证后写）vs 普通 agent（纯文本生成）
+   - 踩坑：GENERATE_PROMPT 用 .format()，delegate 示例的花括号必须 {{}} 转义
+     （裸 {scope} → KeyError）
+
+**验证**：全量 581 绿；ruff+format+mypy strict 全绿；前端 tsc/lint/build 绿；
+服务实测 sandbox 列表/读文件/防穿越全通。新增测试：test_generator_teaches_delegate
+（教学 prompt 断言）+ test_sandbox_api_lists_and_reads（列表/防穿越/404）。
+
+**下一步**：无剩余审计缺口。候选：AI 写文件→人编辑→AI 再写的闭环（文件面板只读版）；
+敏感指令加料按需实测。

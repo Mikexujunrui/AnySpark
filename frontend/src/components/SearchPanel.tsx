@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { showToast } from './ui/toast-utils'
 import Icon from './ui/Icon'
 import { openTab } from '../stores/tabStore'
+import { emitTabSwitch } from '../lib/events'
 import { triggerRefresh } from '../store'
 
 // V4 适配版 SearchPanel：前端本地搜索
@@ -180,6 +181,23 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
               <Icon name="x" size={16} />
             </button>
           )}
+        </div>
+
+        {/* S141（审计缺口②修复）：精确检索入口——前端本地搜索只做关键词过滤；
+            词表批量/排除词/正则/片段宽度由 AI 的 search_chapters 工具提供，
+            一键切到对话让 AI 精确检索 */}
+        <div className="mt-2 flex items-center gap-2 text-[11px] text-zinc-500 bg-zinc-900/60 border border-zinc-800 rounded-lg px-3 py-2">
+          <Icon name="target" size={12} className="text-amber-400 shrink-0" />
+          <span className="flex-1">本地搜索仅关键词过滤；需要词表批量/排除/正则精确检索时，让 AI 来查</span>
+          <button
+            onClick={() => {
+              emitTabSwitch('chat')
+              showToast('已切到对话——告诉 AI：用 search_chapters 检索“' + (query.trim() || '关键词') + '”')
+            }}
+            className="shrink-0 px-2 py-0.5 bg-amber-600/20 border border-amber-700/50 text-amber-300 hover:bg-amber-600/30 rounded transition-colors"
+          >
+            AI 精确检索
+          </button>
         </div>
 
         {/* Result group tabs */}

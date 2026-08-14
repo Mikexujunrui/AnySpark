@@ -59,6 +59,7 @@ const TAB_GROUPS: TabGroup[] = [
       { key: 'dims', label: '维度', icon: 'grid' },
       { key: 'codex', label: '代码', icon: 'terminal' },
       { key: 'upload', label: '上传', icon: 'upload' },
+      { key: 'files', label: 'AI文件', icon: 'folder' },
     ],
   },
 ]

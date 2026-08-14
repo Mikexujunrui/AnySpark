@@ -217,3 +217,39 @@ def test_uncensored_api() -> None:
     # 关
     r = client.post("/api/uncensored", json={"book_id": "main", "enabled": False})
     assert r.json()["enabled"] is False
+
+
+def test_sandbox_api_lists_and_reads() -> None:
+    """S141（审计缺口①修复）：AI 文件沙箱浏览 API——列文件树 + 读内容。
+
+    read_file/write_file 产物（笔记/灵感）前端可见；路径防穿越。
+    """
+    import tempfile
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    class _M:
+        model_name = "fake"
+
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="好的。")
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=_M(), db_path=db))
+    # 沙箱列表接口可用（空库也可能有历史文件；只验接口形态）
+    r = client.get("/api/sandbox")
+    assert r.status_code == 200
+    d = r.json()
+    assert "files" in d and "count" in d and "root" in d
+    assert isinstance(d["files"], list)
+    # 防穿越：越界路径 400
+    r2 = client.get("/api/sandbox/file", params={"path": "../../etc/passwd"})
+    assert r2.status_code == 400
+    # 不存在文件 404
+    r3 = client.get("/api/sandbox/file", params={"path": "no_such_file_xyz.md"})
+    assert r3.status_code == 404

@@ -28,7 +28,14 @@ NODE_CATALOG = """可用节点类型（kind 字段）：
 1. agent — 调模型执行写作/审读/查证指令。
    params: {instruction: 该步做什么（自然语言，必填）,
             system_prompt: 可选补充提示,
-            output_key: 该步产出存为变量的名字（缺省用节点 id）}
+            output_key: 该步产出存为变量的名字（缺省用节点 id）,
+            delegate: 可选——委派子 Agent 执行（该节点获得完整工具循环：
+              可自主调用图谱查询/正文检索/资料库/网络搜索等工具后产出）。
+              delegate 格式: {scope: {tools: [工具名...]}, budget: {max_turns: 轮数}}
+              tools 留空数组 = 全量工具；建议写清需要的工具白名单（如
+              ["graph_query","search_chapters","read_material"]）。
+              适合"需要查证后写"的复杂节点（如'查图谱确认人物设定后写这段'）；
+              纯文本生成（改写/扩写/审读直接输出）用普通 agent 节点即可。}
 2. script — 确定性函数（固定逻辑，如读章节/统计/格式化）。
    params: {function: "read_chapter"（读章节正文，chapter_title=章名）
             或其他内置函数, output_key: 产出变量名}
@@ -95,7 +102,12 @@ GENERATE_PROMPT = (
     "（function=read_chapter，params.chapter_title=章名，output_key=chapter_text）"
     "读章节，agent 节点 instruction 里用 {{chapter_text}} 引用它；"
     "或 agent 节点 params.chapter_title 直接指定章名（自动附正文）。\n"
-    "8. 所有 agent 节点 instruction 里的 {{变量}} 都会在运行时被上游输出替换。\n\n"
+    "8. 所有 agent 节点 instruction 里的 {{变量}} 都会在运行时被上游输出替换。\n"
+    "9. **需要查证后再写的复杂节点用 delegate 委派子 Agent**：agent 节点加\n"
+    "   params.delegate={{scope:{{tools:[工具名]}}, budget:{{max_turns: N}}}}——子 Agent\n"
+    "   有完整工具循环（graph_query/search_chapters/read_material/search_web 等），\n"
+    "   适合'查图谱/查资料/搜资料后产出'；纯文本生成（改写/扩写/审读）用普通\n"
+    "   agent 节点（不带 delegate，干净单次调用更省）。\n\n"
     "节点类型目录：\n{node_catalog}\n\n"
     "用户需求：{goal}\n"
 )

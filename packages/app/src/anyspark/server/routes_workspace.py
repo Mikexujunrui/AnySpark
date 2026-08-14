@@ -80,4 +80,48 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
             raise HTTPException(status_code=404, detail="文件不存在")
         return FileResponse(p)
 
+    # ------------------------------------------------------------------
+    # S141（审计缺口①修复）：AI 文件沙箱浏览——read_file/write_file 的产物
+    # （笔记/灵感/参考资料）前端可见。人能看到 AI 记的东西（内容自然语言可编辑）。
+    # ------------------------------------------------------------------
+    @router.get("/api/sandbox", response_model=dict[str, Any])
+    def sandbox_list() -> dict[str, Any]:
+        """列 AI 文件沙箱（data/sandbox/）文件树：相对路径/大小/修改时间。
+
+        read_file/write_file 工具（S60 纯文档通道）的产物都在此；前端文件面板
+        据此展示，人类可读 AI 笔记/灵感/参考资料。仅 .txt/.md/.json 等文本。
+        """
+        from anyspark.server.tools_writing import SANDBOX_DIR
+
+        files: list[dict[str, Any]] = []
+        if SANDBOX_DIR.exists():
+            for f in sorted(SANDBOX_DIR.rglob("*")):
+                if f.is_file():
+                    rel = str(f.relative_to(SANDBOX_DIR)).replace("\\", "/")
+                    files.append(
+                        {
+                            "path": rel,
+                            "name": f.name,
+                            "size": f.stat().st_size,
+                            "mtime": f.stat().st_mtime,
+                        }
+                    )
+        return {"root": str(SANDBOX_DIR), "files": files, "count": len(files)}
+
+    @router.get("/api/sandbox/file", response_model=dict[str, Any])
+    def sandbox_read_file(path: str) -> dict[str, Any]:
+        """读沙箱文本文件内容（相对路径；防穿越）。"""
+        from anyspark.server.tools_writing import _resolve_sandbox_path
+
+        p = _resolve_sandbox_path(path)
+        if p is None:
+            raise HTTPException(status_code=400, detail="路径越界：仅允许沙箱内相对路径")
+        if not p.exists() or not p.is_file():
+            raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
+        try:
+            text = p.read_text(encoding="utf-8", errors="ignore")
+        except OSError as exc:
+            raise HTTPException(status_code=500, detail=f"读取失败: {exc}") from exc
+        return {"path": path, "name": p.name, "content": text}
+
     return router
