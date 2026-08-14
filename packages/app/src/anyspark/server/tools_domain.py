@@ -1843,9 +1843,8 @@ def render_reference_knowledge(
             ents = graph.list_entities(ref_book_id, q=keyword, limit=limit)
             for e in ents:
                 state = (e.state or e.description or "").strip()
-                line = (
-                    f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）"
-                    + (f"：{state[:120]}" if state else "")
+                line = f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）" + (
+                    f"：{state[:120]}" if state else ""
                 )
                 # 该实体的关系（从/到命中本实体）
                 rels = [
@@ -1864,8 +1863,7 @@ def render_reference_knowledge(
                 blob = f"{s.name} {s.content} {s.category}"
                 if keyword.lower() in blob.lower():
                     lines.append(
-                        f"设定[{s.category}] {s.name or s.content[:20]}"
-                        f"：{s.content[:150]}"
+                        f"设定[{s.category}] {s.name or s.content[:20]}：{s.content[:150]}"
                     )
         except Exception:
             pass

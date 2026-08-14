@@ -132,10 +132,11 @@ def test_loop_default_no_hard_limit_but_repeat_detection() -> None:
     assert turn.error is not None
 
     # 递进式任务（参数变化）不受限——20 轮后正常终答
-    from anyspark.core import ToolCall as TC
+    from anyspark.core import ToolCall
 
     outputs: list[ModelOutput] = [
-        ModelOutput(tool_calls=[TC(name="add", arguments={"a": i, "b": i})]) for i in range(20)
+        ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": i, "b": i})])
+        for i in range(20)
     ]
     outputs.append(_no_tool("完成"))
     agent2 = _make_agent(ScriptedModel(outputs))

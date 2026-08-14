@@ -159,11 +159,10 @@ def test_clean_write_no_inject_when_flag_off() -> None:
     assert all("创作模式声明" not in c for c in model.clean_contexts)
 
 
-def test_read_file_lists_directory(tmp_path) -> None:
+def test_read_file_lists_directory(tmp_path: Path) -> None:
     """S108：read_file 传目录 → 列出内容（此前 Errno 13 误导为权限错误）。"""
-    from anyspark.server.tools_writing import SANDBOX_DIR, _resolve_sandbox_path
-    from anyspark.server.tools_writing import WritingTools
-    from anyspark.core import ToolSpec, ToolCall
+    from anyspark.core import ToolSpec
+    from anyspark.server.tools_writing import SANDBOX_DIR, WritingTools
 
     # 真实沙箱目录（测试环境 data/sandbox 已存在）
     sd = SANDBOX_DIR

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from anyspark.server.skill_io import parse_skill_file, render_skill_file
 
@@ -79,7 +80,7 @@ def _db() -> Path:
     return Path(tempfile.mkdtemp()) / "t.db"
 
 
-def _probe_model():
+def _probe_model() -> Any:
     class _P:
         model_name = "probe"
 

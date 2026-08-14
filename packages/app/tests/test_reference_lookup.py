@@ -83,9 +83,7 @@ def _setup() -> tuple[LibraryStore, GraphStore, WorldSettingStore, Any]:
     class _Chapters:
         def __init__(self) -> None:
             self._store: dict[str, list[Any]] = {
-                "雾城旧作": [
-                    _Chapter("第一章 钟表铺", "陈渡坐在柜台后，听见雨声敲打旧钟。")
-                ]
+                "雾城旧作": [_Chapter("第一章 钟表铺", "陈渡坐在柜台后，听见雨声敲打旧钟。")]
             }
 
         def list_by_book(self, book_id: str) -> list[Any]:
