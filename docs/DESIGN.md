@@ -843,6 +843,14 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   （enrich_stitch）原位并入原文（无标记则追加章末保原文）；重操作 loop 前 approval 闸门。
   指令完全参数化（enrich_instruction）：非敏感指令（扩环境/内心/对白）与敏感指令走同一条
   管道——**验证/演示用非敏感指令即可绕开模型内容审核坎**（S113 实测 data_inspection_failed）。
+- S138（PLAN-SCALE-SAFETY 阶段 A+B）：**规模化安全网**——① resume 续跑（POST
+  /api/workflows/tasks/{id}/resume：引擎幂等恢复已有，补应用层入口，服务重启后可拉起
+  未完成任务）；② 版本回溯三件套：B1 upsert note 携带来源（write_chapter script 带
+  '批量任务/任务{task_id}'，批级定位基石）；B2 单章恢复（POST /api/chapters/{id}/restore，
+  当前内容先入版本 note='恢复前' 可再回滚，目标版本写回；前端 ChapterHistoryPanel 恢复
+  按钮 + api.revertChapter 真实化）；B3 批级一键回滚（POST
+  /api/workflows/tasks/{id}/rollback：按 note 聚合每章最早改前快照逐个恢复，内容幂等
+  跳过防循环回滚）。规模化修改（几百章批量改写/加料）具备"中断能续跑 + 改错能反悔"。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/

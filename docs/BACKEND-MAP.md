@@ -121,7 +121,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_chat | chat/stream/cancel/steer/stats/direction/candidates/rewrite + S99 队列（queues 查看/queue 入队/queue 删/queue→steer 转插入）+ S116 records/{conv_id}（会话运行记录回放：轮快照+系统事件） | model/store/chapters/active_*/bg_queue/conv_queues |
 | routes_conversations | 会话 CRUD/fork/rename + 模型注册表 CRUD/激活（protocol 字段透传 S131） | store/models |
 | routes_books | 书架（项目枚举/创建/删除） | workspace/chapters |
-| routes_chapters | 章节 CRUD/patch/export/wrapup | chapters/workspace/export |
+| routes_chapters | 章节 CRUD/patch/restore（S138 版本回溯：POST /{id}/restore 恢复到历史版本）/export/wrapup | chapters/workspace/export |
 | routes_manual→routes_mind | manual/brief/signals/mind 全部 | manual/signals/workspace/mind_planner |
 | routes_settings | 设定档 categories/CRUD/uncensored/extract | settings/model/workspace |
 | routes_mode | 快速模式 GET/POST /api/settings/mode（模式/槽位/任务映射 S98） | mode_store/models |
@@ -132,7 +132,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials（S128：模式库读 skill 表 type=plot） | plots/skills/materials |
 | routes_graph | 图谱 types/entities/relations/events/context/extract/impact | graph/graph_extractor/impact |
 | routes_story | 计划 plan/叙事树 nodes/threads/layout | plans/story_tree/story_threads |
-| routes_workflow | 工作流模板/草稿/任务 CRUD+run（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134 + 章节加料 S137（enrich_stitch 定点插入）） | workflow_store/engine/generator |
+| routes_workflow | 工作流模板/草稿/任务 CRUD+run+resume（S138 续跑）+rollback（S138 批级回滚）（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134 + 章节加料 S137） | workflow_store/engine/generator |
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 

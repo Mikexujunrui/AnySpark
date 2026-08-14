@@ -17,7 +17,13 @@ from anyspark.core import Message
 from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import logger
-from anyspark.server.schemas import ChapterCreate, ChapterOut, ChapterPatchIn, ChapterUpdate
+from anyspark.server.schemas import (
+    ChapterCreate,
+    ChapterOut,
+    ChapterPatchIn,
+    ChapterRestoreIn,
+    ChapterUpdate,
+)
 
 
 def make_chapters_router(deps: AppDeps) -> APIRouter:
@@ -169,6 +175,40 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
             content=updated.content,
             order_index=updated.order_index,
             updated_at=updated.updated_at,
+        )
+
+    @router.post("/api/chapters/{chapter_id}/restore", response_model=ChapterOut)
+    def restore_chapter_version(chapter_id: str, req: ChapterRestoreIn) -> ChapterOut:
+        """S138（回溯安全网 B2）：章节恢复到指定历史版本。
+
+        当前内容先入版本历史（note='恢复前'，可再回滚），目标版本内容写回当前。
+        versions 列表见 GET /api/chapters/{id} 的 versions 字段（id/content/note/saved_at）。
+        """
+        ch = deps.chapters.get(chapter_id)
+        if ch is None:
+            raise HTTPException(status_code=404, detail="章节不存在")
+        restored = deps.chapters.restore_version(chapter_id, req.version_id)
+        if restored is None:
+            raise HTTPException(status_code=404, detail="版本不存在")
+        # S85：恢复也是内容变化 → 后台图谱抽取（防图谱漂移）
+        deps.bg_queue.put(
+            BgTask(
+                kind="chapter",
+                title=restored.title,
+                content=restored.content,
+                order=restored.order_index,
+                line=restored.narrative_line,
+                book_id=restored.book_id,
+            )
+        )
+        return ChapterOut(
+            id=restored.id,
+            book_id=restored.book_id,
+            title=restored.title,
+            content=restored.content,
+            order_index=restored.order_index,
+            updated_at=restored.updated_at,
+            versions=restored.versions or [],
         )
 
     @router.delete("/api/chapters/{chapter_id}", response_model=dict[str, object])

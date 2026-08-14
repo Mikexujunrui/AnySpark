@@ -3695,3 +3695,48 @@ NSFW 审核坎）；本地 vLLM/LM Studio 适配文档（S131 接续）。
 
 **下一步**：/api/batch 内存实现可再收编（按需）；本地模型与 DeepSeek 双轨使用指南
 （LOCAL-LLM.md 已覆盖）；无剩余规划项待拍板。
+
+---
+
+## S138 规模化安全网——resume 续跑 + 版本回溯三件套（PLAN-SCALE-SAFETY 阶段 A+B）（已完成 ✅）
+
+**背景**：主人质询"规模化修改后能否回溯"驱动——workflow 引擎层断点恢复已有（S129）
+但无应用层续跑入口；chapter_versions 有快照数据但无恢复端点、无批级标识。规划
+docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回溯）在前，收编
+内存 batch 在后。
+
+**交付（commit `TODO`）**：
+
+1. **阶段 A：resume 续跑**（routes_workflow.py）：
+   - POST /api/workflows/tasks/{id}/resume：对非 done 任务后台线程再跑 run_task
+     （引擎幂等恢复已有，done 幂等返回）；服务重启后未完成任务可拉起续跑
+
+2. **阶段 B1：版本 note 携带来源**（store/sqlite.py + app.py）：
+   - ChapterStore.upsert 加 note 参数（默认 '修改前'，向后兼容）
+   - write_chapter script 写回时带 '批量任务/任务{task_id}'——批级定位基石
+
+3. **阶段 B2：单章恢复**（store + routes_chapters + 前端）：
+   - ChapterStore.restore_version：当前内容先入版本（note='恢复前'，可再回滚）、
+     目标版本写回；get 返回 versions 带 id
+   - POST /api/chapters/{id}/restore {version_id}（恢复也触发后台图谱抽取）
+   - 前端：ChapterHistoryPanel 恢复按钮 + api.revertChapter 真实化（兼容 3 参调用）
+
+4. **阶段 B3：批级一键回滚**（routes_workflow.py）：
+   - POST /api/workflows/tasks/{id}/rollback：按 note 聚合任务改前快照，每章取
+     最早一条逐个恢复；内容幂等跳过（防循环回滚）；任务保留可再回滚/重跑
+
+**验证**：
+- 测试（test_scale_safety.py 5 用例）：resume done 幂等 / note 带任务标识 /
+  单章恢复可再回滚 / 批级回滚 3 章全还原 + 二次 rollback 幂等 / 404
+- 全量 577 绿；ruff+format+mypy strict 全绿（210 文件）；前端 tsc/lint/build 绿
+- 真实库 curl 链路：版本历史 → restore V0 → 恢复前入版本 → 404 校验全过
+
+**踩坑**：
+- rollback 二次调用会把改前快照再聚合（快照自身带任务标识且恢复后仍在）——
+  内容幂等跳过修复（当前内容==快照内容则 skip）
+- chapter_ids 传数组 422 → 须传 JSON 字符串（既有模板参数约定）
+- test_queue.py 偶发 SSE 时序抖动（与本次改动无关，单跑通过）
+- signals.py format 债（并行 S132 系提交）机械修复
+
+**下一步**：阶段 C 中规模实测（真实库 10-20 章：中断→resume→rollback 闭环）→
+阶段 D 收编内存 batch（A+B+C 全绿后）。

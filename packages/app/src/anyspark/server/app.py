@@ -1066,13 +1066,20 @@ def build_app(
             if not content.strip():
                 return NodeResult(error="write_chapter 无内容（检查 text_key 上游输出）")
             try:
+                # S138（B1）：版本 note 携带来源——批量任务写回带任务标识，
+                # 供批级回滚（rollback）按来源聚合定位改前快照。
+                src_note = (
+                    f"批量任务/任务{getattr(ctx, 'task_id', '')}"
+                    if getattr(ctx, "task_id", "")
+                    else "修改前"
+                )
                 chs = chapters.list_by_book(ctx.book_id)
                 ch = next((c for c in chs if c.title == title), None)
                 if ch is None:
                     order = len(chs) + 1
-                    chapters.upsert(ctx.book_id, title, content, order)
+                    chapters.upsert(ctx.book_id, title, content, order, note=src_note)
                 else:
-                    chapters.upsert(ctx.book_id, title, content, ch.order_index)
+                    chapters.upsert(ctx.book_id, title, content, ch.order_index, note=src_note)
                 # 双写落盘（工作区 md 权威，与 write_chapter 工具一致）
                 try:
                     if workspace is not None:

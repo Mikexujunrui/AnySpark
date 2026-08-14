@@ -308,8 +308,13 @@ class ChapterStore:
         content: str,
         order_index: int = 0,
         narrative_line: str = "main",
+        note: str = "修改前",
     ) -> Chapter:
-        """新建或覆盖一章；覆盖前把旧版存进版本历史。"""
+        """新建或覆盖一章；覆盖前把旧版存进版本历史。
+
+        note（S138 回溯安全网 B1）：版本来源标识，默认 '修改前'；批量任务/工作流
+        可传来源（如 '批量改写/任务{task_id}'）供批级回滚按来源聚合定位。
+        """
         now = _now()
         existing = self._conn.execute(
             "SELECT id FROM chapters WHERE book_id = ? AND title = ?", (book_id, title)
@@ -320,8 +325,8 @@ class ChapterStore:
             with self._conn:
                 self._conn.execute(
                     "INSERT INTO chapter_versions (chapter_id, content, note, saved_at) "
-                    "VALUES (?, ?, '修改前', ?)",
-                    (cid, old["content"], now),
+                    "VALUES (?, ?, ?, ?)",
+                    (cid, old["content"], note, now),
                 )
                 self._conn.execute(
                     "UPDATE chapters SET content = ?, title = ?, order_index = ?, "
@@ -338,6 +343,60 @@ class ChapterStore:
                 )
         return self.get(cid)  # type: ignore[return-value]
 
+    def restore_version(self, chapter_id: str, version_id: int) -> Chapter | None:
+        """S138（回溯安全网 B2）：把章节恢复到指定历史版本。
+
+        当前内容先入版本历史（note='恢复前'，可再回滚），目标版本内容写回当前。
+        返回恢复后的 Chapter；版本不存在返回 None。
+        """
+        with self._lock:
+            ver = self._conn.execute(
+                "SELECT id, content FROM chapter_versions WHERE id = ? AND chapter_id = ?",
+                (version_id, chapter_id),
+            ).fetchone()
+            if ver is None:
+                return None
+            cur = self._conn.execute(
+                "SELECT content FROM chapters WHERE id = ?", (chapter_id,)
+            ).fetchone()
+            now = _now()
+            with self._conn:
+                if cur is not None:
+                    self._conn.execute(
+                        "INSERT INTO chapter_versions (chapter_id, content, note, saved_at) "
+                        "VALUES (?, ?, '恢复前', ?)",
+                        (chapter_id, cur["content"], now),
+                    )
+                self._conn.execute(
+                    "UPDATE chapters SET content = ?, updated_at = ? WHERE id = ?",
+                    (ver["content"], now, chapter_id),
+                )
+        return self.get(chapter_id)
+
+    def find_versions_by_note(self, note_fragment: str) -> list[dict[str, Any]]:
+        """S138（回溯安全网 B3）：按版本 note 来源片段查历史版本。
+
+        批级回滚用：批量任务写回时 note 带任务标识（如 '批量改写/任务{task_id}'），
+        按片段聚合可定位该任务改过的所有章节改前快照（按 saved_at 升序取最早=任务
+        首次覆盖前状态）。返回 [{id, chapter_id, content, note, saved_at}]。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id, chapter_id, content, note, saved_at FROM chapter_versions "
+                "WHERE note LIKE ? ORDER BY saved_at ASC",
+                (f"%{note_fragment}%",),
+            ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "chapter_id": r["chapter_id"],
+                "content": r["content"],
+                "note": r["note"],
+                "saved_at": r["saved_at"],
+            }
+            for r in rows
+        ]
+
     def get(self, chapter_id: str) -> Chapter | None:
         with self._lock:
             row = self._conn.execute(
@@ -346,12 +405,17 @@ class ChapterStore:
             if not row:
                 return None
             ver_rows = self._conn.execute(
-                "SELECT content, note, saved_at FROM chapter_versions "
+                "SELECT id, content, note, saved_at FROM chapter_versions "
                 "WHERE chapter_id = ? ORDER BY saved_at DESC",
                 (chapter_id,),
             ).fetchall()
             versions = [
-                {"content": v["content"], "note": v["note"], "saved_at": v["saved_at"]}
+                {
+                    "id": v["id"],
+                    "content": v["content"],
+                    "note": v["note"],
+                    "saved_at": v["saved_at"],
+                }
                 for v in ver_rows
             ]
         return Chapter(

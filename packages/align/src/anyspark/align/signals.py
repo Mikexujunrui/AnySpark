@@ -227,9 +227,7 @@ class SignalCollector:
             )
         )
 
-    def negative(
-        self, statement: str, context: str = "", book_id: str | None = None
-    ) -> Signal:
+    def negative(self, statement: str, context: str = "", book_id: str | None = None) -> Signal:
         """S53c 实时负例：用户明确否定/撤回（如"不要破折号""我说了不用这个词"）。
 
         即时捕获（不等轮末提炼），防隐式否定被上下文稀释丢失。

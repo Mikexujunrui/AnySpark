@@ -99,6 +99,66 @@ def make_workflow_router(deps: AppDeps) -> APIRouter:
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @router.post("/api/workflows/tasks/{task_id}/resume", response_model=dict[str, Any])
+    def resume_workflow_task(task_id: str) -> dict[str, Any]:
+        """S138（PLAN-SCALE-SAFETY 阶段 A）：断点续跑——服务重启/中断后拉起未完成任务。
+
+        引擎层 run_task 幂等可恢复（done 节点跳过、loop 从记录迭代数续跑，S129）；
+        本端点补应用层入口：对非 done 任务后台线程再跑 run_task。
+        返回当前任务状态（调用方应轮询 GET /tasks/{id} 看续跑进度）。
+        """
+        task = deps.workflow_store.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        status = str(task.get("status") or "")
+        if status == "done":
+            return task  # 已完成，无需续跑
+
+        def _run() -> None:
+            try:
+                workflow_engine.run_task(task_id)
+            except Exception as exc:
+                logger.warning("工作流续跑异常 %s: %s", task_id, exc)
+
+        threading.Thread(target=_run, daemon=True).start()
+        return deps.workflow_store.get_task(task_id) or {}
+
+    @router.post("/api/workflows/tasks/{task_id}/rollback", response_model=dict[str, Any])
+    def rollback_workflow_task(task_id: str) -> dict[str, Any]:
+        """S138（回溯安全网 B3）：批级一键回滚——恢复该任务改过的所有章节改前快照。
+
+        任务写回时版本 note 带任务标识（'批量任务/任务{task_id}'，见 write_chapter
+        script），按片段聚合定位每章最早一条改前快照并逐个恢复（restore_version）。
+        任务本身保留（不删记录），可再次回滚/重跑；回滚产生的 '恢复前' 版本不
+        携带任务标识，不会被再次聚合（防循环回滚）。
+        返回 {ok, restored: [{chapter_id, title, restored_at}]}。
+        """
+        task = deps.workflow_store.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        snaps = deps.chapters.find_versions_by_note(f"任务{task_id}")
+        if not snaps:
+            return {
+                "ok": True,
+                "restored": [],
+                "note": "该任务无改前快照（未写回章节或无来源标识）",
+            }
+        # 每章取最早一条（saved_at 升序 = 任务首次覆盖前状态）
+        by_chapter: dict[str, dict[str, Any]] = {}
+        for s in snaps:
+            by_chapter.setdefault(str(s["chapter_id"]), s)
+        restored = []
+        for cid, snap in by_chapter.items():
+            ch = deps.chapters.get(str(cid))
+            if ch is not None and ch.content == snap["content"]:
+                continue  # 内容已是目标快照（幂等：上次已回滚/未改动），跳过
+            ch = deps.chapters.restore_version(str(cid), int(snap["id"]))
+            if ch is not None:
+                restored.append(
+                    {"chapter_id": str(cid), "title": ch.title, "restored_at": ch.updated_at}
+                )
+        return {"ok": True, "restored": restored, "total": len(restored)}
+
     @router.get("/api/workflows/{workflow_id}", response_model=dict[str, Any])
     def get_workflow(workflow_id: str) -> dict[str, Any]:
         wf = deps.workflow_store.get_template(workflow_id)

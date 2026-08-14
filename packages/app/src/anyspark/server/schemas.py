@@ -204,6 +204,12 @@ class ChapterUpdate(BaseModel):
     content: str
 
 
+class ChapterRestoreIn(BaseModel):
+    """S138（回溯安全网 B2）：章节恢复到指定历史版本。"""
+
+    version_id: int
+
+
 class ManualEntryIn(BaseModel):
     content: str
     confidence: float = 0.5

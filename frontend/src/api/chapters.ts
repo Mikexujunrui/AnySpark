@@ -50,7 +50,6 @@ export const getOutline = (bookId: string): Promise<unknown> => {
 };
 export const getDetailedOutline = (bookId: string): Promise<unknown> => getOutline(bookId);
 
-// ── Chapter history / versions：V4 无版本历史 API，降级（兼容任意调用签名）──
 // ── Chapter history / versions：V4 chapter_versions 表（GET /api/chapters/{id} 返回 versions）──
 export const getChapterHistory = (...args: unknown[]): Promise<unknown[]> => {
   const chapterId = args[1] as string;
@@ -67,7 +66,13 @@ export const getChapterVersion = (...args: unknown[]): Promise<unknown> => {
     return { content: found?.content || '', original_content: null, patches_summary: [] };
   });
 };
-export const revertChapter = (..._args: unknown[]): Promise<unknown> => Promise.resolve({ ok: true });
+// S138（回溯安全网 B2）：revert 走真实恢复端点（版本 id）；兼容既有调用签名
+// (bookId, chapterId, versionId) 与 (chapterId, versionId)
+export const revertChapter = (...args: unknown[]): Promise<unknown> => {
+  const chapterId = args.length >= 3 ? (args[1] as string) : (args[0] as string);
+  const versionId = args.length >= 3 ? (args[2] as number | string) : (args[1] as number | string);
+  return post(`/api/chapters/${chapterId}/restore`, { version_id: Number(versionId) });
+};
 export const deleteChapterVersion = (..._args: unknown[]): Promise<unknown> => Promise.resolve({ ok: true });
 
 // ── Deep style / emotional curve：V4 无，降级 ──
