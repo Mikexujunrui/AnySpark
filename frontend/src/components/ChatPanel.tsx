@@ -18,6 +18,7 @@ import { triggerRefresh } from "../store"
 import { enqueueChat, dequeueChat, steerQueuedChat, steerChat, fetchQueues, type QueueItem } from '../api/chat'
 import { listWorkflows, runWorkflow, getWorkflowTask } from '../api/workflow'
 import { listChapters } from '../api/chapters'
+import { runCheck } from '../api/check'
 import { listSkillDrafts, promoteSkillDraft, deleteSkillDraft } from '../api/skills'
 
 const DIAG_PREFIX = '[CONN-DIAG]'
@@ -540,23 +541,31 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   async function handleValidate(text) {
     setMessages(prev => [...prev, { role: 'agent', text: '正在校验内容与知识库的一致性...' }])
     try {
-      const res = await fetch(`/api/books/${bookId}/validate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text }),
-      })
-      const result = await res.json()
+      // S145（第三方评审 P0-2）：此前调 /api/books/{bookId}/validate——后端无此路由，
+      // 点击必 404。改为接真实能力 /api/check（多检测者审读 + 图谱证据 + 时序校验）。
+      const result = await runCheck(text, '当前章节')
       const lines = []
-      if (result.valid) {
-        lines.push('校验通过，未发现与知识库的冲突')
+      if (result.hard_count === 0 && result.findings.length === 0 && !result.temporal_warnings?.length) {
+        lines.push('✅ 校验通过，未发现与知识库的硬伤冲突')
       } else {
-        lines.push('发现以下问题：')
-        for (const c of (result.conflicts || [])) {
-          lines.push(`  · ${c}`)
+        if (result.hard_count > 0) {
+          lines.push(`发现 ${result.hard_count} 处硬伤：`)
+          for (const f of result.findings) {
+            if (f.severity === 'hard') lines.push(`  · [${f.category}] ${f.message}`)
+          }
+        }
+        for (const f of result.findings) {
+          if (f.severity !== 'hard') lines.push(`  [${f.category}] ${f.message}`)
         }
       }
-      for (const n of (result.notes || [])) {
-        lines.push(`  [i] ${n}`)
+      for (const w of (result.temporal_warnings || [])) {
+        lines.push(`  ⏱ 时序警告: ${w}`)
+      }
+      if (result.graph_evidence) {
+        lines.push(`\n图谱证据：\n${result.graph_evidence.slice(0, 500)}`)
+      }
+      if (lines.length === 1) {
+        lines.push('（无其他发现项）')
       }
       setMessages(prev => [...prev, { role: 'agent', text: lines.join('\n') }])
     } catch (e) {
