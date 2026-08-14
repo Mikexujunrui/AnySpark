@@ -40,6 +40,8 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
   } | null>(null);
   // S145b：任务结果明细（loop 迭代累积——每章审读/改写输出）
   const [wfItems, setWfItems] = useState<Record<string, string>[]>([]);
+  // S147b：旧引擎任务 fallback——loop 无 items 时展示顶层结果（至少最后一章可见）
+  const [wfResults, setWfResults] = useState<Record<string, unknown> | null>(null);
   const [wfPendingApprove, setWfPendingApprove] = useState(false);
   const [wfBusy, setWfBusy] = useState(false);
   const [wfTemplates, setWfTemplates] = useState<{ rewrite: string; review: string }>({
@@ -102,6 +104,8 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
           } catch {
             setWfItems([])
           }
+          // S147b：顶层 results 兜底（旧引擎任务无 items → 至少展示最后一章结果）
+          setWfResults((t.results as Record<string, unknown> | undefined) ?? null)
         }
       } catch (e) {
         console.error("workflow poll error", e);
@@ -305,6 +309,22 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
                   ))}
                 </div>
               )}
+              {/* S147b：旧引擎任务 fallback——无迭代明细时展示顶层结果（至少最后一章） */}
+              {wfTask.status === "done" && wfItems.length === 0 && wfResults && (() => {
+                const keys = ["review_report", "review", "report", "rewritten", "fixed", "saved"]
+                const hit = keys.find((k) => wfResults[k] != null && String(wfResults[k]).trim())
+                return hit ? (
+                  <div className="border-t border-emerald-800/40 pt-2 mt-1 space-y-1">
+                    <p className="text-[10px] text-zinc-500 uppercase tracking-wide">结果（旧引擎任务，仅最后迭代）</p>
+                    <details className="text-[11px]" open>
+                      <summary className="cursor-pointer text-emerald-300/90 hover:text-emerald-200">最后结果</summary>
+                      <pre className="mt-1 text-zinc-400 whitespace-pre-wrap leading-relaxed bg-zinc-900/50 rounded p-2 max-h-48 overflow-y-auto">
+                        {String(wfResults[hit]).slice(0, 3000)}
+                      </pre>
+                    </details>
+                  </div>
+                ) : null
+              })()}
             </div>
           )}
 
