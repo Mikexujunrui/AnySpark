@@ -3853,3 +3853,43 @@ docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回
 
 **下一步**：无剩余审计缺口。候选：AI 写文件→人编辑→AI 再写的闭环（文件面板只读版）；
 敏感指令加料按需实测。
+
+---
+
+## S142 当前状态视图——scripts/current_state.py 自动生成 docs/CURRENT-STATE.md（主人质询驱动）（已完成 ✅）
+
+**背景**：主人质询"记录了整个流程，但有没有一个东西能完美显示最终/当前状态"——
+PROGRESS.md 是历史流水（S127 以来多次修改都有记录，但无聚合视图）；anyspark_state
+只有运行时数据快照（章节/图谱统计），缺能力状态（工具/模板/入口）与系统规模。
+
+**方案**：**机制自动生成，非手写**（哲学：内容由真实系统扫描产出，永不过期）——
+`scripts/current_state.py` 扫描真实代码装配 + 读真实 DB，产出可提交的
+`docs/CURRENT-STATE.md`。
+
+**交付（commit `2c0fed7`——并行会话收编入库，归属已在其提交说明声明；本条目为产出方记录）**：
+
+1. **scripts/current_state.py**（一键生成，`--json` 可输出结构化数据供前端/脚本用）：
+   - 系统规模：阶段数 / API 路由（openapi 强制展开 _IncludedRouter，143）/ agent
+     工具（真实 build_toolkit 装配，46）/ workflow 模板（8）/ 测试函数数（正则，
+     590）/ 后端代码行数（28k，按包）
+   - 能力清单：46 工具按装配语义分组（写作/领域/情节/心智/批量/工作流/网络）+
+     workflow 模板 + 前端 tab（功能 23 + 模式徽标 4）
+   - 数据状态：真实库（章节 32 / 图谱 33 / 说明书 6 / skill 11 / 资料 4 / 激活模型
+     deepseek-v4-flash）
+   - 人类可见映射：AI 能力 → 前端入口（审计成果固化，S141 的 AI文件 tab 在内）
+
+**踩坑**：
+- FastAPI _IncludedRouter 懒加载 → 路由数须 app.openapi() 强制展开（app.routes 只有 4）
+- pytest --collect-only 在此环境不输出统计行（addopts 配置）→ 正则数 def test_（590，
+  与 gate 581 通过数的差异 = skipped/xfail，作规模参考）
+- collect_data 各 store 接口签名不同（graph.list_entities(book_id)/skills.list_skills()/
+  models.active()）逐一实测；model 用 ModelRegistry.active().model（真实激活模型）
+- mypy strict：脚本也要过（list 类型断言、无裸 type:ignore）
+
+**用法**：每次大阶段提交后 `uv run python scripts/current_state.py` 重跑更新文档；
+gate 不强制（不拖慢全量），靠阶段纪律主动重跑。
+
+**验证**：全量 581 绿；ruff+format+mypy strict 全绿（196 文件）。
+
+**下一步**：无剩余审计缺口。候选：CURRENT-STATE 接入前端（--json 供状态面板）；
+AI 文件编辑闭环（人改 AI 笔记）；敏感指令加料按需实测。
