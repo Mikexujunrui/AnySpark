@@ -13,6 +13,7 @@ import queue
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -999,566 +1000,636 @@ def build_app(
 
         return re.sub(r"\{\{\s*([A-Za-z0-9_.\-]+)\s*\}\}", _repl, text)
 
-    def _wf_run_script(ctx: RunContext, node: Any) -> NodeResult:
-        """script 节点：确定性函数（内置白名单）。"""
-        fn = str(node.params.get("function") or "")
-        if fn == "noop":
-            # 无操作（AI 生成流程常用来做循环体出口占位）
-            return NodeResult(output=str(node.params.get("output_key") or "done"))
-        if fn == "read_chapter":
-            title = _wf_resolve(str(node.params.get("chapter_title") or ""), ctx)
+    # ------------------------------------------------------------------
+    # S150（REPAIR-LIST D1）：script 函数拆分——每个 script 独立方法 + 注册表分发
+    # （此前 500 行 if/elif 单函数，每阶段加分支持续膨胀）
+    _wf_scripts: dict[str, Callable[[RunContext, Any], NodeResult]] = {}
+
+    def _wf_script_noop(ctx: RunContext, node: Any) -> NodeResult:
+        # 无操作（AI 生成流程常用来做循环体出口占位）
+        return NodeResult(output=str(node.params.get("output_key") or "done"))
+
+    _wf_scripts["noop"] = _wf_script_noop
+
+    def _wf_script_read_chapter(ctx: RunContext, node: Any) -> NodeResult:
+        title = _wf_resolve(str(node.params.get("chapter_title") or ""), ctx)
+        chs = chapters.list_by_book(ctx.book_id)
+        ch = next((c for c in chs if c.title == title), None)
+        if ch is None:
+            # 模糊匹配（AI 生成标题可能不精确——真实链路暴露）：
+            # ① 双向包含 ② 提取双方"第X章"片段做章号匹配
+            def _chapter_no(t: str) -> str:
+                import re as _re
+
+                m = _re.search(r"第\s*([0-9一二三四五六七八九十百]+)\s*章", t)
+                return m.group(1) if m else ""
+
+            t_no = _chapter_no(title)
+            for c in chs:
+                if title and (title in c.title or c.title in title):
+                    ch = c
+                    break
+                if t_no and _chapter_no(c.title) == t_no:
+                    ch = c
+                    break
+        if ch is None:
+            return NodeResult(
+                error=f"章节不存在: {title}（可用章节: "
+                + ", ".join(c.title for c in chs[:8])
+                + "）"
+            )
+        return NodeResult(output=ch.content)
+
+    _wf_scripts["read_chapter"] = _wf_script_read_chapter
+
+    def _wf_script_review_chapter(ctx: RunContext, node: Any) -> NodeResult:
+        title = _wf_resolve(str(node.params.get("chapter_title") or ""), ctx)
+        ch = next((c for c in chapters.list_by_book(ctx.book_id) if c.title == title), None)
+        if ch is None:
+            return NodeResult(error=f"章节不存在: {title}")
+        report = run_review(model, ch.title, ch.content[:20000])
+        return NodeResult(output=f"硬伤数: {report.hard_count}\n" + report.render())
+
+    _wf_scripts["review_chapter"] = _wf_script_review_chapter
+
+    def _wf_script_list_chapters(ctx: RunContext, node: Any) -> NodeResult:
+        chs = chapters.list_by_book(ctx.book_id)
+        if not chs:
+            return NodeResult(output="（无章节）")
+        return NodeResult(output="\n".join(f"{c.order_index}. {c.title}" for c in chs))
+
+    _wf_scripts["list_chapters"] = _wf_script_list_chapters
+
+    def _wf_script_write_chapter(ctx: RunContext, node: Any) -> NodeResult:
+        """写回章节：参数 chapter_title + content（或 {{var}} 引用上游改写结果）。
+
+        content 缺失时取 params.text_key（缺省 'rewritten'）对应的上游输出——
+        AI 生成的流程常用：改写 agent 输出 rewritten → write_chapter 脚本落盘。
+        chapter_title/content 支持 {{var}} 解析（如 {{chapter_title}} 来自 run params）。
+        """
+        title = _wf_resolve(str(node.params.get("chapter_title") or ""), ctx)
+        content = _wf_resolve(str(node.params.get("content") or ""), ctx)
+        if not content:
+            text_key = str(node.params.get("text_key") or "rewritten")
+            content = str(ctx.results.get(text_key, ""))
+        if not title:
+            return NodeResult(error="write_chapter 缺 chapter_title")
+        if not content.strip():
+            return NodeResult(error="write_chapter 无内容（检查 text_key 上游输出）")
+        try:
+            # S138（B1）：版本 note 携带来源——批量任务写回带任务标识，
+            # 供批级回滚（rollback）按来源聚合定位改前快照。
+            src_note = (
+                f"批量任务/任务{getattr(ctx, 'task_id', '')}"
+                if getattr(ctx, "task_id", "")
+                else "修改前"
+            )
             chs = chapters.list_by_book(ctx.book_id)
             ch = next((c for c in chs if c.title == title), None)
             if ch is None:
-                # 模糊匹配（AI 生成标题可能不精确——真实链路暴露）：
-                # ① 双向包含 ② 提取双方"第X章"片段做章号匹配
-                def _chapter_no(t: str) -> str:
-                    import re as _re
-
-                    m = _re.search(r"第\s*([0-9一二三四五六七八九十百]+)\s*章", t)
-                    return m.group(1) if m else ""
-
-                t_no = _chapter_no(title)
-                for c in chs:
-                    if title and (title in c.title or c.title in title):
-                        ch = c
-                        break
-                    if t_no and _chapter_no(c.title) == t_no:
-                        ch = c
-                        break
-            if ch is None:
-                return NodeResult(
-                    error=f"章节不存在: {title}（可用章节: "
-                    + ", ".join(c.title for c in chs[:8])
-                    + "）"
-                )
-            return NodeResult(output=ch.content)
-        if fn == "review_chapter":
-            title = _wf_resolve(str(node.params.get("chapter_title") or ""), ctx)
-            ch = next((c for c in chapters.list_by_book(ctx.book_id) if c.title == title), None)
-            if ch is None:
-                return NodeResult(error=f"章节不存在: {title}")
-            report = run_review(model, ch.title, ch.content[:20000])
-            return NodeResult(output=f"硬伤数: {report.hard_count}\n" + report.render())
-        if fn == "list_chapters":
-            chs = chapters.list_by_book(ctx.book_id)
-            if not chs:
-                return NodeResult(output="（无章节）")
-            return NodeResult(output="\n".join(f"{c.order_index}. {c.title}" for c in chs))
-        if fn == "write_chapter":
-            """写回章节：参数 chapter_title + content（或 {{var}} 引用上游改写结果）。
-
-            content 缺失时取 params.text_key（缺省 'rewritten'）对应的上游输出——
-            AI 生成的流程常用：改写 agent 输出 rewritten → write_chapter 脚本落盘。
-            chapter_title/content 支持 {{var}} 解析（如 {{chapter_title}} 来自 run params）。
-            """
-            title = _wf_resolve(str(node.params.get("chapter_title") or ""), ctx)
-            content = _wf_resolve(str(node.params.get("content") or ""), ctx)
-            if not content:
-                text_key = str(node.params.get("text_key") or "rewritten")
-                content = str(ctx.results.get(text_key, ""))
-            if not title:
-                return NodeResult(error="write_chapter 缺 chapter_title")
-            if not content.strip():
-                return NodeResult(error="write_chapter 无内容（检查 text_key 上游输出）")
-            try:
-                # S138（B1）：版本 note 携带来源——批量任务写回带任务标识，
-                # 供批级回滚（rollback）按来源聚合定位改前快照。
-                src_note = (
-                    f"批量任务/任务{getattr(ctx, 'task_id', '')}"
-                    if getattr(ctx, "task_id", "")
-                    else "修改前"
-                )
-                chs = chapters.list_by_book(ctx.book_id)
-                ch = next((c for c in chs if c.title == title), None)
-                if ch is None:
-                    order = len(chs) + 1
-                    chapters.upsert(ctx.book_id, title, content, order, note=src_note)
-                else:
-                    chapters.upsert(ctx.book_id, title, content, ch.order_index, note=src_note)
-                # 双写落盘（工作区 md 权威，与 write_chapter 工具一致）
-                try:
-                    if workspace is not None:
-                        order = ch.order_index if ch else (len(chs) + 1)
-                        workspace.write_chapter(ctx.book_id, order, title, content)
-                except Exception:
-                    pass  # 库镜像已更新，落盘失败不阻断
-                return NodeResult(output=f"已写回章节: {title}")
-            except Exception as exc:
-                return NodeResult(error=f"写回失败: {exc}")
-        if fn == "read_settings":
-            """读本项目设定档（正典设定）→ 文本块（供 agent 注入，防 OOC）。
-
-            params: keyword 可选（过滤分类/名称/内容）；limit 缺省 40。
-            """
-            keyword = str(node.params.get("keyword") or "").strip()
-            try:
-                limit = max(1, min(200, int(str(node.params.get("limit") or "40"))))
-            except ValueError:
-                limit = 40
-            try:
-                items = settings.list(ctx.book_id)
-            except Exception as exc:
-                return NodeResult(error=f"读设定档失败: {exc}")
-            lines = []
-            for s in items:
-                if keyword and keyword.lower() not in f"{s.name} {s.content} {s.category}".lower():
-                    continue
-                lines.append(f"[{s.category}] {s.name or s.content[:20]}：{s.content[:200]}")
-                if len(lines) >= limit:
-                    break
-            if not lines:
-                return NodeResult(output=f"（项目「{ctx.book_id}」设定档无匹配条目）")
-            return NodeResult(output="\n".join(lines))
-        if fn == "read_graph":
-            """读本项目图谱（人物/地点/伏笔状态 + 关系）→ 文本块（供 agent 注入）。
-
-            params: keyword 可选（实体名/别名匹配）；limit 缺省 20（按出场章数取 Top N）。
-            """
-            keyword = str(node.params.get("keyword") or "").strip()
-            try:
-                limit = max(1, min(100, int(str(node.params.get("limit") or "20"))))
-            except ValueError:
-                limit = 20
-            try:
-                ents = graph.list_entities(ctx.book_id, q=keyword or None, limit=200)
-            except Exception as exc:
-                return NodeResult(error=f"读图谱失败: {exc}")
-            ents = sorted(ents, key=lambda e: -e.weight)[:limit]
-            if not ents:
-                return NodeResult(output=f"（项目「{ctx.book_id}」图谱无匹配实体）")
-            lines = []
-            try:
-                rels = graph.list_relations(ctx.book_id, limit=500)
-            except Exception:
-                rels = []
-            for e in ents:
-                state = (e.state or e.description or "").strip()
-                line = f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）" + (
-                    f"：{state[:150]}" if state else ""
-                )
-                for r in rels:
-                    if r.from_name == e.name or r.to_name == e.name:
-                        line += f"\n  ↳ {r.from_name} {r.rel_type} {r.to_name}"
-                lines.append(line)
-            return NodeResult(output="\n".join(lines))
-        if fn == "query_reference":
-            """查参考书（分级检索）：原文片段 + 高级参考书（项目）的图谱/设定知识层。
-
-            params: keyword 必填（支持 {{var}} 解析，如 run params 传 ref_keyword）；
-            max_per_book 缺省 3。复用 reference_lookup 分级检索。
-            """
-            keyword = _wf_resolve(str(node.params.get("keyword") or ""), ctx).strip()
-            if not keyword:
-                return NodeResult(error="query_reference 缺 keyword")
-            try:
-                max_per = max(1, min(5, int(str(node.params.get("max_per_book") or "3"))))
-            except ValueError:
-                max_per = 3
-
-            def _project_files(ref_book_id: str) -> str:
-                parts = []
-                for ch in chapters.list_by_book(ref_book_id):
-                    parts.append(f"【{ch.title}】\n{ch.content}")
-                return "\n\n".join(parts)
-
-            try:
-                res = search_reference_books(
-                    library,
-                    ctx.book_id,
-                    keyword,
-                    project_files=_project_files,
-                    max_per_book=max_per,
-                )
-            except Exception as exc:
-                return NodeResult(error=f"参考书检索失败: {exc}")
-            lines = [f"参考书命中「{keyword}」："]
-            for item in res.get("results", []):
-                lines.append(f"——{item['ref_name']}——")
-                for h in item.get("hits", []):
-                    lines.append(f"({h['count']}次) {h['snippet']}")
-            # 高级参考书（项目）知识层：图谱/设定
-            if library is not None:
-                try:
-                    for ref in library.get_references(ctx.book_id):
-                        if ref.get("type") != "project":
-                            continue
-                        klines = render_reference_knowledge(
-                            graph, settings, str(ref.get("id", "")), keyword
-                        )
-                        if klines:
-                            lines.append(f"——项目「{ref.get('id', '?')}」（知识层：图谱/设定）——")
-                            lines.extend(klines)
-                except Exception:
-                    pass
-            if len(lines) == 1:
-                return NodeResult(output=f"参考书中未命中「{keyword}」（含图谱/设定层）。")
-            return NodeResult(output="\n\n".join(lines))
-        if fn == "chapter_extract":
-            """S134（WORKFLOW 第 3 批）：单章图谱抽取+伏笔回收+学习审查。
-
-            复用 tasks.extract_chapter（落库形态与现后台任务一致）：读 chapter_id →
-            图谱抽取/伏笔回收/学习审查三合一。params.item_var（缺省 "item"）= chapter_id。
-            """
-            from anyspark.server import tasks as _tasks
-
-            cid = str(ctx.var(str(node.params.get("item_var") or "item")) or "").strip()
-            if not cid:
-                return NodeResult(error="chapter_extract 缺 item（chapter_id）")
-            ch = chapters.get(cid)
-            if ch is None:
-                return NodeResult(error=f"章节不存在: {cid}")
-            _tasks.extract_chapter(deps, ctx.book_id, ch.title, ch.content or "", ch.order_index)
-            return NodeResult(output=f"图谱抽取完成: 《{ch.title}》")
-        if fn == "signal_refine":
-            """S134：信号 → 偏好提炼 → 说明书（复用 tasks.refine_from_signals，增量游标）。"""
-            from anyspark.server import tasks as _tasks
-
-            before = len(deps.manual.list("project", "main"))
-            _tasks.refine_from_signals(deps)
-            after = len(deps.manual.list("project", "main"))
-            return NodeResult(output=f"信号提炼完成（说明书 {before}→{after} 条）")
-        if fn == "conversation_summarize":
-            """S134：会话 → 场景记忆摘要（复用 tasks.summarize_conversation）。
-
-            params.conv_id：会话 id（{{var}} 解析）。
-            """
-            from anyspark.server import tasks as _tasks
-
-            conv_id = _wf_resolve(str(node.params.get("conv_id") or ""), ctx).strip()
-            if not conv_id:
-                return NodeResult(error="conversation_summarize 缺 conv_id")
-            _tasks.summarize_conversation(deps, conv_id)
-            return NodeResult(output=f"会话归档摘要完成: {conv_id}")
-        if fn == "enrich_stitch":
-            """S137：加料拼接——把 agent 生成的插入内容合并进原文（定点插入，原文保留）。
-
-            agent 输出含 【插入】...【/插入】 标记（可多处；带锚点说明）：
-              原文……【插入】新增内容【/插入】原文……
-            stitch 把标记块原位展开并入原文；未提供完整标记时把插入块追加到章末。
-            params：source_var（原章文本变量名，缺省 "chapter_text"）/ insert_var
-            （agent 输出变量名，缺省 "enriched"）。输出完整增强版正文。
-            """
-            import re as _re
-
-            src = str(ctx.var(str(node.params.get("source_var") or "chapter_text")) or "")
-            insert = str(ctx.var(str(node.params.get("insert_var") or "enriched")) or "")
-            if not src.strip():
-                return NodeResult(error="enrich_stitch 缺源章文本（source_var 上游未产出）")
-            if not insert.strip():
-                return NodeResult(error="enrich_stitch 缺插入内容（insert_var 上游未产出）")
-            # 方案 A：agent 已产出带【插入】标记的完整正文 → 直接合并标记块
-            if "【插入】" in insert:
-
-                def _expand(m: _re.Match[str]) -> str:
-                    return m.group(1)
-
-                merged = _re.sub(r"【插入】\s*(.*?)\s*【/插入】", _expand, insert, flags=_re.S)
-                if merged.strip():
-                    return NodeResult(output=merged)
-            # 方案 B：agent 只产出纯插入段 → 追加到章末（保原文不丢）
-            return NodeResult(output=f"{src.rstrip()}\n\n{insert.strip()}")
-        if fn == "batch_prepare":
-            """S133（WORKFLOW 第 2 批）：批量任务准备——收集章节 id 集合（遍历源）。
-
-            params：chapter_ids（逗号分隔或 JSON 数组，支持 {{var}} 从 run params 传入）；
-            缺省=当前项目全部章节（list_chapters 同源）。输出 JSON 数组供 loop collection_var。
-            """
-            import json as _json
-
-            raw = _wf_resolve(str(node.params.get("chapter_ids") or ""), ctx).strip()
-            ids: list[str] = []
-            if raw:
-                try:
-                    parsed = _json.loads(raw)
-                    if isinstance(parsed, list):
-                        ids = [str(x) for x in parsed]
-                except Exception:
-                    ids = [x.strip() for x in raw.split(",") if x.strip()]
-            if not ids:
-                # 缺省全部章节
-                ids = [c.id for c in chapters.list_by_book(ctx.book_id)]
-            if not ids:
-                return NodeResult(error="batch_prepare 无章节（chapter_ids 为空且项目无章节）")
-            return NodeResult(output=_json.dumps(ids, ensure_ascii=False))
-        if fn == "chapter_by_id":
-            """S133：按 chapter_id 读章节（标题+正文）——loop 集合遍历逐项喂 agent。
-
-            读 params.item_var（缺省 "item"）为 chapter_id，输出「标题\n正文」；
-            超长章（>20000）告知边界（对齐 run_batch_rewrite）。
-            """
-            cid = str(ctx.var(str(node.params.get("item_var") or "item")) or "").strip()
-            if not cid:
-                return NodeResult(error="chapter_by_id 缺 item（chapter_id）")
-            ch = chapters.get(cid)
-            if ch is None:
-                return NodeResult(error=f"章节不存在: {cid}")
-            ch_content = ch.content or ""
-            if len(ch_content) > 20000:
-                ch_content = (
-                    f"【注意：本章全文 {len(ch.content)} 字，以下仅前 20000 字，"
-                    "末尾部分未展示】\n" + ch_content[:20000]
-                )
-            return NodeResult(output=f"【{ch.title}】\n{ch_content}")
-        if fn == "chapter_title_by_id":
-            """S133：按 chapter_id 取章标题（write_chapter 落盘用）。
-
-            读 params.item_var（缺省 "item"）为 chapter_id → 输出标题。
-            """
-            cid = str(ctx.var(str(node.params.get("item_var") or "item")) or "").strip()
-            if not cid:
-                return NodeResult(error="chapter_title_by_id 缺 item（chapter_id）")
-            ch = chapters.get(cid)
-            if ch is None:
-                return NodeResult(error=f"章节不存在: {cid}")
-            return NodeResult(output=ch.title)
-        if fn == "book_refine_prepare":
-            """S129（WORKFLOW 第 1 批）：拆书准备——从书库读全书 → 选章 → 分批。
-
-            确定性步骤（复用 skillgen 选章/分批逻辑）：
-            params.library_book_id：书库书 id（支持 {{var}} 解析，如 run params 传入）
-            params.batch_size：每批章数（缺省 4，对齐 skillgen._BATCH_SIZE）
-            输出 JSON：{"batches": [...], "titles": [...]}——batches 供 loop collection_var
-            遍历，titles 供骨架扫描（章标题轨迹）。
-            """
-            import json as _json
-
-            from anyspark.align.skillgen import (
-                _BATCH_SIZE as _SK_BATCH,
-            )
-            from anyspark.align.skillgen import (
-                _build_batches as _build_batches_fn,
-            )
-            from anyspark.align.skillgen import (
-                _parse_chapters as _parse_chapters_fn,
-            )
-            from anyspark.align.skillgen import (
-                _select_structural_chapters as _select_fn,
-            )
-
-            bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
-            if not bid:
-                return NodeResult(error="book_refine_prepare 缺 library_book_id")
-            try:
-                batch_size = max(1, min(8, int(str(node.params.get("batch_size") or _SK_BATCH))))
-            except ValueError:
-                batch_size = _SK_BATCH
-            if library is None:
-                return NodeResult(error="书库不可用（未装配）")
-            book = library.get_book(bid)
-            if book is None:
-                return NodeResult(error=f"书库无此书：{bid}")
-            source = library.read_book(bid, max_chars=None).strip()
-            if not source:
-                return NodeResult(error=f"书库《{book['name']}》无内容（先导入文本）")
-            chaps = _parse_chapters_fn(source)
-            if len(chaps) < 5:  # 无章节结构回退均匀抽样（对齐 generate_book）
-                batches = [source]
-                titles = []
+                order = len(chs) + 1
+                chapters.upsert(ctx.book_id, title, content, order, note=src_note)
             else:
-                selected = _select_fn(chaps)
-                batches = _build_batches_fn(chaps, selected, batch_size)
-                titles = [t for t, _ in chaps]
-            return NodeResult(
-                output=_json.dumps(
-                    {"batches": batches, "titles": titles, "book_name": book["name"]},
+                chapters.upsert(ctx.book_id, title, content, ch.order_index, note=src_note)
+                # 双写落盘（工作区 md 权威，与 write_chapter 工具一致）
+            try:
+                if workspace is not None:
+                    order = ch.order_index if ch else (len(chs) + 1)
+                    workspace.write_chapter(ctx.book_id, order, title, content)
+            except Exception:
+                pass  # 库镜像已更新，落盘失败不阻断
+            return NodeResult(output=f"已写回章节: {title}")
+        except Exception as exc:
+            return NodeResult(error=f"写回失败: {exc}")
+
+    _wf_scripts["write_chapter"] = _wf_script_write_chapter
+
+    def _wf_script_read_settings(ctx: RunContext, node: Any) -> NodeResult:
+        """读本项目设定档（正典设定）→ 文本块（供 agent 注入，防 OOC）。
+
+        params: keyword 可选（过滤分类/名称/内容）；limit 缺省 40。
+        """
+        keyword = str(node.params.get("keyword") or "").strip()
+        try:
+            limit = max(1, min(200, int(str(node.params.get("limit") or "40"))))
+        except ValueError:
+            limit = 40
+        try:
+            items = settings.list(ctx.book_id)
+        except Exception as exc:
+            return NodeResult(error=f"读设定档失败: {exc}")
+        lines = []
+        for s in items:
+            if keyword and keyword.lower() not in f"{s.name} {s.content} {s.category}".lower():
+                continue
+            lines.append(f"[{s.category}] {s.name or s.content[:20]}：{s.content[:200]}")
+            if len(lines) >= limit:
+                break
+        if not lines:
+            return NodeResult(output=f"（项目「{ctx.book_id}」设定档无匹配条目）")
+        return NodeResult(output="\n".join(lines))
+
+    _wf_scripts["read_settings"] = _wf_script_read_settings
+
+    def _wf_script_read_graph(ctx: RunContext, node: Any) -> NodeResult:
+        """读本项目图谱（人物/地点/伏笔状态 + 关系）→ 文本块（供 agent 注入）。
+
+        params: keyword 可选（实体名/别名匹配）；limit 缺省 20（按出场章数取 Top N）。
+        """
+        keyword = str(node.params.get("keyword") or "").strip()
+        try:
+            limit = max(1, min(100, int(str(node.params.get("limit") or "20"))))
+        except ValueError:
+            limit = 20
+        try:
+            ents = graph.list_entities(ctx.book_id, q=keyword or None, limit=200)
+        except Exception as exc:
+            return NodeResult(error=f"读图谱失败: {exc}")
+        ents = sorted(ents, key=lambda e: -e.weight)[:limit]
+        if not ents:
+            return NodeResult(output=f"（项目「{ctx.book_id}」图谱无匹配实体）")
+        lines = []
+        try:
+            rels = graph.list_relations(ctx.book_id, limit=500)
+        except Exception:
+            rels = []
+        for e in ents:
+            state = (e.state or e.description or "").strip()
+            line = f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）" + (
+                f"：{state[:150]}" if state else ""
+            )
+            for r in rels:
+                if r.from_name == e.name or r.to_name == e.name:
+                    line += f"\n  ↳ {r.from_name} {r.rel_type} {r.to_name}"
+            lines.append(line)
+        return NodeResult(output="\n".join(lines))
+
+    _wf_scripts["read_graph"] = _wf_script_read_graph
+
+    def _wf_script_query_reference(ctx: RunContext, node: Any) -> NodeResult:
+        """查参考书（分级检索）：原文片段 + 高级参考书（项目）的图谱/设定知识层。
+
+        params: keyword 必填（支持 {{var}} 解析，如 run params 传 ref_keyword）；
+        max_per_book 缺省 3。复用 reference_lookup 分级检索。
+        """
+        keyword = _wf_resolve(str(node.params.get("keyword") or ""), ctx).strip()
+        if not keyword:
+            return NodeResult(error="query_reference 缺 keyword")
+        try:
+            max_per = max(1, min(5, int(str(node.params.get("max_per_book") or "3"))))
+        except ValueError:
+            max_per = 3
+
+        def _project_files(ref_book_id: str) -> str:
+            parts = []
+            for ch in chapters.list_by_book(ref_book_id):
+                parts.append(f"【{ch.title}】\n{ch.content}")
+            return "\n\n".join(parts)
+
+        try:
+            res = search_reference_books(
+                library,
+                ctx.book_id,
+                keyword,
+                project_files=_project_files,
+                max_per_book=max_per,
+            )
+        except Exception as exc:
+            return NodeResult(error=f"参考书检索失败: {exc}")
+        lines = [f"参考书命中「{keyword}」："]
+        for item in res.get("results", []):
+            lines.append(f"——{item['ref_name']}——")
+            for h in item.get("hits", []):
+                lines.append(f"({h['count']}次) {h['snippet']}")
+            # 高级参考书（项目）知识层：图谱/设定
+        if library is not None:
+            try:
+                for ref in library.get_references(ctx.book_id):
+                    if ref.get("type") != "project":
+                        continue
+                    klines = render_reference_knowledge(
+                        graph, settings, str(ref.get("id", "")), keyword
+                    )
+                    if klines:
+                        lines.append(f"——项目「{ref.get('id', '?')}」（知识层：图谱/设定）——")
+                        lines.extend(klines)
+            except Exception:
+                pass
+        if len(lines) == 1:
+            return NodeResult(output=f"参考书中未命中「{keyword}」（含图谱/设定层）。")
+        return NodeResult(output="\n\n".join(lines))
+
+    _wf_scripts["query_reference"] = _wf_script_query_reference
+
+    def _wf_script_chapter_extract(ctx: RunContext, node: Any) -> NodeResult:
+        """S134（WORKFLOW 第 3 批）：单章图谱抽取+伏笔回收+学习审查。
+
+        复用 tasks.extract_chapter（落库形态与现后台任务一致）：读 chapter_id →
+        图谱抽取/伏笔回收/学习审查三合一。params.item_var（缺省 "item"）= chapter_id。
+        """
+        from anyspark.server import tasks as _tasks
+
+        cid = str(ctx.var(str(node.params.get("item_var") or "item")) or "").strip()
+        if not cid:
+            return NodeResult(error="chapter_extract 缺 item（chapter_id）")
+        ch = chapters.get(cid)
+        if ch is None:
+            return NodeResult(error=f"章节不存在: {cid}")
+        _tasks.extract_chapter(deps, ctx.book_id, ch.title, ch.content or "", ch.order_index)
+        return NodeResult(output=f"图谱抽取完成: 《{ch.title}》")
+
+    _wf_scripts["chapter_extract"] = _wf_script_chapter_extract
+
+    def _wf_script_signal_refine(ctx: RunContext, node: Any) -> NodeResult:
+        """S134：信号 → 偏好提炼 → 说明书（复用 tasks.refine_from_signals，增量游标）。"""
+        from anyspark.server import tasks as _tasks
+
+        before = len(deps.manual.list("project", "main"))
+        _tasks.refine_from_signals(deps)
+        after = len(deps.manual.list("project", "main"))
+        return NodeResult(output=f"信号提炼完成（说明书 {before}→{after} 条）")
+
+    _wf_scripts["signal_refine"] = _wf_script_signal_refine
+
+    def _wf_script_conversation_summarize(ctx: RunContext, node: Any) -> NodeResult:
+        """S134：会话 → 场景记忆摘要（复用 tasks.summarize_conversation）。
+
+        params.conv_id：会话 id（{{var}} 解析）。
+        """
+        from anyspark.server import tasks as _tasks
+
+        conv_id = _wf_resolve(str(node.params.get("conv_id") or ""), ctx).strip()
+        if not conv_id:
+            return NodeResult(error="conversation_summarize 缺 conv_id")
+        _tasks.summarize_conversation(deps, conv_id)
+        return NodeResult(output=f"会话归档摘要完成: {conv_id}")
+
+    _wf_scripts["conversation_summarize"] = _wf_script_conversation_summarize
+
+    def _wf_script_enrich_stitch(ctx: RunContext, node: Any) -> NodeResult:
+        """S137：加料拼接——把 agent 生成的插入内容合并进原文（定点插入，原文保留）。
+
+        agent 输出含 【插入】...【/插入】 标记（可多处；带锚点说明）：
+          原文……【插入】新增内容【/插入】原文……
+        stitch 把标记块原位展开并入原文；未提供完整标记时把插入块追加到章末。
+        params：source_var（原章文本变量名，缺省 "chapter_text"）/ insert_var
+        （agent 输出变量名，缺省 "enriched"）。输出完整增强版正文。
+        """
+        import re as _re
+
+        src = str(ctx.var(str(node.params.get("source_var") or "chapter_text")) or "")
+        insert = str(ctx.var(str(node.params.get("insert_var") or "enriched")) or "")
+        if not src.strip():
+            return NodeResult(error="enrich_stitch 缺源章文本（source_var 上游未产出）")
+        if not insert.strip():
+            return NodeResult(error="enrich_stitch 缺插入内容（insert_var 上游未产出）")
+            # 方案 A：agent 已产出带【插入】标记的完整正文 → 直接合并标记块
+        if "【插入】" in insert:
+
+            def _expand(m: _re.Match[str]) -> str:
+                return m.group(1)
+
+            merged = _re.sub(r"【插入】\s*(.*?)\s*【/插入】", _expand, insert, flags=_re.S)
+            if merged.strip():
+                return NodeResult(output=merged)
+            # 方案 B：agent 只产出纯插入段 → 追加到章末（保原文不丢）
+        return NodeResult(output=f"{src.rstrip()}\n\n{insert.strip()}")
+
+    _wf_scripts["enrich_stitch"] = _wf_script_enrich_stitch
+
+    def _wf_script_batch_prepare(ctx: RunContext, node: Any) -> NodeResult:
+        """S133（WORKFLOW 第 2 批）：批量任务准备——收集章节 id 集合（遍历源）。
+
+        params：chapter_ids（逗号分隔或 JSON 数组，支持 {{var}} 从 run params 传入）；
+        缺省=当前项目全部章节（list_chapters 同源）。输出 JSON 数组供 loop collection_var。
+        """
+        import json as _json
+
+        raw = _wf_resolve(str(node.params.get("chapter_ids") or ""), ctx).strip()
+        ids: list[str] = []
+        if raw:
+            try:
+                parsed = _json.loads(raw)
+                if isinstance(parsed, list):
+                    ids = [str(x) for x in parsed]
+            except Exception:
+                ids = [x.strip() for x in raw.split(",") if x.strip()]
+        if not ids:
+            # 缺省全部章节
+            ids = [c.id for c in chapters.list_by_book(ctx.book_id)]
+        if not ids:
+            return NodeResult(error="batch_prepare 无章节（chapter_ids 为空且项目无章节）")
+        return NodeResult(output=_json.dumps(ids, ensure_ascii=False))
+
+    _wf_scripts["batch_prepare"] = _wf_script_batch_prepare
+
+    def _wf_script_chapter_by_id(ctx: RunContext, node: Any) -> NodeResult:
+        """S133：按 chapter_id 读章节（标题+正文）——loop 集合遍历逐项喂 agent。
+
+        读 params.item_var（缺省 "item"）为 chapter_id，输出「标题\n正文」；
+        超长章（>20000）告知边界（对齐 run_batch_rewrite）。
+        """
+        cid = str(ctx.var(str(node.params.get("item_var") or "item")) or "").strip()
+        if not cid:
+            return NodeResult(error="chapter_by_id 缺 item（chapter_id）")
+        ch = chapters.get(cid)
+        if ch is None:
+            return NodeResult(error=f"章节不存在: {cid}")
+        ch_content = ch.content or ""
+        if len(ch_content) > 20000:
+            ch_content = (
+                f"【注意：本章全文 {len(ch.content)} 字，以下仅前 20000 字，"
+                "末尾部分未展示】\n" + ch_content[:20000]
+            )
+        return NodeResult(output=f"【{ch.title}】\n{ch_content}")
+
+    _wf_scripts["chapter_by_id"] = _wf_script_chapter_by_id
+
+    def _wf_script_chapter_title_by_id(ctx: RunContext, node: Any) -> NodeResult:
+        """S133：按 chapter_id 取章标题（write_chapter 落盘用）。
+
+        读 params.item_var（缺省 "item"）为 chapter_id → 输出标题。
+        """
+        cid = str(ctx.var(str(node.params.get("item_var") or "item")) or "").strip()
+        if not cid:
+            return NodeResult(error="chapter_title_by_id 缺 item（chapter_id）")
+        ch = chapters.get(cid)
+        if ch is None:
+            return NodeResult(error=f"章节不存在: {cid}")
+        return NodeResult(output=ch.title)
+
+    _wf_scripts["chapter_title_by_id"] = _wf_script_chapter_title_by_id
+
+    def _wf_script_book_refine_prepare(ctx: RunContext, node: Any) -> NodeResult:
+        """S129（WORKFLOW 第 1 批）：拆书准备——从书库读全书 → 选章 → 分批。
+
+        确定性步骤（复用 skillgen 选章/分批逻辑）：
+        params.library_book_id：书库书 id（支持 {{var}} 解析，如 run params 传入）
+        params.batch_size：每批章数（缺省 4，对齐 skillgen._BATCH_SIZE）
+        输出 JSON：{"batches": [...], "titles": [...]}——batches 供 loop collection_var
+        遍历，titles 供骨架扫描（章标题轨迹）。
+        """
+        import json as _json
+
+        from anyspark.align.skillgen import (
+            _BATCH_SIZE as _SK_BATCH,
+        )
+        from anyspark.align.skillgen import (
+            _build_batches as _build_batches_fn,
+        )
+        from anyspark.align.skillgen import (
+            _parse_chapters as _parse_chapters_fn,
+        )
+        from anyspark.align.skillgen import (
+            _select_structural_chapters as _select_fn,
+        )
+
+        bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
+        if not bid:
+            return NodeResult(error="book_refine_prepare 缺 library_book_id")
+        try:
+            batch_size = max(1, min(8, int(str(node.params.get("batch_size") or _SK_BATCH))))
+        except ValueError:
+            batch_size = _SK_BATCH
+        if library is None:
+            return NodeResult(error="书库不可用（未装配）")
+        book = library.get_book(bid)
+        if book is None:
+            return NodeResult(error=f"书库无此书：{bid}")
+        source = library.read_book(bid, max_chars=None).strip()
+        if not source:
+            return NodeResult(error=f"书库《{book['name']}》无内容（先导入文本）")
+        chaps = _parse_chapters_fn(source)
+        if len(chaps) < 5:  # 无章节结构回退均匀抽样（对齐 generate_book）
+            batches = [source]
+            titles = []
+        else:
+            selected = _select_fn(chaps)
+            batches = _build_batches_fn(chaps, selected, batch_size)
+            titles = [t for t, _ in chaps]
+        return NodeResult(
+            output=_json.dumps(
+                {"batches": batches, "titles": titles, "book_name": book["name"]},
+                ensure_ascii=False,
+            )
+        )
+
+    _wf_scripts["book_refine_prepare"] = _wf_script_book_refine_prepare
+
+    def _wf_script_book_refine_titles(ctx: RunContext, node: Any) -> NodeResult:
+        """S129：取全书章标题（骨架扫描输入——标题轨迹无正文）。
+
+        params.library_book_id：书库书 id。输出："第1章 标题\n第2章 标题..."
+        （超 _MAX_SKELETON_TITLES 抽稀，对齐 skillgen 骨架扫描）。
+        """
+        from anyspark.align.skillgen import (
+            _MAX_SKELETON_TITLES as _SK_TITLES,
+        )
+        from anyspark.align.skillgen import (
+            _parse_chapters as _parse_chapters_fn,
+        )
+
+        bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
+        if not bid:
+            return NodeResult(error="book_refine_titles 缺 library_book_id")
+        if library is None:
+            return NodeResult(error="书库不可用（未装配）")
+        book = library.get_book(bid)
+        if book is None:
+            return NodeResult(error=f"书库无此书：{bid}")
+        source = library.read_book(bid, max_chars=None).strip()
+        chaps = _parse_chapters_fn(source)
+        n = len(chaps)
+        if n < 1:
+            return NodeResult(output=f"《{book['name']}》（无章节标题）")
+        titles = [t for t, _ in chaps]
+        if n > _SK_TITLES:
+            step = n / _SK_TITLES
+            titles = [titles[int(i * step)] for i in range(_SK_TITLES - 1)] + [titles[-1]]
+        lines = [f"第{i + 1}章 {t}" for i, t in enumerate(titles)]
+        return NodeResult(output=f"《{book['name']}》\n" + "\n".join(lines))
+
+    _wf_scripts["book_refine_titles"] = _wf_script_book_refine_titles
+
+    def _wf_script_book_refine_accumulate(ctx: RunContext, node: Any) -> NodeResult:
+        """S129：累计单批拆解结果 → partials JSON 数组。
+        读 params.item_var（缺省 "partial"）对应的上游 agent 输出，append 进
+        params.list_var（缺省 "partials"）数组；输出更新后的数组（供归并 agent 读）。
+        """
+        import json as _json
+
+        item_var = str(node.params.get("item_var") or "partial")
+        list_var = str(node.params.get("list_var") or "partials")
+        item = str(ctx.var(item_var) or "")
+        if not item.strip():
+            return NodeResult(error=f"book_refine_accumulate 缺 {item_var}（上游未产出）")
+        current = ctx.var(list_var)
+        try:
+            arr = _json.loads(current) if isinstance(current, str) and current.strip() else []
+        except Exception:
+            arr = []
+        arr.append(item)
+        return NodeResult(output=_json.dumps(arr, ensure_ascii=False))
+
+    _wf_scripts["book_refine_accumulate"] = _wf_script_book_refine_accumulate
+
+    def _wf_script_book_refine_refine_input(ctx: RunContext, node: Any) -> NodeResult:
+        """S129：定点精读输入准备——从骨架笔记定位机关章 → 精读原文片段。
+
+        复用 skillgen 的 _extract_chapter_nums / _locate_mechanism_passages：
+        骨架笔记提到机关章号 → 拼机关章 + 首尾章 + 关键词定位段（确定性，防案例幻觉的
+        先给原文）。params.note：骨架笔记（{{var}} 解析）；params.library_book_id。
+        """
+        from anyspark.align.skillgen import (
+            _extract_chapter_nums as _ext_nums,
+        )
+        from anyspark.align.skillgen import (
+            _locate_mechanism_passages as _locate_passages,
+        )
+
+        note = _wf_resolve(str(node.params.get("note") or ""), ctx).strip()
+        bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
+        if not note or not bid:
+            return NodeResult(error="book_refine_refine_input 缺 note/library_book_id")
+        if library is None:
+            return NodeResult(error="书库不可用（未装配）")
+        book = library.get_book(bid)
+        if book is None:
+            return NodeResult(error=f"书库无此书：{bid}")
+        source = library.read_book(bid, max_chars=None).strip()
+        from anyspark.align.skillgen import _parse_chapters as _parse_chapters_fn
+
+        chaps = _parse_chapters_fn(source)
+        if len(chaps) < 2:
+            return NodeResult(output="（章节不足，跳过定点精读）")
+        nums = _ext_nums(note)
+        idxs: set[int] = set()
+        for a, b in nums:
+            for k in range(a, min(b, a + 4) + 1):
+                if 1 <= k <= len(chaps):
+                    idxs.add(k - 1)
+        idxs.add(0)
+        idxs.add(len(chaps) - 1)
+        ref_idx = sorted(i for i in idxs if 0 < i < len(chaps) - 1)
+        ordered = ([*ref_idx, 0, len(chaps) - 1])[:6]
+        parts = []
+        for i in ordered:
+            t, body = chaps[i]
+            parts.append(f"【第{i + 1}章 {t}】\n{body[:4000]}")
+        passages = _locate_passages(chaps, note)
+        excerpt = "\n\n".join([*passages, *parts])
+        return NodeResult(output=f"{note[:2500]}\n\n{excerpt}")
+
+    _wf_scripts["book_refine_refine_input"] = _wf_script_book_refine_refine_input
+
+    def _wf_script_book_refine_finish(ctx: RunContext, node: Any) -> NodeResult:
+        """S129：拆书落草稿——解析三路 agent 候选 → skills.add_draft。
+
+        params：merge(书名方法论)/arch(架构技法)/plot(剧情模式) 三路文本
+        （{{var}} 解析）+ refine_excerpt（精读原文，供架构技法案例机器校验）。
+        确定性解析复用 skillgen._parse_skills/_parse_templates（含枚举校验回落）
+        + _sanitize_examples（防案例幻觉：引号句必须逐字在精读片段）。
+        类型映射对齐 generate_book：merge→both（文风给写作、结构给主循环）；
+        arch→main（架构机关给主循环）；plot→plot（四要素进 ext）。
+        """
+        import json as _json
+
+        from anyspark.align.skillgen import (
+            _parse_skills as _ps,
+        )
+        from anyspark.align.skillgen import (
+            _parse_templates as _pt,
+        )
+        from anyspark.align.skillgen import (
+            _sanitize_examples as _san,
+        )
+
+        merge_raw = _wf_resolve(str(node.params.get("merge") or ""), ctx).strip()
+        arch_raw = _wf_resolve(str(node.params.get("arch") or ""), ctx).strip()
+        plot_raw = _wf_resolve(str(node.params.get("plot") or ""), ctx).strip()
+        excerpt = _wf_resolve(str(node.params.get("refine_excerpt") or ""), ctx)
+        # S130：拆书产物同书名一包（pack_id=书名，整包引用写作只取 writing/both）
+        pack_id = _wf_resolve(str(node.params.get("pack_id") or ""), ctx).strip()
+        if not pack_id:
+            # 回退：从 library_book_id 解析书名
+            bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
+            if bid and library is not None:
+                bk = library.get_book(bid)
+                if bk is not None:
+                    pack_id = str(bk.get("name", ""))
+        if skills is None:
+            return NodeResult(error="skills 未装配（无法落草稿）")
+        cands: list[dict[str, str]] = []
+        # 书名方法论（GENERATE_PROMPT_BOOK 单元素输出）→ both
+        for mk in _ps(merge_raw)[:1]:
+            mk["type"] = "both"
+            cands.append(mk)
+            # 架构技法（REFINE_PROMPT 多元素）→ main + 案例机器校验
+        arch_cands = _ps(arch_raw)
+        for ac in arch_cands:
+            ac["type"] = "main"
+        cands.extend(_san(arch_cands, excerpt))
+        # 剧情模式（骨架笔记版四要素）→ plot（content 由 description 派生）
+        for pc in _pt(plot_raw):
+            cands.append(
+                {
+                    "name": pc["name"],
+                    "description": pc["description"],
+                    "content": f"剧情模式：{pc['description']}",
+                    "example": "",
+                    "tags": "剧情模式",
+                    "type": "plot",
+                    "granularity": pc["granularity"],
+                    "position": pc["position"],
+                    "function": pc["function"],
+                    "params": pc["params"],
+                }
+            )
+        if not cands:
+            return NodeResult(output="（无有效候选）")
+        added = 0
+        for cd in cands:
+            typ = cd.get("type", "writing")
+            ext = ""
+            if typ == "plot":
+                params: Any = cd.get("params", [])
+                if isinstance(params, str):
+                    params = [p.strip() for p in params.split(",") if p.strip()]
+                ext = _json.dumps(
+                    {
+                        "granularity": cd.get("granularity", "章"),
+                        "position": cd.get("position", "发展"),
+                        "function": cd.get("function", "主线"),
+                        "params": params or [],
+                    },
                     ensure_ascii=False,
                 )
+            d = skills.add_draft(
+                name=str(cd.get("name", ""))[:120],
+                description=str(cd.get("description", ""))[:500],
+                content=str(cd.get("content", "")),
+                example=str(cd.get("example", ""))[:2000],
+                tags=str(cd.get("tags", "")),
+                type=typ,
+                ext=ext,
+                pack_id=pack_id,
+                source="workflow",
             )
-        if fn == "book_refine_titles":
-            """S129：取全书章标题（骨架扫描输入——标题轨迹无正文）。
+            if d:
+                added += 1
+        return NodeResult(output=f"已存 {added} 条 skill 草稿（人工确认后生效）")
 
-            params.library_book_id：书库书 id。输出："第1章 标题\n第2章 标题..."
-            （超 _MAX_SKELETON_TITLES 抽稀，对齐 skillgen 骨架扫描）。
-            """
-            from anyspark.align.skillgen import (
-                _MAX_SKELETON_TITLES as _SK_TITLES,
-            )
-            from anyspark.align.skillgen import (
-                _parse_chapters as _parse_chapters_fn,
-            )
+    _wf_scripts["book_refine_finish"] = _wf_script_book_refine_finish
 
-            bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
-            if not bid:
-                return NodeResult(error="book_refine_titles 缺 library_book_id")
-            if library is None:
-                return NodeResult(error="书库不可用（未装配）")
-            book = library.get_book(bid)
-            if book is None:
-                return NodeResult(error=f"书库无此书：{bid}")
-            source = library.read_book(bid, max_chars=None).strip()
-            chaps = _parse_chapters_fn(source)
-            n = len(chaps)
-            if n < 1:
-                return NodeResult(output=f"《{book['name']}》（无章节标题）")
-            titles = [t for t, _ in chaps]
-            if n > _SK_TITLES:
-                step = n / _SK_TITLES
-                titles = [titles[int(i * step)] for i in range(_SK_TITLES - 1)] + [titles[-1]]
-            lines = [f"第{i + 1}章 {t}" for i, t in enumerate(titles)]
-            return NodeResult(output=f"《{book['name']}》\n" + "\n".join(lines))
-        if fn == "book_refine_accumulate":
-            """S129：累计单批拆解结果 → partials JSON 数组。
-            读 params.item_var（缺省 "partial"）对应的上游 agent 输出，append 进
-            params.list_var（缺省 "partials"）数组；输出更新后的数组（供归并 agent 读）。
-            """
-            import json as _json
-
-            item_var = str(node.params.get("item_var") or "partial")
-            list_var = str(node.params.get("list_var") or "partials")
-            item = str(ctx.var(item_var) or "")
-            if not item.strip():
-                return NodeResult(error=f"book_refine_accumulate 缺 {item_var}（上游未产出）")
-            current = ctx.var(list_var)
-            try:
-                arr = _json.loads(current) if isinstance(current, str) and current.strip() else []
-            except Exception:
-                arr = []
-            arr.append(item)
-            return NodeResult(output=_json.dumps(arr, ensure_ascii=False))
-        if fn == "book_refine_refine_input":
-            """S129：定点精读输入准备——从骨架笔记定位机关章 → 精读原文片段。
-
-            复用 skillgen 的 _extract_chapter_nums / _locate_mechanism_passages：
-            骨架笔记提到机关章号 → 拼机关章 + 首尾章 + 关键词定位段（确定性，防案例幻觉的
-            先给原文）。params.note：骨架笔记（{{var}} 解析）；params.library_book_id。
-            """
-            from anyspark.align.skillgen import (
-                _extract_chapter_nums as _ext_nums,
-            )
-            from anyspark.align.skillgen import (
-                _locate_mechanism_passages as _locate_passages,
-            )
-
-            note = _wf_resolve(str(node.params.get("note") or ""), ctx).strip()
-            bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
-            if not note or not bid:
-                return NodeResult(error="book_refine_refine_input 缺 note/library_book_id")
-            if library is None:
-                return NodeResult(error="书库不可用（未装配）")
-            book = library.get_book(bid)
-            if book is None:
-                return NodeResult(error=f"书库无此书：{bid}")
-            source = library.read_book(bid, max_chars=None).strip()
-            from anyspark.align.skillgen import _parse_chapters as _parse_chapters_fn
-
-            chaps = _parse_chapters_fn(source)
-            if len(chaps) < 2:
-                return NodeResult(output="（章节不足，跳过定点精读）")
-            nums = _ext_nums(note)
-            idxs: set[int] = set()
-            for a, b in nums:
-                for k in range(a, min(b, a + 4) + 1):
-                    if 1 <= k <= len(chaps):
-                        idxs.add(k - 1)
-            idxs.add(0)
-            idxs.add(len(chaps) - 1)
-            ref_idx = sorted(i for i in idxs if 0 < i < len(chaps) - 1)
-            ordered = ([*ref_idx, 0, len(chaps) - 1])[:6]
-            parts = []
-            for i in ordered:
-                t, body = chaps[i]
-                parts.append(f"【第{i + 1}章 {t}】\n{body[:4000]}")
-            passages = _locate_passages(chaps, note)
-            excerpt = "\n\n".join([*passages, *parts])
-            return NodeResult(output=f"{note[:2500]}\n\n{excerpt}")
-        if fn == "book_refine_finish":
-            """S129：拆书落草稿——解析三路 agent 候选 → skills.add_draft。
-
-            params：merge(书名方法论)/arch(架构技法)/plot(剧情模式) 三路文本
-            （{{var}} 解析）+ refine_excerpt（精读原文，供架构技法案例机器校验）。
-            确定性解析复用 skillgen._parse_skills/_parse_templates（含枚举校验回落）
-            + _sanitize_examples（防案例幻觉：引号句必须逐字在精读片段）。
-            类型映射对齐 generate_book：merge→both（文风给写作、结构给主循环）；
-            arch→main（架构机关给主循环）；plot→plot（四要素进 ext）。
-            """
-            import json as _json
-
-            from anyspark.align.skillgen import (
-                _parse_skills as _ps,
-            )
-            from anyspark.align.skillgen import (
-                _parse_templates as _pt,
-            )
-            from anyspark.align.skillgen import (
-                _sanitize_examples as _san,
-            )
-
-            merge_raw = _wf_resolve(str(node.params.get("merge") or ""), ctx).strip()
-            arch_raw = _wf_resolve(str(node.params.get("arch") or ""), ctx).strip()
-            plot_raw = _wf_resolve(str(node.params.get("plot") or ""), ctx).strip()
-            excerpt = _wf_resolve(str(node.params.get("refine_excerpt") or ""), ctx)
-            # S130：拆书产物同书名一包（pack_id=书名，整包引用写作只取 writing/both）
-            pack_id = _wf_resolve(str(node.params.get("pack_id") or ""), ctx).strip()
-            if not pack_id:
-                # 回退：从 library_book_id 解析书名
-                bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
-                if bid and library is not None:
-                    bk = library.get_book(bid)
-                    if bk is not None:
-                        pack_id = str(bk.get("name", ""))
-            if skills is None:
-                return NodeResult(error="skills 未装配（无法落草稿）")
-            cands: list[dict[str, str]] = []
-            # 书名方法论（GENERATE_PROMPT_BOOK 单元素输出）→ both
-            for mk in _ps(merge_raw)[:1]:
-                mk["type"] = "both"
-                cands.append(mk)
-            # 架构技法（REFINE_PROMPT 多元素）→ main + 案例机器校验
-            arch_cands = _ps(arch_raw)
-            for ac in arch_cands:
-                ac["type"] = "main"
-            cands.extend(_san(arch_cands, excerpt))
-            # 剧情模式（骨架笔记版四要素）→ plot（content 由 description 派生）
-            for pc in _pt(plot_raw):
-                cands.append(
-                    {
-                        "name": pc["name"],
-                        "description": pc["description"],
-                        "content": f"剧情模式：{pc['description']}",
-                        "example": "",
-                        "tags": "剧情模式",
-                        "type": "plot",
-                        "granularity": pc["granularity"],
-                        "position": pc["position"],
-                        "function": pc["function"],
-                        "params": pc["params"],
-                    }
-                )
-            if not cands:
-                return NodeResult(output="（无有效候选）")
-            added = 0
-            for cd in cands:
-                typ = cd.get("type", "writing")
-                ext = ""
-                if typ == "plot":
-                    params: Any = cd.get("params", [])
-                    if isinstance(params, str):
-                        params = [p.strip() for p in params.split(",") if p.strip()]
-                    ext = _json.dumps(
-                        {
-                            "granularity": cd.get("granularity", "章"),
-                            "position": cd.get("position", "发展"),
-                            "function": cd.get("function", "主线"),
-                            "params": params or [],
-                        },
-                        ensure_ascii=False,
-                    )
-                d = skills.add_draft(
-                    name=str(cd.get("name", ""))[:120],
-                    description=str(cd.get("description", ""))[:500],
-                    content=str(cd.get("content", "")),
-                    example=str(cd.get("example", ""))[:2000],
-                    tags=str(cd.get("tags", "")),
-                    type=typ,
-                    ext=ext,
-                    pack_id=pack_id,
-                    source="workflow",
-                )
-                if d:
-                    added += 1
-            return NodeResult(output=f"已存 {added} 条 skill 草稿（人工确认后生效）")
-        return NodeResult(error=f"未注册的 script 函数: {fn}")
+    def _wf_run_script(ctx: RunContext, node: Any) -> NodeResult:
+        """script 节点：确定性函数（内置白名单）——查表分发（S150 拆分）。"""
+        fn = str(node.params.get("function") or "")
+        handler = _wf_scripts.get(fn)
+        if handler is None:
+            return NodeResult(error=f"未注册的 script 函数: {fn}")
+        result = handler(ctx, node)
+        assert isinstance(result, NodeResult)
+        return result
 
     def _wf_run_approval(ctx: RunContext, node: Any) -> NodeResult:
         """approval 节点：抛等待信号（任务置 waiting_approval，人工 approve 后续跑）。"""
