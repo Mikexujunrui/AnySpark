@@ -3827,7 +3827,7 @@ docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回
 - 人类可见性 ⚠️ 44/46 可见，2 个缺口：read_file/write_file 产物（AI 笔记）无前端浏览；
   搜索高级能力（词表/exclude/regex）前端不对等；+ delegate 能力"可跑但 AI 生成不用"
 
-**交付（commit `TODO`）**：
+**交付（commit `03469bb`）**：
 
 1. **缺口①：AI 文件沙箱人类可见**（routes_workspace + FilesPanel）：
    - GET /api/sandbox：沙箱文件树（路径/大小/修改时间）
