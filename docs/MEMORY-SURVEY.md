@@ -100,14 +100,14 @@
    - 实测（真实 DeepSeek，独立临时库）："我不是说了别用正如开头吗" → agent 链路
      list_chapters → mind_reconcile → mind_register，登记"禁止用'正如'开头写任何段落或章节"
      （habit, user 来源）✓。注：此方案依赖 LLM 遵循指引，非硬保证（与"相信模型"哲学的代价一致）。
-2. **merge_add 碎片治理**：3 个双字词重叠阈值拦不住 2 词重叠的近似条目（实测"叙事克制，
-   少用感叹号"[habit] 与"避免使用过多感叹号"[style] 并存）。DESIGN §12.33 已记录历史同类
-   问题（"叙事克制"×5 + 一条合并 5 条内容的碎片），**历史脏数据仍在库里**。
-   建议：单独数据治理（按需），不阻塞。
-3. **多书信号硬编码 main**：refine_from_signals 与 SignalCollector 绑定 book_id="main"，
-   非 main 书的信号不提炼。本次保持一致（DESIGN 有 book_id 分层规划），多书场景再扩展。
-4. **对账 prompt 不含信号 context**：build_reconcile_prompt 只送 kind+content，LLM 看不到
-   信号场景（稿纸/对话），对账精度略降。小问题，改 prompt 需回归 /api/mind/reconcile。
+2. **merge_add 碎片阈值——确认不修**：降阈值（≥3→≥2 双字词）会把"不要用破折号"与
+   "不要用省略号"误合并（不同雷区），非纯正收益。历史脏数据实查已不存在（库里无重复条目），
+   无需清理。碎片由活跃度衰减+渐进式披露兜底，不阻塞。
+3. **多书信号 main 硬编码——S132e 已修**：SignalCollector 支持 per-call book_id、
+   SignalIn 加 book_id、refine 按书遍历（unprocessed_books）、条目落信号所属书。
+   端到端验证：book2 章节修改 → book2 信号 → 提炼"书=book2 +1 条" → 条目 book_id=book2 ✓
+4. **对账 prompt 缺 context——S132e 已修**：信号行带 context（稿纸保存/定点编辑/对话），
+   供对账 LLM 判断信号来源权重。
 
 **真实可用性评估**：链路已通（三次真实 DeepSeek 端到端验证：自动提炼/操作信号/对账工具），
 但**"真实可用"的唯一检验是真实使用**——此前智能体真实使用暴露的问题（S62 正则误判、
