@@ -3519,7 +3519,7 @@ skills/templates 归属竞争彻底消除。
 带 approval 闸门（W2），轻操作（审读只读）无闸门；集合遍历逐章（W3-A 已验证）；前端
 BatchPanel 对接（归一不降级：旧任务与新模板并存）。
 
-**交付（commit `TODO`）**：
+**交付（commit `edb28c7`）**：
 
 1. **script 函数 3 个（app.py _wf_run_script）**：
    - batch_prepare：收集章节 id 集合（params.chapter_ids JSON/逗号串，缺省全部章节）→
