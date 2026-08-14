@@ -3902,7 +3902,7 @@ AI 文件编辑闭环（人改 AI 笔记）；敏感指令加料按需实测。
 "编辑闭环没实现"——人不能改 AI 笔记，AI 下次 write_file 会静默覆盖。补全
 "内容自然语言可编辑"完整闭环：**AI 写 → 人看 → 人改 → AI 不覆盖**。
 
-**交付（commit `TODO`）**：
+**交付（commit `92463ed`）**：
 
 1. **PUT /api/sandbox/file**（routes_workspace）：人工保存——写内容 + 落
    `.human_edited.json` 标记（{path: 人工保存时间}，隐藏文件不列列表）
