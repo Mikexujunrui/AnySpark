@@ -173,3 +173,46 @@ def test_stream_relay_empty_queue_single_round() -> None:
 
     assert "queue_consume" not in body
     assert '"rounds": 1' in body
+
+
+def test_history_filters_empty_assistant_messages() -> None:
+    """S147 回归：历史接口过滤工具轮空 assistant 消息（空气泡根治）。
+
+    工具调用轮 assistant 消息（content='' + tool_calls 元数据）落库是上下文配对
+    必需（S23），但历史 UI 读取应过滤——渲染空气泡根因。
+    """
+    import tempfile
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    class _M:
+        model_name = "fake"
+
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="好的。")
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=_M(), db_path=db))
+    # 建会话
+    r = client.post("/api/conversations", json={"title": "历史过滤", "book_id": "main"})
+    conv_id = r.json()["id"]
+    # 手动写入：正常 assistant 消息 + 空 assistant 消息（模拟工具轮）+ user 消息
+    client.post(
+        f"/api/conversations/{conv_id}/messages",
+        json={
+            "messages": [
+                {"role": "user", "content": "你好"},
+                {"role": "assistant", "content": "正常回复"},
+                {"role": "assistant", "content": ""},  # 工具轮空声明（S23 配对必需）
+                {"role": "assistant", "content": "工具后回复"},
+            ]
+        },
+    )
+    msgs = client.get(f"/api/conversations/{conv_id}/messages").json()
+    texts = [m["content"] for m in msgs]
+    assert texts == ["你好", "正常回复", "工具后回复"], f"空消息应被过滤: {texts}"

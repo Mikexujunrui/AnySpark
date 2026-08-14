@@ -169,3 +169,34 @@ def test_batch_rewrite_reject_aborts() -> None:
     # 章节未被改写
     after = client.get("/api/chapters").json()
     assert after == before
+
+
+def test_batch_review_loop_items_keep_each_chapter() -> None:
+    """S147 回归：批量审读 2 章 → loop items 保留**每章**审读报告（此前覆盖只留最后）。"""
+    import json as _json
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=FakeBatchModel(), db_path=db))
+    ids = _mk_chapters(client, 2)
+    wfs = client.get("/api/workflows").json()
+    wf_id = next(w["id"] for w in wfs if w["name"] == "批量审读")
+    r = client.post(
+        f"/api/workflows/{wf_id}/run",
+        json={"book_id": "main", "params": {"chapter_ids": json.dumps(ids)}},
+    )
+    task_id = r.json()["task_id"]
+    status = ""
+    for _ in range(100):
+        t = client.get(f"/api/workflows/tasks/{task_id}").json()
+        status = t.get("status", "")
+        if status in ("done", "failed"):
+            break
+        time.sleep(0.1)
+    assert status == "done", f"审读任务未完成: {status}"
+    # loop 迭代明细：2 章各一条（每章 read/title/review 全保留，不是覆盖只留最后）
+    loop = next(s for s in t.get("node_states", []) if s["node_id"] == "loop")
+    out = _json.loads(loop["output"])
+    assert len(out["items"]) == 2, f"应 2 章明细，实际 {len(out['items'])}"
+    for item in out["items"]:
+        assert item.get("review"), "每迭代应有审读报告"
+        assert item.get("title"), "每迭代应有章名"
