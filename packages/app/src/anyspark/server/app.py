@@ -186,7 +186,7 @@ def _migrate_templates_to_skills(skills: WritingSkillStore, db_path: str | Path)
 # agent 节点（可断点恢复/可重试/节点级记账）。prompt 文本种子时从 skillgen 常量
 # 内联进模板（模板=数据：用户改节点指令即改拆解要求，不碰代码）。
 def _seed_book_refine_template(workflow_store: Any) -> None:
-    """预置拆书/批量改写/批量审读 workflow 模板（WORKFLOW 第 1+2 批）。"""
+    """预置拆书/批量/轻流程 workflow 模板（WORKFLOW 第 1+2+3 批）。"""
     from anyspark.workflow import WorkflowDef
 
     existing = {t["name"] for t in workflow_store.list_templates()}
@@ -196,6 +196,125 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
         _seed_batch_rewrite_template(workflow_store, WorkflowDef)
     if "批量审读" not in existing:
         _seed_batch_review_template(workflow_store, WorkflowDef)
+    if "图谱抽取" not in existing:
+        _seed_graph_extract_template(workflow_store, WorkflowDef)
+    if "信号提炼" not in existing:
+        _seed_signal_refine_template(workflow_store, WorkflowDef)
+    if "会话摘要" not in existing:
+        _seed_conversation_summarize_template(workflow_store, WorkflowDef)
+
+
+def _seed_graph_extract_template(workflow_store: Any, wf_def_cls: Any) -> None:
+    """S134（WORKFLOW 第 3 批）：图谱抽取——逐章 LLM 抽取实体/关系/事件 → 落库。
+
+    非全程（直接出结果，无 approval——轻流程）；集合遍历逐章；落库形态复用
+    tasks.extract_chapter（图谱+伏笔回收+学习审查与现后台任务一致）。
+    运行参数：chapter_ids（JSON 数组或逗号串，缺省全部章节）。
+    """
+    wf = wf_def_cls.from_dict(
+        {
+            "name": "图谱抽取",
+            "description": (
+                "逐章图谱抽取（实体/关系/事件）+ 伏笔回收 + 学习审查。直接出结果；"
+                "集合遍历逐章，落库形态与章节落盘自动抽取一致。"
+                "运行参数：chapter_ids=章节id数组或逗号串（缺省全部）。"
+            ),
+            "nodes": [
+                {
+                    "id": "prep",
+                    "kind": "script",
+                    "label": "收集章节",
+                    "params": {
+                        "function": "batch_prepare",
+                        "chapter_ids": "{{chapter_ids}}",
+                        "output_key": "chapter_ids",
+                    },
+                },
+                {
+                    "id": "loop",
+                    "kind": "loop",
+                    "label": "逐章抽取",
+                    "params": {
+                        "body": ["extract"],
+                        "max_iterations": 500,
+                        "collection_var": "chapter_ids",
+                        "item_var": "cid",
+                    },
+                },
+                {
+                    "id": "extract",
+                    "kind": "script",
+                    "label": "抽取落库",
+                    "params": {
+                        "function": "chapter_extract",
+                        "item_var": "cid",
+                        "output_key": "extract_report",
+                    },
+                },
+            ],
+            "edges": [{"source": "prep", "target": "loop"}],
+        }
+    )
+    errors = wf.validate()
+    if errors:
+        raise ValueError(f"图谱抽取模板校验失败: {errors}")
+    workflow_store.add_template(wf)
+
+
+def _seed_signal_refine_template(workflow_store: Any, wf_def_cls: Any) -> None:
+    """S134：信号提炼——未处理信号 → 偏好提炼 → 说明书（直接出结果）。"""
+    wf = wf_def_cls.from_dict(
+        {
+            "name": "信号提炼",
+            "description": (
+                "把未处理的操作信号提炼成说明书偏好条目（增量游标，分批归并）。"
+                "直接出结果；复用后台 refine_from_signals 同逻辑。无运行参数。"
+            ),
+            "nodes": [
+                {
+                    "id": "refine",
+                    "kind": "script",
+                    "label": "信号提炼",
+                    "params": {"function": "signal_refine", "output_key": "report"},
+                }
+            ],
+            "edges": [],
+        }
+    )
+    errors = wf.validate()
+    if errors:
+        raise ValueError(f"信号提炼模板校验失败: {errors}")
+    workflow_store.add_template(wf)
+
+
+def _seed_conversation_summarize_template(workflow_store: Any, wf_def_cls: Any) -> None:
+    """S134：会话摘要——会话 → 场景记忆摘要（直接出结果）。"""
+    wf = wf_def_cls.from_dict(
+        {
+            "name": "会话摘要",
+            "description": (
+                "把会话归档成场景记忆（跨会话延续性）。直接出结果；复用后台"
+                " summarize_conversation 同逻辑。运行参数：conv_id=会话 id。"
+            ),
+            "nodes": [
+                {
+                    "id": "summarize",
+                    "kind": "script",
+                    "label": "会话摘要",
+                    "params": {
+                        "function": "conversation_summarize",
+                        "conv_id": "{{conv_id}}",
+                        "output_key": "report",
+                    },
+                }
+            ],
+            "edges": [],
+        }
+    )
+    errors = wf.validate()
+    if errors:
+        raise ValueError(f"会话摘要模板校验失败: {errors}")
+    workflow_store.add_template(wf)
 
 
 def _seed_refine_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -837,8 +956,9 @@ def build_app(
                     chapters.upsert(ctx.book_id, title, content, ch.order_index)
                 # 双写落盘（工作区 md 权威，与 write_chapter 工具一致）
                 try:
-                    order = ch.order_index if ch else (len(chs) + 1)
-                    workspace.write_chapter(ctx.book_id, order, title, content)
+                    if workspace is not None:
+                        order = ch.order_index if ch else (len(chs) + 1)
+                        workspace.write_chapter(ctx.book_id, order, title, content)
                 except Exception:
                     pass  # 库镜像已更新，落盘失败不阻断
                 return NodeResult(output=f"已写回章节: {title}")
@@ -952,6 +1072,42 @@ def build_app(
             if len(lines) == 1:
                 return NodeResult(output=f"参考书中未命中「{keyword}」（含图谱/设定层）。")
             return NodeResult(output="\n\n".join(lines))
+        if fn == "chapter_extract":
+            """S134（WORKFLOW 第 3 批）：单章图谱抽取+伏笔回收+学习审查。
+
+            复用 tasks.extract_chapter（落库形态与现后台任务一致）：读 chapter_id →
+            图谱抽取/伏笔回收/学习审查三合一。params.item_var（缺省 "item"）= chapter_id。
+            """
+            from anyspark.server import tasks as _tasks
+
+            cid = str(ctx.var(str(node.params.get("item_var") or "item")) or "").strip()
+            if not cid:
+                return NodeResult(error="chapter_extract 缺 item（chapter_id）")
+            ch = chapters.get(cid)
+            if ch is None:
+                return NodeResult(error=f"章节不存在: {cid}")
+            _tasks.extract_chapter(deps, ctx.book_id, ch.title, ch.content or "", ch.order_index)
+            return NodeResult(output=f"图谱抽取完成: 《{ch.title}》")
+        if fn == "signal_refine":
+            """S134：信号 → 偏好提炼 → 说明书（复用 tasks.refine_from_signals，增量游标）。"""
+            from anyspark.server import tasks as _tasks
+
+            before = len(deps.manual.list("project", "main"))
+            _tasks.refine_from_signals(deps)
+            after = len(deps.manual.list("project", "main"))
+            return NodeResult(output=f"信号提炼完成（说明书 {before}→{after} 条）")
+        if fn == "conversation_summarize":
+            """S134：会话 → 场景记忆摘要（复用 tasks.summarize_conversation）。
+
+            params.conv_id：会话 id（{{var}} 解析）。
+            """
+            from anyspark.server import tasks as _tasks
+
+            conv_id = _wf_resolve(str(node.params.get("conv_id") or ""), ctx).strip()
+            if not conv_id:
+                return NodeResult(error="conversation_summarize 缺 conv_id")
+            _tasks.summarize_conversation(deps, conv_id)
+            return NodeResult(output=f"会话归档摘要完成: {conv_id}")
         if fn == "batch_prepare":
             """S133（WORKFLOW 第 2 批）：批量任务准备——收集章节 id 集合（遍历源）。
 

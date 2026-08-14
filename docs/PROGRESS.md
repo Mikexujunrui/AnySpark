@@ -39,9 +39,9 @@
 >   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1 ✅ + S128 阶段 2 ✅ + S130 阶段 3 ✅ 三阶段全部完成（容器统一收官）
 >   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）——S129 第 1 批（拆书模板化打样）已实施
 > - **下一步开工（建议顺序）**：
->   1. ~~SKILL 阶段 1/2/3~~ ✅（S127/S128/S130）；~~WORKFLOW 第 1 批拆书打样~~ ✅（S129）；~~WORKFLOW 第 2 批批量模板~~ ✅（S133）
->   2. WORKFLOW 第 3 批：图谱抽取/信号收集/摘要等轻流程 → 非全程模板（直接出结果）
->   3. 加料模板（先实测 NSFW 审核坎）/ 本地 vLLM/LM Studio 适配文档（S131 接续）
+>   1. ~~SKILL 阶段 1/2/3~~ ✅（S127/S128/S130）；~~WORKFLOW 第 1 批拆书打样~~ ✅（S129）；~~WORKFLOW 第 2 批批量模板~~ ✅（S133）；~~WORKFLOW 第 3 批轻流程模板~~ ✅（S134）
+>   2. 加料模板（先实测 NSFW 审核坎）/ 本地 vLLM/LM Studio 适配文档（S131 接续）
+>   3. WORKFLOW 收尾：删对应工具/精简注册（每批对拍后统一处理）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
@@ -56,7 +56,7 @@
   4. **设定档渐进式披露**：条目多时分段/按需注入（当前全量）
   5. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
   6. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
-  7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路；S129 第 1 批拆书打样 ✅ + S133 第 2 批批量模板 ✅）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书 ✅→批量 ✅→轻流程），每批对拍验证可回退
+  7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路；S129 第 1 批拆书 ✅ + S133 第 2 批批量 ✅ + S134 第 3 批轻流程 ✅）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书 ✅→批量 ✅→轻流程 ✅），每批对拍验证可回退
   8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127/S128/S130 三阶段全部完成 ✅）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（pack_id 聚合，整包引用写作只取 writing/both——纪律 3），拆书一次产出整包（含剧情模式骨架派生）；templates 已并入 ✅；workflow（执行）保持独立——加 type ✅ → 并 templates ✅ → 书名包 ✅，skills/templates 归属竞争彻底消除
 - ~~httpx2 迁移~~ ✅（S66 完成）；~~Autopilot~~ —— 已划掉：S59 工作流（loop+gate+approval+AI 生成流程）已吸收其全部机制价值，需要"全书自动连写"时用 workflow_generate + 人工确认 + 跑循环即可，不另起包（同评审团判断逻辑）
 - 纪律：每阶段开工前向主人确认；对设计的偏离/新增先确认再改 DESIGN.md
@@ -3554,3 +3554,40 @@ BatchPanel 对接（归一不降级：旧任务与新模板并存）。
 
 **下一步**：WORKFLOW 第 3 批（图谱抽取/信号收集/摘要等轻流程 → 非全程模板）；加料模板
 （先实测 NSFW 审核坎）。
+
+---
+
+## S134 WORKFLOW 第 3 批——轻流程非全程模板（图谱抽取/信号提炼/会话摘要）（已完成 ✅）
+
+**背景**：PLAN-WORKFLOW-UNIFY 第 3 批（W2 轻=直接出结果已拍板）。目标：图谱抽取/信号
+收集/会话摘要等事件驱动轻流程声明化为非全程模板（无 approval，直接出结果），落库形态
+与后台自动任务一致（对拍）。WORKFLOW 三批全部完成。
+
+**交付（commit `TODO`）**：
+
+1. **script 函数 3 个（app.py _wf_run_script）**：
+   - chapter_extract：按 chapter_id 复用 tasks.extract_chapter（图谱抽取+伏笔回收+
+     学习审查三合一，落库形态与章节落盘自动抽取一致）
+   - signal_refine：复用 tasks.refine_from_signals（增量游标分批归并）
+   - conversation_summarize：复用 tasks.summarize_conversation（短会话阈值跳过）
+
+2. **预置模板 3 个（app.py 种子，幂等，非全程无 approval）**：
+   - 「图谱抽取」：prep 收集章节 → loop 集合遍历逐章 chapter_extract
+   - 「信号提炼」：单 script 直跑
+   - 「会话摘要」：单 script 直跑（params.conv_id）
+
+3. **边界（保持分工）**：事件驱动路径（章节落盘自动抽取/归档摘要）仍走内部函数——
+   模板供手动/批量重跑（如改稿后重抽某章图谱），不替代事件触发器。
+
+**验证（test_workflow_light.py 4 用例）**：模板种入+无 approval 断言/图谱抽取实体落库
+（type 归一与 extract_chapter 一致）/信号提炼幂等/会话摘要短会话跳过。
+
+**测试**：新增 4 用例；全量 552 绿；ruff+format+mypy strict 全绿。
+
+**踩坑**：
+- 图谱实体类型默认集是"角色/地点/事件/物件/设定"（非"人物"）——fake JSON 用 type 键
+  且 type ∈ 类型集，否则 parse 回落"设定"（_parse 只认 type 键 + 类型集成员）
+- mypy：write_chapter 的 workspace 可为 None（历史潜藏），本批顺带补 None 检查
+
+**下一步**：WORKFLOW 收尾（删对应工具/精简注册——三批对拍后统一）；加料模板（先实测
+NSFW 审核坎）；本地 vLLM/LM Studio 适配文档（S131 接续）。

@@ -829,6 +829,11 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   （轻操作只读不改，无闸门）。script 函数 batch_prepare（章节 id 集合）/chapter_by_id
   （原文）/chapter_title_by_id（标题）；集合遍历逐章，断点恢复/失败重试。前端
   BatchPanel 加工作流模式开关（归一不降级：旧内存任务与新模板并存）。
+- S134（WORKFLOW 第 3 批）：**轻流程非全程模板**——「图谱抽取」（逐章集合遍历，
+  script 复用 tasks.extract_chapter 三合一落库）/「信号提炼」（复用 refine_from_signals
+  增量游标）/「会话摘要」（复用 summarize_conversation 阈值）——直接出结果（无 approval），
+  落库形态与后台自动任务一致（对拍）。事件驱动路径（章节落盘自动抽取）仍走内部函数，
+  模板供手动/批量重跑。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/

@@ -9,6 +9,7 @@ from __future__ import annotations
 import sqlite3
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from anyspark.core.types import Message, ModelOutput
 
@@ -21,15 +22,20 @@ class ProbeModel:
         return ModelOutput(text="好的。")
 
 
-def _signals(db: Path) -> list[dict]:
+def _signals(db: Path) -> list[dict[str, str]]:
     conn = sqlite3.connect(db)
     conn.row_factory = sqlite3.Row
     rows = conn.execute("SELECT kind, content, context FROM signals ORDER BY rowid").fetchall()
     conn.close()
-    return [dict(r) for r in rows]
+    out: list[dict[str, str]] = []
+    for r in rows:
+        out.append(
+            {"kind": str(r["kind"]), "content": str(r["content"]), "context": str(r["context"])}
+        )
+    return out
 
 
-def _client(tmp: Path):
+def _client(tmp: Path) -> Any:
     from fastapi.testclient import TestClient
 
     from anyspark.server.app import build_app
@@ -37,10 +43,10 @@ def _client(tmp: Path):
     return TestClient(build_app(model=ProbeModel(), db_path=tmp / "t.db"))
 
 
-def _create(client, title: str = "第一章", content: str = "他慢慢地走进了房间。") -> str:
+def _create(client: Any, title: str = "第一章", content: str = "他慢慢地走进了房间。") -> str:
     r = client.post("/api/chapters", json={"title": title, "content": content})
     assert r.status_code == 200, r.text
-    return r.json()["id"]
+    return str(r.json()["id"])
 
 
 def test_save_change_sends_modified_signal() -> None:
