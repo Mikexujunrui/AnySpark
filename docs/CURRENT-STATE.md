@@ -1,26 +1,26 @@
 # AnySpark v4 系统当前状态（自动生成）
 
-> 生成：2026-08-14 12:10 UTC · commit `86478e1 docs: PROGRESS S143 补 commit hash（92463ed）` · 阶段 S143 · **非手写**：
+> 生成：2026-08-14 12:28 UTC · commit `1972c29 docs: PROGRESS S144 补 commit hash（9fda8d7）` · 阶段 S144 · **非手写**：
 > 由 `scripts/current_state.py` 扫描真实代码/DB 产出，改动后重跑即更新
 
 ## 一、系统规模
 
 | 维度 | 数值 |
 |---|---|
-| 已交付阶段 | **S143** |
+| 已交付阶段 | **S144** |
 | API 路由 | **143** 个 |
-| Agent 工具 | **46** 个 |
+| Agent 工具 | **47** 个 |
 | Workflow 模板 | **8** 个 |
 | 前端入口 | **27** 个 tab |
-| 测试 | **591** 个 |
-| 后端代码 | **28119** 行（align 4446, app 16555, check 524, core 1529, explore 837, graph 1479, template 1083, workflow 1666） |
+| 测试 | **598** 个 |
+| 后端代码 | **28175** 行（align 4446, app 16580, check 555, core 1529, explore 837, graph 1479, template 1083, workflow 1666） |
 
 ## 二、能力清单
 
-### Agent 工具（46 个，全量注入主循环 LLM）
+### Agent 工具（47 个，全量注入主循环 LLM）
 
 - **写作（6）**：`list_chapters` `patch_chapter` `read_chapter` `read_file` `write_chapter` `write_file`
-- **领域查证/登记（9）**：`graph_query` `graph_register` `material_register` `read_context` `read_material` `read_setting` `search_chapters` `skill_lookup` `skill_refine`
+- **领域查证/登记（10）**：`graph_query` `graph_register` `material_register` `read_context` `read_material` `read_setting` `reference_lookup` `search_chapters` `skill_lookup` `skill_refine`
 - **情节/计划/探索（10）**：`explore_direction` `path_explore` `plan_list` `plan_mark_done` `plot_delete` `plot_list` `plot_register` `plot_resolve` `plot_update` `role_play`
 - **心智/信号（4）**：`mind_delete` `mind_reconcile` `mind_register` `mind_update`
 - **批量/检测/收编（5）**：`batch_review` `batch_rewrite` `check_text` `ingest_document` `register_tool`
