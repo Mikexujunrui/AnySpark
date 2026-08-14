@@ -3363,7 +3363,7 @@ pack_id + 前端 type 分组/包视图）。
 （ExternalLibrary）物理并入 skill 表 type=plot，探索消费方改读 plot 类——
 S127 拆书 plot 子条从此进入探索模板源，生产/消费闭环打通，skills/templates 归属竞争消除。
 
-**交付（commit `TODO`）**：
+**交付（commit `423b8fd`）**：
 
 1. **物理并入（app.py `_migrate_templates_to_skills`）**：
    - L2 默认模板（DEFAULT_TEMPLATES）+ L3 外部模板（templates_external 表）迁移为 skill 表
