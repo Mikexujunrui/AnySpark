@@ -45,7 +45,7 @@
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
-> [S145] 正在改 `agent_factory.py`（补 library 装配）+ `schemas.py`/`tools_domain.py`（图谱注入过期文案纠偏）+ `scripts/current_state.py`（硬编码 46 → 动态）+ `frontend/` ChatPanel/MessageList（校验按钮接 /api/check）+ `check/reviewers.py`（6000 截断分块）+ docs/uml + BACKEND-MAP——第三方评审修复（REVIEW-THIRD-PARTY*.md），不碰 S144 的 workspace.py/routes_workspace.py/UploadPanel.tsx/uploadStore.ts（完成提交后删本行）
+> [S145] 已提交完成（6 commits：311e94b/5fdfa93/624a515/fd5acbb/1b3e36f/edc0984，第三方评审修复）——声明行随 S145 提交后删除
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
@@ -3956,3 +3956,53 @@ AI 文件编辑闭环（人改 AI 笔记）；敏感指令加料按需实测。
 
 **下一步**：无剩余缺口。候选：CURRENT-STATE 接前端状态面板（--json，意义低待
 主人需要）、敏感指令加料按需实测、AI 文件沙箱删除入口（同上传区模式按需）。
+
+## S145 第三方评审修复——REVIEW-THIRD-PARTY 落地 + 哲学两报告问题分批复修（已完成 ✅）
+
+**背景**：主人要求第三方视角评审（只找问题不动代码），产出两份报告
+（`docs/REVIEW-THIRD-PARTY.md` 落地层 + `docs/REVIEW-THIRD-PARTY-PHILOSOPHY.md` 哲学层），
+随后指示按报告修复。并行会话 S144 在场（上传区删除，已提交 9fda8d7），
+本批避开其文件（workspace.py/routes_workspace.py/UploadPanel.tsx/uploadStore.ts）。
+
+**交付（6 commits，A/B/C/D + 卫生 + 报告入库）**：
+
+1. **批次 A（`311e94b`）——装配断链 + 过期文案**：
+   - `agent_factory.py` 补 `library=deps.library`：**reference_lookup 工具回归**——
+     此前 ctx.library 恒 None → 生产装配永不注册（S86"检索走 agent 工具"落空，
+     仅 workflow query_reference script 可用）。原子查询按决策点边界应留工具层
+   - `scripts/current_state.py` 同补 library：审计装配自带同源缺陷（曾掩盖该工具缺席）
+   - `schemas.py` DEFAULT_SYSTEM + `tools_domain.py` graph_query 描述：删"已自动注入
+     当前时空点已知事实"过期宣称（S58 已停图谱常驻注入）——原文案教 agent 不查证，
+     放大"AI 不知道要查什么"风险；改"图谱不常驻注入，主动 graph_query 查证"
+   - `current_state.py` 硬编码"46 个"→ len(tools) 动态
+   - 测试 +2：reference_lookup 注册/缺席对照
+
+2. **批次 B（`5fdfa93`）——前端死功能**：ChatPanel handleValidate 此前 fetch
+   `/api/books/{bookId}/validate`（后端无此路由，点击必 404）→ 改调真实 `runCheck`
+   （/api/check：多检测者 + 图谱证据 + 时序校验），展示层适配新响应。
+
+3. **批次 C（`624a515`）——检测网长章覆盖**：ReviewEngine text[:6000] 截断 →
+   滑动窗口分块（6000 + 500 重叠），每检测者逐块检测汇总——>6000 字章节后半段
+   此前 7 个检测者全部零覆盖；测试 +4（短/空/长文重叠/边界）。
+
+4. **批次 D（`fd5acbb`）——文档批**：uml/sequence_explore 画错端点（confirm/select
+   → cards/archive + 叙事树）、uml/activity_tasks 删已收编 batch case（7→4 种）、
+   BACKEND-MAP §2.2 7→4 + 工具数 45→47、BACKEND-ISSUES 历史快照标注（P0 已修
+   S75/S79 + P1 引用失效 S75 重构，保留审计痕迹）。
+
+5. **卫生（`1b3e36f`）**：.gitignore 补 `.review_tmp/` + `.pi/`。
+
+6. **报告入库（`edc0984`）**：两份评审报告进 docs/（审计资产，非临时产物）。
+
+**验证**：批次测试全绿（test_reference_lookup 8 / test_review 10 / adapters+domain+app
+57）；ruff+format+mypy strict 绿；前端 tsc（lint）绿。全量门禁：见提交后 gate。
+
+**未修项（留待后续，报告中已列）**：
+- 对齐闭环信号半通：前端 `reportSignal` 零调用方（accepted/rejected/negative 无产生
+  路径，只剩 modified 活着）——需接 ExploreView 选卡 + 候选拒绝
+- 说明书"用户是最终编辑者"未落地（前端只能看+锁定，增删改 API 零调用）
+- 图谱抽取质量后校验（真实库主角陈渡被抽为"设定"、last_chapter 非章节名）
+- 前端 Autopilot 残留死代码（stub 空转 + 桥接永不触发）
+- 6 个后端端点前端零引用（有测试无 UI）
+
+**下一步**：按主人意向从上述未修项挑选继续；或回归超长书实证路径。
