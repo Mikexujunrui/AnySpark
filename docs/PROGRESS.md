@@ -36,16 +36,15 @@
 > - **S114 拆书三层已落地**（commit `faf7d4a`）：结构感知选章 + 骨架扫描 + 定点精读，猎手准则 367 万字实测发现回环（见 DESIGN §12.43）
 > - **并行会话 S120-S126 已全部提交**（run_subagent/调研模板/资料库闭环/文档清洗），门禁红已清零
 > - **两个规划已拍板待实施**（12 决策点主人全部确认）：
->   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1（type 字段+拆书双落）✅ + S128 阶段 2（templates 并入+探索改读）✅ 已实施
+>   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1 ✅ + S128 阶段 2 ✅ + S130 阶段 3 ✅ 三阶段全部完成（容器统一收官）
 >   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）——S129 第 1 批（拆书模板化打样）已实施
 > - **下一步开工（建议顺序）**：
->   1. ~~SKILL 阶段 1：拆书双落~~ ✅（S127）；~~SKILL 阶段 2：templates 并入~~ ✅（S128）；~~WORKFLOW 第 1 批：拆书模板化打样~~ ✅（S129）
->   2. SKILL 阶段 3：书名包（pack_id 聚合 + 整包/单条引用路由，后端为主）——容器已完整，包是最后一步
->   3. 或 WORKFLOW 第 2 批：批量改写/审读 → 模板（含 approval 闸门 + 集合遍历已验证）；加料模板（先实测 NSFW 审核坎）
+>   1. ~~SKILL 阶段 1/2/3~~ ✅（S127/S128/S130）；~~WORKFLOW 第 1 批：拆书模板化打样~~ ✅（S129）
+>   2. WORKFLOW 第 2 批：批量改写/审读 → 模板（集合遍历已验证 + approval 闸门 + 进度回传）
+>   3. 加料模板（先实测 NSFW 审核坎）/ 本地 vLLM/LM Studio 适配文档（S131 接续）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
-> [S130] 正在改 `align/skills.py` + `routes_library.py` + `tools_domain.py` + `app.py` + `SkillsShelfPanel.tsx` + `SkillPanel.tsx`：SKILL 阶段 3（pack_id 聚合 + 整包/单条引用路由 + 前端 type 分组/包视图）——已声明（完成提交后删本行）
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
@@ -58,7 +57,7 @@
   5. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
   6. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
   7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路；S129 第 1 批拆书打样已完成）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书打样 ✅→批量→轻流程），每批对拍验证可回退
-  8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127 阶段 1 + S128 阶段 2 已完成：type 字段 + 拆书双落 + templates 并入）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（整包/单条引用），拆书一次产出整包（含剧情模式骨架派生）；templates 已并入 ✅；workflow（执行）保持独立——分三阶段迁移（加 type ✅ → 并 templates ✅ → 书名包），消除 skills/templates 归属竞争
+  8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127/S128/S130 三阶段全部完成 ✅）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（pack_id 聚合，整包引用写作只取 writing/both——纪律 3），拆书一次产出整包（含剧情模式骨架派生）；templates 已并入 ✅；workflow（执行）保持独立——加 type ✅ → 并 templates ✅ → 书名包 ✅，skills/templates 归属竞争彻底消除
 - ~~httpx2 迁移~~ ✅（S66 完成）；~~Autopilot~~ —— 已划掉：S59 工作流（loop+gate+approval+AI 生成流程）已吸收其全部机制价值，需要"全书自动连写"时用 workflow_generate + 人工确认 + 跑循环即可，不另起包（同评审团判断逻辑）
 - 纪律：每阶段开工前向主人确认；对设计的偏离/新增先确认再改 DESIGN.md
 
@@ -3474,3 +3473,39 @@ ruff+format+mypy strict 全绿。工具（skill_refine）保留——W1-B 归一
 **已知边界**：Bedrock/Vertex 原生 SDK 仍 YAGNI（重依赖 + 国内不可用）；gemini 思考内容不进响应（需 includeThoughts 显式启用，未做）；前端 tsc 整体 build 被并行 S130 的 SkillsShelfPanel.tsx type/target 错误阻塞（非本阶段引入）
 
 **下一步**：WORKFLOW 第 2 批 / SKILL 阶段 3（S130 进行中）/ 本地 vLLM/LM Studio 适配文档
+
+---
+
+## S130 SKILL 阶段 3——书名包（pack_id 聚合 + 整包/单条引用路由 + 前端）（已完成 ✅）
+
+**背景**：PLAN-SKILL-UNIFY 阶段 3（最后阶段）。目标：拆书产物按书名成包——pack_id
+聚合（逻辑聚合不物理复制），整包引用按 type 分流到各自消费方（纪律 3），前端按 type
+分组 + 包徽标。至此统一 skill 容器三步（加 type → 并 templates → 书名包）全部完成，
+skills/templates 归属竞争彻底消除。
+
+**交付（commit `9fdf025`）**：
+
+1. **存储（align/skills.py）**：writing_skills/skill_drafts 加 pack_id 列（ALTER 兼容）；
+   WritingSkill dataclass + to_dict + add/update/add_draft/promote/revision 全链带 pack_id；
+   包=逻辑聚合，子条独立可编辑/删除
+2. **拆书产出落包**：routes_library refine-skill、tools_domain skill_refine、workflow
+   book_refine_finish（从 library_book_id 解析书名）三路统一 pack_id=书名
+3. **引用路由（纪律 3）**：render_skills_by_name 整包点名=pack_id → 写作上下文只注入
+   包内 writing/both 子条，main/plot 子条绝不进写作上下文；单条点名仍按名精确匹配；
+   包内方法论 both 保留（写作+主循环都可达——保留语义）
+4. **导入导出**：skill_io front-matter 加 pack_id（分享包子条带归属还原）；schemas/
+   routes_skills add/patch/export 全链带 pack_id；ingest 还原
+5. **前端**：SkillsShelfPanel 按 type 分组（writing/main/plot/both）+ 包徽标（包：书名）；
+   编辑表单加 plot 类型；api Skill 类型加 type/ext/pack_id（阶段 3 前端部分）
+
+**测试**：+3（包聚合/包引用路由纪律 3/包导出导入）+ 拆书三路同包断言（library/workflow
+对拍）；全量 545 绿；ruff+format+mypy strict 全绿；前端 tsc/lint/build 全绿。
+
+**踩坑**：
+- sqlite3.Row 无 .get()——pack_id 读取用 row["pack_id"]（schema init 后必然存在）
+- 并行会话 S131（多模型兼容协议）在 S130 前已提交；其未提交的 models/ 改动曾短暂
+  阻塞 mypy（并行会话自行处理，已消失）；S131 记录的"前端 tsc 被 S130 阻塞"是 S130
+  开发中途状态（type/target 类型未同步），S130 提交时已修复
+
+**下一步**：WORKFLOW 第 2 批（批量改写/审读 → 模板，集合遍历已验证 + approval 闸门）
++ 加料模板（先实测 NSFW 审核坎）；PLAN-SKILL-UNIFY 三阶段全部完成，容器统一收官。

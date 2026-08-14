@@ -101,9 +101,10 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
       ④ 剧情模式双落（S127）：骨架笔记 → 剧情模式 plot 子条（type=plot，
          四要素存 ext 扩展 JSON；探索消费方阶段 2 接线）
   → 多条候选存草稿（方法论 + 架构技法 + 剧情模式各自确认，人工闸门）
-  → 确认后入库 skills 表（type 字段：both/main/plot）
-  → 写"这本书风格"时 write_chapter 的 skills 点名「书名」→ 方法论注入；
-    主循环规划时点名架构技法 → 全书机关参考；探索（阶段 2）读 type=plot 派生方向
+  → 确认后入库 skills 表（type 字段：both/main/plot；S130：三路同 pack_id=书名成包）
+  → 写"这本书风格"时 write_chapter 的 skills 点名「书名」（整包引用）→ 包内 writing/both
+    子条注入写作（纪律 3：main/plot 不进写作上下文）；主循环规划时点名架构技法 →
+    全书机关参考；探索读 type=plot 派生方向
 
   ✦ S129 同链路 workflow 化（预置模板「拆书提炼」，WORKFLOW 第 1 批打样）：
     确定性步骤（选章/分批/累计/精读输入/落草稿）作 script 节点；LLM 步骤
@@ -172,7 +173,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | ManualStore | align/manual | manual_entries/manual_notices | 心智全链 |
 | BiasStore | align/bias | ai_bias | agent 注入/skills 面板 |
 | AgencyStore | align/agency | agency_levels/agency_state | 能动性全链 |
-| WritingSkillStore | align/skills | writing_skills/drafts（type 列 + ext 扩展列，S127） | 技巧注入/剧情模式 |
+| WritingSkillStore | align/skills | writing_skills/drafts（type + ext + pack_id 列，S127/S130） | 技巧注入/剧情模式/书名包 |
 | SignalStore | align/signals | signals | 信号采集 |
 | StoryPlanStore | align/plan | chapter_plans | 计划 |
 | StoryTreeStore/StoryThreadStore | align/storytree | story_nodes/story_threads | 叙事树/线进度 |

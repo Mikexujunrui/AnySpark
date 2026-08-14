@@ -786,6 +786,14 @@ skill 表（前端 TemplateItem 形状保持，L2 默认不可删 layer=default 
 ExternalLibrary 类保留在 template 包供独立测试，app 装配退役。拆书 plot 子条（S127）
 确认后自动进入探索模板源——生产/消费闭环打通，skills/templates 归属竞争消除。
 
+**S130（PLAN-SKILL-UNIFY 阶段 3）书名包（pack_id 聚合 + 引用路由）**：拆书三路产出
+（方法论 both/架构 main/剧情 plot）同 pack_id=书名落库（routes_library + skill_refine +
+workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 写作上下文只注入
+包内 writing/both 子条（纪律 3：main/plot 子条绝不进写作上下文），单条点名按名精确匹配；
+包=逻辑聚合不物理复制（子条独立可编辑/删除）；skill_io 导出带 pack_id 还原；前端书架
+按 type 分组 + 包徽标。统一容器三阶段（加 type → 并 templates → 书名包）至此全部完成，
+知识归属竞争消除。
+
 ### 12.22 工作流扩展包（S59，主人拍板：开源路线 + 借鉴 DeterminFlow 思想）
 
 > 背景：主人要求把"固定分析流程"（如章节质量分析）与"可迁移改书标准"（某作者
