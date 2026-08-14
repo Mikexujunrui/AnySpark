@@ -3563,7 +3563,7 @@ BatchPanel 对接（归一不降级：旧任务与新模板并存）。
 收集/会话摘要等事件驱动轻流程声明化为非全程模板（无 approval，直接出结果），落库形态
 与后台自动任务一致（对拍）。WORKFLOW 三批全部完成。
 
-**交付（commit `TODO`）**：
+**交付（commit `a721c6a`）**：
 
 1. **script 函数 3 个（app.py _wf_run_script）**：
    - chapter_extract：按 chapter_id 复用 tasks.extract_chapter（图谱抽取+伏笔回收+
