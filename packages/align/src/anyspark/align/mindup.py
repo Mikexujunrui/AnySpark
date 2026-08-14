@@ -49,7 +49,11 @@ _RECONCILE_PROMPT = """你是心智模型的对账器。下面是用户已沉淀
 
 def _reconcile_prompt(entries: list[ManualEntry], signals: list[Signal]) -> str:
     e = "\n".join(f"- [{s.category}] {s.content}" for s in entries[:20]) or "（无条目）"
-    sig = "\n".join(f"- [{s.kind}] {s.content[:80]}" for s in signals[:20]) or "（无信号）"
+    # S132e：信号行带 context（场景：稿纸保存/定点编辑/对话），供对账 LLM 判断信号来源权重
+    sig = (
+        "\n".join(f"- [{s.kind}] [{s.context}] {s.content[:80]}" for s in signals[:20])
+        or "（无信号）"
+    )
     return _RECONCILE_PROMPT.replace("{entries}", e).replace("{signals}", sig)
 
 

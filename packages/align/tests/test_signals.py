@@ -91,6 +91,28 @@ def test_unprocessed_limit_and_book_scope() -> None:
         store.close()
 
 
+def test_collector_per_call_book_id_and_books() -> None:
+    """S132e：单次调用可指定书；unprocessed_books 列出所有有积压的书。"""
+    store, col = _store()
+    try:
+        col.accepted("main 书信号")
+        col.modified("旧", "新", book_id="book2")
+        col.negative("不要用X", book_id="book3")
+        # 书归属正确
+        assert store.unprocessed(book_id="main")[0].content == "main 书信号"
+        assert store.unprocessed(book_id="book2")[0].kind == "modified"
+        assert store.unprocessed(book_id="book3")[0].kind == "negative"
+        # 全部书列出
+        assert store.unprocessed_books() == ["book2", "book3", "main"]
+        # 提炼推进后书列表收缩
+        for b in store.unprocessed_books():
+            p = store.unprocessed(book_id=b)
+            store.mark_processed([s.id for s in p])
+        assert store.unprocessed_books() == []
+    finally:
+        store.close()
+
+
 def test_old_schema_migration() -> None:
     """旧库（无 processed 列）打开后自动补列，不丢数据。"""
     import sqlite3

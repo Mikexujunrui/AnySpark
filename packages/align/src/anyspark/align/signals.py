@@ -135,6 +135,14 @@ class SignalStore:
             self._conn.executemany("UPDATE signals SET processed=1 WHERE id=?", [(i,) for i in ids])
             self._conn.commit()
 
+    def unprocessed_books(self) -> list[str]:
+        """S132e 多书：有未提炼信号的所有书（refine 按书遍历，防非 main 书信号永不提炼）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT book_id FROM signals WHERE processed=0 ORDER BY book_id"
+            ).fetchall()
+        return [r["book_id"] for r in rows]
+
     def close(self) -> None:
         self._conn.close()
 
@@ -152,18 +160,32 @@ def _signal_from_row(row: sqlite3.Row) -> Signal:
 
 
 class SignalCollector:
-    """操作式信号采集器：把用户操作转换成对齐信号并入库。"""
+    """操作式信号采集器：把用户操作转换成对齐信号并入库。
+
+    S132e 多书：每个方法支持可选 book_id 覆盖（缺省用构造时绑定的书）——
+    路由层可按操作实际所属的书传参，避免非 main 书信号错记 main。
+    """
 
     def __init__(self, store: SignalStore, book_id: str = "main") -> None:
         self._store = store
         self._book_id = book_id
 
-    def accepted(self, content: str, context: str = "") -> Signal:
+    def _bk(self, book_id: str | None) -> str:
+        return book_id or self._book_id
+
+    def accepted(self, content: str, context: str = "", book_id: str | None = None) -> Signal:
         return self._store.record(
-            Signal(kind="accepted", content=content, context=context, book_id=self._book_id)
+            Signal(
+                kind="accepted",
+                content=content,
+                context=context,
+                book_id=self._bk(book_id),
+            )
         )
 
-    def modified(self, original: str, new: str, context: str = "") -> Signal:
+    def modified(
+        self, original: str, new: str, context: str = "", book_id: str | None = None
+    ) -> Signal:
         delta = _delta_ratio(original, new)
         return self._store.record(
             Signal(
@@ -171,33 +193,55 @@ class SignalCollector:
                 content=f"原文：{original[:200]}\n改为：{new[:200]}",
                 context=context,
                 delta=delta,
-                book_id=self._book_id,
+                book_id=self._bk(book_id),
             )
         )
 
-    def deleted(self, content: str, context: str = "") -> Signal:
+    def deleted(self, content: str, context: str = "", book_id: str | None = None) -> Signal:
         return self._store.record(
-            Signal(kind="deleted", content=content[:200], context=context, book_id=self._book_id)
+            Signal(
+                kind="deleted",
+                content=content[:200],
+                context=context,
+                book_id=self._bk(book_id),
+            )
         )
 
-    def rejected(self, content: str, context: str = "") -> Signal:
+    def rejected(self, content: str, context: str = "", book_id: str | None = None) -> Signal:
         return self._store.record(
-            Signal(kind="rejected", content=content[:200], context=context, book_id=self._book_id)
+            Signal(
+                kind="rejected",
+                content=content[:200],
+                context=context,
+                book_id=self._bk(book_id),
+            )
         )
 
-    def custom(self, statement: str, context: str = "") -> Signal:
+    def custom(self, statement: str, context: str = "", book_id: str | None = None) -> Signal:
         return self._store.record(
-            Signal(kind="custom", content=statement, context=context, book_id=self._book_id)
+            Signal(
+                kind="custom",
+                content=statement,
+                context=context,
+                book_id=self._bk(book_id),
+            )
         )
 
-    def negative(self, statement: str, context: str = "") -> Signal:
+    def negative(
+        self, statement: str, context: str = "", book_id: str | None = None
+    ) -> Signal:
         """S53c 实时负例：用户明确否定/撤回（如"不要破折号""我说了不用这个词"）。
 
         即时捕获（不等轮末提炼），防隐式否定被上下文稀释丢失。
         内容 = 用户原话（自然语言），后续由 NegativeCapture 落雷区条目。
         """
         return self._store.record(
-            Signal(kind="negative", content=statement[:200], context=context, book_id=self._book_id)
+            Signal(
+                kind="negative",
+                content=statement[:200],
+                context=context,
+                book_id=self._bk(book_id),
+            )
         )
 
 

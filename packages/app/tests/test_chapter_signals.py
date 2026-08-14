@@ -96,3 +96,28 @@ def test_delete_no_signal() -> None:
     r = client.delete(f"/api/chapters/{cid}")
     assert r.status_code == 200, r.text
     assert _signals(db / "t.db") == []
+
+
+def test_multi_book_signal_scoped() -> None:
+    """S132e：非 main 书章节的修改信号落对应书（不串书）。"""
+    db = Path(tempfile.mkdtemp())
+    client = _client(db)
+    # 建 book2 章节并修改
+    r = client.post(
+        "/api/chapters",
+        json={"title": "异界章", "book_id": "book2", "content": "旧版内容"},
+    )
+    assert r.status_code == 200, r.text
+    cid = r.json()["id"]
+    client.put(f"/api/chapters/{cid}", json={"content": "新版内容"})
+    sigs = _signals(db / "t.db")
+    assert len(sigs) == 1
+    assert sigs[0]["kind"] == "modified"
+    assert "新版内容" in sigs[0]["content"]
+    # book_id 落对（信号按书隔离，不串到 main）
+    import sqlite3
+
+    conn = sqlite3.connect(db / "t.db")
+    row = conn.execute("SELECT book_id FROM signals ORDER BY rowid DESC LIMIT 1").fetchone()
+    conn.close()
+    assert row[0] == "book2"

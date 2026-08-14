@@ -150,7 +150,7 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         # S132b 信号入口：稿纸保存（内容实际变化）→ modified 信号（确定性操作，非语义猜测）
         # 只发信号不入队 refine（保存高频，提炼留给会话结束/手动触发；增量游标保证不丢）
         if req.content != ch.content:
-            deps.signal_collector.modified(ch.content, req.content, "稿纸保存")
+            deps.signal_collector.modified(ch.content, req.content, "稿纸保存", book_id=ch.book_id)
         # S85：手动保存也触发图谱抽取/伏笔回收（对齐 write_chapter 后台链路，防图谱漂移）
         deps.bg_queue.put(
             BgTask(
@@ -201,7 +201,7 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         deps.chapters.upsert("main", ch.title, new_content, ch.order_index, ch.narrative_line)
         # S132b 信号入口：定点编辑（内容实际变化）→ modified 信号（含段落删除/替换）
         if ok_all and new_content != ch.content:
-            deps.signal_collector.modified(ch.content, new_content, "定点编辑")
+            deps.signal_collector.modified(ch.content, new_content, "定点编辑", book_id=ch.book_id)
         # S85：定点编辑也触发图谱抽取（防图谱漂移）
         if ok_all and new_content != ch.content:
             deps.bg_queue.put(

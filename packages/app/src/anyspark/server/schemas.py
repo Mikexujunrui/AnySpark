@@ -263,6 +263,7 @@ class SignalIn(BaseModel):
     content: str
     new_content: str | None = None
     context: str = ""
+    book_id: str = "main"  # S132e 多书：前端可指定信号所属书
 
 
 class ReconcileIn(BaseModel):

@@ -176,22 +176,24 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
     def record_signal(req: SignalIn) -> dict[str, Any]:
         """采集用户操作信号（接受/修改/删除/自定义等）；同时驱动能动性反馈调节。"""
         if req.kind == "accepted":
-            sig = deps.signal_collector.accepted(req.content, req.context)
+            sig = deps.signal_collector.accepted(req.content, req.context, book_id=req.book_id)
             deps.agency.adjust(+1)  # 接受=升级（档位上限 4）
         elif req.kind == "deleted":
-            sig = deps.signal_collector.deleted(req.content, req.context)
+            sig = deps.signal_collector.deleted(req.content, req.context, book_id=req.book_id)
             deps.agency.adjust(-1)  # 删除=降级（档位下限 0）
         elif req.kind == "rejected":
-            sig = deps.signal_collector.rejected(req.content, req.context)
+            sig = deps.signal_collector.rejected(req.content, req.context, book_id=req.book_id)
             deps.agency.adjust(-1)  # 拒绝=降级
         elif req.kind == "negative":
             # S53c ⑤ 实时负例：负例信号原文进 signals 表（不丢）——"是否构成雷区、
             # 雷区是什么"是内容判断，交给轮末提炼器 LLM（S62：删除正则机械落条目）
-            sig = deps.signal_collector.negative(req.content, req.context)
+            sig = deps.signal_collector.negative(req.content, req.context, book_id=req.book_id)
         elif req.kind == "custom":
-            sig = deps.signal_collector.custom(req.content, req.context)
+            sig = deps.signal_collector.custom(req.content, req.context, book_id=req.book_id)
         else:  # modified
-            sig = deps.signal_collector.modified(req.content, req.new_content or "", req.context)
+            sig = deps.signal_collector.modified(
+                req.content, req.new_content or "", req.context, book_id=req.book_id
+            )
         # S28：信号 → 后台提炼 → 说明书（异步，不阻塞操作；修复对齐闭环缺口）
         deps.bg_queue.put(BgTask(kind="refine"))
         # S54-C：信号驱动 → skill 候选草稿（后台，人工确认生效）
