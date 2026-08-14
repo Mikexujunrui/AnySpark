@@ -90,6 +90,8 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 ### 2.5 拆书链路（S78→S127：参考书 → 「书名」skill + 架构技法 + 剧情模式 → 点名注入）
 ```
 用户"拆这本书" → skill_refine(mode=book) / POST /api/library/{book_id}/refine-skill
+  → S135：优先走「拆书提炼」workflow 模板（快捷入口→底层统一 workflow，断点/重试/持久化）；
+    模板缺失回退 generate_book（向后兼容）
   → S114+S127 拆书（generate_book，四步）：
       ① 微观方法论：结构感知选章（按卷分层整章拼批，无章结构回退字符均匀）
          → 分批拆解（GENERATE_PROMPT_BOOK 7 维）→ MERGE 归并成一份「书名」skill
@@ -151,7 +153,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | setting_query | 设定档查证 | enable_domain |
 | search_chapters / read_context | 正文检索/锚点阅读 | enable_domain |
 | mind_register / mind_manage | 心智登记/管理 | enable_domain |
-| skill_refine | 技巧提炼候选 / 拆书（mode=book 四步：结构感知微观方法论 + 骨架扫描 + 定点精读架构技法 + 剧情模式双落，S78/S114/S127） | enable_domain |
+| skill_refine | 技巧提炼候选 / 拆书（mode=book 四步：结构感知微观方法论 + 骨架扫描 + 定点精读架构技法 + 剧情模式双落；S135 收编：mode=book 优先走「拆书提炼」workflow 模板，快捷入口→底层统一 workflow） | enable_domain |
 | role_play | 角色推演 | enable_domain |
 | ingest_document | 资料消化（⚠️与端点重复见审计） | enable_domain |
 | register_tool | 扩展工具注册 | enable_domain |

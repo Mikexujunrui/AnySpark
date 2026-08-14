@@ -179,3 +179,32 @@ def test_book_refine_workflow_matches_generator() -> None:
     # 对拍：模板落草稿与生成器直出同名同 type（三路覆盖）
     for n, t in ref_names.items():
         assert wf_names.get(n) == t, f"对拍不一致: {n} 模板={wf_names.get(n)} 参考={t}"
+
+
+def test_skill_refine_tool_uses_template_when_wired() -> None:
+    """S135（WORKFLOW 收尾）：skill_refine(mode=book) 装配 workflow 时走「拆书提炼」模板
+    （快捷入口→底层统一 workflow），草稿由模板 finish 落库不重复 add_draft。"""
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    model = FakeRefineModel()
+    app = build_app(model=model, db_path=db)
+    deps = app.state.deps
+    client = TestClient(app)
+    bid = _mk_book(client)
+    from anyspark.server.tools_domain import make_skill_refine_implementer
+
+    spec, impl = make_skill_refine_implementer(
+        None,
+        None,
+        library=deps.library,
+        skills=deps.skills,
+        workflow_store=deps.workflow_store,
+        workflow_engine=deps.workflow_engine,
+    )
+    drafts_before = len(deps.skills.list_drafts())
+    res = impl(spec, {"library_book_id": bid, "mode": "book"})
+    assert res.ok, res.content
+    assert "workflow" in res.content  # 走模板路径
+    drafts_after = deps.skills.list_drafts()
+    new_names = {d["name"] for d in drafts_after[: max(0, len(drafts_after) - drafts_before)]}
+    assert "测试书写作法" in new_names  # 模板 finish 落库（不重复 add_draft）
+    assert "坏档与重开" in new_names and "时间回环·宿命闭环" in new_names

@@ -1608,6 +1608,8 @@ def build_app(
     if (frontend_dist / "index.html").exists():
         app.mount("/", StaticFiles(directory=str(frontend_dist), html=True), name="frontend")
 
+    # S135：暴露组合根（测试/工具收编验证用——可直接取 workflow 依赖做单元验证）
+    app.state.deps = deps
     return app
 
 

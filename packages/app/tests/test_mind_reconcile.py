@@ -16,7 +16,7 @@ class FakeModel:
     def __init__(self) -> None:
         self.model_name = "fake"
         self.last_prompt = ""
-        self._reply = '[]'
+        self._reply = "[]"
 
     def set_reply(self, text: str) -> None:
         self._reply = text
@@ -69,7 +69,8 @@ def test_reconcile_conflict_found() -> None:
     model = FakeModel()
     model.set_reply(
         '[{"entry": "避免使用破折号", "verdict": "一致", "note": "最近修改确实去掉了破折号"}, '
-        '{"entry": "打斗场景要多用动词", "verdict": "需更新", "note": "最近两次修改与动词偏好无关"}]'
+        '{"entry": "打斗场景要多用动词", "verdict": "需更新", '
+        '"note": "最近两次修改与动词偏好无关"}]'
     )
     spec, impl = make_mind_reconcile_implementer(manual, signals, model)
     r = impl(spec, {})
@@ -97,7 +98,9 @@ def test_reconcile_prompt_contains_entries_and_signals() -> None:
     spec, impl = make_mind_reconcile_implementer(manual, signals, model)
     impl(spec, {})
     assert "避免使用破折号" in model.last_prompt  # 条目进了 prompt
-    assert "他——走了" in model.last_prompt  # 信号内容进了 prompt（build_reconcile_prompt 只含 kind+content）
+    assert (
+        "他——走了" in model.last_prompt
+    )  # 信号内容进了 prompt（build_reconcile_prompt 只含 kind+content）
 
 
 def test_reconcile_failure_graceful() -> None:

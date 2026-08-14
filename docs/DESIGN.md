@@ -834,6 +834,10 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   增量游标）/「会话摘要」（复用 summarize_conversation 阈值）——直接出结果（无 approval），
   落库形态与后台自动任务一致（对拍）。事件驱动路径（章节落盘自动抽取）仍走内部函数，
   模板供手动/批量重跑。
+- S135（WORKFLOW 收尾，W1-B 归一不降级）：**工具变快捷入口、底层走 workflow**——
+  skill_refine(mode=book) 拆书优先实例化「拆书提炼」模板同步跑（create_task + run_task），
+  草稿由模板 finish 落库（不重复 add_draft）；模板缺失/engine 未装配回退 generate_book
+  （向后兼容）。build_app 暴露 app.state.deps（测试/收编验证取 workflow 依赖）。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/
