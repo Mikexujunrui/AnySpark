@@ -4055,3 +4055,48 @@ ruff+format+mypy strict 全绿；前端 tsc+build 绿；ChatPanel 1186→1055 �
 **下一步**：报告闭环，无剩余缺口。候选：超长书实证路径（报告观察：32 章为
 最长真实运行，几百章设计假设未验证）、records 回放面板（按需）、模型地基
 风险兜底（报告观察：航向系统有效性依赖模型创造力上限）。
+
+---
+
+## S147 空气泡根治 + 批量任务显示三连修（主人实测驱动）（已完成 ✅）
+
+**背景**：主人实测报告三个现象：① 前端打开后空气泡（会话历史空消息）；② 批量任务
+"一直 running"（实际已完成）；③ 批量 done 后无结果输出。逐一查证根因并修复。
+
+**交付（commit `TODO`）**：
+
+1. **① 空气泡根治**：
+   - 根因：工具调用轮 assistant 消息（content='' + metadata.tool_calls）落库
+     （S23 上下文配对必需）→ 历史加载渲染空气泡（S107b 只修字段映射没修空值）
+   - 后端：GET /api/conversations/{id}/messages 过滤空 content assistant 消息
+     （上下文重建走 store.messages 不受影响，工具轨迹 RunLedger 展示）
+   - 前端兜底：历史加载过滤空文本 agent 消息
+2. **② 批量 running 假象**：
+   - 根因：批量任务经 ChatPanel（agent 提议路径）启动，轮询中断（刷新/切页）后
+     历史消息停在"[批量改写执行中]"快照——重开看起来还在 running（实测任务
+     86 秒完成）
+   - 修：历史加载时纠正陈旧的"[批量X执行中]"消息为"[批量X任务已结束（详情见
+     批量面板）]"
+3. **③ 结果可见性（引擎缺陷）**：
+   - 根因：loop 迭代 body 节点输出按节点 id 覆盖存储——批量审读 4 章只留最后
+     一章报告（顶层 results/node_states 均只剩最后迭代）
+   - 修：引擎 loop（collection_var + continue_condition 两分支）累积每迭代 body
+     输出到 loop 节点 output 的 items 列表（截断 2000 字符/节点防超长；断点
+     恢复兼容 prev.items 续累积）
+   - 前端：BatchPanel done 后从 loop output 解析 items，逐项展开每章结果
+
+**验证**：
+- 测试 +8：引擎迭代明细（3 迭代每项保留）+ 既有 workflow 20 全过
+- 全量 593 绿；ruff+format+mypy strict 全绿；前端 tsc/lint/build 绿
+- 真实链路：新引擎跑批量审读 1 章 → loop items 含 read/title/review 输出；
+  旧任务（旧引擎）loop output 仅 {iterations: 4} 确认无明细（新旧区分正确）
+
+**踩坑**：
+- loop 有两个分支（collection_var 遍历 + continue_condition 循环），明细累积
+  须两处都加（测试先走 continue_condition 分支暴露漏改）
+- 历史消息映射 `?? ''` 对空字符串不生效（?? 只挡 null/undefined）→ 空 content
+  消息映射成 text='' 仍渲染空气泡，必须显式过滤
+- python urllib 对该服务持续 502（keep-alive 怪癖）→ 实测全用 curl
+
+**下一步**：批量任务结果会话侧反馈（手动面板路径结果仍不进会话——如需可在
+批量面板 done 时发消息，按需）；CURRENT-STATE 接前端（意义低待需）。

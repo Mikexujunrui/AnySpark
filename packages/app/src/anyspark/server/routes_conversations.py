@@ -102,12 +102,24 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
 
     @router.get("/api/conversations/{conv_id}/messages", response_model=list[dict[str, Any]])
     def get_conversation_messages(conv_id: str) -> list[dict[str, Any]]:
-        """获取会话的全部消息（F4a：会话历史恢复）。"""
+        """获取会话的全部消息（F4a：会话历史恢复）。
+
+        S145b（空气泡根治）：过滤 content 为空的 assistant 消息——工具调用轮的
+        assistant 声明（content='' + metadata.tool_calls）落库是为了上下文配对
+        （S23），对用户无展示价值；历史 UI 过滤掉（工具轨迹由 RunLedger 展示），
+        上下文重建走 store.messages 不受影响。
+        """
         conv = deps.store.get(conv_id)
         if conv is None:
             raise HTTPException(status_code=404, detail="会话不存在")
         msgs = deps.store.messages(conv_id)
-        return [{"role": m.role, "content": m.content} for m in msgs]
+        out = []
+        for m in msgs:
+            content = m.content or ""
+            if m.role == "assistant" and not content.strip():
+                continue  # 工具轮空 assistant 声明不展示
+            out.append({"role": m.role, "content": content})
+        return out
 
     @router.post("/api/conversations/{conv_id}/messages", response_model=dict[str, int])
     def save_conversation_messages(conv_id: str, req: MessagesSaveIn) -> dict[str, int]:

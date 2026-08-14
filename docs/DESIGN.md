@@ -870,6 +870,13 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   工具写前查标记——人工保存过的文件不再静默覆盖（返回提示让 agent 告知用户，尊重
   人的改动）；③ FilesPanel 加编辑/保存（textarea 编辑态）；④ 沙箱列表排除隐藏标记文件。
   "内容自然语言可编辑"完整闭环：AI 写 → 人看 → 人改 → AI 不覆盖。
+- S147（主人实测：空气泡 + 批量任务 running 不结束 + done 无输出三连）：
+  **① 空气泡根治**——工具调用轮 assistant 空 content 消息（S23 上下文配对必需）落库但
+  历史接口（GET messages）过滤展示，前端再兜底过滤空文本；**② 批量 running 假象**——
+  ChatPanel 轮询中断后历史消息停在'[批量X执行中]'快照，历史加载时纠正为结束提示；
+  **③ 结果可见性**——loop 迭代 body 输出按节点覆盖只留最后一章（批量审读 4 章只看到
+  第 4 章报告），引擎改为迭代明细累积（loop output 存 items 列表），批量面板 done 后
+  逐项展开每章审读/改写结果。
 - S144（主人实需：上传区=素材区应可删）：DELETE /api/upload/{book}/{filename}——素材
   传错/重复清理；前端 UploadPanel 每项加删除按钮（确认防误删）；Workspace.delete_upload
   （文件名消毒防穿越）。上传区 CRUD 补全。

@@ -532,3 +532,53 @@ def test_generator_teaches_delegate() -> None:
     # 生成规则教何时用 delegate（查证后写）vs 普通 agent（纯文本生成）
     assert "delegate" in GENERATE_PROMPT
     assert "查证后再写" in GENERATE_PROMPT or "查图谱" in GENERATE_PROMPT
+
+
+def test_loop_items_accumulate_iteration_outputs() -> None:
+    """S145b（结果可见性）：loop 累积每迭代 body 输出明细（不覆盖只留最后）。"""
+
+    class LoopRunner:
+        def __call__(self, ctx: object, node: WorkflowNode) -> NodeResult:
+            if node.params.get("instruction") == "审读":
+                return NodeResult(output="硬伤数: 1")
+            return NodeResult(output="改完")
+
+    store, _ = _new_store()
+    wf = WorkflowDef.from_dict(
+        {
+            "name": "循环明细",
+            "nodes": [
+                {
+                    "id": "l",
+                    "kind": "loop",
+                    "params": {
+                        "body": ["n1", "n2"],
+                        "max_iterations": 3,
+                        "continue_condition": "{{review}} contains '硬伤'",
+                    },
+                },
+                {
+                    "id": "n1",
+                    "kind": "agent",
+                    "params": {"instruction": "审读", "output_key": "review"},
+                },
+                {
+                    "id": "n2",
+                    "kind": "agent",
+                    "params": {"instruction": "改写", "output_key": "fixed"},
+                },
+            ],
+            "edges": [],
+        }
+    )
+    task_id = store.create_task(wf, book_id="main")
+    result = WorkflowEngine(store, LoopRunner()).run_task(task_id)
+    loop_state = next(s for s in result["node_states"] if s["node_id"] == "l")
+    import json as _json
+
+    out = _json.loads(loop_state["output"])
+    assert out["iterations"] == 3
+    assert len(out["items"]) == 3  # 每次迭代一条明细（此前只留最后一次）
+    for item in out["items"]:
+        assert item["n1"] == "硬伤数: 1"  # 每迭代审读输出都保留
+        assert item["n2"] == "改完"

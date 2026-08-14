@@ -38,6 +38,8 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
     done: number;
     total: number;
   } | null>(null);
+  // S145b：任务结果明细（loop 迭代累积——每章审读/改写输出）
+  const [wfItems, setWfItems] = useState<Record<string, string>[]>([]);
   const [wfPendingApprove, setWfPendingApprove] = useState(false);
   const [wfBusy, setWfBusy] = useState(false);
   const [wfTemplates, setWfTemplates] = useState<{ rewrite: string; review: string }>({
@@ -92,6 +94,14 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
         } else if (t.status === "done" || t.status === "failed" || t.status === "cancelled") {
           stopWfPoll();
           setWfBusy(false);
+          // S145b：done 后从 loop 节点 output 解析每迭代明细（每章结果可看）
+          const loop = (t.node_states ?? []).find((s: any) => s.node_id === "loop")
+          try {
+            const parsed = loop && loop.output ? JSON.parse(loop.output) : null
+            setWfItems(Array.isArray(parsed?.items) ? parsed.items : [])
+          } catch {
+            setWfItems([])
+          }
         }
       } catch (e) {
         console.error("workflow poll error", e);
@@ -276,6 +286,24 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
                 >
                   ✓ 已结束（关闭进度）
                 </button>
+              )}
+              {/* S145b：任务结果明细（loop 每迭代输出——批量审读=每章报告，批量改写=每章写回） */}
+              {wfTask.status === "done" && wfItems.length > 0 && (
+                <div className="border-t border-emerald-800/40 pt-2 mt-1 space-y-1 max-h-48 overflow-y-auto">
+                  <p className="text-[10px] text-zinc-500 uppercase tracking-wide">结果（{wfItems.length} 项）</p>
+                  {wfItems.map((it, i) => (
+                    <details key={i} className="text-[11px]">
+                      <summary className="cursor-pointer text-emerald-300/90 hover:text-emerald-200">
+                        第 {i + 1} 项{it.title ? ` · ${String(it.title).slice(0, 20)}` : ""}
+                      </summary>
+                      {Object.entries(it).filter(([k]) => k !== "iter").map(([k, v]) => (
+                        <pre key={k} className="mt-1 text-zinc-400 whitespace-pre-wrap leading-relaxed bg-zinc-900/50 rounded p-2 max-h-32 overflow-y-auto">
+                          {String(v)}
+                        </pre>
+                      ))}
+                    </details>
+                  ))}
+                </div>
               )}
             </div>
           )}

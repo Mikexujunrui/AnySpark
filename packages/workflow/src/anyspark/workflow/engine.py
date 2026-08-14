@@ -295,6 +295,9 @@ class WorkflowEngine:
         except Exception:
             prev = {}
         start_iter = int(prev.get("iterations", 0))
+        # S145b（结果可见性）：累积每迭代 body 节点输出明细（批量审读=每章报告，
+        # 批量改写=每章写回）——此前同节点覆盖只留最后一章，任务 done 后无结果可看
+        items: list[dict[str, Any]] = list(prev.get("items") or [])
         self._store.update_node_state(task_id, node, "running")
 
         # 集合遍历模式：collection_var 指向 JSON 数组（或 {batches: [...]} 对象，S129 拆书
@@ -325,18 +328,27 @@ class WorkflowEngine:
                     self._execute_node(ctx, body_node, force=True)
                     if self._store.node_status(task_id, nid) == "failed":
                         raise RuntimeError(f"loop 体节点 {nid} 失败")
+                # S145b：收集本迭代各 body 节点输出（供结果明细展示）
+                item_out: dict[str, Any] = {"iter": iteration}
+                for nid in body_ids:
+                    out = self._store.node_output(task_id, nid)
+                    if out:
+                        item_out[nid] = out[:2000]  # 截断防超长（逐章报告够展示）
+                items.append(item_out)
                 iteration += 1
                 self._store.update_node_state(
                     task_id,
                     node,
                     "running",
-                    output=json.dumps({"iterations": iteration}, ensure_ascii=False),
+                    output=json.dumps(
+                        {"iterations": iteration, "items": items}, ensure_ascii=False
+                    ),
                 )
             self._store.update_node_state(
                 task_id,
                 node,
                 "done",
-                output=json.dumps({"iterations": iteration}, ensure_ascii=False),
+                output=json.dumps({"iterations": iteration, "items": items}, ensure_ascii=False),
             )
             self._advance(ctx, node)
             return
@@ -354,6 +366,13 @@ class WorkflowEngine:
                 self._execute_node(ctx, body_node, force=True)
                 if self._store.node_status(task_id, nid) == "failed":
                     raise RuntimeError(f"loop 体节点 {nid} 失败")
+            # S145b：收集本迭代各 body 节点输出（供结果明细展示）
+            item_out2: dict[str, Any] = {"iter": iteration - 1}
+            for nid in body_ids:
+                out2 = self._store.node_output(task_id, nid)
+                if out2:
+                    item_out2[nid] = out2[:2000]
+            items.append(item_out2)
             # 出口条件评估：cond 为空 → 跑满 max_iterations
             if cond:
                 continue_loop = self._eval_condition({"type": "rule", "expression": cond}, ctx)
@@ -364,13 +383,13 @@ class WorkflowEngine:
                 task_id,
                 node,
                 "running",
-                output=json.dumps({"iterations": iteration}, ensure_ascii=False),
+                output=json.dumps({"iterations": iteration, "items": items}, ensure_ascii=False),
             )
         self._store.update_node_state(
             task_id,
             node,
             "done",
-            output=json.dumps({"iterations": iteration}, ensure_ascii=False),
+            output=json.dumps({"iterations": iteration, "items": items}, ensure_ascii=False),
         )
         self._advance(ctx, node)
 
