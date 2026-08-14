@@ -39,17 +39,19 @@ class ChatRequest(BaseModel):
 
 
 class ModelIn(BaseModel):
-    """S47 模型配置写入（新增或更新；id 缺省由 name 生成 slug）。"""
+    """S47 模型配置写入（新增或更新；id 缺省由 name 生成 slug）。S131 加 protocol。"""
 
     id: str | None = None
     name: str
-    base_url: str | None = None  # 缺省用 env 默认端点（DEEPSEEK_BASE_URL）
-    model: str  # 模型名（如 deepseek-v4-flash / deepseek-v4-pro）
-    api_key: str | None = None  # 缺省用 env DEEPSEEK_API_KEY
+    base_url: str | None = None  # 缺省用 env 默认端点（各协议各自的默认端点）
+    model: str  # 模型名（如 deepseek-v4-flash / claude-sonnet-4-5 / gemini-2.5-flash / gpt-5）
+    api_key: str | None = None  # 缺省用 env（openai→DEEPSEEK_API_KEY；
+    # anthropic→ANTHROPIC_API_KEY…）
     context_window: int | None = None
     max_tokens: int | None = None
     temperature: float | None = None
     thinking: str | None = None  # off/low/medium/high/xhigh/max（None=交模型默认）
+    protocol: str = "openai"  # S131 兼容协议：openai/anthropic/gemini/responses
 
 
 class ConversationRenameIn(BaseModel):
@@ -518,6 +520,7 @@ class WritingSkillIn(BaseModel):
     type: str = "writing"  # S127：writing(写作调用)/main(主循环)/plot(探索)/both(两者)
     target: str = ""  # S127 兼容：前端旧字段，等价映射到 type（type 优先）
     ext: str = ""  # S127：扩展字段（plot 四要素 JSON）
+    pack_id: str = ""  # S130：书名包聚合（拆书产物同书名同包）
     enabled: bool = True
 
 
@@ -530,6 +533,7 @@ class WritingSkillPatch(BaseModel):
     type: str | None = None  # S127
     target: str | None = None  # S127 兼容：前端旧字段
     ext: str | None = None
+    pack_id: str | None = None  # S130
     enabled: bool | None = None
 
 

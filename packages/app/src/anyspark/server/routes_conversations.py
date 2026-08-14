@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from anyspark.core import Conversation
-from anyspark.models import DEFAULT_BASE_URL, validate_thinking
+from anyspark.models import DEFAULT_BASE_URL, validate_protocol, validate_thinking
 from anyspark.models.registry import (
     DEFAULT_CONTEXT_WINDOW,
     DEFAULT_MAX_TOKENS,
@@ -150,6 +150,7 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
         """新增或更新模型配置（同 id 覆盖；id 缺省由 name 生成 slug）。"""
         try:
             validate_thinking(req.thinking)  # 非法思考强度 → 400（尽早暴露配置错误）
+            validate_protocol(req.protocol)  # S131：非法协议 → 400
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         cfg = ModelConfig(
@@ -162,6 +163,7 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
             max_tokens=req.max_tokens or DEFAULT_MAX_TOKENS,
             temperature=req.temperature or DEFAULT_TEMPERATURE,
             thinking=req.thinking,
+            protocol=req.protocol,
         )
         saved = deps.models.upsert(cfg)
         return {"ok": True, "model": saved.to_dict(), "active": saved.is_active}

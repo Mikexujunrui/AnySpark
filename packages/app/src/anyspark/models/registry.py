@@ -37,7 +37,16 @@ DEFAULT_CONTEXT_WINDOW = int(os.getenv("DEEPSEEK_CONTEXT_WINDOW", "65536"))
 DEFAULT_MAX_TOKENS = 8192
 DEFAULT_TEMPERATURE = 0.7
 
-# 模型配置 SQLite 表
+# 兼容协议（S131 多协议扩展）：协议名 → 适配器工厂（见 _PROTOCOL_FACTORIES）
+# - openai：OpenAI Chat Completions（绝大多数厂商 + 本地 Ollama/LM Studio/vLLM/llama.cpp）
+# - anthropic：Anthropic Messages（Claude 直连/中转）
+# - gemini：Google Generative AI（Gemini 直连）
+# - responses：OpenAI Responses（GPT-5 系新 API）
+PROTOCOLS: tuple[str, ...] = ("openai", "anthropic", "gemini", "responses")
+
+
+# 模型配置 SQLite 表（S131：protocol 列加在末尾——旧库 ALTER ADD COLUMN 也追加到末尾，
+# 新旧库列顺序一致，_insert 位置参数不受影响）
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS model_configs (
     id TEXT PRIMARY KEY,
@@ -51,9 +60,33 @@ CREATE TABLE IF NOT EXISTS model_configs (
     thinking TEXT,
     is_active INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    protocol TEXT NOT NULL DEFAULT 'openai'
 );
 """
+
+# 协议 → 适配器工厂（统一构造签名：base_url/api_key/model/temperature/max_tokens/
+# context_window/thinking——DeepSeekModel 兼容该签名，新增适配器同款）
+from anyspark.models.anthropic import AnthropicModel  # noqa: E402
+from anyspark.models.gemini import GeminiModel  # noqa: E402
+from anyspark.models.responses import ResponsesModel  # noqa: E402
+
+_PROTOCOL_FACTORIES: dict[str, type] = {
+    "openai": DeepSeekModel,
+    "anthropic": AnthropicModel,
+    "gemini": GeminiModel,
+    "responses": ResponsesModel,
+}
+
+
+def validate_protocol(protocol: str | None) -> str:
+    """校验协议取值；非法值抛 ValueError（配置错误应尽早暴露）。"""
+    if not protocol:
+        return "openai"
+    v = str(protocol).strip().lower()
+    if v not in PROTOCOLS:
+        raise ValueError(f"非法协议 {protocol!r}：可选 {PROTOCOLS}")
+    return v
 
 
 def _now() -> str:
@@ -81,6 +114,7 @@ class ModelConfig:
     thinking: str | None = (
         None  # 该模型的默认思考强度（None=模型默认；off/low/medium/high/xhigh/max）
     )
+    protocol: str = "openai"  # S131：兼容协议 openai/anthropic/gemini/responses
     is_active: bool = False
     created_at: str = field(default_factory=_now)
     updated_at: str = field(default_factory=_now)
@@ -121,6 +155,13 @@ class ModelRegistry:
         self._conn = sqlite_connect(self._db)
         with self._lock:
             self._conn.execute(_SCHEMA)
+            # S131：旧库迁移——model_configs 缺 protocol 列 → ALTER 加列（默认 openai，
+            # 旧配置全部按 OpenAI 兼容协议继续工作，行为零变化）
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(model_configs)")]
+            if "protocol" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE model_configs ADD COLUMN protocol TEXT NOT NULL DEFAULT 'openai'"
+                )
             # 空库播种：从 .env 建默认 DeepSeek（旧版本升上来直接可用）
             row = self._conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()
             if row[0] == 0:
@@ -130,7 +171,7 @@ class ModelRegistry:
     @staticmethod
     def _insert(conn: sqlite3.Connection, cfg: ModelConfig) -> None:
         conn.execute(
-            "INSERT OR REPLACE INTO model_configs VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+            "INSERT OR REPLACE INTO model_configs VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 cfg.id,
                 cfg.name,
@@ -144,6 +185,7 @@ class ModelRegistry:
                 1 if cfg.is_active else 0,
                 cfg.created_at,
                 cfg.updated_at,
+                cfg.protocol,
             ),
         )
 
@@ -161,6 +203,7 @@ class ModelRegistry:
             is_active=bool(row["is_active"]),
             created_at=row["created_at"],
             updated_at=row["updated_at"],
+            protocol=row["protocol"],
         )
 
     def list(self) -> list[ModelConfig]:
@@ -197,6 +240,7 @@ class ModelRegistry:
         from anyspark.models import validate_thinking
 
         cfg.thinking = validate_thinking(cfg.thinking)
+        cfg.protocol = validate_protocol(cfg.protocol)
         cfg.updated_at = _now()
         existing = self.get(cfg.id)
         with self._lock:
@@ -253,8 +297,8 @@ class ModelProvider:
     """实现 core Model 协议：委托给注册表当前激活配置（运行时切换即时生效）。
 
     - respond / respond_stream / model_name / context_window 跟随当前激活配置
-    - 实例按 (config, temperature, thinking) 组合缓存——切模型/换参数后惰性重建
-    - build(): 按激活配置构造 DeepSeekModel（供 chat 请求做档位温度/思考强度覆盖）
+    - 实例按 (config, protocol, temperature, thinking) 组合缓存——切模型/换参数后惰性重建
+    - build(): 按激活配置构造适配器（供 chat 请求做档位温度/思考强度覆盖）
     """
 
     def __init__(
@@ -263,15 +307,19 @@ class ModelProvider:
         client_factory: Callable[..., DeepSeekModel] = DeepSeekModel,
         mode: Any | None = None,
     ) -> None:
-        """mode: ModeResolver——按任务分流槽位模型（S98）；None=全部用激活配置。"""
+        """mode: ModeResolver——按任务分流槽位模型（S98）；None=全部用激活配置。
+
+        client_factory: openai 协议（Chat Completions）的工厂覆盖——测试可注入 fake；
+        anthropic/gemini/responses 协议走内置工厂（_PROTOCOL_FACTORIES）。
+        """
         self._registry = registry
         self._factory = client_factory
         self._mode = mode
         self._lock = threading.Lock()
-        self._cache: dict[tuple[str, float, str | None], DeepSeekModel] = {}
+        self._cache: dict[tuple[str, str, float, str | None], Any] = {}
 
-    def build(self, temperature: float | None = None, thinking: str | None = None) -> DeepSeekModel:
-        """按当前激活配置构造 DeepSeekModel（可覆盖温度/思考强度；None=用配置值）。"""
+    def build(self, temperature: float | None = None, thinking: str | None = None) -> Any:
+        """按当前激活配置构造适配器（可覆盖温度/思考强度；None=用配置值）。"""
         cfg = self._registry.active()
         return self._build_cfg(cfg, temperature, thinking)
 
@@ -280,7 +328,7 @@ class ModelProvider:
         task: str,
         temperature: float | None = None,
         thinking: str | None = None,
-    ) -> DeepSeekModel:
+    ) -> Any:
         """S98：按任务解析槽位模型构造（模式分流 quality/split/flash/custom）。
 
         槽位未配 / 指向的模型不存在 → 回退激活配置（向后兼容，现有行为不变）。
@@ -295,15 +343,28 @@ class ModelProvider:
         cfg: ModelConfig,
         temperature: float | None = None,
         thinking: str | None = None,
-    ) -> DeepSeekModel:
-        """按给定配置构造 DeepSeekModel（温度/思考覆盖；None=用配置值），同参缓存复用。"""
+    ) -> Any:
+        """按给定配置构造适配器（温度/思考覆盖；None=用配置值），同参缓存复用。
+
+        S131：按 cfg.protocol 分发到对应协议工厂——openai 兼容（DeepSeekModel，
+        覆盖绝大多数厂商 + 本地）/ anthropic（Claude）/ gemini（Gemini）/ responses（GPT-5 系）。
+        缓存 key 含 protocol：同一 id 改协议后立即重建，不串用旧协议实例。
+        """
         eff_temp = cfg.temperature if temperature is None else temperature
         eff_thinking = cfg.thinking if thinking is None else thinking
-        key = (cfg.id, eff_temp, eff_thinking)
+        key = (cfg.id, cfg.protocol, eff_temp, eff_thinking)
         with self._lock:
             inst = self._cache.get(key)
             if inst is None:
-                inst = self._factory(
+                # openai 协议用注入工厂（测试 fake）；其余协议走内置工厂
+                factory = (
+                    self._factory
+                    if cfg.protocol == "openai"
+                    else _PROTOCOL_FACTORIES.get(cfg.protocol)
+                )
+                if factory is None:
+                    raise ValueError(f"不支持的协议 {cfg.protocol!r}：可选 {PROTOCOLS}")
+                inst = factory(
                     base_url=cfg.base_url,
                     api_key=cfg.resolved_api_key(),
                     model=cfg.model,
@@ -334,7 +395,7 @@ class ModelProvider:
         return self
 
     def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
-        return self.build().respond(messages, tools)
+        return self.build().respond(messages, tools)  # type: ignore[no-any-return]
 
     def respond_stream(
         self,
@@ -342,4 +403,4 @@ class ModelProvider:
         tools: list[ToolSpec],
         on_event: Callable[[Any], None] | None = None,
     ) -> ModelOutput:
-        return self.build().respond_stream(messages, tools, on_event)
+        return self.build().respond_stream(messages, tools, on_event)  # type: ignore[no-any-return]

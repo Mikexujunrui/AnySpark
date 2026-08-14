@@ -1,12 +1,16 @@
 """
-anyspark.models.deepseek — 真实 DeepSeek 模型适配器（OpenAI 兼容）。
+anyspark.models.deepseek — OpenAI Chat Completions 兼容适配器（DeepSeek 及绝大多数厂商）。
 
-实现 core 的 Model 协议，用 OpenAI SDK 真实调用 DeepSeek（DashScope 兼容端点）。
+实现 core 的 Model 协议，用 OpenAI SDK 真实调用 chat.completions 端点（原生 tool calling）。
+S131 泛化定位：本适配器即“openai”协议——凡是 OpenAI 兼容端点（DeepSeek/DashScope、
+通义、Kimi、GLM、豆包、Groq、Cerebras、Mistral、xAI、OpenRouter、本地 Ollama/
+LM Studio/vLLM/llama.cpp 等）都通过它接入（base_url 指向对应端点）。
 不做任何模拟/降级：使用原生 chat.completions + 原生 tool calling。
 
 配置（优先级从高到低）：
 1. 构造时显式传 base_url / api_key / model
 2. 环境变量 DEEPSEEK_API_KEY / DEEPSEEK_BASE_URL / DEEPSEEK_MODEL
+（类名/模块名保留 DeepSeek 历史名，向后兼容既有引用）
 
 思考强度（thinking，S47 新增）：deepseek-v4 系列默认开启思考模式，
 通过 OpenAI 标准参数 reasoning_effort 调整强度（low/medium/high/xhigh/max），
@@ -23,6 +27,7 @@ import os
 from collections.abc import Callable
 from typing import Any
 
+import httpx2 as httpx  # S66：httpx2（下一代 httpx；重命名迁移，API 兼容）
 from openai import OpenAI
 
 from anyspark.core import Event, Message, ModelOutput, ToolCall
@@ -180,10 +185,14 @@ class DeepSeekModel:
         self._timeout = timeout
         self._thinking = validate_thinking(thinking)
         self._context_window = context_window or int(os.getenv("DEEPSEEK_CONTEXT_WINDOW", "65536"))
+        # S131：显式 trust_env=False——openai SDK 默认 client 会读环境变量代理（国内网络
+        # 常配 HTTP(S)_PROXY），把本地端点（Ollama/vLLM 等 127.0.0.1）请求发到代理导致 502。
+        # 用 httpx2 自建 client 关闭代理读取；远端 API 不受影响（SDK 直连不走系统代理）。
         self._client = OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
             timeout=self._timeout,
+            http_client=httpx.Client(trust_env=False, timeout=self._timeout),  # type: ignore[arg-type]
         )
 
     @property

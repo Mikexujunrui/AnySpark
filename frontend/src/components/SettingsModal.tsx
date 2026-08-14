@@ -6,10 +6,18 @@ import Modal from './ui/Modal'
 import Toggle from './ui/Toggle'
 import { getErrorLog, exportErrorLog, clearErrorLog } from '../lib/errorLog'
 
-interface ModelItem { id: string; name: string; base_url?: string; model?: string; context_window?: number; max_tokens?: number; is_active?: boolean; thinking?: string | null; temperature?: number | null }
+interface ModelItem { id: string; name: string; base_url?: string; model?: string; context_window?: number; max_tokens?: number; is_active?: boolean; thinking?: string | null; temperature?: number | null; protocol?: string }
 interface AgencyLevel { id: string; name: string; description: string; temperature: number; order: number; is_default?: boolean }
 
 const THINKING_LEVELS = ['off', 'low', 'medium', 'high', 'xhigh', 'max'] as const
+
+// S131 多协议：兼容协议下拉选项（openai 覆盖绝大多数厂商 + 本地）
+const PROTOCOLS = [
+  { key: 'openai', label: 'OpenAI 兼容', desc: 'DeepSeek/通义/Kimi/GLM/豆包/OpenRouter/本地 Ollama/vLLM 等' },
+  { key: 'anthropic', label: 'Anthropic', desc: 'Claude 直连/中转（Messages API）' },
+  { key: 'gemini', label: 'Gemini', desc: 'Google Generative AI 直连' },
+  { key: 'responses', label: 'OpenAI Responses', desc: 'GPT-5 系新 API' },
+] as const
 
 // S98 快速模式：模式说明 + 任务类型中文名
 const MODE_INFO: { key: string; label: string; desc: string }[] = [
@@ -28,7 +36,7 @@ const TASK_TYPE_LABELS: { key: string; label: string }[] = [
 ]
 
 // 模型表单空态（注册/编辑共用；编辑时回填 id 走同一 POST 覆盖更新）
-const EMPTY_MODEL_FORM = { id: '', name: '', model: '', base_url: '', api_key: '', thinking: 'medium', max_tokens: 16384, temperature: 0.7, context_window: 65536 }
+const EMPTY_MODEL_FORM = { id: '', name: '', model: '', base_url: '', api_key: '', thinking: 'medium', protocol: 'openai', max_tokens: 16384, temperature: 0.7, context_window: 65536 }
 
 
 
@@ -337,6 +345,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
       base_url: m.base_url || '',
       api_key: '', // key 不回传（列表接口安全剔除）；留空=保留原 key（后端 upsert 语义）
       thinking: m.thinking || 'medium',
+      protocol: m.protocol || 'openai',
       max_tokens: m.max_tokens || 16384,
       temperature: m.temperature != null ? m.temperature : 0.7,
       context_window: m.context_window || 65536,
@@ -362,6 +371,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
           base_url: modelForm.base_url.trim() || undefined,
           api_key: modelForm.api_key.trim() || undefined,
           thinking: modelForm.thinking,
+          protocol: modelForm.protocol,
           max_tokens: modelForm.max_tokens || undefined,
           temperature: modelForm.temperature != null ? Number(modelForm.temperature) : undefined,
           context_window: modelForm.context_window || undefined,
@@ -464,6 +474,11 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                     <input value={modelForm.base_url} onChange={e => setModelForm({ ...modelForm, base_url: e.target.value })} placeholder="API 端点（可选，默认 DashScope）" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
                     <input value={modelForm.api_key} onChange={e => setModelForm({ ...modelForm, api_key: e.target.value })} placeholder="API Key（编辑时留空=保留原 key；新增时留空=用环境变量）" type="password" className="w-full bg-zinc-800 border border-zinc-700 rounded px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-sky-500 placeholder-zinc-600" />
                     <div className="flex items-center gap-2">
+                      <label className="flex items-center gap-1 text-[11px] text-zinc-500 shrink-0">协议
+                        <select value={modelForm.protocol} onChange={e => setModelForm({ ...modelForm, protocol: e.target.value })} title={PROTOCOLS.find(p => p.key === modelForm.protocol)?.desc} className="bg-zinc-800 text-zinc-300 text-xs px-2 py-1.5 rounded border border-zinc-700">
+                          {PROTOCOLS.map(p => <option key={p.key} value={p.key}>{p.label}</option>)}
+                        </select>
+                      </label>
                       <label className="flex items-center gap-1 text-[11px] text-zinc-500 shrink-0">思考
                         <select value={modelForm.thinking} onChange={e => setModelForm({ ...modelForm, thinking: e.target.value })} className="bg-zinc-800 text-zinc-300 text-xs px-2 py-1.5 rounded border border-zinc-700">
                           {THINKING_LEVELS.map(t => <option key={t} value={t}>{t === 'off' ? 'off（不思考）' : t}</option>)}
@@ -490,7 +505,7 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
                         {m.is_active && <span className="text-[10px] px-1.5 py-0.5 bg-emerald-900/40 text-emerald-400 rounded">激活</span>}
                       </div>
                       <div className="text-[11px] text-zinc-500 mt-0.5 truncate">
-                        {m.model}{m.context_window ? ` · ${Math.round(m.context_window / 10000) / 100}M 上下文` : ''}
+                        <span className="text-sky-500/80">{m.protocol || 'openai'}</span> · {m.model}{m.context_window ? ` · ${Math.round(m.context_window / 10000) / 100}M 上下文` : ''}
                         {m.thinking ? ` · 思考:${m.thinking}` : ''}
                         {m.temperature != null ? ` · temp:${m.temperature}` : ''}
                       </div>

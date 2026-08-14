@@ -536,7 +536,7 @@ v4 从空库起步，数据在 v4 内自然生长
 - **请求级覆盖**：ChatRequest 加 `model_id`（指定模型，缺省用激活）+ `thinking`（思考强度覆盖）——显式指定 > 当前激活
 - **思考强度**：DeepSeek v4 系列默认开思考；`reasoning_effort`（OpenAI 标准参数，顶层直传，low/medium/high/xhigh/max）控制强度；`off` 用 `extra_body={"enable_thinking": False}` 显式关闭（非标准参数）。思考内容经 `reasoning_content` 返回（当前不展示，仅用于生成）
 - **哲学保持**：配置内容（供应商/模型名/强度）是自然语言数据可增删改；机制（表结构/激活语义/委托/缓存）硬编码；说明书/图谱等载体"模型无关，换模型不丢"继续成立；重试/压缩等流程基建不依赖具体模型（S15 组合式）
-- **已知限制**：token 预算窗口在启动时按当时激活模型计算，切到窗口不同的模型后重启才更新预算（activate 时打日志提示）；换非 DeepSeek 兼容供应商需新适配器（core Model 协议不变，YAGNI 不预建）
+- **已知限制**：token 预算窗口在启动时按当时激活模型计算，切到窗口不同的模型后重启才更新预算（activate 时打日志提示）；~~换非 DeepSeek 兼容供应商需新适配器（YAGNI 不预建）~~（S131 已加 anthropic/gemini/responses 三协议，见 §12.44；Bedrock/Vertex 原生 SDK 仍 YAGNI 不预建）
 
 ### 12.10 工作区化（S48，主人拍板：小说特化版 pi 第一步）
 - **定位**：形态变革起点——从"应用系统"（后端 API + React UI）走向"特化 agent"（对话驱动、文件自由），保留后端完全可用
@@ -1573,3 +1573,41 @@ CAS 恢复），这些是通用计算机科学概念，重写后是自有代码�
 | 会话归属 | conversations.book_id（S81） | ✅ |
 | 图谱 REST API | book_id query（S82） | ✅ |
 | 伏笔/知识库面板 | book_id query（S82） | ✅ |
+
+### 12.44 多模型兼容协议（S131：openai/anthropic/gemini/responses，主人拍板"达到 Pi 水平"）
+
+**背景（主人指示）**：模型提供商支持向 Pi 看齐——至少覆盖所有主流模型厂商 + 本地。
+现状盘点：主流厂商 90% 是 OpenAI Chat Completions 兼容（DeepSeek/通义/Kimi/GLM/豆包/
+Groq/Cerebras/Mistral/xAI/OpenRouter/本地 Ollama/LM Studio/vLLM/llama.cpp），一个
+openai 协议适配器全覆盖；真正缺的是三个独立协议——Anthropic Messages（Claude
+直连/中转）、Google Generative AI（Gemini 直连）、OpenAI Responses（GPT-5 系，
+chat.completions 用不了 gpt-5）。
+
+**协议注册表**（ModelConfig 加 `protocol` 字段，SQLite 列默认 'openai'，旧库启动
+ALTER 自动迁移）：
+| protocol | 适配器 | 覆盖 | 思考强度映射 |
+|---|---|---|---|
+| openai | DeepSeekModel（泛化） | 绝大多数厂商 + 本地 | reasoning_effort / enable_thinking（原有） |
+| anthropic | AnthropicModel | Claude 直连/中转 | thinking: {budget_tokens}（low=2048→max=32768；开启时温度强制 1） |
+| gemini | GeminiModel | Gemini 直连 | thinkingConfig: {thinkingBudget}（off=0） |
+| responses | ResponsesModel | GPT-5 系 | reasoning: {effort}（xhigh/max 封顶 high） |
+
+**设计要点**：
+- core Model 协议零改动——新适配器实现同一协议（respond/respond_stream/model_name/
+  context_window），Agent/图谱/检测/探索/后台全组件自动跟随，无感知
+- ModelProvider.build 按 cfg.protocol 分发到协议工厂（openai 保留注入工厂供测试），
+  缓存 key 含 protocol（同 id 改协议立即重建）
+- 工具调用三协议原生支持：anthropic tool_use 块 + tool_result 回填（相邻同角色消息
+  合并满足严格交替）；gemini functionCall + functionResponse；responses 扁平
+  function tool + function_call_output item
+- 思考强度档位四协议统一（off/low/medium/high/xhigh/max），各协议按能力映射；
+  Anthropic 的 thinking enabled 强制 temperature=1（API 硬性限制）
+- **零新增依赖**：anthropic/gemini 用 httpx2 手写 HTTP（Messages/Generative AI 是
+  简单 JSON API）；responses 复用 openai SDK（client.responses，2.x 原生）
+- **代理坑（实测发现）**：openai SDK 默认 client 读环境变量代理（trust_env=True），
+  把本地端点（127.0.0.1 Ollama/vLLM）请求发到代理导致 502——deepseek/responses 适配器
+  显式传 httpx2 Client(trust_env=False)；anthropic/gemini 手写层本就走 trust_env=False
+- **哲学保持**：协议选择/端点/模型名是自然语言数据可增删改；机制（分发/转换/映射）
+  硬编码；模型无关（换协议不换组件逻辑）继续成立
+- **YAGNI 边界**：Bedrock/Vertex 原生 SDK（重依赖 boto3/google-auth + 云账号，
+  国内基本用不到）不预建；本地模型全部走 openai 协议（base_url 指本地端点）

@@ -3443,3 +3443,33 @@ ruff+format+mypy strict 全绿。工具（skill_refine）保留——W1-B 归一
 
 **下一步**：WORKFLOW 第 2 批（批量改写/审读→模板，集合遍历已验证）+ 加料模板
 （先实测 NSFW 审核坎）；或 SKILL 阶段 3（书名包 pack_id）。
+
+## S131 多模型兼容协议——openai/anthropic/gemini/responses（已完成 ✅）
+
+**背景（主人拍板）**：模型提供商支持向 Pi 看齐——"达到 Pi 的水平，至少覆盖所有主流模型厂商和本地"。验证方式：不用真实 key，本地 Ollama 实测。
+
+**交付（commit 待填）**：
+
+1. **协议注册表（registry.py）**：ModelConfig 加 `protocol` 字段（openai/anthropic/gemini/responses），SQLite 列默认 'openai' + 旧库启动 ALTER 自动迁移（旧配置零行为变化）；`validate_protocol` 校验；ModelProvider.build 按 protocol 分发到协议工厂（openai 保留注入工厂供测试），缓存 key 含 protocol（同 id 改协议立即重建）
+
+2. **三个新适配器（零新增依赖）**：
+   - `anthropic.py`：Messages API，httpx2 手写（tool_use 块 + tool_result 回填 + 相邻同角色合并 + thinking budget + SSE 流式）；thinking enabled 强制 temperature=1（Anthropic 硬性限制）
+   - `gemini.py`：Generative AI API，httpx2 手写（functionCall + functionResponse + thinkingConfig + SSE 流式）
+   - `responses.py`：OpenAI Responses，复用 openai SDK client.responses（扁平 function tool + function_call_output item + reasoning.effort + SDK 事件流）
+   - thinking 档位四协议统一（off/low/medium/high/xhigh/max），各协议按能力映射（anthropic budget_tokens、gemini thinkingBudget、responses effort 封顶 high）
+   - core Model 协议零改动——所有组件（Agent/图谱/检测/探索/后台）自动跟随，无感知
+
+3. **OpenAI 兼容泛化（deepseek.py）**：文档定位改为通用 Chat Completions 适配器（覆盖绝大多数厂商 + 本地）；**实测发现并修复代理坑**——openai SDK 默认 client 读环境变量代理（trust_env=True），本地端点请求被发到代理导致 502，deepseek/responses 显式传 httpx2 Client(trust_env=False)
+
+4. **前后端**：routes_conversations upsert_model 透传 protocol（非法协议 400）；schemas.ModelIn 加 protocol；SettingsModal 模型表单加协议下拉 + 列表显示协议标记
+
+5. **测试**：`tests/test_adapters.py` 新增 17 个（协议注册表默认/CRUD/校验/旧库迁移 + 三协议 thinking 映射/工具转换/消息转换 + Provider 分发）；test_models.py 15 个原测试全绿
+
+**本地 Ollama 实测（主人拍板验证方式）**：
+- 注册 `josiefied:7b-32k`（base_url=http://127.0.0.1:11434/v1, protocol=openai）→ 激活 → /api/chat 全链路真实对话成功（Agent 循环走本地模型）
+- 适配器层：文本/工具调用（get_weather{city:北京}）/流式（text_delta + usage）三路径全通
+- Ollama 配置保留在注册表（随时可切回本地，不占资源）
+
+**已知边界**：Bedrock/Vertex 原生 SDK 仍 YAGNI（重依赖 + 国内不可用）；gemini 思考内容不进响应（需 includeThoughts 显式启用，未做）；前端 tsc 整体 build 被并行 S130 的 SkillsShelfPanel.tsx type/target 错误阻塞（非本阶段引入）
+
+**下一步**：WORKFLOW 第 2 批 / SKILL 阶段 3（S130 进行中）/ 本地 vLLM/LM Studio 适配文档

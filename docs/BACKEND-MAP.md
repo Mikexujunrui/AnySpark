@@ -45,7 +45,7 @@ POST /api/chat 或 /api/chat/stream（routes_chat）
       ├ 工具注册 build_toolkit（按 enable_* 点亮）
       ├ 注入块装配（prepend: 项目简介/协作约定；append: 叙事树/能动性/
       │  倾向/伏笔/设定/心智/变更通知/场景记忆/技巧索引/计划/破限）
-      └ 模型选择（档位温度映射 + thinking 覆盖）
+      └ 模型选择（档位温度映射 + thinking 覆盖 + S131 按 protocol 分发适配器）
   → Agent.run（core.loop 循环：模型→工具→回填→终答）
       ├ 事件流 turn_start→text_delta/tool_call→tool_execution_start/end→tool_result→done
       ├ recorder 记录（思维链只进记录不进上下文）
@@ -116,7 +116,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | Router | 端点区 | 核心依赖 |
 |---|---|---|
 | routes_chat | chat/stream/cancel/steer/stats/direction/candidates/rewrite + S99 队列（queues 查看/queue 入队/queue 删/queue→steer 转插入）+ S116 records/{conv_id}（会话运行记录回放：轮快照+系统事件） | model/store/chapters/active_*/bg_queue/conv_queues |
-| routes_conversations | 会话 CRUD/fork/rename + 模型注册表 CRUD/激活 | store/models |
+| routes_conversations | 会话 CRUD/fork/rename + 模型注册表 CRUD/激活（protocol 字段透传 S131） | store/models |
 | routes_books | 书架（项目枚举/创建/删除） | workspace/chapters |
 | routes_chapters | 章节 CRUD/patch/export/wrapup | chapters/workspace/export |
 | routes_manual→routes_mind | manual/brief/signals/mind 全部 | manual/signals/workspace/mind_planner |
@@ -185,7 +185,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | GraphStore | graph/schema | entities/relations/events/types | 图谱 |
 | PlayStore | play/tree | play_sessions/tree | 推演 |
 | WorkflowStore | workflow/store | templates/drafts/tasks | 工作流 |
-| ModelRegistry | app/models/registry | model_configs | 运行时模型 |
+| ModelRegistry | app/models/registry | model_configs | 运行时模型（S131 多协议：openai/anthropic/gemini/responses） |
 | ModeStore | app/models/mode | mode_config | 快速模式（S98 单行配置） |
 | ExtensionToolStore | app/server/tools_extensions | ext_tools | 扩展工具 |
 | 全部连接 | core/db.connect | — | S79 收敛一处 |
