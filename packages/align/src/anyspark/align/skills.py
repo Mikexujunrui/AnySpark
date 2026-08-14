@@ -121,9 +121,6 @@ class WritingSkill:
             "created_at": self.created_at,
         }
 
-    def tag_list(self) -> list[str]:
-        return [t.strip() for t in self.tags.split(",") if t.strip()]
-
 
 class WritingSkillStore:
     """叙事技巧存储（SQLite）。"""

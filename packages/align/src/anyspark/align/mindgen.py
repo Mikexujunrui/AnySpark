@@ -19,7 +19,6 @@ from typing import Any
 from anyspark.core.jsonutil import (
     parse_json_array,
     parse_json_object,
-    strip_fence,
 )
 
 from .agency import AgencyLevel
@@ -115,11 +114,6 @@ def parse_agency_gen_result(raw: str) -> list[dict[str, Any]]:
 # ---------------------------------------------------------------------------
 # 宽容 JSON 解析（对象 + 数组；对齐 extract._parse_json_array 风格）
 # ---------------------------------------------------------------------------
-
-
-def _strip_fence(text: str) -> str:
-    """去 ```json ... ``` 围栏（R1 收敛到 core.jsonutil）。"""
-    return strip_fence(text)
 
 
 def _parse_json_object(text: str) -> dict[str, Any] | None:

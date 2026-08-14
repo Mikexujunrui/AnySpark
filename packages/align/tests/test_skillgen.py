@@ -116,7 +116,7 @@ def test_generate_main_mode_forces_target_main() -> None:
     """S58/S127：main 模式用结构指导 prompt，候选 type 强制 main。"""
     model = FakeSkillModel(GOOD_OUTPUT)  # 输出不含 type → 应强制 main
     gen = SkillGenerator(model)
-    cands = gen.generate_main("废柴流开局：主角受辱三年，偶得金手指。")
+    cands = gen.generate("废柴流开局：主角受辱三年，偶得金手指。", mode="main")
     assert cands, "应产出候选"
     assert all(c["type"] == "main" for c in cands)
     # prompt 用主循环结构指导（区别于文风 prompt）
@@ -414,14 +414,6 @@ def test_generate_plot_mode_uses_plot_prompt() -> None:
     # prompt 含剧情模式特征
     assert "剧情模式" in model.prompts[0]
     assert "多章" in model.prompts[0]
-
-
-def test_generate_plot_helper() -> None:
-    """S69：generate_plot 便捷方法。"""
-    model = FakeSkillModel(PLOT_OUTPUT)
-    gen = SkillGenerator(model)
-    cands = gen.generate_plot("多章正文")
-    assert cands and cands[0]["name"].startswith("护送式")
 
 
 def test_generate_plot_api_and_dedup() -> None:

@@ -690,7 +690,7 @@ def _sentence_at(content: str, idx: int) -> str:
     return content
 
 
-def _sent_has(content: str, idx: int, kw_len: int, exclude: str) -> bool:
+def _sent_has(content: str, idx: int, exclude: str) -> bool:
     """句级排除：命中所在句子含 exclude 则 True（防短句互相污染/否定语境）。"""
     sent = _sentence_at(content, idx)
     return exclude in sent
@@ -799,9 +799,7 @@ def make_search_chapters_implementer(chapters: Any, book_id: str = "main") -> tu
                                 continue
                             if frag > 0:
                                 ctx = c.content[max(0, m.start() - frag) : m.end() + frag]
-                                if exclude is not None and _sent_has(
-                                    c.content, m.start(), m.end() - m.start(), exclude
-                                ):
+                                if exclude is not None and _sent_has(c.content, m.start(), exclude):
                                     continue
                                 n += 1
                                 if not first_ctx:
@@ -819,9 +817,7 @@ def make_search_chapters_implementer(chapters: Any, book_id: str = "main") -> tu
                                 break
                             if frag > 0:
                                 ctx = c.content[max(0, idx - frag) : idx + len(term) + frag]
-                                if exclude is not None and _sent_has(
-                                    c.content, idx, len(term), exclude
-                                ):
+                                if exclude is not None and _sent_has(c.content, idx, exclude):
                                     start = idx + len(term)
                                     continue
                                 n += 1

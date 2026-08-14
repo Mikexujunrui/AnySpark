@@ -875,24 +875,6 @@ class SkillGenerator:
             c["type"] = "main"  # 架构机关给主循环
         return _sanitize_examples(cands, excerpt)
 
-    def generate_main(
-        self,
-        source_text: str,
-        hint: str = "",
-        max_items: int = 5,
-    ) -> list[dict[str, str]]:
-        """S58：类型/结构指导生成（type=main，给主循环看）。"""
-        return self.generate(source_text, hint, max_items, mode="main")
-
-    def generate_plot(
-        self,
-        source_text: str,
-        hint: str = "",
-        max_items: int = 5,
-    ) -> list[dict[str, str]]:
-        """S69：剧情模式模板生成（四要素元数据，给探索用）。"""
-        return self.generate(source_text, hint, max_items, mode="plot")
-
 
 def render_skill_candidates(candidates: list[dict[str, str]]) -> str:
     """把候选渲染成可读文本（供确认/展示）。"""
