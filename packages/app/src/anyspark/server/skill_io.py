@@ -60,7 +60,7 @@ def parse_skill_file(text: str) -> dict[str, Any] | None:
             continue
         k, _, v = ln.partition(":")
         k = k.strip().lower()
-        if k in ("name", "description", "content", "example", "tags", "type", "target"):
+        if k in ("name", "description", "content", "example", "tags", "type", "target", "pack_id"):
             fm[k] = v.strip()
     name = fm.get("name", "").strip()
     if not name:
@@ -87,6 +87,7 @@ def parse_skill_file(text: str) -> dict[str, Any] | None:
         "example": example,
         "tags": fm.get("tags", "").strip(),
         "type": typ,
+        "pack_id": fm.get("pack_id", "").strip(),
     }
 
 
@@ -97,15 +98,19 @@ def render_skill_file(
     example: str = "",
     tags: str = "",
     type: str = "writing",
+    pack_id: str = "",
 ) -> str:
     """渲染 skill 为文件（front-matter 五段式，与 parse_skill_file 闭环）。
 
     S127：front-matter 键用 type（替代 target）；旧文件 target 键解析仍兼容。
+    S130：pack_id 可选（书名包子条导出带包归属，导入还原）。
     """
     type = type if type in _VALID_TARGETS else "writing"
     lines = ["---", f"name: {name}"]
     if type:
         lines.append(f"type: {type}")
+    if pack_id:
+        lines.append(f"pack_id: {pack_id}")
     if tags:
         lines.append(f"tags: {tags}")
     if description:

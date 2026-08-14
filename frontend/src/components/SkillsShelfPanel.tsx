@@ -3,11 +3,13 @@ import { useSkillStore } from "../stores/skillStore";
 import Icon from "./ui/Icon";
 import ConfirmModal from "./ui/ConfirmModal";
 
-// S105：书架技能库（全局能力库管理视角——与项目内「技巧」面板互补）
-// 分组：写作技法（target=writing/both，写作点名用）/ 类型指导（target=main，主循环用）
+// S105→S130：书架技能库（全局能力库管理视角——与项目内「技巧」面板互补）
+// S130（阶段 3）：按 type 分组（writing 写作技法 / main 类型指导 / plot 剧情模式 /
+// both 通用）+ 书名包聚合视图（pack_id 非空子条归入包卡片，包名=方法论 skill）
 const TARGET_LABELS: Record<string, string> = {
   writing: "写作技法",
   main: "类型指导",
+  plot: "剧情模式",
   both: "通用",
 };
 
@@ -17,20 +19,26 @@ function SkillCard({
   onDelete,
   onToggle,
 }: {
-  skill: { id: string; name: string; content: string; description?: string; tags?: string; target?: string; enabled?: boolean };
-  onEdit: (s: { id: string; name: string; content: string; description?: string; tags?: string; target?: string }) => void;
+  skill: { id: string; name: string; content: string; description?: string; tags?: string; type?: string; target?: string; pack_id?: string; enabled?: boolean };
+  onEdit: (s: { id: string; name: string; content: string; description?: string; tags?: string; type?: string }) => void;
   onDelete: (id: string, name: string) => void;
   onToggle: (id: string, enabled: boolean) => void;
 }) {
+  const st = skill.type || skill.target || "";
   return (
     <div className={`rounded-xl border p-3.5 transition-colors ${skill.enabled === false ? "bg-zinc-900/30 border-zinc-800/60 opacity-60" : "bg-zinc-900/60 border-zinc-800 hover:border-zinc-700"}`}>
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h3 className="text-sm font-medium text-zinc-200 truncate">{skill.name}</h3>
-            {skill.target && TARGET_LABELS[skill.target] && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${skill.target === "main" ? "bg-purple-900/40 text-purple-300" : "bg-sky-900/40 text-sky-300"}`}>
-                {TARGET_LABELS[skill.target]}
+            {st && TARGET_LABELS[st] && (
+              <span className={`text-[10px] px-1.5 py-0.5 rounded-full shrink-0 ${st === "main" ? "bg-purple-900/40 text-purple-300" : st === "plot" ? "bg-emerald-900/40 text-emerald-300" : "bg-sky-900/40 text-sky-300"}`}>
+                {TARGET_LABELS[st]}
+              </span>
+            )}
+            {skill.pack_id && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400 shrink-0">
+                包：{skill.pack_id}
               </span>
             )}
           </div>
@@ -86,9 +94,12 @@ export default function SkillsShelfPanel() {
   }, [fetchSkills, fetchDrafts]);
 
   const groups = useMemo(() => {
-    const g: Record<string, typeof skills> = { writing: [], main: [], other: [] };
+    // S130：按 type 分组（writing/main/plot/both）；pack 子条仍归 type 组
+    // （包视图：书名方法论 both 组内可见，子条带包徽标）
+    const g: Record<string, typeof skills> = { writing: [], main: [], plot: [], both: [], other: [] };
     for (const s of skills) {
-      const key = s.target === "main" ? "main" : s.target === "writing" || s.target === "both" ? "writing" : "other";
+      const st = s.type || s.target || "";
+      const key = st === "main" || st === "plot" || st === "both" ? st : st === "writing" ? "writing" : "other";
       g[key].push(s);
     }
     return g;
@@ -128,6 +139,8 @@ export default function SkillsShelfPanel() {
 
   const groupTitle = (key: string): { label: string; desc: string } => {
     if (key === "main") return { label: "类型指导", desc: "结构/节奏/类型方法论——主循环决策用" };
+    if (key === "plot") return { label: "剧情模式", desc: "跨章剧情模式模板——探索派生方向用" };
+    if (key === "both") return { label: "通用", desc: "文风+结构兼顾——写作与主循环都注入" };
     if (key === "writing") return { label: "写作技法", desc: "文风/句法/表现手法——写作点名注入" };
     return { label: "其他", desc: "" };
   };
@@ -178,6 +191,7 @@ export default function SkillsShelfPanel() {
             <select value={form.target} onChange={(e) => setForm({ ...form, target: e.target.value })} className="bg-zinc-800 text-zinc-300 text-xs px-2.5 py-2 rounded-lg border border-zinc-700">
               <option value="writing">写作技法</option>
               <option value="main">类型指导</option>
+              <option value="plot">剧情模式</option>
               <option value="both">通用</option>
             </select>
           </div>

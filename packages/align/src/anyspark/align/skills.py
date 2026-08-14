@@ -86,8 +86,9 @@ class WritingSkill:
 
     S127：type 分流（PLAN-SKILL-UNIFY 阶段 1，target 语义并入）——
     writing（文风/叙事技巧，注入写作调用）/ main（类型/结构指导，注入主循环决策）/
-    plot（剧情模式模板，探索消费方，阶段 2 接线）/ both（两者，书名方法论过渡值，
-    阶段 3 书名包按包拆分）。ext=plot 四要素 JSON（阶段 2 模板并入复用）。
+    plot（剧情模式模板，探索消费方）/ both（两者，书名方法论过渡值）。
+    S130（阶段 3）：pack_id 书名包聚合——拆书三路产出（方法论/架构/剧情）同一包；
+    整包引用按 pack 分流（写作只取包内 writing/both，纪律 3）；NULL=独立子条。
     """
 
     name: str
@@ -97,6 +98,7 @@ class WritingSkill:
     tags: str = ""
     type: str = "writing"  # writing | main | plot | both（S127）
     ext: str = ""  # S127：扩展字段（plot 四要素 JSON；writing/main 空）
+    pack_id: str = ""  # S130：书名包聚合（空=独立子条；拆书产物同书名同包）
     enabled: bool = True
     order: int = 0
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
@@ -113,6 +115,7 @@ class WritingSkill:
             "type": self.type,
             "target": self.type,  # S127：target 兼容别名（迁移期前端仍读 target）
             "ext": self.ext,
+            "pack_id": self.pack_id,
             "enabled": self.enabled,
             "order": self.order,
             "created_at": self.created_at,
@@ -147,6 +150,7 @@ class WritingSkillStore:
                     target TEXT NOT NULL DEFAULT 'writing',
                     type TEXT NOT NULL DEFAULT 'writing',
                     ext TEXT NOT NULL DEFAULT '',
+                    pack_id TEXT NOT NULL DEFAULT '',
                     enabled INTEGER NOT NULL DEFAULT 1,
                     order_index INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL
@@ -166,6 +170,7 @@ class WritingSkillStore:
                     target TEXT NOT NULL DEFAULT 'writing',
                     type TEXT NOT NULL DEFAULT 'writing',
                     ext TEXT NOT NULL DEFAULT '',
+                    pack_id TEXT NOT NULL DEFAULT '',
                     source TEXT NOT NULL DEFAULT 'manual',  -- manual|mental|signal
                     created_at TEXT NOT NULL
                 )
@@ -200,6 +205,11 @@ class WritingSkillStore:
                 self._conn.execute(
                     "ALTER TABLE writing_skills ADD COLUMN ext TEXT NOT NULL DEFAULT ''"
                 )
+            # S130：pack_id 列（旧库补默认空=独立子条）
+            if "pack_id" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE writing_skills ADD COLUMN pack_id TEXT NOT NULL DEFAULT ''"
+                )
             # S57：skill_drafts 表同样补 target
             dcols = {r[1] for r in self._conn.execute("PRAGMA table_info(skill_drafts)")}
             if "target" not in dcols:
@@ -219,6 +229,11 @@ class WritingSkillStore:
                 self._conn.execute(
                     "ALTER TABLE skill_drafts ADD COLUMN ext TEXT NOT NULL DEFAULT ''"
                 )
+            # S130：skill_drafts 补 pack_id
+            if "pack_id" not in dcols:
+                self._conn.execute(
+                    "ALTER TABLE skill_drafts ADD COLUMN pack_id TEXT NOT NULL DEFAULT ''"
+                )
             self._conn.commit()
 
     def _seed(self) -> None:
@@ -232,8 +247,8 @@ class WritingSkillStore:
                         self._conn.execute(
                             "INSERT INTO writing_skills "
                             "(id, name, description, content, example, tags, target, type, ext, "
-                            "enabled, order_index, created_at) "
-                            "VALUES (?,?,?,?,?,?,?,?,?,1,?,?)",
+                            "pack_id, enabled, order_index, created_at) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?)",
                             (
                                 uuid.uuid4().hex,
                                 s["name"],
@@ -244,6 +259,7 @@ class WritingSkillStore:
                                 s.get("type", "writing"),
                                 s.get("type", "writing"),
                                 s.get("ext", ""),
+                                s.get("pack_id", ""),
                                 i,
                                 now,
                             ),
@@ -279,10 +295,11 @@ class WritingSkillStore:
         with self._lock:
             rows = self._conn.execute(
                 "SELECT name, description, content, example, enabled, order_index, "
-                "tags, type, ext FROM writing_skills"
+                "tags, type, ext, pack_id FROM writing_skills"
             ).fetchall()
         sig = "".join(
-            f"{r[0]}|{r[1]}|{r[2]}|{r[3]}|{r[5]}|{int(r[4])}|{r[6]}|{r[7]}|{r[8]}" for r in rows
+            f"{r[0]}|{r[1]}|{r[2]}|{r[3]}|{r[5]}|{int(r[4])}|{r[6]}|{r[7]}|{r[8]}|{r[9]}"
+            for r in rows
         )
         return sig
 
@@ -306,6 +323,7 @@ class WritingSkillStore:
         tags: str = "",
         type: str = "writing",
         ext: str = "",
+        pack_id: str = "",
     ) -> WritingSkill:
         type = type if type in ("writing", "main", "plot", "both") else "writing"
         with self._lock:
@@ -320,13 +338,14 @@ class WritingSkillStore:
                 tags=tags,
                 type=type,
                 ext=ext,
+                pack_id=pack_id,
                 order=int(max_order) + 1,
             )
             self._conn.execute(
                 "INSERT INTO writing_skills "
                 "(id, name, description, content, example, tags, target, type, ext, "
-                "enabled, order_index, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,1,?,?)",
+                "pack_id, enabled, order_index, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?)",
                 (
                     s.id,
                     s.name,
@@ -337,6 +356,7 @@ class WritingSkillStore:
                     s.type,
                     s.type,
                     s.ext,
+                    s.pack_id,
                     s.order,
                     s.created_at,
                 ),
@@ -354,6 +374,7 @@ class WritingSkillStore:
         tags: str | None = None,
         type: str | None = None,
         ext: str | None = None,
+        pack_id: str | None = None,
         enabled: bool | None = None,
     ) -> WritingSkill | None:
         with self._lock:
@@ -386,6 +407,9 @@ class WritingSkillStore:
             if ext is not None:
                 sets.append("ext=?")
                 params.append(ext)
+            if pack_id is not None:
+                sets.append("pack_id=?")
+                params.append(pack_id)
             if enabled is not None:
                 sets.append("enabled=?")
                 params.append(1 if enabled else 0)
@@ -423,6 +447,7 @@ class WritingSkillStore:
         tags: str = "",
         type: str = "writing",
         ext: str = "",
+        pack_id: str = "",
         source: str = "manual",
     ) -> dict[str, Any] | None:
         """存一条 skill 候选草稿（未生效；人工确认后转正进 writing_skills）。"""
@@ -441,12 +466,32 @@ class WritingSkillStore:
             self._conn.execute(
                 "INSERT INTO skill_drafts "
                 "(id, name, description, content, example, tags, target, type, ext, "
-                "source, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                (did, name, description, content, example, tags, type, type, ext, source, _now()),
+                "pack_id, source, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    did,
+                    name,
+                    description,
+                    content,
+                    example,
+                    tags,
+                    type,
+                    type,
+                    ext,
+                    pack_id,
+                    source,
+                    _now(),
+                ),
             )
             self._conn.commit()
-            return {"id": did, "name": name, "source": source, "type": type, "target": type}
+            return {
+                "id": did,
+                "name": name,
+                "source": source,
+                "type": type,
+                "target": type,
+                "pack_id": pack_id,
+            }
 
     def list_drafts(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -456,6 +501,7 @@ class WritingSkillStore:
             d = dict(r)
             d["type"] = d.get("type") or d.get("target", "writing")
             d["target"] = d["type"]
+            d["pack_id"] = d.get("pack_id") or ""
             out.append(d)
         return out
 
@@ -479,13 +525,14 @@ class WritingSkillStore:
                 tags=row["tags"],
                 type=typ,
                 ext=row["ext"] or "",
+                pack_id=row["pack_id"] or "",
                 order=int(max_order) + 1,
             )
             self._conn.execute(
                 "INSERT INTO writing_skills "
                 "(id, name, description, content, example, tags, target, type, ext, "
-                "enabled, order_index, created_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?,1,?,?)",
+                "pack_id, enabled, order_index, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,1,?,?)",
                 (
                     s.id,
                     s.name,
@@ -496,6 +543,7 @@ class WritingSkillStore:
                     s.type,
                     s.type,
                     s.ext,
+                    s.pack_id,
                     s.order,
                     s.created_at,
                 ),
@@ -522,6 +570,7 @@ def _from_row(row: sqlite3.Row) -> WritingSkill:
         tags=row["tags"],
         type=typ,
         ext=row["ext"],
+        pack_id=row["pack_id"] or "",
         enabled=bool(row["enabled"]),
         order=int(row["order_index"]),
         created_at=row["created_at"],
@@ -575,11 +624,32 @@ def render_skills_by_name(skills: list[WritingSkill], names: list[str]) -> str:
     写作调用是被执行方不自行选技巧：主循环点名了才注入（S61 删自动匹配兜底）。
     S127：plot 类绝不进写作上下文（纪律 3）——点名命中 plot 子条也跳过；
     writing/main/both 保持点名即注入（S61 语义不变，对拍保留）。
+    S130（阶段 3）：**书名包整包引用**——点名=包名（pack_id，如「斗破苍穹」）时，
+    写作上下文只注入包内 writing/both 子条（纪律 3：main/plot 子条绝不进写作上下文）；
+    单条点名仍按名精确匹配。包=逻辑聚合不物理复制。
     """
     want = {n.strip() for n in names if n.strip()}
     if not want:
         return ""
-    selected = [s for s in skills if s.enabled and s.name in want and s.type != "plot"]
+    selected: list[WritingSkill] = []
+    selected_ids: set[str] = set()
+    for s in skills:
+        if not s.enabled:
+            continue
+        # 单条点名：按名精确匹配（plot 除外——纪律 3）
+        if s.name in want and s.type != "plot" and s.id not in selected_ids:
+            selected.append(s)
+            selected_ids.add(s.id)
+            continue
+        # 整包引用：点名=pack_id → 只取包内 writing/both（main/plot 不进写作上下文）
+        if (
+            s.pack_id
+            and s.pack_id in want
+            and s.type in ("writing", "both")
+            and s.id not in selected_ids
+        ):
+            selected.append(s)
+            selected_ids.add(s.id)
     if not selected:
         return ""
     lines = ["# 叙事技巧（点名）"]

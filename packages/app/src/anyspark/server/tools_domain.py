@@ -1654,6 +1654,8 @@ def make_skill_refine_implementer(
             return ToolResult(call=call, ok=False, content=content)
         # S103：候选存草稿（skills.add_draft）——前端草稿区人工确认转正，对话链路不再断链
         draft_ids: list[str] = []
+        # S130：拆书产物同书名一包（pack_id=书名，整包引用写作只取 writing/both）
+        pack_id = book.get("name", "") if (mode == "book" and library_book_id) else ""
         if skills is not None:
             for c in candidates:
                 d = skills.add_draft(
@@ -1663,6 +1665,7 @@ def make_skill_refine_implementer(
                     example=str(c.get("example", ""))[:2000],
                     tags=str(c.get("tags", "")),
                     type=str(c.get("type", "writing")),
+                    pack_id=pack_id,
                     source="agent",
                 )
                 if d:

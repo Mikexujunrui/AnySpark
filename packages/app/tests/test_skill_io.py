@@ -102,6 +102,24 @@ def test_render_plot_type_roundtrip() -> None:
     assert parsed is not None and parsed["type"] == "plot"
 
 
+def test_render_pack_id_roundtrip() -> None:
+    """S130：书名包子条导出带 pack_id → 导入还原（整包引用路由前提）。"""
+    rendered = render_skill_file(
+        name="斗破苍穹·文笔",
+        description="文笔技法",
+        content="短句直给推进",
+        type="writing",
+        pack_id="斗破苍穹",
+    )
+    assert "pack_id: 斗破苍穹" in rendered
+    parsed = parse_skill_file(rendered)
+    assert parsed is not None
+    assert parsed["type"] == "writing" and parsed["pack_id"] == "斗破苍穹"
+    # 无 pack_id 文件 → 空串（独立子条）
+    plain = parse_skill_file(render_skill_file(name="独立", content="c"))
+    assert plain is not None and plain["pack_id"] == ""
+
+
 # ---------------------------------------------------------------------------
 # ingest 判别路由 + export 端点（build_app 真实链路）
 # ---------------------------------------------------------------------------

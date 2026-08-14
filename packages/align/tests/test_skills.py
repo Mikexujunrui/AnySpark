@@ -266,6 +266,74 @@ def test_skill_draft_type_and_ext_promote() -> None:
     assert s.ext != "" and _json.loads(s.ext)["granularity"] == "全书"
 
 
+def test_skill_pack_aggregation() -> None:
+    """S130（阶段 3）：书名包聚合——拆书三路产出（方法论 both/架构 main/剧情 plot）
+    同 pack_id；子条独立可编辑/删除（包=逻辑聚合不物理复制）。"""
+    from anyspark.align import WritingSkillStore
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "p.db")
+    # 模拟拆书落草稿：三路子条同 pack_id=书名
+    d1 = store.add_draft(
+        "斗破苍穹写作法",
+        "整本书方法论",
+        "文风/结构融合",
+        type="both",
+        pack_id="斗破苍穹",
+        source="library",
+    )
+    d2 = store.add_draft(
+        "坏档与重开", "架构技法", "时间循环", type="main", pack_id="斗破苍穹", source="library"
+    )
+    d3 = store.add_draft(
+        "时间回环·宿命闭环", "剧情模式", "回环", type="plot", pack_id="斗破苍穹", source="library"
+    )
+    assert d1 and d2 and d3
+    assert d1["pack_id"] == "斗破苍穹"
+    # 转正保留 pack_id
+    s1 = store.promote_draft(d1["id"])
+    assert s1 is not None and s1.pack_id == "斗破苍穹"
+    s2 = store.promote_draft(d2["id"])
+    assert s2 is not None and s2.pack_id == "斗破苍穹"
+    s3 = store.promote_draft(d3["id"])
+    assert s3 is not None and s3.pack_id == "斗破苍穹"
+    # to_dict 带 pack_id
+    assert s1.to_dict()["pack_id"] == "斗破苍穹"
+    # 独立可删：删 plot 子条不影响包内其他
+    store.delete(s3.id)
+    remaining = [s for s in store.list_skills() if s.pack_id == "斗破苍穹"]
+    assert len(remaining) == 2 and all(s.pack_id == "斗破苍穹" for s in remaining)
+
+
+def test_skill_pack_reference_routing() -> None:
+    """S130（纪律 3）：整包引用点名=包名 → 写作上下文只注入包内 writing/both 子条，
+    main/plot 子条绝不进写作上下文；单条点名仍按名精确匹配。"""
+    from anyspark.align import render_skill_index, render_skills_by_name
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "pr.db")
+    # 包：斗破苍穹（方法论 both + 文笔 writing + 架构 main + 剧情 plot）
+    store.add("斗破苍穹写作法", "整本书方法论", "文风节奏结构融合", type="both", pack_id="斗破苍穹")
+    store.add("斗破苍穹·文笔", "文笔技法", "短句直给推进", type="writing", pack_id="斗破苍穹")
+    store.add("坏档与重开", "架构技法", "时间循环设计", type="main", pack_id="斗破苍穹")
+    store.add("时间回环·宿命闭环", "剧情模式", "回环模板", type="plot", pack_id="斗破苍穹")
+    skills = store.list_skills()
+    # 整包引用「斗破苍穹」→ 注入 both 方法论 + writing 子条；main/plot 不注入
+    block = render_skills_by_name(skills, ["斗破苍穹"])
+    assert "斗破苍穹写作法" in block  # both 方法论（写作+主循环都要）
+    assert "斗破苍穹·文笔" in block  # writing 子条
+    assert "坏档与重开" not in block  # main 绝不进写作上下文（纪律 3）
+    assert "时间回环·宿命闭环" not in block  # plot 绝不进写作上下文
+    # 单条点名：按名精确匹配（main 仍可点名注入——S61 语义保留）
+    block2 = render_skills_by_name(skills, ["坏档与重开"])
+    assert "时间循环设计" in block2
+    # 主循环索引（target=""）：含 writing/main/both，不含 plot
+    idx = render_skill_index(skills, target="")
+    assert "斗破苍穹写作法" in idx and "坏档与重开" in idx
+    assert "时间回环·宿命闭环" not in idx
+    # plot 视角可见 plot 子条
+    idx_plot = render_skill_index(skills, target="plot")
+    assert "时间回环·宿命闭环" in idx_plot
+
+
 def test_skill_description_preserved_full() -> None:
     """S62：skill 描述存储永不截断（内容主权）；索引渲染层才展示省略。"""
     from anyspark.align import WritingSkillStore

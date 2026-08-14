@@ -6,7 +6,10 @@ export interface Skill {
   description?: string;
   content: string;
   tags?: string;
+  type?: string;
   target?: string;
+  ext?: string;
+  pack_id?: string;
   enabled?: boolean;
   created_at: string;
   updated_at: string;

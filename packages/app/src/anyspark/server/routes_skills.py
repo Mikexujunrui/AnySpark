@@ -102,6 +102,7 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
             example=s.example,
             tags=s.tags,
             type=s.type,
+            pack_id=s.pack_id,
         )
         safe = quote(f"{s.name}.skill.md")
         from fastapi.responses import PlainTextResponse
@@ -118,7 +119,7 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
     def add_skill(req: WritingSkillIn) -> dict[str, Any]:
         typ = req.type or req.target or "writing"  # S127：type 优先，target 兼容
         s = deps.skills.add(
-            req.name, req.description, req.content, req.example, req.tags, typ, req.ext
+            req.name, req.description, req.content, req.example, req.tags, typ, req.ext, req.pack_id
         )
         return s.to_dict()
 
@@ -155,6 +156,7 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
             req.tags,
             typ,
             req.ext,
+            req.pack_id,
             req.enabled,
         )
         if s is None:

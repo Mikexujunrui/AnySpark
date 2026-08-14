@@ -128,6 +128,10 @@ def test_book_refine_workflow_dual_landing() -> None:
 
     ext = _json.loads(by_name["时间回环·宿命闭环"]["ext"])
     assert ext["granularity"] == "全书" and ext["function"] == "悬念"
+    # S130：三路产出同书名一包（pack_id 从书库解析）
+    assert by_name["测试书写作法"]["pack_id"] == "测试书"
+    assert by_name["坏档与重开"]["pack_id"] == "测试书"
+    assert by_name["时间回环·宿命闭环"]["pack_id"] == "测试书"
 
 
 def test_book_refine_workflow_matches_generator() -> None:

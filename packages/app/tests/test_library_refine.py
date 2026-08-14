@@ -144,6 +144,10 @@ def test_library_refine_plot_dual_landing(tmp_path: Path) -> None:
     assert "斗破苍穹写作法" in by_name and by_name["斗破苍穹写作法"]["type"] == "both"
     assert "坏档与重开" in by_name and by_name["坏档与重开"]["type"] == "main"
     assert "时间回环·宿命闭环" in by_name and by_name["时间回环·宿命闭环"]["type"] == "plot"
+    # S130：三路产出同书名一包（pack_id=书名，整包引用路由前提）
+    assert by_name["斗破苍穹写作法"]["pack_id"] == "斗破苍穹"
+    assert by_name["坏档与重开"]["pack_id"] == "斗破苍穹"
+    assert by_name["时间回环·宿命闭环"]["pack_id"] == "斗破苍穹"
     # plot 草稿四要素进 ext（阶段 2 探索消费方读取）
     import json as _json
 

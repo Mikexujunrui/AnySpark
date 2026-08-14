@@ -98,6 +98,7 @@ def ingest_pipeline(
                     example=skill["example"],
                     tags=skill["tags"],
                     type=skill["type"],
+                    pack_id=skill.get("pack_id", ""),
                     source="import",
                 )
                 if draft is None:

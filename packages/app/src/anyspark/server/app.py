@@ -318,6 +318,7 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
                         "arch": "{{arch_cands}}",
                         "plot": "{{plot_cands}}",
                         "refine_excerpt": "{{refine_excerpt}}",
+                        "library_book_id": "{{library_book_id}}",
                         "output_key": "finish_report",
                     },
                 },
@@ -941,6 +942,15 @@ def build_app(
             arch_raw = _wf_resolve(str(node.params.get("arch") or ""), ctx).strip()
             plot_raw = _wf_resolve(str(node.params.get("plot") or ""), ctx).strip()
             excerpt = _wf_resolve(str(node.params.get("refine_excerpt") or ""), ctx)
+            # S130：拆书产物同书名一包（pack_id=书名，整包引用写作只取 writing/both）
+            pack_id = _wf_resolve(str(node.params.get("pack_id") or ""), ctx).strip()
+            if not pack_id:
+                # 回退：从 library_book_id 解析书名
+                bid = _wf_resolve(str(node.params.get("library_book_id") or ""), ctx).strip()
+                if bid and library is not None:
+                    bk = library.get_book(bid)
+                    if bk is not None:
+                        pack_id = str(bk.get("name", ""))
             if skills is None:
                 return NodeResult(error="skills 未装配（无法落草稿）")
             cands: list[dict[str, str]] = []
@@ -996,6 +1006,7 @@ def build_app(
                     tags=str(cd.get("tags", "")),
                     type=typ,
                     ext=ext,
+                    pack_id=pack_id,
                     source="workflow",
                 )
                 if d:
