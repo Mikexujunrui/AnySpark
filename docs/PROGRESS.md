@@ -3601,7 +3601,7 @@ NSFW 审核坎）；本地 vLLM/LM Studio 适配文档（S131 接续）。
 （拆书/批量/轻流程）对拍已绿；收尾把真正的多步流程工具 skill_refine(mode=book) 收编为
 快捷入口——底层统一走「拆书提炼」workflow 模板（断点/重试/持久化单一机制）。
 
-**交付（commit `TODO`）**：
+**交付（commit `eb5739d`）**：
 
 1. **skill_refine 收编（tools_domain.py）**：
    - make_skill_refine_implementer 加 workflow_store/workflow_engine 可选参数
