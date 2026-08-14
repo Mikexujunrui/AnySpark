@@ -213,9 +213,6 @@ class StoryTreeStore:
     # ------------------------------------------------------------------
     # 树视图（注入用）
     # ------------------------------------------------------------------
-    def current_path(self, book_id: str = "main") -> list[StoryNode]:
-        """主线轨迹（chosen 链，按创建顺序）。"""
-        return [n for n in self.list_nodes(book_id) if n.chosen]
 
     def render_tree(self, book_id: str = "main") -> str:
         """渲染叙事树导航块（注入用，极小）：主线 + 锚点 + 探索可能性 + 支线。

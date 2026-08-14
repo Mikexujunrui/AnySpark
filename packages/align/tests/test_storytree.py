@@ -22,10 +22,6 @@ def test_node_add_and_choose() -> None:
         # 选为主线
         s.choose(n3.id)
         s.choose(n2.id)
-        path = s.current_path("main")
-        assert len(path) == 1  # 同级候选 chosen 互斥，最后选的生效
-        assert path[0].id == n2.id
-        assert path[0].kind == "main"
     finally:
         s.close()
 

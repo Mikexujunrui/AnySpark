@@ -9,7 +9,7 @@ from pathlib import Path
 
 from anyspark.core.types import Message, ModelOutput
 from anyspark.server.app import build_app
-from anyspark.server.pipeline import chapterize, extract_text, find_image_refs
+from anyspark.server.pipeline import chapterize, extract_text
 from anyspark.server.workspace import Workspace
 
 
@@ -87,20 +87,6 @@ def test_chapterize_fallback_single() -> None:
     assert len(chs) == 1 and chs[0]["title"] == "全文"
     # 空文本
     assert chapterize("") == []
-
-
-def test_find_image_refs() -> None:
-    project = Path(tempfile.mkdtemp())
-    (project / "上传").mkdir()
-    (project / "上传" / "图.png").write_bytes(b"png")
-    ch_dir = project / "章节"
-    ch_dir.mkdir()
-    md = (
-        "看图：![封面](../上传/图.png) 和 http://x.com/a.png "
-        "和 ![inline](data:image/png;base64,xxx)"
-    )
-    found = find_image_refs(md, ch_dir)  # md 在章节目录，引用相对它
-    assert len(found) == 1 and found[0].name == "图.png"
 
 
 # ---------------------------------------------------------------------------

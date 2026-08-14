@@ -141,19 +141,3 @@ def chapterize(text: str, fallback_title: str = "全文") -> list[dict[str, str]
         if body:
             chapters = [{"title": fallback_title, "content": body}]
     return chapters
-
-
-def find_image_refs(md_text: str, base_dir: Path) -> list[Path]:
-    """收集 md 中的图片引用（相对 base_dir 解析），返回存在的文件列表（导出用）。"""
-    found: list[Path] = []
-    for m in _IMG_RE.finditer(md_text):
-        raw = m.group(2).strip()
-        if not raw or raw.startswith(("http://", "https://", "data:")):
-            continue
-        p = Path(raw)
-        if p.is_absolute():
-            continue
-        resolved = (base_dir / p).resolve()
-        if resolved.exists() and resolved.is_file():
-            found.append(resolved)
-    return found

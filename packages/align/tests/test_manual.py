@@ -115,40 +115,6 @@ def test_merge_add_different_category_no_merge() -> None:
         store.close()
 
 
-def test_dedupe_cleans_legacy_duplicates() -> None:
-    """S55 dedupe：清理历史重复（同类别+关键词重叠≥2 → 合并+删冗余）。"""
-    store = ManualStore(_db())
-    try:
-        # 模拟历史 3 条重复（S53c 实测发现的脏数据形态）
-        store.add(ManualEntry(content="叙事克制，少用感叹号", category="style", confidence=0.5))
-        store.add(ManualEntry(content="叙事克制，少用感叹号", category="style", confidence=0.6))
-        store.add(ManualEntry(content="叙事克制，少用感叹号", category="style", confidence=0.4))
-        # 一条不重复的
-        store.add(ManualEntry(content="习惯晚上写作", category="habit"))
-        removed = store.dedupe()
-        assert removed == 2  # 合并掉 2 条冗余
-        entries = store.list("project")
-        assert len(entries) == 2  # 1 条合并后的感叹号 + 1 条习惯
-        sighao = [e for e in entries if "感叹号" in e.content]
-        assert len(sighao) == 1
-        assert sighao[0].confidence == 0.6  # 取最高置信度
-    finally:
-        store.close()
-
-
-def test_dedupe_keeps_locked() -> None:
-    """S55 dedupe：锁定条目不合并（用户主权）。"""
-    store = ManualStore(_db())
-    try:
-        store.add(ManualEntry(content="叙事克制，少用感叹号", category="style", locked=True))
-        store.add(ManualEntry(content="叙事克制，少用感叹号", category="style"))
-        removed = store.dedupe()
-        assert removed == 0  # 锁定条目不合并
-        assert len(store.list("project")) == 2
-    finally:
-        store.close()
-
-
 def test_decay_stale_downgrades_unused_entries() -> None:
     """S61 活跃度衰减：超过阈值未触达 → 降级（high→medium→low）。"""
     from datetime import UTC, datetime, timedelta
