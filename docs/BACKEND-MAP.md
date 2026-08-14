@@ -19,7 +19,7 @@
 │ 路由层  routes_*.py（15 个领域 router，~164 端点）        │
 │   HTTP 入口 → 校验 → 调领域逻辑/engine → 响应              │
 ├─────────────────────────────────────────────────────────┤
-│ Agent 工具层  toolkit.py + tools_*.py（45 个工具，S114 默认全注册）  │
+│ Agent 工具层  toolkit.py + tools_*.py（47 个工具，S114 默认全注册；S145 补 library 后含 reference_lookup）  │
 │   Agent 循环内可调用的领域能力（按 enable_* 开关点亮）      │
 ├─────────────────────────────────────────────────────────┤
 │ 基础设施  deps/tasks/agent_factory/context/pipeline/      │
@@ -58,7 +58,7 @@ POST /api/chat 或 /api/chat/stream（routes_chat）
 
 ### 2.2 后台任务链路（tasks.py 单例 worker 线程）
 ```
-_bg_queue（deps.bg_queue）→ 7 种任务：
+_bg_queue（deps.bg_queue）→ 4 种任务：
   chapter     章节落盘后：图谱抽取 + 伏笔回收 + 学习审查
   refine      信号→偏好提炼进 manual
   skill_drafts 心智联动+信号→skill 候选草稿（人工确认转正）

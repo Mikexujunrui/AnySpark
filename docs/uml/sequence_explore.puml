@@ -21,15 +21,26 @@ API -> Intent: build_confirmation(concept)
 Intent --> API: confirmation_text
 API --> User: 对齐确认（概念卡 + 歧义问题）
 
-User -> API: POST /api/explore/confirm\n{confirmed_concept}
+User -> API: POST /api/explore/intent
+{seed}
+API -> Intent: understand(seed)
+Intent -> LLM: respond(INTENT_PROMPT + seed)
+LLM --> Intent: JSON{concept, questions}
+Intent --> API: concept_card
+API -> Intent: build_confirmation(concept)
+Intent --> API: confirmation_text
+API --> User: 对齐确认（概念卡 + 歧义问题）
+
+User -> API: POST /api/explore/cards
+{seed, intent_confirmed}（S128：确认后直接取卡）
 
 == 阶段 2：并行探索 ==
-API -> Engine: run_exploration(model, seed, confirmed, constraints)
+API -> Engine: run_exploration(model, seed, confirmed, constraints, templates)
 API -> Strategy: ExplorationStrategy(seed, confirmed, constraints)
 
 loop 4 个探索者并行（asyncio.gather）
   API -> Strategy: explorer_prompt(i)
-  Strategy --> API: 差异化指令\n（维度 + 来源分派）
+  Strategy --> API: 差异化指令\n（维度 + 来源分派 template/grow/user）
   API -> LLM: respond(prompt_i, [])
   note right: 上下文隔离\n保证真多样性
   LLM --> API: JSON{title, summary, term}
@@ -40,10 +51,11 @@ end
 API --> User: 4 张方向卡（候选堆）
 
 == 阶段 3：判别固化 ==
-User -> API: POST /api/explore/select\n{card_id}
+User -> API: POST /api/explore/archive\n{card, parent_node_id?}（S128 取代原 select）
 API -> Archive: archive_direction(card, book_id)
 Archive --> API: saved_direction
 API -> Archive: add_constraint(content)
-API --> User: 已固化方向 + 约束
+API -> StoryTree: add_node(主线节点, chosen=true)（S59：探索=树的生长器）
+API --> User: 已固化方向 + 约束 + 叙事树节点
 
 @enduml

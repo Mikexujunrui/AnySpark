@@ -1,6 +1,6 @@
 @startuml AnySpark v4 - Activity: 后台任务派发
 !theme plain
-title AnySpark v4 — 活动图：后台任务队列（7 种任务，单 worker 串行）
+title AnySpark v4 — 活动图：后台任务队列（4 种任务，单 worker 串行；S140 收编 batch 后）
 skinparam activityDiamondFontSize 12
 
 start
@@ -16,10 +16,6 @@ repeat
     :心智联动 + 信号 → skill 候选草稿|
   case ( summarize )
     :会话 → 场景记忆归档|
-  case ( batch_rewrite )
-    :逐章 LLM 改写 → upsert 版本历史|
-  case ( batch_review )
-    :逐章检测网审读 → 汇总报告|
   case ( 未知 )
     :记 warning 日志|
   endswitch

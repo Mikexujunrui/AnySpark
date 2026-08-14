@@ -2,11 +2,17 @@
 
 **创建时间**：2026-08-10  
 **来源**：F8-F9 前端测试中发现的后端问题  
-**优先级**：P0 > P1 > P2
+**优先级**：P0 > P1 > P2  
+**状态**：历史快照（2026-08-10）——S145 已复核标注各条修复状态；新问题请记入
+PROGRESS.md 或本文件末尾追加新条目（勿改历史条目修复内容，保留审计痕迹）。
 
 ---
 
-## 🔴 P0 阻塞性：SQLite 并发锁定
+## 🔴 P0 阻塞性：SQLite 并发锁定（✅ 已修复：S75 补 commit + S79 core/db.py 收敛）
+
+> S145 复核：本条目所列问题均已修复——`core/db.py`（S79）收敛连接配置
+> （WAL + timeout=30 + check_same_thread=False），`sqlite.py:456`（S75）补 commit；
+> `test_sqlite.py:76` 断言 WAL 生效。下方
 
 ### 现象
 
@@ -88,7 +94,12 @@ curl -X POST http://127.0.0.1:8002/api/chat \
 
 ---
 
-## 🟡 P1 体验问题：前端聊天错误处理
+## 🟡 P1 体验问题：前端聊天错误处理（🟡 部分已修：S145 复核）
+
+> S145 复核：文中引用的 `chatStore.ts:338-348` 已不存在（S75 前端重构后聊天状态
+> 收归 ChatPanel.tsx + hooks/useSSE.ts，无独立 chatStore）。错误重置逻辑已在
+> useSSE.ts 的 error 分支 + ChatPanel 处理（onError 回调重置 streaming）；
+> “重试/超时”增强仍为候选（未实现）。下方
 
 ### 现象
 
