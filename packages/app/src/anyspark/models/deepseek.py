@@ -68,8 +68,11 @@ def validate_thinking(thinking: str | None) -> str | None:
 def _apply_thinking(kwargs: dict[str, Any], thinking: str | None) -> None:
     """把思考强度写入请求参数（S47）。
 
-    - "off"：enable_thinking 非 OpenAI 标准参数 → extra_body 显式关闭思考
-      （v4 系列默认开思考，需要关闭时必须显式传）
+    - "off"：显式关闭思考——两个平台的参数**同时发**（S136 双平台兼容）：
+      DashScope/千问认识 enable_thinking（非 OpenAI 标准 → extra_body），
+      DeepSeek 官方 API（api.deepseek.com）认识 thinking: {type: disabled}——
+      只发 enable_thinking 切官方 API 时开关无效/可能报错（官方文档用 thinking.type）。
+      未知字段按 OpenAI 兼容约定被忽略，双发无害。
     - low/medium/high/xhigh/max：reasoning_effort 是 OpenAI 标准参数 → 顶层直传
       （v4-flash 默认思考开，effort 控制推理强度；low/medium 映射 high、xhigh 映射 max）
     """
@@ -78,6 +81,7 @@ def _apply_thinking(kwargs: dict[str, Any], thinking: str | None) -> None:
     if thinking == "off":
         extra = dict(kwargs.get("extra_body") or {})
         extra["enable_thinking"] = False
+        extra["thinking"] = {"type": "disabled"}  # S136：DeepSeek 官方 API 开关参数
         kwargs["extra_body"] = extra
     else:
         kwargs["reasoning_effort"] = thinking

@@ -104,10 +104,14 @@ def test_registry_rejects_bad_thinking() -> None:
 
 
 def test_apply_thinking_off_uses_extra_body() -> None:
-    """off = 显式关闭思考（enable_thinking 非标准参数走 extra_body）。"""
+    """off = 显式关闭思考——双平台参数（S136：DashScope 的 enable_thinking
+    + DeepSeek 官方 thinking.type）。"""
     kwargs: dict[str, Any] = {}
     _apply_thinking(kwargs, "off")
-    assert kwargs["extra_body"] == {"enable_thinking": False}
+    assert kwargs["extra_body"] == {
+        "enable_thinking": False,
+        "thinking": {"type": "disabled"},
+    }
     assert "reasoning_effort" not in kwargs
 
 
