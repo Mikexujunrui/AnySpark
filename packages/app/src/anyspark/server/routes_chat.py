@@ -290,6 +290,8 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
         )
         # S53c ② 归档后分析：会话结束后台摘要成场景记忆（不阻塞响应）
         deps.bg_queue.put(BgTask(kind="summarize", conv_id=conv_id))
+        # 会话结束：信号 → 偏好提炼（增量游标，后台；无信号时零成本返回）
+        deps.bg_queue.put(BgTask(kind="refine"))
         # 图谱抽取：写入章节后自动抽取入库（后台任务，不阻塞响应；失败不影响写作）
         # extract_graph 开关（S15）：默认开保持现状，可关省 token（手动 /api/graph/extract 兜底）
         if req.extract_graph:
@@ -361,6 +363,8 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                         turn = agent.run(msg, conv_id, token)
                         # S53c ② 归档后分析：每轮结束后台摘要成场景记忆（不阻塞 SSE）
                         deps.bg_queue.put(BgTask(kind="summarize", conv_id=conv_id))
+                        # 每轮结束：信号 → 偏好提炼（增量游标，后台；无信号零成本）
+                        deps.bg_queue.put(BgTask(kind="refine"))
                         # 图谱抽取：与 /api/chat 行为一致（write_chapter 落盘后自动抽取）
                         # extract_graph 开关（S15）：默认开保持现状，可关省 token
                         if req.extract_graph:

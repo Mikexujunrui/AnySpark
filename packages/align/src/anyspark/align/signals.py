@@ -74,10 +74,17 @@ class SignalStore:
                 context TEXT NOT NULL DEFAULT '',
                 delta REAL NOT NULL DEFAULT 0,
                 book_id TEXT NOT NULL DEFAULT 'main',
-                created_at TEXT NOT NULL
+                created_at TEXT NOT NULL,
+                processed INTEGER NOT NULL DEFAULT 0
             )
             """
         )
+        # 兼容旧库：已有 signals 表缺 processed 列时补列（增量游标，DESIGN §12.18 长会话标准重定）
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(signals)")}
+        if "processed" not in cols:
+            self._conn.execute(
+                "ALTER TABLE signals ADD COLUMN processed INTEGER NOT NULL DEFAULT 0"
+            )
         self._conn.commit()
 
     def record(self, sig: Signal) -> Signal:
@@ -105,6 +112,31 @@ class SignalStore:
                 (book_id, limit),
             ).fetchall()
         return [_signal_from_row(r) for r in rows]
+
+    def unprocessed(self, limit: int = 20, book_id: str = "main") -> list[Signal]:
+        """取未提炼信号（增量游标：按 rowid 升序=时间序，最早未提炼先处理）。
+
+        S7x 长会话标准重定（DESIGN §12.18）：不再用 recent() 滑动窗口——
+        长会话早期信号会被挤掉导致早期偏好丢失；改为 processed 标记推进，
+        与模型上下文窗口解耦（64K 还是 1M 都成立）。
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM signals WHERE book_id=? AND processed=0 "
+                "ORDER BY rowid ASC LIMIT ?",
+                (book_id, limit),
+            ).fetchall()
+        return [_signal_from_row(r) for r in rows]
+
+    def mark_processed(self, ids: list[str]) -> None:
+        """批量标记已提炼（游标推进）。不存在的 id 静默忽略（幂等）。"""
+        if not ids:
+            return
+        with self._lock:
+            self._conn.executemany(
+                "UPDATE signals SET processed=1 WHERE id=?", [(i,) for i in ids]
+            )
+            self._conn.commit()
 
     def close(self) -> None:
         self._conn.close()

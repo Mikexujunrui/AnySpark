@@ -130,25 +130,37 @@ def refine_from_signals(
     修复对齐闭环缺口：此前 /api/deps.signals 只记录信号，说明书永不自动更新
     （PreferenceExtractor 存在但从未在 API 层接线）——用户操作无法变成
     写作约束，T7"修改率↓/说明书累积"的机制前提缺失。
+
+    增量游标（S7x 长会话标准重定，DESIGN §12.18）：只提炼未 processed 信号，
+    分批推进——不再用 recent(20) 滑动窗口（长会话早期信号会被挤掉，
+    早期偏好丢失）。单批 ≤20 条（LLM 一次看 20 条质量稳），积压多则分批
+    +merge_add 归并（轻量多步归并，无需索引/深读重型机制）。
+    阈值语义从"会话 token 数"改为"信号积压量"，与模型上下文窗口解耦。
     """
     try:
-        recent = deps.signals.recent(limit=20)
-        if not recent:
-            return
-        # 最近对话（任意会话，取最近 10 条）作为提炼上下文
-        dialogue = deps.store.recent_messages(10)
-        entries = deps.preference_extractor.extract(dialogue, recent, max_items=3)
-        existing = {e.content for e in deps.manual.list("project", "main")}
-        added = 0
-        for e in entries:
-            if e.content in existing:
-                continue
-            # S55 合并式新增：同主题条目合并（治碎片），不重复堆窄条目
-            _, did_merge = deps.manual.merge_add(e)
-            if not did_merge:
-                added += 1
-        if added:
-            logger.info("信号提炼: +%d 条新说明书条目", added)
+        batch_size = 20
+        max_batches = 5  # 防极端积压/并发下任务无限跑；剩余留待下次任务
+        for _ in range(max_batches):
+            pending = deps.signals.unprocessed(limit=batch_size, book_id="main")
+            if not pending:
+                break
+            # 最近对话（任意会话，取最近 10 条）作为提炼上下文
+            dialogue = deps.store.recent_messages(10)
+            entries = deps.preference_extractor.extract(dialogue, pending, max_items=3)
+            existing = {e.content for e in deps.manual.list("project", "main")}
+            added = 0
+            for e in entries:
+                if e.content in existing:
+                    continue
+                # S55 合并式新增：同主题条目合并（治碎片），不重复堆窄条目
+                _, did_merge = deps.manual.merge_add(e)
+                if not did_merge:
+                    added += 1
+            deps.signals.mark_processed([s.id for s in pending])
+            if added:
+                logger.info("信号提炼: +%d 条新说明书条目", added)
+            if len(pending) < batch_size:
+                break  # 本批不满说明无积压了
     except Exception as exc:
         logger.warning("信号提炼失败(不影响主链路): %s", exc)
 
