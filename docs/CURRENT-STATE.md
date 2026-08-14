@@ -1,13 +1,13 @@
 # AnySpark v4 系统当前状态（自动生成）
 
-> 生成：2026-08-14 12:28 UTC · commit `1972c29 docs: PROGRESS S144 补 commit hash（9fda8d7）` · 阶段 S144 · **非手写**：
+> 生成：2026-08-14 12:31 UTC · commit `c3e97a4 docs: PROGRESS S145 记录 + 声明区清理（6 commits 汇总）` · 阶段 S145 · **非手写**：
 > 由 `scripts/current_state.py` 扫描真实代码/DB 产出，改动后重跑即更新
 
 ## 一、系统规模
 
 | 维度 | 数值 |
 |---|---|
-| 已交付阶段 | **S144** |
+| 已交付阶段 | **S145** |
 | API 路由 | **143** 个 |
 | Agent 工具 | **47** 个 |
 | Workflow 模板 | **8** 个 |
