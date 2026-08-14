@@ -85,4 +85,12 @@ D2（搬文件）时再处理依赖注入，届时闭包方案改为显式传参
 
 ## 六、实施记录
 
-（实施后填写：commit hash、实际拆分结果、验证情况、发现的新问题）
+- **S151（commit `57dd2f6`）**：D1 实施完成。
+  - 20 个 script 分支机械拆为独立方法 `_wf_script_xxx(ctx, node)`（闭包内，无 self）
+  - `_wf_scripts: dict[str, Callable[[RunContext, Any], NodeResult]]` 注册表 +
+    `_wf_run_script` 查表分发（15 行）；新 script = 新函数 + 一行注册
+  - 踩坑：闭包函数误加 self（参数错位）；if 链末尾兜底 return 被切进最后块
+    （fn 未定义）；N806 注册表命名；mypy 分发器返回值断言
+  - 验证：全量 591 绿 + ruff/mypy 198 文件；workflow 测试 54 个全过（行为锚点）
+- **D2（app.py 瘦身）**：未实施——D1 已把最重的 script 分发迁出；模板种子
+  （_seed_*）拆 seed_templates.py 留待按需（收益递减，避免大改风险）
