@@ -1,19 +1,19 @@
 # AnySpark v4 系统当前状态（自动生成）
 
-> 生成：2026-08-14 11:38 UTC · commit `c8ba23c docs: PROGRESS S142 条目——当前状态视图（scripts/current_state.py 产出方记录）` · 阶段 S142 · **非手写**：
+> 生成：2026-08-14 12:10 UTC · commit `86478e1 docs: PROGRESS S143 补 commit hash（92463ed）` · 阶段 S143 · **非手写**：
 > 由 `scripts/current_state.py` 扫描真实代码/DB 产出，改动后重跑即更新
 
 ## 一、系统规模
 
 | 维度 | 数值 |
 |---|---|
-| 已交付阶段 | **S142** |
+| 已交付阶段 | **S143** |
 | API 路由 | **143** 个 |
 | Agent 工具 | **46** 个 |
 | Workflow 模板 | **8** 个 |
 | 前端入口 | **27** 个 tab |
-| 测试 | **590** 个 |
-| 后端代码 | **28041** 行（align 4446, app 16477, check 524, core 1529, explore 837, graph 1479, template 1083, workflow 1666） |
+| 测试 | **591** 个 |
+| 后端代码 | **28119** 行（align 4446, app 16555, check 524, core 1529, explore 837, graph 1479, template 1083, workflow 1666） |
 
 ## 二、能力清单
 
