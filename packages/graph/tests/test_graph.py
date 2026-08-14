@@ -262,9 +262,23 @@ def test_extract_skips_existing_and_bad_items() -> None:
         )
     )
     out = ex.extract("第一章", "正文", [])
-    # 空名跳过；非法类型映射"设定"
-    assert [e.name for e in out.entities] == ["甲", "乙"]
-    assert out.entities[0].entity_type == "设定"
+    # 空名跳过；非法类型（怪物）不再静默映射"设定"——丢弃并计数（S146）
+    assert [e.name for e in out.entities] == ["乙"]
+    assert ex.dropped_types == 1
+
+
+def test_extract_normalizes_type_aliases() -> None:
+    """S146：常见类型别名归一（人物/主人公→角色、地方→地点），不再静默降级。"""
+    ex = GraphExtractor(
+        FakeModel(
+            '{"entities": [{"name": "丙", "type": "人物"}, {"name": "丁", "type": "地方"}, '
+            '{"name": "戊", "type": "主人公"}], "relations": [], "events": []}'
+        )
+    )
+    out = ex.extract("第一章", "正文", [])
+    types = {e.name: e.entity_type for e in out.entities}
+    assert types == {"丙": "角色", "丁": "地点", "戊": "角色"}
+    assert ex.dropped_types == 0
 
 
 def test_extract_garbage_returns_empty() -> None:

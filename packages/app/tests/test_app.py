@@ -128,6 +128,18 @@ def test_graph_api_manual_extract() -> None:
     assert "陈渡" in {e["name"] for e in client.get("/api/graph/entities").json()}
 
 
+def test_graph_extract_rejects_content_fragment_ref() -> None:
+    """S146（评审 4.1）：chapter_ref 传正文片段（含换行/超长）→ 400。"""
+    db = Path(tempfile.mkdtemp()) / "test.db"
+    app = build_app(model=FakeExtractModel(), db_path=db)
+    client = TestClient(app)
+    r = client.post(
+        "/api/graph/extract",
+        json={"chapter_ref": "环境描写：江心楼顶层\n底层有一扇门开着", "text": "正文"},
+    )
+    assert r.status_code == 400
+
+
 def test_chat_stream_sse_frames() -> None:
     """S8：/api/chat/stream 返回 SSE 帧（事件协议 → 传输层）。
 

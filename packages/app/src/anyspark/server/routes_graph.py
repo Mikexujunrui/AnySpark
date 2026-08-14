@@ -198,7 +198,18 @@ def make_graph_router(deps: AppDeps) -> APIRouter:
 
     @router.post("/api/graph/extract", response_model=dict[str, int])
     def graph_extract_route(req: GraphExtractIn) -> dict[str, int]:
-        """手动抽取一章入库（真实 LLM；write_chapter 后已自动，此为补抽/重抽）。"""
+        """手动抽取一章入库（真实 LLM；write_chapter 后已自动，此为补抽/重抽）。
+
+        S146（第三方评审 4.1）：校验 chapter_ref——脏数据实测为
+        last_chapter="环境描写：江心楼顶层"（调用方把内容片段当章节名传了）。
+        拦截"明显是正文片段"的 ref（含换行/超长），短标题字符串放行（补抽
+        场景可能引用未入库章节名，测试亦如此）。
+        """
+        if "\n" in req.chapter_ref or len(req.chapter_ref) > 30:
+            raise HTTPException(
+                status_code=400,
+                detail="chapter_ref 应为章节标题（短字符串），不是正文片段",
+            )
         existing = [e.to_dict() for e in deps.graph.list_entities(req.book_id)]
         ext = deps.graph_extractor.extract(req.chapter_ref, req.text, existing)
         chs = deps.chapters.list_by_book(req.book_id)
@@ -208,6 +219,7 @@ def make_graph_router(deps: AppDeps) -> APIRouter:
             "entities": len(ext.entities),
             "relations": len(ext.relations),
             "events": len(ext.events),
+            "dropped_types": deps.graph_extractor.dropped_types,
         }
 
     return router

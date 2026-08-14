@@ -17,6 +17,36 @@ from anyspark.core.jsonutil import parse_json_object
 # 默认实体类型（S50 内容化：GraphExtractor 可注入自定义类型集，提示词动态拼）
 VALID_TYPES = ("角色", "地点", "事件", "物件", "设定")
 
+# S146（第三方评审 4.1）：常见类型漂移归一——模型常输出口语化/别名类型
+# （"人物""主人公"→角色；"地方"→地点；"场景"→地点；"物品"→物件）。
+# 此前非法类型静默降级为"设定"（语义误导：主角被抽成"设定"的机制）。
+_TYPE_ALIASES: dict[str, str] = {
+    "人物": "角色",
+    "人": "角色",
+    "主人公": "角色",
+    "主角": "角色",
+    "配角": "角色",
+    "npc": "角色",
+    "NPC": "角色",
+    "地方": "地点",
+    "场所": "地点",
+    "场景": "地点",
+    "位置": "地点",
+    "物品": "物件",
+    "道具": "物件",
+    "器物": "物件",
+    "背景设定": "设定",
+    "世界观": "设定",
+}
+
+
+def _normalize_type(raw: str, valid: tuple[str, ...]) -> str | None:
+    """类型归一：合法原样；别名映射；其他返回 None（调用方决定丢弃/重试）。"""
+    t = str(raw).strip()
+    if t in valid:
+        return t
+    return _TYPE_ALIASES.get(t)
+
 
 def _types_line(types: list[str]) -> str:
     """类型清单 → 提示词里的约束行（N 选一，随内容集变化）。"""
@@ -105,6 +135,9 @@ class GraphExtractor:
         self._model = model
         # S50：类型集内容化——项目级可配置（缺省默认 5 类），提示词动态拼
         self._types = list(types) if types else list(VALID_TYPES)
+        # S146：非法类型丢弃计数（可观测：抽取质量监控/重试依据）
+        self._dropped_types = 0
+        self.dropped_types = 0
 
     def extract(
         self,
@@ -136,6 +169,8 @@ class GraphExtractor:
                 parsed = candidate
                 break
             parsed = candidate
+        # S146：丢弃计数同步到实例（调用方读 dropped_types 监控质量）
+        self.dropped_types = self._dropped_types
         return parsed
 
     def _parse(self, raw: str) -> Extraction:
@@ -147,9 +182,13 @@ class GraphExtractor:
             name = str(item.get("name", "")).strip()
             if not name:
                 continue
-            etype = str(item.get("type", "设定")).strip()
-            if etype not in self._types:
-                etype = "设定"
+            # S146（评审 4.1）：类型归一 + 非法类型不再静默降级为"设定"——
+            # 丢弃并计数（模型输出了类型集外的词，可能是"人物"等别名，
+            # 也可能是真错误；宁可丢弃不可语义误导）。
+            etype = _normalize_type(str(item.get("type", "")), tuple(self._types))
+            if etype is None:
+                self._dropped_types += 1
+                continue
             aliases = [str(a).strip() for a in _as_list(item.get("aliases")) if str(a).strip()]
             extraction.entities.append(
                 EntityDraft(
