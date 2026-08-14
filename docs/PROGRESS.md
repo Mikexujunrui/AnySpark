@@ -3591,3 +3591,73 @@ BatchPanel 对接（归一不降级：旧任务与新模板并存）。
 
 **下一步**：WORKFLOW 收尾（删对应工具/精简注册——三批对拍后统一）；加料模板（先实测
 NSFW 审核坎）；本地 vLLM/LM Studio 适配文档（S131 接续）。
+
+---
+
+## S135 WORKFLOW 收尾——工具变快捷入口，底层走 workflow（W1-B 归一不降级）（已完成 ✅）
+
+**背景**：PLAN-WORKFLOW-UNIFY 每批"跑通→对拍→删对应工具/精简注册"的收尾步。三批模板
+（拆书/批量/轻流程）对拍已绿；收尾把真正的多步流程工具 skill_refine(mode=book) 收编为
+快捷入口——底层统一走「拆书提炼」workflow 模板（断点/重试/持久化单一机制）。
+
+**交付（commit `TODO`）**：
+
+1. **skill_refine 收编（tools_domain.py）**：
+   - make_skill_refine_implementer 加 workflow_store/workflow_engine 可选参数
+   - mode=book 优先走 _run_refine_template：按名找「拆书提炼」模板 → create_task →
+     run_task 同步跑 → 从草稿反查新产出（before/after 差值）作展示摘要
+   - 模板路径草稿由模板 finish 落库（不重复 add_draft）；模板缺失/engine 未装配回退
+     generator.generate_book（向后兼容）
+   - 结果展示区分：走模板标注 "workflow"，回退标注 "拆书 skill"
+
+2. **装配（toolkit.py）**：skill_refine 注入 workflow_store/engine（enable_domain 路径）
+
+3. **可测性（app.py）**：build_app 暴露 app.state.deps（测试/收编验证取 workflow 依赖）
+
+4. **验证（test_workflow_refine.py +1 用例）**：装配 workflow 的 skill_refine(mode=book)
+   走模板 → 草稿由 finish 落库（三路名齐，不重复）；未装配回退路径由既有用例覆盖。
+
+**边界（保持分工）**：batch_rewrite/batch_review agent 工具是申请型原子动作（只提议，
+批准后走 BatchPanel/路由），不属多步流程工具——保留正确；/api/batch/* 内存实现与前端
+工作流模式并存（S133 已归一不降级）。
+
+**测试**：全量 560 绿；ruff+format+mypy strict 全绿。
+
+**踩坑**：
+- 模板路径草稿由 finish 落库，工具自身 add_draft 循环须跳过（否则重复草稿）——用
+  via_template 标志分流
+- _run_refine_template 返回草稿摘要须按 before/after 差值取（否则混入历史草稿）
+- app.state.deps 赋值无需 type: ignore（app.state 是 Any）
+
+**下一步**：WORKFLOW 收尾完成（工具已收编，/api/batch 路径保持并存）；加料模板（先实测
+NSFW 审核坎）；本地 vLLM/LM Studio 适配文档（S131 接续）。
+
+## S136 打包版三 bug 修复（主人实测反馈：bool schema 400 + 双重创建 + 书架不刷新）
+
+**背景（主人反馈打包版）**：① 新建项目同时弹「创建成功」+「项目已存在」；② 书架看不到
+新项目需退出重进；③ DeepSeek 官方 API 报 `Invalid schema for function 'mind_update':
+"bool" is not valid under any of the schemas`（400）。
+
+**根因**（三个相互独立，均为真实 bug 未修复）：
+
+1. **mind_update locked 参数 `type="bool"`**（tools_domain.py）：JSON Schema 合法类型是
+   `"boolean"`——DeepSeek 官方 API（api.deepseek.com）严格校验直接 400；DashScope 兼容
+   端点宽容不报错所以一直没暴露。**已修复**：bool→boolean，并全局排查确认全部 ParamSpec
+   类型仅 string/integer/number/boolean（无其他非法类型）。
+
+2. **创建项目双重 POST**（CreateBookModal + Bookshelf）：CreateBookModal 自己 fetch
+   POST /api/books 成功后 toast「创建成功」→ onCreate 回调 → Bookshelf.handleCreate
+   **再次** api.createBook POST → 后端第二次 409「项目已存在」→ 两个 toast 同时弹。
+   **已修复**：创建职责单一化——CreateBookModal 只收集输入，实际 POST/刷新/toast 由
+   Bookshelf.handleCreate 完成（返回 boolean，失败保持模态框打开可重试）。
+
+3. **书架不刷新**：问题 2 的连带——第二次 POST 走 catch 分支没有 loadBooks，新项目
+   不显示（退出重进=重挂载触发 useEffect 才刷新）。**已修复**：随问题 2 一并解决
+   （创建成功 await loadBooks）。
+
+**验证**：
+- schema 层：全部工具集 ParamSpec 类型合法性扫描通过（DeepSeek 官方 API 严格校验可通过）
+- 后端链路：创建→409→书架立即可见→删除，curl 全通过（后端 API 本身无问题）
+- 前端：tsc 无新增错误（S130 遗留的 SkillsShelfPanel type/target 错误非本阶段引入）；
+  mind 相关测试 7 个 + 工具/域/agent 测试 67 个全绿
+- 注：打包版需重新打包才生效（源码已修复）

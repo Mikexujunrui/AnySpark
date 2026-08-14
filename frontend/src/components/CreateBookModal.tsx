@@ -1,33 +1,24 @@
 // CreateBookModal — 新建项目（V4 适配版：POST /api/books）
+// S135：创建职责单一化——本组件只收集输入，实际 POST/刷新/toast 由父组件
+// onCreate 完成（此前组件自 POST + 父组件再 POST = 双重创建 → 成功+已存在同时弹）。
 import { useState } from 'react'
 import Modal from './ui/Modal'
 import Icon from './ui/Icon'
-import { showToast } from './ui/toast-utils'
 
-export default function CreateBookModal({ onClose, onCreate }: { onClose: () => void; onCreate?: (data: { title: string }) => void }) {
+export default function CreateBookModal({ onClose, onCreate }: { onClose: () => void; onCreate?: (data: { title: string }) => Promise<boolean> }) {
   const [title, setTitle] = useState('')
   const [saving, setSaving] = useState(false)
 
   async function handleCreate() {
-    if (!title.trim()) return
+    if (!title.trim() || saving) return
     setSaving(true)
     try {
-      const res = await fetch('/api/books', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: title.trim(), book_id: '' }),
-      })
-      if (!res.ok) {
-        const d = await res.json().catch(() => null)
-        throw new Error(d?.detail || `HTTP ${res.status}`)
-      }
-      showToast(`项目「${title.trim()}」创建成功`, 'success')
-      onCreate?.({ title: title.trim() })
-      onClose()
-    } catch (e) {
-      showToast(e instanceof Error ? e.message : '创建失败', 'error')
+      // 父组件负责创建 + 刷新 + toast；返回 true 才关窗（失败保持打开可重试）
+      const ok = await onCreate?.({ title: title.trim() })
+      if (ok) onClose()
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   return (

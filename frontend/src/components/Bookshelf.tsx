@@ -80,13 +80,16 @@ export default function Bookshelf() {
 
   async function handleCreate(bookData) {
     try {
-      // 新建项目：title → api.createBook（POST /api/books）
+      // 新建项目：唯一创建入口（S135 修复：此前 CreateBookModal 自 POST 成功后又
+      // 经 onCreate 二次 POST → 后端 409「项目已存在」且 catch 不刷新书架）
       await api.createBook({ title: bookData.title || bookData })
+      await loadBooks()
       setShowCreate(false)
-      loadBooks()
       showToast('项目创建成功', 'success')
+      return true
     } catch (e) {
       showToast(e instanceof Error ? e.message : '创建失败', 'error')
+      return false
     }
   }
 

@@ -1803,7 +1803,8 @@ def make_mind_manage_implementer(manual: Any, book_id: str = "main") -> tuple[li
             ),
             ParamSpec(
                 name="locked",
-                type="bool",
+                # S135：bool→boolean（JSON Schema 标准类型；DeepSeek 官方 API 严格校验会 400）
+                type="boolean",
                 required=False,
                 description="true 锁定/false 解锁（缺省不改）",
             ),
