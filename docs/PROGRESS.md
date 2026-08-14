@@ -29,7 +29,19 @@
   - **S79-S82 后端收敛**：SQLite 连接收敛 + app.py 按领域拆 router + 双层资料库（全局池↔项目池）+ 资料库写入通道补全 + 会话绑定项目/智能体作用域隔离 + 图谱 API 项目隔离（跨书保护）
   - **S83-S96 收尾加固**：约束机制 + 审计修复 + 破限提示自编辑 + 模型注册表编辑功能（S89）+ 门禁自动分层（S96）
   - **剩余（按主人路线，非缺陷）**：多模态（未来计划）/ B 真自我修复（补丁应用，按需）/ httpx2 迁移（等 starlette）/ 实体改名（S72 主键语义，前端表单待适配）
-  - 测试现状：pytest 424 例全绿 + 前端 tsc/lint/build 全绿（分层门禁见 AGENTS.md）
+  - 测试现状：pytest 508 例全绿 + 前端 tsc/lint/build 全绿（分层门禁见 AGENTS.md）
+
+> 📍 **接续锚点（2026-08-14，新会话必读）**：
+> - **基线：总闸首次全绿**（commit `13f67ae`，S108b 以来首次）——ruff/mypy 183/pytest 508 全过，从干净起点动工
+> - **S114 拆书三层已落地**（commit `faf7d4a`）：结构感知选章 + 骨架扫描 + 定点精读，猎手准则 367 万字实测发现回环（见 DESIGN §12.43）
+> - **并行会话 S120-S126 已全部提交**（run_subagent/调研模板/资料库闭环/文档清洗），门禁红已清零
+> - **两个规划已拍板待实施**（12 决策点主人全部确认）：
+>   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）
+>   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）
+> - **下一步开工（建议顺序）**：
+>   1. SKILL 阶段 1：**拆书双落**（骨架笔记 → 剧情模式 plot 子条）——动 `skillgen.py`，两条线共同起点
+>   2. WORKFLOW 第 1 批：**拆书模板化**——同上文件，同一 writer 顺序做（避同文件冲突）
+>   3. 之后 SKILL 阶段 2（templates 并入）/ WORKFLOW 加料模板（先实测 NSFW 审核坎）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
