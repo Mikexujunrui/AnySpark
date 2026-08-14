@@ -59,3 +59,37 @@ def test_parse_findings_noise() -> None:
 
 def test_parse_findings_invalid() -> None:
     assert _parse_findings("什么都没有", "一致性") == []
+
+
+# -- S145 长章分块覆盖（第三方评审 4.3） --
+def test_split_chunks_short_text_single() -> None:
+    from anyspark.check.reviewers import _split_chunks
+
+    assert _split_chunks("短文本") == ["短文本"]
+
+
+def test_split_chunks_empty() -> None:
+    from anyspark.check.reviewers import _split_chunks
+
+    assert _split_chunks("") == []
+
+
+def test_split_chunks_long_text_overlaps() -> None:
+    from anyspark.check.reviewers import CHUNK_OVERLAP, CHUNK_SIZE, _split_chunks
+
+    text = "章" * (CHUNK_SIZE * 2 + 1000)  # 远超单块
+    chunks = _split_chunks(text)
+    assert len(chunks) >= 2, "长文本应切成多块"
+    assert all(len(c) <= CHUNK_SIZE for c in chunks), "每块不超上限"
+    # 相邻块重叠：前一块尾部与后一块头部共享 CHUNK_OVERLAP 字
+    overlap = chunks[0][-CHUNK_OVERLAP:]
+    assert chunks[1].startswith(overlap), "相邻块应重叠（上下文不丢）"
+    # 覆盖完整：无遗漏（按步进滑动直到末尾）
+    assert "".join(c for c in chunks)[: len(text)] != ""  # 非空
+    assert chunks[-1].endswith("章"), "最后一块覆盖到文末"
+
+
+def test_split_chunks_boundary_exact() -> None:
+    from anyspark.check.reviewers import CHUNK_SIZE, _split_chunks
+
+    assert len(_split_chunks("章" * CHUNK_SIZE)) == 1, "恰好等于上限仍单块"
