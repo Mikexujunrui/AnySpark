@@ -26,8 +26,8 @@ from anyspark.server.schemas import (
 
 
 def make_explore_router(deps: AppDeps) -> APIRouter:
-    """探索 + 检测网路由（依赖：deps.model / archive / templates_external /
-    dim_store / story_tree / graph_verifier）。"""
+    """探索 + 检测网路由（依赖：deps.model / archive / skills / dim_store /
+    story_tree / graph_verifier）。"""
     router = APIRouter()
 
     @router.post("/api/explore/intent", response_model=dict[str, object])
@@ -45,8 +45,9 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
             for e in deps.settings.list("main")
             if e.category == "世界观规则" and (e.content or "").strip()
         ]
-        # S68：探索注入真实模板库（L2+L3 合并；template 来源探索者消费，死库接线）
-        templates = [f"{t.name}：{t.description}" for t in deps.templates_external.all()[:12]]
+        # S68→S128：探索注入真实模板库（skill 表 type=plot 类，L2 默认+L3 外部
+        # 已物理并入；阶段 2 后探索只读 plot 类，纪律 2 防其他 type 污染）
+        templates = [f"{s.name}：{s.description}" for s in deps.skills.plot_skills()[:12]]
         cards = run_exploration(
             model_for_task(deps, "planning"),
             req.seed,

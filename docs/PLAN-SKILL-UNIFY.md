@@ -97,9 +97,9 @@ plot→探索节点）、书名包 = 整包风格参数（模板参数化换 ski
 
 ```
 阶段 1：skills 表加 type 字段（writing/main/plot），target 语义并入；
-        拆书产出补 plot 子条（骨架笔记 → 剧情模式，双落打通）
+        拆书产出补 plot 子条（骨架笔记 → 剧情模式，双落打通） ✅ S127
 阶段 2：templates（ExternalLibrary）并入 skill 表（type=plot 迁移数据 + 扩展字段）；
-        探索消费方改读 skill 表 plot 类
+        探索消费方改读 skill 表 plot 类 ✅ S128
 阶段 3：书名包（pack_id 聚合 + 整包/单条引用路由）；
         前端书架技能面板展示类型分组 + 包视图
 每阶段：全量 gate + 消费方对拍（写作注入/主循环/探索派生结果一致）

@@ -778,6 +778,14 @@ v4 从空库起步，数据在 v4 内自然生长
 
 **哲学**：机制（四层流程/选章/关键词定位/机器校验/双落）硬编码；内容（方法论/技法/剧情模式）模型生成
 
+**S128（PLAN-SKILL-UNIFY 阶段 2）templates 物理并入**：模式库（templates_external 表 +
+L2 默认模板）并入 skill 表 type=plot——L2 默认（DEFAULT_TEMPLATES）与 L3 外部数据迁移为
+plot 条目，四要素+layer（default/external）存 ext 扩展 JSON；探索消费方改读
+`skills.plot_skills()`（纪律 2：只读 plot 类，其他 type 不混入）；/api/templates CRUD 走
+skill 表（前端 TemplateItem 形状保持，L2 默认不可删 layer=default 保护）；
+ExternalLibrary 类保留在 template 包供独立测试，app 装配退役。拆书 plot 子条（S127）
+确认后自动进入探索模板源——生产/消费闭环打通，skills/templates 归属竞争消除。
+
 ### 12.22 工作流扩展包（S59，主人拍板：开源路线 + 借鉴 DeterminFlow 思想）
 
 > 背景：主人要求把"固定分析流程"（如章节质量分析）与"可迁移改书标准"（某作者

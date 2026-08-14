@@ -47,7 +47,6 @@ from anyspark.server.recorder import RunRecorder
 from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import (
-    ExternalLibrary,
     MaterialDigestor,
     MaterialStore,
     PlotGenerator,
@@ -86,7 +85,6 @@ class AppDeps:
     archive: ProjectArchive
     dim_store: DimensionStore
     materials: MaterialStore
-    templates_external: ExternalLibrary
     plots: PlotStore
     models: ModelRegistry
     mode_store: ModeStore

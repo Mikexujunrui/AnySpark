@@ -26,27 +26,99 @@ from anyspark.server.schemas import (
 from anyspark.template import MaterialDigestor
 
 
+def _plot_skill_to_template(s: Any) -> dict[str, object]:
+    """S128：skill 表 type=plot 条目 → 前端 TemplateItem 形状（四要素+layer 从 ext 解析）。
+
+    ext 兼容缺省：无 ext/无四要素时回落默认（对齐 _parse_templates 枚举回落）。
+    """
+    import json as _json
+
+    ext: dict[str, Any] = {}
+    if s.ext:
+        try:
+            ext = _json.loads(s.ext) or {}
+        except ValueError:
+            ext = {}
+    valid_gr = ("全书", "卷", "章", "场景", "段落")
+    valid_pos = ("开局", "发展", "高潮", "结局")
+    valid_fn = ("铺垫", "主线", "悬念", "爽点", "情感")
+    gr = ext.get("granularity", "章")
+    po = ext.get("position", "发展")
+    fn = ext.get("function", "主线")
+    return {
+        "name": s.name,
+        "description": s.description,
+        "granularity": gr if gr in valid_gr else "章",
+        "position": po if po in valid_pos else "发展",
+        "function": fn if fn in valid_fn else "主线",
+        "params": ext.get("params", []) or [],
+        "layer": ext.get("layer", "external"),
+    }
+
+
 def make_plot_router(deps: AppDeps) -> APIRouter:
-    """模式库 + 关键点 + 材料路由（依赖：deps.templates_external / plot_generator /
+    """模式库 + 关键点 + 材料路由（依赖：deps.skills / plot_generator /
     plots / materials / graph / model）。"""
     router = APIRouter()
 
     @router.get("/api/templates", response_model=list[dict[str, object]])
     def list_templates() -> list[dict[str, object]]:
-        """模式库 L2+L3 合并（探索方向生成器）。"""
-        return [t.to_dict() for t in deps.templates_external.all()]
+        """模式库（S128：skill 表 type=plot 类，L2 默认+L3 外部+拆书 plot 子条合并）。"""
+        return [_plot_skill_to_template(s) for s in deps.skills.plot_skills()]
 
     @router.post("/api/templates/import", response_model=dict[str, object])
     def import_template(req: TemplateIn) -> dict[str, object]:
-        """L3 外部模式库：导入自定义模板（自然语言+四要素，合并进探索库）。"""
-        t = deps.templates_external.import_template(
-            req.name, req.description, req.granularity, req.position, req.function, req.params
+        """L3 外部模式库：导入自定义模板（自然语言+四要素）→ skill 表 type=plot。
+
+        对齐原 ExternalLibrary.import_template 的 INSERT OR REPLACE 语义：同名覆盖；
+        L2 默认模板（layer=default）不可被覆盖（保持默认库不可改）。
+        """
+        import json as _json
+
+        ext = _json.dumps(
+            {
+                "granularity": req.granularity,
+                "position": req.position,
+                "function": req.function,
+                "params": req.params,
+                "layer": "external",
+            },
+            ensure_ascii=False,
         )
-        return t.to_dict()
+        dup = next((s for s in deps.skills.plot_skills() if s.name == req.name), None)
+        if dup is not None and dup.ext and '"layer": "default"' in dup.ext:
+            raise HTTPException(status_code=409, detail=f"默认模板「{req.name}」不可覆盖")
+        if dup is not None:
+            s = deps.skills.update(
+                dup.id,
+                name=req.name,
+                description=req.description,
+                content=f"剧情模式：{req.description}",
+                tags="剧情模式",
+                ext=ext,
+            )
+        else:
+            s = deps.skills.add(
+                name=req.name,
+                description=req.description,
+                content=f"剧情模式：{req.description}",
+                tags="剧情模式",
+                type="plot",
+                ext=ext,
+            )
+        assert s is not None
+        return _plot_skill_to_template(s)
 
     @router.delete("/api/templates/{name}")
     def delete_template(name: str) -> dict[str, bool]:
-        deps.templates_external.delete(name)
+        """删除外部模板（S128：删 skill 表 type=plot 同名条目；L2 默认库不可删）。"""
+        target = next((s for s in deps.skills.plot_skills() if s.name == name), None)
+        if target is None:
+            return {"ok": True}
+        # L2 默认库（layer=default）不可删（对齐原 ExternalLibrary.delete 只删外部）
+        if target.ext and '"layer": "default"' in target.ext:
+            return {"ok": False}
+        deps.skills.delete(target.id)
         return {"ok": True}
 
     @router.post("/api/plot", response_model=list[dict[str, object]])

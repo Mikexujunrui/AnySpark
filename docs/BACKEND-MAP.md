@@ -84,6 +84,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
   → 判别选优（LLM 判别器 + 用户在环选择）
   → path 定向再探索（A→B 桥）/ roleplay（场景内 N 路+判别）
 固化：方向卡 → explore/archive（项目档案）；约束 = 设定档"世界观规则"类别条目直接注入（不匹配，模型判断）
+模板源（S128）：skill 表 type=plot 条目（L2 默认+L3 外部+拆书 plot 子条，已物理并入；前身 templates_external 表）
 ```
 
 ### 2.5 拆书链路（S78→S127：参考书 → 「书名」skill + 架构技法 + 剧情模式 → 点名注入）
@@ -120,7 +121,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_skills | 技巧 generate/CRUD/drafts + S118 export（skill 文件导出）+ bias（S127：type 字段 writing/main/plot/both，target 兼容） | skills/skill_generator/bias |
 | routes_agency | 能动性 CRUD/generate + 批量改写/审读 | agency/bias/batches/bg_queue |
 | routes_explore | intent/cards/path/dims/archive + check | dim_store/archive/explore |
-| routes_plot | 模式库 templates/伏笔 plot/资料 materials | plots/templates_external/materials |
+| routes_plot | 模式库 templates/伏笔 plot/资料 materials（S128：模式库读 skill 表 type=plot） | plots/skills/materials |
 | routes_graph | 图谱 types/entities/relations/events/context/extract/impact | graph/graph_extractor/impact |
 | routes_story | 计划 plan/叙事树 nodes/threads/layout | plans/story_tree/story_threads |
 | routes_workflow | 工作流模板/草稿/任务 CRUD+run（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115） | workflow_store/engine/generator |
@@ -175,7 +176,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | DimensionStore/ProjectArchive | explore/direction | explore_dims/archive | 探索 |
 | PlotStore | template/plot | plots | 伏笔 |
 | MaterialStore | template/materials | materials | 资料库 |
-| ExternalLibrary | template/patterns | templates | 模式库 |
+| ExternalLibrary | template/patterns | templates（S128：数据已并入 skill 表，类保留供独立测试） | 模式库（已退役装配） |
 | GraphStore | graph/schema | entities/relations/events/types | 图谱 |
 | PlayStore | play/tree | play_sessions/tree | 推演 |
 | WorkflowStore | workflow/store | templates/drafts/tasks | 工作流 |

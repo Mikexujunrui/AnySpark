@@ -95,7 +95,6 @@ from anyspark.server.tools_extensions import (
 from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import (
-    ExternalLibrary,
     MaterialStore,
     PlotGenerator,
     PlotResolver,
@@ -136,6 +135,46 @@ def _data_root() -> Path:
 PROJECT_ROOT = _runtime_root()
 DATA_DIR = _data_root()
 DB_PATH = DATA_DIR / "anyspark.db"
+
+
+# S128（PLAN-SKILL-UNIFY 阶段 2）：templates（ExternalLibrary）并入 skill 表。
+# 物理并入：L2 默认模板（DEFAULT_TEMPLATES）+ L3 外部模板（templates_external 表）
+# 迁移为 skill 表 type=plot 条目——四要素（granularity/position/function/params）
+# 与 layer（default/external）存 ext 扩展 JSON；探索消费方改读 skills.plot_skills()。
+# 幂等同名跳过（可重复启动/迁移不重复），ExternalLibrary 类保留供独立测试。
+def _migrate_templates_to_skills(skills: WritingSkillStore, db_path: str | Path) -> None:
+    import json as _json
+
+    from anyspark.template import ExternalLibrary, default_library
+
+    existing = {s.name for s in skills.list_skills()}
+    lib = ExternalLibrary(db_path)
+    try:
+        # L2 默认模板（代码内嵌）+ L3 外部模板（templates_external 表）合并迁移
+        for t in [*default_library(), *lib.list_external()]:
+            if t.name in existing:
+                continue
+            skills.add(
+                name=t.name,
+                description=t.description,
+                content=f"剧情模式：{t.description}",
+                tags="剧情模式",
+                type="plot",
+                ext=_json.dumps(
+                    {
+                        "granularity": t.granularity,
+                        "position": t.position,
+                        "function": t.function,
+                        "params": t.params,
+                        "layer": t.layer,
+                    },
+                    ensure_ascii=False,
+                ),
+            )
+            existing.add(t.name)
+    finally:
+        lib.close()
+
 
 # S55 #3 注入块分层缓存：stable 块（跨请求不变）按签名缓存，volatile 块每次组装。
 # 签名=底层数据内容（任何增删改 → 签名变 → 缓存失效），避免长会话重复渲染。
@@ -201,7 +240,6 @@ def build_app(
     archive = ProjectArchive(real_db)
     dim_store = DimensionStore(real_db)  # S50 探索维度内容化（可增删改）
     materials = MaterialStore(real_db)
-    templates_external = ExternalLibrary(real_db)
     plots = PlotStore(real_db)
     # 活跃会话的取消令牌（S21：/api/chat/cancel 可中断正在跑的 Agent）
     _active_tokens: dict[str, CancellationToken] = {}
@@ -259,6 +297,10 @@ def build_app(
     bias = BiasStore(real_db)
     settings = WorldSettingStore(real_db)  # S41 设定档（作者正典）
     skills = WritingSkillStore(real_db)  # S50 叙事技巧（skill 式内容载体）
+    # S128（PLAN-SKILL-UNIFY 阶段 2）：templates（ExternalLibrary）并入 skill 表。
+    # 物理并入：L2 默认模板 + L3 外部模板迁移为 type=plot 条目（四要素+layer 存 ext），
+    # 探索消费方改读 skills.plot_skills()；幂等同名跳过（可重复启动/迁移不重复）。
+    _migrate_templates_to_skills(skills, real_db)
     plans = StoryPlanStore(real_db)  # S46 剧情计划（计划→执行）
 
     # S59 工作流扩展包（可选增强，默认关）：结构化流程（顺序/分支/循环）+
@@ -664,7 +706,6 @@ def build_app(
         archive=archive,
         dim_store=dim_store,
         materials=materials,
-        templates_external=templates_external,
         plots=plots,
         models=models,
         mode_store=mode_store,

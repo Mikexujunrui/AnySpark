@@ -289,6 +289,14 @@ class WritingSkillStore:
     def enabled(self) -> list[WritingSkill]:
         return [s for s in self.list_skills() if s.enabled]
 
+    def plot_skills(self) -> list[WritingSkill]:
+        """S128：type=plot 条目（探索/模式库消费方专用，只读 plot 防污染）。
+
+        阶段 2（templates 并入）后探索方向来源=skill 表 plot 类；
+        纪律 2：只读 type=plot，其他 type 绝不混入探索消费。
+        """
+        return [s for s in self.list_skills() if s.enabled and s.type == "plot"]
+
     def add(
         self,
         name: str,

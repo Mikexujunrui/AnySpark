@@ -36,12 +36,12 @@
 > - **S114 拆书三层已落地**（commit `faf7d4a`）：结构感知选章 + 骨架扫描 + 定点精读，猎手准则 367 万字实测发现回环（见 DESIGN §12.43）
 > - **并行会话 S120-S126 已全部提交**（run_subagent/调研模板/资料库闭环/文档清洗），门禁红已清零
 > - **两个规划已拍板待实施**（12 决策点主人全部确认）：
->   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1 已实施（type 字段 + 拆书双落）
+>   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1（type 字段+拆书双落）✅ + S128 阶段 2（templates 并入+探索改读）✅ 已实施
 >   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）
 > - **下一步开工（建议顺序）**：
->   1. ~~SKILL 阶段 1：拆书双落（骨架笔记 → 剧情模式 plot 子条）~~ ✅（S127 已完成）
+>   1. ~~SKILL 阶段 1：拆书双落~~ ✅（S127 已完成）；~~SKILL 阶段 2：templates 并入~~ ✅（S128 已完成）
 >   2. WORKFLOW 第 1 批：**拆书模板化**——动 `skillgen.py`/拆书链路，同一 writer 顺序做（避同文件冲突）
->   3. 之后 SKILL 阶段 2（templates 并入）/ WORKFLOW 加料模板（先实测 NSFW 审核坎）
+>   3. 之后 SKILL 阶段 3（书名包 pack_id + 前端 type 分组）/ WORKFLOW 加料模板（先实测 NSFW 审核坎）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
@@ -57,7 +57,7 @@
   5. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
   6. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
   7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路未实施）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书打样→批量→轻流程），每批对拍验证可回退
-  8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127 阶段 1 已完成：type 字段 + 拆书双落）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（整包/单条引用），拆书一次产出整包（含剧情模式骨架派生）；templates 并入；workflow（执行）保持独立——分三阶段迁移（加 type ✅ → 并 templates → 书名包），消除 skills/templates 归属竞争
+  8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127 阶段 1 + S128 阶段 2 已完成：type 字段 + 拆书双落 + templates 并入）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（整包/单条引用），拆书一次产出整包（含剧情模式骨架派生）；templates 已并入 ✅；workflow（执行）保持独立——分三阶段迁移（加 type ✅ → 并 templates ✅ → 书名包），消除 skills/templates 归属竞争
 - ~~httpx2 迁移~~ ✅（S66 完成）；~~Autopilot~~ —— 已划掉：S59 工作流（loop+gate+approval+AI 生成流程）已吸收其全部机制价值，需要"全书自动连写"时用 workflow_generate + 人工确认 + 跑循环即可，不另起包（同评审团判断逻辑）
 - 纪律：每阶段开工前向主人确认；对设计的偏离/新增先确认再改 DESIGN.md
 
@@ -3306,7 +3306,7 @@ grep "主人" = 0；imports OK；review 测试 31 绿（注释改动无逻辑影
 已确认，基线全绿 pytest 508 起步）。目标：skills 表加 type 字段（writing/main/plot，
 target 语义并入）+ 拆书产出补 plot 子条（骨架笔记 → 剧情模式，双落打通）。
 
-**交付（commit `TODO`）**：
+**交付（commit `5fa917a`）**：
 
 1. **存储层（align/skills.py）**：
    - writing_skills + skill_drafts 加 `type` 列（writing/main/plot/both，both 为过渡值），
@@ -3354,3 +3354,43 @@ target 语义并入）+ 拆书产出补 plot 子条（骨架笔记 → 剧情模
 
 **下一步（按计划）**：阶段 2（templates 并入 skill 表 type=plot + 探索改读）→ 阶段 3（书名包
 pack_id + 前端 type 分组/包视图）。
+
+---
+
+## S128 SKILL 阶段 2——templates 并入 skill 表 + 探索消费方改读（已完成 ✅）
+
+**背景**：PLAN-SKILL-UNIFY 阶段 2（S127 直接续章，主人已拍板）。目标：模式库
+（ExternalLibrary）物理并入 skill 表 type=plot，探索消费方改读 plot 类——
+S127 拆书 plot 子条从此进入探索模板源，生产/消费闭环打通，skills/templates 归属竞争消除。
+
+**交付（commit `TODO`）**：
+
+1. **物理并入（app.py `_migrate_templates_to_skills`）**：
+   - L2 默认模板（DEFAULT_TEMPLATES）+ L3 外部模板（templates_external 表）迁移为 skill 表
+     type=plot 条目——四要素（granularity/position/function/params）+ layer（default/external）
+     存 ext 扩展 JSON
+   - 幂等同名跳过（重复启动/迁移不重复种入，测试验证）
+   - ExternalLibrary 类保留在 template 包（独立存储实现+测试保留），app 装配退役（deps 移除）
+
+2. **消费方改读（纪律 2：只读 type=plot，防其他 type 污染）**：
+   - 探索（routes_explore）/ 主循环（agent_factory）/ 子 agent（subagent）模板注入
+     → `deps.skills.plot_skills()[:12]`（原来 templates_external.all()[:12]）
+   - WritingSkillStore.plot_skills()：只返回 enabled+type=plot 条目
+   - /api/templates 路由改读写 skill 表（前端 TemplateItem 形状保持零改动）：
+     GET=plot 条目转 TemplateItem（ext 解析四要素+layer，枚举回落默认）；
+     import=写 skill 表（同名覆盖对齐 INSERT OR REPLACE；layer=default 不可覆盖）；
+     delete=删同名 plot 条目（layer=default 拒绝 ok=False，默认库不可删保护）
+   - routes_skills generate_template 去重 → plot_skills() 名集
+
+3. **前端**：零改动（/api/templates 形状 name/description/granularity/position/function/params/layer 保持）。
+
+**测试**：新增 test_skill_phase2.py 6 用例（迁移+幂等+CRUD+default 保护+探索只读 plot+
+拆书 plot 子条转正进探索源）；全量 361 绿；ruff+format+mypy strict 全绿。
+
+**踩坑**：
+- test_skills_api_and_injection 原断言 len==DEFAULT_SKILLS——阶段 2 后种子含 plot 类
+  （L2 默认模板并入），改为写作（DEFAULT_SKILLS）+ plot 类分别断言
+- 迁移幂等同名跳过：重复 build_app 不重复种入（同库重启验证）
+
+**下一步（按计划）**：阶段 3（书名包 pack_id + 前端 type 分组/包视图）；或 WORKFLOW 第 1 批
+（拆书模板化——节点导入 skill 依赖统一容器，现在容器已完整）。

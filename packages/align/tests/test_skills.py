@@ -79,9 +79,11 @@ def test_skills_api_and_injection() -> None:
     m = ProbeModel()
     db = Path(tempfile.mkdtemp()) / "t.db"
     client = TestClient(build_app(model=m, db_path=db))
-    # 种子默认存在
+    # S128：统一容器——种子 = 写作技巧（DEFAULT_SKILLS）+ 剧情模式（L2 默认模板并入）
     skills = client.get("/api/skills").json()
-    assert len(skills) == len(DEFAULT_SKILLS)
+    assert len(skills) == len(DEFAULT_SKILLS) + len([s for s in skills if s["type"] == "plot"])
+    # plot 类（L2 默认模板并入）已落地 skill 表
+    assert any(s["type"] == "plot" for s in skills)
     # 新增自定义技巧（带案例与标签）
     r = client.post(
         "/api/skills",
@@ -110,7 +112,10 @@ def test_skills_api_and_injection() -> None:
     assert "把叙事当作镜头" not in last  # 内容不常驻注入（skill_lookup 按需）
     # 删除
     assert client.delete(f"/api/skills/{sid}").json()["ok"] is True
-    assert len(client.get("/api/skills").json()) == len(DEFAULT_SKILLS)
+    remaining = client.get("/api/skills").json()
+    assert len(remaining) == len(DEFAULT_SKILLS) + len(
+        [s for s in remaining if s["type"] == "plot"]
+    )
 
 
 def test_skill_target_routing() -> None:

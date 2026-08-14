@@ -95,8 +95,8 @@ def make_agent(
             book_id=book_id,
             # S121：子 Agent 内核装配依赖（主循环 run_subagent 工具）
             subagent_deps=deps,
-            # S68：探索注入真实模板库（L2+L3 合并，agent 的 explore_direction 消费）
-            templates=[f"{t.name}：{t.description}" for t in deps.templates_external.all()[:12]],
+            # S68→S128：探索注入真实模板库（skill 表 type=plot 类，L2+L3 物理并入）
+            templates=[f"{s.name}：{s.description}" for s in deps.skills.plot_skills()[:12]],
         ),
         enable_domain=enable_domain,
         enable_codex=enable_codex,
