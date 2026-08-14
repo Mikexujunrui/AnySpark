@@ -147,6 +147,10 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         updated = deps.chapters.get(chapter_id)
         if updated is None:
             raise HTTPException(status_code=500, detail="保存后章节读取失败")
+        # S132b 信号入口：稿纸保存（内容实际变化）→ modified 信号（确定性操作，非语义猜测）
+        # 只发信号不入队 refine（保存高频，提炼留给会话结束/手动触发；增量游标保证不丢）
+        if req.content != ch.content:
+            deps.signal_collector.modified(ch.content, req.content, "稿纸保存")
         # S85：手动保存也触发图谱抽取/伏笔回收（对齐 write_chapter 后台链路，防图谱漂移）
         deps.bg_queue.put(
             BgTask(
@@ -178,6 +182,9 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         removed = deps.chapters.delete(chapter_id)
         if not removed:
             raise HTTPException(status_code=500, detail="删除失败")
+        # S132b 说明：章节删除**不发** deleted 信号——删除章节是管理操作（结构重排），
+        # 不是内容否定（用户删章节≠讨厌这种写法），发信号会误导提炼器。
+        # 真正的内容否定由 patch 的定点删除（内容变化 → modified）覆盖。
         logger.info("章节删除: %s《%s》", ch.book_id, ch.title)
         return {"ok": True, "id": chapter_id, "title": ch.title}
 
@@ -192,6 +199,9 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         new_content, results = apply_patch(ch.content, req.operations)
         ok_all = all(r.get("ok") for r in results)
         deps.chapters.upsert("main", ch.title, new_content, ch.order_index, ch.narrative_line)
+        # S132b 信号入口：定点编辑（内容实际变化）→ modified 信号（含段落删除/替换）
+        if ok_all and new_content != ch.content:
+            deps.signal_collector.modified(ch.content, new_content, "定点编辑")
         # S85：定点编辑也触发图谱抽取（防图谱漂移）
         if ok_all and new_content != ch.content:
             deps.bg_queue.put(
