@@ -8,6 +8,7 @@ import {
   type DirectionCard,
   type ArchivedDirection,
 } from "../api/explore";
+import { reportSignal } from "../api/signals";
 
 type ExplorePhase = "seed" | "intent" | "cards" | "archived";
 
@@ -71,6 +72,11 @@ export const useExploreStore = create<ExploreState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       await archiveDirection(card);
+      // S146（第三方评审 2.3）：选卡固化 = 最高频的"操作即信号"场景——
+      // 上报 accepted（此前 reportSignal 零调用方，5 种信号只剩 modified 活着）
+      reportSignal("accepted", `${card.title}：${card.summary}`, {
+        context: "探索方向选卡",
+      });
       // 刷新已固化列表
       const archived = await listArchived();
       set({ archived, phase: "archived", loading: false, cards: [] });

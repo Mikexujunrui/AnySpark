@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { reportSignal } from "../api/signals";
 import {
   listPlaySessions,
   createPlaySession,
@@ -118,6 +119,13 @@ export const usePlayStore = create<PlayState>((set, get) => ({
   choose: async (optionId, customText) => {
     const { session } = get();
     if (!session) return;
+    // S146（第三方评审 2.3）：推演选行动 = 用户偏好信号（accepted）——
+    // 选了什么方向/拒绝什么，提炼进心智（此前该路径无信号）
+    if (optionId) {
+      reportSignal("accepted", `推演选择：${optionId}`, { context: "互动推演选行动" });
+    } else if (customText) {
+      reportSignal("custom", customText, { context: "推演自定义行动" });
+    }
     const result = await playChoose(session.id, optionId, customText);
     set({ node: result.node });
     await get().get(session.id);
