@@ -51,6 +51,7 @@ class ToolContext:
     skill_generator: Any = None  # S72 文风参考 → skill 提炼工具（skill_refine）
     templates: list[str] = None  # type: ignore[assignment]  # S68 模板描述列表（explore_direction 注入）
     library: Any = None  # S86 参考书库（reference_lookup 工具：不注入，按需检索）
+    signals: Any = None  # S132c 信号存储（mind_reconcile 对账读最近行为信号）
     book_id: str = "main"  # S74：当前项目 id——工具层多书隔离（此前各 implementer 硬编码 main）
     subagent_deps: Any = None  # S121 提案 B：子 Agent 内核装配依赖（主循环 run_subagent 工具用）
 
@@ -106,6 +107,7 @@ def build_toolkit(
             make_ingest_implementer,
             make_material_register_implementer,
             make_mind_manage_implementer,
+            make_mind_reconcile_implementer,
             make_mind_register_implementer,
             make_path_explore_implementer,
             make_plan_implementer,
@@ -144,7 +146,12 @@ def build_toolkit(
         # S103：+library（书库取原文）+ skills（候选存草稿，对话链路可确认）
         if ctx.skill_generator is not None and ctx.materials is not None:
             sr_spec, sr_impl = make_skill_refine_implementer(
-                ctx.skill_generator, ctx.materials, library=ctx.library, skills=ctx.skills_store
+                ctx.skill_generator,
+                ctx.materials,
+                library=ctx.library,
+                skills=ctx.skills_store,
+                workflow_store=ctx.workflow_store,
+                workflow_engine=ctx.workflow_engine,
             )
             registry.register(sr_spec, sr_impl)
         # S80：灵感登记（资料库 = 灵感冷藏库；AI 可写 inspiration，copy 仅人工/导入）
@@ -210,6 +217,12 @@ def build_toolkit(
             mm_specs, mm_impls = make_mind_manage_implementer(ctx.manual)
             for _s, _i in zip(mm_specs, mm_impls, strict=True):
                 registry.register(_s, _i)
+            # S132c 跨会话对账工具：条目 vs 最近信号 → 冲突提示（只读，纠正走 mind_update/delete）
+            if ctx.signals is not None:
+                mr_spec, mr_impl = make_mind_reconcile_implementer(
+                    ctx.manual, ctx.signals, ctx.model, book_id=ctx.book_id
+                )
+                registry.register(mr_spec, mr_impl)
         # S121 提案 B 第二入口：主循环 run_subagent 工具（对话即时委派子 Agent）
         from anyspark.server.tools_subagent import make_subagent_implementer
 

@@ -1528,16 +1528,62 @@ def make_path_explore_implementer(model: Any) -> tuple[Any, Any]:
     return spec, implementer
 
 
+def _run_refine_template(
+    workflow_store: Any,
+    workflow_engine: Any,
+    template_name: str,
+    params: dict[str, str],
+    skills: Any,
+) -> list[dict[str, str]] | None:
+    """S135：按模板名同步跑拆书 workflow → 返回候选摘要。
+
+    通过「拆书提炼」模板执行（实例化 + create_task + run_task 同步跑），
+    落草稿由模板 finish 节点完成（与直接 generate_book 同源）。
+    返回轻量候选列表供工具展示（从草稿反查）；模板缺失/engine 未装配 → None
+    （调用方回退 generate_book）。
+    """
+    if workflow_store is None or workflow_engine is None or skills is None:
+        return None
+    wf = None
+    for t in workflow_store.list_templates():
+        if t["name"] == template_name:
+            wf = workflow_store.get_template(t["id"])
+            break
+    if wf is None:
+        return None
+    if not params.get("library_book_id"):
+        return None
+    before = len(skills.list_drafts())
+    task_id = workflow_store.create_task(wf, book_id="main", template_id=wf.id, params=params)
+    try:
+        workflow_engine.run_task(task_id)
+    except Exception:
+        # 模板执行失败 → 回退直接生成（保工具可用性）
+        return None
+    # 从草稿反查本任务新产出的候选（finish 落库的，取 before 之后的）
+    drafts = skills.list_drafts()
+    new_drafts = drafts[: max(0, len(drafts) - before)]
+    return [
+        {"name": str(d.get("name", "")), "description": str(d.get("description", ""))}
+        for d in new_drafts
+    ] or None
+
+
 def make_skill_refine_implementer(
     generator: Any,
     materials: Any,
     library: Any = None,
     skills: Any = None,
+    workflow_store: Any = None,
+    workflow_engine: Any = None,
 ) -> tuple[Any, Any]:
     """文风参考书 → skill 提炼工具（S72）：把原文/资料提炼成叙事技法候选。
 
     S103：加 library_book_id（从书库取原文）+ 候选存草稿（skills.add_draft，
     前端草稿区人工确认转正——对话触发的提炼不再断链）。
+    S135（WORKFLOW 收尾，W1-B 归一不降级）：mode=book（拆书多步管道）改走
+    「拆书提炼」workflow 模板（同步实例化+跑，断点/重试/持久化统一）；
+    模板不存在时回退 generator.generate_book（向后兼容）。
 
     需要借鉴某本书/资料的写法（句式/节奏/用词/视角）时使用——生成 skill 候选
     供用户确认（人工确认闸门：不自动入库，对齐 S54 哲学）。
@@ -1633,13 +1679,28 @@ def make_skill_refine_implementer(
         if not source_text:
             return ToolResult(call=call, ok=False, content="需要 material_id 或 source_text。")
         mode = str(arguments.get("mode", "writing")).strip() or "writing"
+        via_template = False
         try:
             if mode == "book":
-                # S78/S106 拆书：整本书多维拆解 → 一份「书名」skill（大书分块抽样+归并）
-                # S114：拆书三层（微观方法论 + 骨架扫描 + 定点精读架构技法）；书库场景注入书名
+                # S135（WORKFLOW 收尾）：拆书多步管道优先走「拆书提炼」workflow 模板
+                # （W1-B 归一不降级：工具变快捷入口，底层统一 workflow 机制）；
+                # 模板缺失或未装配 engine 时回退 generator.generate_book（向后兼容）。
                 book_name = book.get("name", "") if library_book_id else ""
-                candidates = generator.generate_book(source_text, hint, book_name=book_name)
-                tag = "拆书 skill"
+                template_ok = _run_refine_template(
+                    workflow_store,
+                    workflow_engine,
+                    "拆书提炼",
+                    {"library_book_id": library_book_id or ""},
+                    skills,
+                )
+                if template_ok:
+                    # 模板 finish 已落草稿；candidates 仅作展示摘要（不重复 add_draft）
+                    via_template = True
+                    candidates = template_ok
+                    tag = "拆书 skill（workflow）"
+                else:
+                    candidates = generator.generate_book(source_text, hint, book_name=book_name)
+                    tag = "拆书 skill"
             else:
                 candidates = generator.generate(source_text, hint, 5, mode="writing")
                 tag = "skill 候选"
@@ -1656,7 +1717,8 @@ def make_skill_refine_implementer(
         draft_ids: list[str] = []
         # S130：拆书产物同书名一包（pack_id=书名，整包引用写作只取 writing/both）
         pack_id = book.get("name", "") if (mode == "book" and library_book_id) else ""
-        if skills is not None:
+        if skills is not None and not via_template:
+            # 模板路径：finish 节点已落草稿，不重复添加（S135）
             for c in candidates:
                 d = skills.add_draft(
                     name=str(c.get("name", "")),
@@ -1675,12 +1737,14 @@ def make_skill_refine_implementer(
             name = c.get("name", f"候选{i}")
             desc = str(c.get("description", ""))[:60]
             lines.append(f"{i}. {name}：{desc}")
-        if mode == "book":
+        if mode == "book" and not via_template:
             content = str(candidates[0].get("content", ""))
             lines.append(
                 f"   （整本方法论 {len(content)} 字，分小节："
                 "文风/节奏/结构/人设/对白/信息投放/钩子）"
             )
+        elif via_template:
+            lines.append("   （workflow「拆书提炼」模板执行完成，草稿已入待确认区）")
         if draft_ids:
             lines.append(f"（草稿已生成 {len(draft_ids)} 条，去书库/技巧标签确认后生效）")
         elif skills is not None:
@@ -1829,6 +1893,62 @@ def make_mind_manage_implementer(manual: Any, book_id: str = "main") -> tuple[li
         )
 
     return [update_spec, delete_spec], [update, delete]
+
+
+def make_mind_reconcile_implementer(
+    manual: Any, signals: Any, model: Any, book_id: str = "main"
+) -> tuple[Any, Any]:
+    """S132c 跨会话对账工具：条目 vs 最近行为信号 → 冲突/需更新提示（真实 LLM）。
+
+    对应 DESIGN §12.18 更新方式 #6（跨会话对账纠偏）。agent 在合适时机主动调用
+    （如用户质疑"你怎么老不按我说的来"/想检查心智是否记偏），结果转述用户，
+    纠正走 mind_update/mind_delete（已有）。只读分析不自动改（用户主权），
+    失败不影响主链路。不做周期任务——对账结果需要人工消费，agent 按需调用
+    比定时跑更符合"相信模型+人工确认"哲学（克制：不加调度机制）。
+    """
+
+    spec = ToolSpec(
+        name="mind_reconcile",
+        description=(
+            "跨会话对账：把已沉淀的心智条目（写作说明书）与最近实际行为信号比对，"
+            "发现'标了雷区却在用/标了偏好却没遵守'的冲突。"
+            "当用户质疑'你怎么老不按我说的来'、或想检查心智是否记偏时使用。"
+            "只读分析（不自动改条目）；发现冲突后转述用户确认，纠正用 mind_update/mind_delete。"
+        ),
+        params=[],
+    )
+
+    def implementer(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        try:
+            from anyspark.align.mindup import build_reconcile_prompt, parse_reconcile_result
+            from anyspark.core.types import Message
+
+            entries = manual.list("project", book_id)
+            recent_signals = signals.recent(limit=30, book_id=book_id)
+            if not entries:
+                return ToolResult(call=call, ok=True, content="心智暂无条目，无需对账。")
+            prompt = build_reconcile_prompt(entries, recent_signals)
+            output = model.respond([Message(role="system", content=prompt)], [])
+            results = parse_reconcile_result(output.text)
+            if not results:
+                return ToolResult(
+                    call=call, ok=True, content="对账完成：未发现条目与实际行为冲突。"
+                )
+            lines = [
+                "心智对账发现以下冲突/需更新（转述用户确认，纠正用 mind_update/mind_delete）："
+            ]
+            for r in results[:8]:
+                lines.append(
+                    f"- 条目「{r.get('entry', '')}」→ {r.get('verdict', '')}：{r.get('note', '')}"
+                )
+            return ToolResult(
+                call=call, ok=True, content="\n".join(lines), data={"results": results}
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"对账失败：{exc}")
+
+    return spec, implementer
 
 
 def render_reference_knowledge(

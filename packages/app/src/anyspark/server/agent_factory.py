@@ -90,6 +90,7 @@ def make_agent(
             play_engine=deps.play_engine,
             review_panel=deps.review_panel,
             skill_generator=deps.skill_generator,
+            signals=deps.signals,  # S132c 信号存储（mind_reconcile 对账工具）
             # S105：工具层多书隔离（S74 已加字段但装配漏传——list_chapters 等
             # 全部落到默认 main，新项目会话读到旧项目章节，泄漏根因）
             book_id=book_id,

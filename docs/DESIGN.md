@@ -1630,3 +1630,38 @@ ALTER 自动迁移）：
   硬编码；模型无关（换协议不换组件逻辑）继续成立
 - **YAGNI 边界**：Bedrock/Vertex 原生 SDK（重依赖 boto3/google-auth + 云账号，
   国内基本用不到）不预建；本地模型全部走 openai 协议（base_url 指本地端点）
+
+### 12.45 心智模型接线收尾（S132/S132b/S132c：增量游标 + 操作信号 + 对账工具）
+
+> 背景（主人复盘"心智模型 vs 主流跨会话记忆系统"后拍板）：V4 心智的设计强在
+> 用户主权/可解释/模型无关，但**自动性比设计蓝图差一档**——§12.18 的 7 种更新方式
+> 多数未接通自动链路（真实自动只有章节学习审查）。按"克制、补自己蓝图而非抄
+> Hindsight 架构"的原则分三步收尾，全部是接线不是新机制。
+
+**S132 增量游标 + 归档自动提炼**（§12.18 长会话标准落地，详见该节）：
+- signals 表加 processed 列（增量游标，旧库自动补列不丢数据）
+- refine_from_signals 只提炼未 processed 信号（单批 ≤20，积压分批 + merge_add 归并，
+  最多 5 批防极端并发），不再用 recent(20) 滑动窗口
+- routes_chat 非流式/流式归档点自动入队 refine——**会话结束即自动提炼**（此前只有
+  手动 /api/signals 触发）
+- 实测：会话结束 → 信号提炼 → "动作描写要简洁直接"（style 0.85）落库，游标推进
+
+**S132b 确定性操作信号入口**：
+- PUT 章节保存（内容实际变化）→ modified 信号（context=稿纸保存）
+- PATCH 定点编辑（内容实际变化）→ modified 信号（context=定点编辑）
+- **章节删除不发 deleted 信号**：删除是管理操作（结构重排）≠ 内容否定，发信号会
+  误导提炼器；真正的内容否定由 patch 定点删除（内容变化→modified）覆盖
+- 只发信号不入队 refine：保存高频，提炼留给会话结束（S132），游标保证不丢
+- 实测：保存+编辑 → 信号 → 会话结束提炼出"使用简洁直接的动作描写，避免冗余
+  修饰词（如'慢慢地''轻轻地'）"（style 0.85）
+
+**S132c mind_reconcile 对账工具（#6 落地形态：agent 工具而非周期任务）**：
+- 原设计标 🔵 后补，方案权衡后定为 **agent 工具**：对账是只读分析（返回冲突列表
+  不自动改），周期任务的结果无人消费 = 白烧 token；V4 无现成调度机制，引入定时器
+  是"加法的加法"。正确形态 = agent 按需主动调用 + 结果转述用户 + 纠正走
+  mind_update/mind_delete（已有），符合"相信模型+人工确认"哲学
+- ToolContext 加 signals 字段（装配传 deps.signals）；工具复用
+  build_reconcile_prompt/parse_reconcile_result（与 /api/mind/reconcile 同逻辑）
+- 实测：用户"检查心智有没有记偏" → agent 自动调 mind_reconcile → 转述"未发现冲突"
+- 边界：与 /api/mind/reconcile 并存（API 供人/前端用，工具供 agent 用）；工具层用
+  ctx.model（会话模型），API 用 extraction 槽位——行为等价（都是 LLM 自然语言判断）
