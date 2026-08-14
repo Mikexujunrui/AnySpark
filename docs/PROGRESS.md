@@ -36,11 +36,11 @@
 > - **S114 拆书三层已落地**（commit `faf7d4a`）：结构感知选章 + 骨架扫描 + 定点精读，猎手准则 367 万字实测发现回环（见 DESIGN §12.43）
 > - **并行会话 S120-S126 已全部提交**（run_subagent/调研模板/资料库闭环/文档清洗），门禁红已清零
 > - **两个规划已拍板待实施**（12 决策点主人全部确认）：
->   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）
+>   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1 已实施（type 字段 + 拆书双落）
 >   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）
 > - **下一步开工（建议顺序）**：
->   1. SKILL 阶段 1：**拆书双落**（骨架笔记 → 剧情模式 plot 子条）——动 `skillgen.py`，两条线共同起点
->   2. WORKFLOW 第 1 批：**拆书模板化**——同上文件，同一 writer 顺序做（避同文件冲突）
+>   1. ~~SKILL 阶段 1：拆书双落（骨架笔记 → 剧情模式 plot 子条）~~ ✅（S127 已完成）
+>   2. WORKFLOW 第 1 批：**拆书模板化**——动 `skillgen.py`/拆书链路，同一 writer 顺序做（避同文件冲突）
 >   3. 之后 SKILL 阶段 2（templates 并入）/ WORKFLOW 加料模板（先实测 NSFW 审核坎）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
@@ -57,7 +57,7 @@
   5. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
   6. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
   7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路未实施）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书打样→批量→轻流程），每批对拍验证可回退
-  8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向未实施）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（整包/单条引用），拆书一次产出整包（含剧情模式骨架派生）；templates 并入；workflow（执行）保持独立——分三阶段迁移（加 type → 并 templates → 书名包），消除 skills/templates 归属竞争
+  8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127 阶段 1 已完成：type 字段 + 拆书双落）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（整包/单条引用），拆书一次产出整包（含剧情模式骨架派生）；templates 并入；workflow（执行）保持独立——分三阶段迁移（加 type ✅ → 并 templates → 书名包），消除 skills/templates 归属竞争
 - ~~httpx2 迁移~~ ✅（S66 完成）；~~Autopilot~~ —— 已划掉：S59 工作流（loop+gate+approval+AI 生成流程）已吸收其全部机制价值，需要"全书自动连写"时用 workflow_generate + 人工确认 + 跑循环即可，不另起包（同评审团判断逻辑）
 - 纪律：每阶段开工前向主人确认；对设计的偏离/新增先确认再改 DESIGN.md
 
@@ -3297,3 +3297,60 @@ grep "主人" = 0；imports OK；review 测试 31 绿（注释改动无逻辑影
 
 **注意**：清洗只动了注释/README，不含任何逻辑；未来开源时 git 历史需用新仓库快照
 导出（现有历史含内部文档），本轮已确认 .gitignore 隔离 data/.env/chapters 隐私。
+
+---
+
+## S127 SKILL 阶段 1——统一 skill 容器：type 字段 + 拆书双落（已完成 ✅）
+
+**背景**：PLAN-SKILL-UNIFY 阶段 1（主人 2026-08-13 拍板 S1-S5 + 6.1 消费方等价性三纪律
+已确认，基线全绿 pytest 508 起步）。目标：skills 表加 type 字段（writing/main/plot，
+target 语义并入）+ 拆书产出补 plot 子条（骨架笔记 → 剧情模式，双落打通）。
+
+**交付（commit `TODO`）**：
+
+1. **存储层（align/skills.py）**：
+   - writing_skills + skill_drafts 加 `type` 列（writing/main/plot/both，both 为过渡值），
+     旧库 target→type 迁移（ALTER + UPDATE，SQLite 3.45 实测）
+   - 加 `ext` 扩展列（plot 四要素 JSON；阶段 2 templates 并入复用）
+   - WritingSkill dataclass：target→type 字段；to_dict 输出 type + target 兼容镜像
+     （前端阶段 3 前仍读 target 不破）；add/update/add_draft/promote_draft 全链带 type/ext
+   - revision() 签名纳入 type/ext（缓存失效覆盖路由变化）
+   - `_target_matches` → `_type_matches`：want=writing 收 writing/both；want=main 收
+     main/both（书名方法论 both 两消费方都可达——保留语义）；want=plot 收 plot；
+     want=''（主循环索引）收 writing/main/both（plot 阶段 1 不进主循环索引，防误点名）
+   - render_skills_by_name：点名命中 plot 子条跳过（纪律 3：plot 绝不进写作上下文）
+
+2. **生成器（align/skillgen.py）**：
+   - `_parse_skills` 输出 type 键（兼容读模型仍标 target）；prompts 输出规格 target→type
+   - GENERATE_PROMPT_PLOT_FROM_SKELETON 新 prompt：骨架笔记 → 剧情模式模板（四要素）
+   - `_derive_plot_from_skeleton(note, book_name)`：复用 _parse_templates 校验四要素枚举
+     （granularity/position/function/params → ext JSON）；失败/空笔记返回 [] 不炸主产出
+   - generate_book 四步：微观方法论（both）+ 骨架扫描 + 定点精读（main）+ **剧情模式双落**（plot）
+     ——骨架笔记一鱼两吃（③定位机关章 + ④派生剧情模式），拆书一次产出整包各 type 子条
+
+3. **API/链路**：
+   - schemas：WritingSkillIn/Patch 加 type + target 兼容（type 优先）+ ext
+   - routes_skills：add/patch 解析 type（req.type or req.target）；export 用 type
+   - routes_library：refine-skill 候选带 type/ext 落草稿（方法论 both + 架构 main + 剧情模式 plot
+     各自独立人工确认）；ingest/tasks/tools_domain 同步
+   - skill_io：front-matter 用 type 键（解析兼容旧 target 键，type 优先）；合法值加 plot
+
+4. **消费方等价性对拍（6.1 三纪律）**：
+   - 纪律 1：所有 `_target_matches` 调用点同步换 `_type_matches` + 测试对拍
+     （test_skill_target_routing 语义保留 + 新增 test_skill_type_plot_routing）
+   - 纪律 2：探索兼容读零改动（templates_external 原样，阶段 2 才改读 type=plot）
+   - 纪律 3：render_skills_by_name 排除 plot（写作上下文绝不进 plot 子条）
+   - 保留语义：书名方法论 both 过渡值保留，writing/main 消费方都可达（阶段 3 按包拆分）
+
+**测试**：align 全量 + app 全量 355 绿（含新增：type 迁移/plot 路由/plot 草稿转正/拆书双落
+全链路/skill_io type 往返）；ruff + ruff format + mypy strict 全绿；真实库迁移验证
+（旧 target 列 → type 列，API 双字段返回）。
+
+**踩坑**：
+- 迁移测试必须手工建旧结构表（CREATE TABLE 无 type 列）才能测 ALTER 分支——直接用新库删行
+  模拟会因 type 列已存在跳过迁移
+- _parse_templates 的 params 归一为逗号串，ext JSON 里要还原成列表（探索阶段 2 消费）
+- to_dict 保留 target 兼容镜像：前端 SkillsShelfPanel/SkillPanel 仍读 skill.target（阶段 3 再改）
+
+**下一步（按计划）**：阶段 2（templates 并入 skill 表 type=plot + 探索改读）→ 阶段 3（书名包
+pack_id + 前端 type 分组/包视图）。

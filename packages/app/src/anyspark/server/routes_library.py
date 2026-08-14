@@ -99,7 +99,7 @@ def make_library_router(deps: AppDeps) -> APIRouter:
             if err:
                 detail += f"：{err}"
             raise HTTPException(status_code=502, detail=detail)
-        # S114：多候选存草稿（书名方法论 + 架构技法各自独立确认）
+        # S114：多候选存草稿（书名方法论 + 架构技法 + 剧情模式各自独立确认）
         drafts: list[dict[str, Any]] = []
         for c in cands:
             draft = deps.skills.add_draft(
@@ -108,7 +108,8 @@ def make_library_router(deps: AppDeps) -> APIRouter:
                 content=str(c.get("content", "")),
                 example=str(c.get("example", ""))[:2000],
                 tags=str(c.get("tags", "")),
-                target=str(c.get("target", "writing")),
+                type=str(c.get("type", "writing")),
+                ext=str(c.get("ext", "")),
                 source="library",
             )
             if draft:

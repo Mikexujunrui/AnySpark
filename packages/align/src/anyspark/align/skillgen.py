@@ -96,12 +96,12 @@ GENERATE_PROMPT = """你是小说文风提炼器。给定一部小说的正文�
   恰恰是最该提炼的差异化技法**——提炼时优先抓这些差异点。
 
 【输出格式】（严格 JSON 数组，不要其它文字）：
-[{"name": "技法名（具体可执行，如'短句直给式推进'）", "description": "一句话索引", "content": "技法说明（负面约束/正面做法，尽量落到句式/用词/节奏），2-3 句", "example": "原文摘录或自拟示范 + 一句为何有效", "tags": "适用场景，逗号分隔，如'打斗,高潮'", "target": "writing或main（写作层技法用writing；章节结构/类型组织指导用main；两者都影响用both）"}]
+[{"name": "技法名（具体可执行，如'短句直给式推进'）", "description": "一句话索引", "content": "技法说明（负面约束/正面做法，尽量落到句式/用词/节奏），2-3 句", "example": "原文摘录或自拟示范 + 一句为何有效", "tags": "适用场景，逗号分隔，如'打斗,高潮'", "type": "writing或main（写作层技法用writing；章节结构/类型组织指导用main；两者都影响用both）"}]
 
 给定正文：
 """
 
-# 主循环视角的类型/结构指导生成提示（S58：target=main 的类型 skill）
+# 主循环视角的类型/结构指导生成提示（S58：type=main 的类型 skill）
 # 用途：给主循环看的叙事组织指导——不是句子技法（那是写作调用看的），
 # 而是结构/类型/节奏/组织层面的决策指导。
 GENERATE_PROMPT_MAIN = """你是小说结构分析器。给定一部小说的正文片段，提炼出**给主循环看的叙事组织指导**（skill）。
@@ -119,7 +119,7 @@ GENERATE_PROMPT_MAIN = """你是小说结构分析器。给定一部小说的正
 - example 尽量引用给定正文的实际结构（如"第X段先压制，第Y段爆发"），或自拟结构示范。
 
 【输出格式】（严格 JSON 数组，不要其它文字）：
-[{"name": "指导名（如'爽文先压制再爆发'）", "description": "一句话索引", "content": "结构/类型/节奏/组织的可执行指导，2-3 句", "example": "原文结构示例或自拟示范 + 一句为何有效", "tags": "适用场景，逗号分隔，如'爽文,节奏'", "target": "main（主循环指导）"}]
+[{"name": "指导名（如'爽文先压制再爆发'）", "description": "一句话索引", "content": "结构/类型/节奏/组织的可执行指导，2-3 句", "example": "原文结构示例或自拟示范 + 一句为何有效", "tags": "适用场景，逗号分隔，如'爽文,节奏'", "type": "main（主循环指导）"}]
 
 给定正文：
 """
@@ -155,7 +155,7 @@ GENERATE_PROMPT_BOOK = """你是小说拆书器。给定一部小说的代表性
 如"斗破苍穹：玄幻爽文——退婚流开局/三年之约钩子/压制-爆发节奏/金手指升级线"。
 
 【输出格式】（严格 JSON 数组，单元素，不要其它文字）：
-[{"name": "书名", "description": "一句话索引", "content": "分小节整本方法论", "example": "原文代表性摘录 + 一句为何有效", "tags": "类型标签，逗号分隔，如'玄幻,爽文,升级流'", "target": "both（文风给写作、结构给主循环，两种都要）"}]
+[{"name": "书名", "description": "一句话索引", "content": "分小节整本方法论", "example": "原文代表性摘录 + 一句为何有效", "tags": "类型标签，逗号分隔，如'玄幻,爽文,升级流'", "type": "both（文风给写作、结构给主循环，两种都要）"}]
 
 给定代表性原文片段：
 """
@@ -192,6 +192,38 @@ GENERATE_PROMPT_PLOT = """你是小说剧情模式提炼器。给定一部小说
 [{"name": "模板名（具体可执行，如'护送式旅程·双线交汇'）", "description": "剧情模式说明（结构/冲突/节拍，含可变参数位置），2-4 句", "granularity": "粒度：全书/卷/章/场景/段落 之一", "position": "位置：开局/发展/高潮/结局 之一", "function": "功能：铺垫/主线/悬念/爽点/情感 之一", "params": ["可变参数1", "可变参数2"]}]
 
 给定多章片段：
+"""
+
+
+# 剧情模式提炼提示（骨架笔记版，S127：拆书双落——骨架笔记 → 剧情模式 plot 子条）
+# 与 GENERATE_PROMPT_PLOT 的区别：输入不是多章正文，而是骨架扫描的结构笔记
+# （跨卷机关/主角目的/阶段/开篇收尾——已基于标题轨迹归纳好全局关系），
+# 从全局结构直接提炼可复用剧情模式；输出同样四要素元数据（探索派生方向用）。
+GENERATE_PROMPT_PLOT_FROM_SKELETON = """你是小说剧情模式提炼器。给定一部小说的**结构分析笔记**
+（基于全书章节标题轨迹分析得出，含跨卷叙事机关/主角最终目的/剧情大阶段/开篇与收尾设计），
+提炼出**可复用剧情模式模板**（给探索派生方向用）。
+
+【什么对探索最有指导价值】
+- 结构笔记里的**跨卷机关**往往就是最高价值的剧情模式（如时间回环/双线并行/真相逐层揭示）
+- 提炼的是**结构层的剧情模式**（跨章组织方式），不是句子/用词技法：
+  ① 开篇钩子：故事怎么开场立钩子（什么悬念/代价/身份设定）
+  ② 冲突升级：冲突怎么逐步升级（间隔、台阶、爆点在哪）
+  ③ 章节衔接：章末怎么留钩子、跨章怎么保持张力
+  ④ 情感节拍：情绪起伏的分布（铺垫→谷底→爆发→余波）
+  ⑤ 收束方式：高潮怎么处理、结局/悬念怎么收
+- 每个模式要写明**可变参数**（模板中可替换的位置）——探索派生方向靠变体，不是照搬
+
+【复现测试】
+- 提炼前问自己：这是这本书**有辨识度的剧情组织方式**，还是通用套路？
+  通用套路不要提炼（如"主角成长变强"）；有辨识度的组织方式才提炼。
+
+【简洁自检】
+- 每条模板 description 应能**一次读完就内化**：2-4 句，去掉形容词，只留结构动作。
+
+【输出格式】（严格 JSON 数组，不要其它文字）：
+[{"name": "模板名（具体可执行，如'时间回环·宿命闭环'）", "description": "剧情模式说明（结构/冲突/节拍，含可变参数位置），2-4 句", "granularity": "粒度：全书/卷/章/场景/段落 之一", "position": "位置：开局/发展/高潮/结局 之一", "function": "功能：铺垫/主线/悬念/爽点/情感 之一", "params": ["可变参数1", "可变参数2"]}]
+
+结构分析笔记如下：
 """
 
 
@@ -250,7 +282,7 @@ REFINE_PROMPT = """你是小说拆书器。以下是《{book_name}》的若干�
 - example 必须**逐字摘录自给定原文**（引用原句，可标注出处章号）；找不到合适摘录写"（无合适摘录）"，**禁止编造或改写原文**
 
 输出（严格 JSON 数组，可多条）：
-[{{"name": "技法名", "description": "一句话索引", "content": "...", "example": "原文摘录 + 一句为何有效", "tags": "适用题材,逗号分隔", "target": "main"}}]
+[{{"name": "技法名", "description": "一句话索引", "content": "...", "example": "原文摘录 + 一句为何有效", "tags": "适用题材,逗号分隔", "type": "main"}}]
 
 关键章节原文如下：
 """
@@ -417,7 +449,11 @@ def _sample_blocks(text: str, n: int, window: int) -> list[str]:
 
 
 def _parse_skills(raw: str) -> list[dict[str, str]]:
-    """宽容解析模型输出的 skill JSON 数组（R1 收敛到 core.jsonutil）。"""
+    """宽容解析模型输出的 skill JSON 数组（R1 收敛到 core.jsonutil）。
+
+    S127：type 键替代 target（PLAN-SKILL-UNIFY 阶段 1）——兼容读模型仍输出
+    target 的情况（旧 prompt 缓存），两者都收；合法值 writing/main/plot/both。
+    """
     data = parse_json_array(raw)
     if data is None:
         return []
@@ -429,6 +465,7 @@ def _parse_skills(raw: str) -> list[dict[str, str]]:
         content = str(d.get("content", "")).strip()
         if not name or not content:
             continue
+        raw_type = str(d.get("type", "") or d.get("target", "")).strip()
         out.append(
             {
                 "name": name,
@@ -436,11 +473,7 @@ def _parse_skills(raw: str) -> list[dict[str, str]]:
                 "content": content,
                 "example": str(d.get("example", "")).strip(),
                 "tags": str(d.get("tags", "")).strip(),
-                "target": (
-                    str(d.get("target", "writing")).strip()
-                    if str(d.get("target", "")).strip() in ("writing", "main", "both")
-                    else "writing"
-                ),
+                "type": raw_type if raw_type in ("writing", "main", "plot", "both") else "writing",
             }
         )
     return out
@@ -493,9 +526,10 @@ def _parse_templates(raw: str) -> list[dict[str, str]]:
 class SkillGenerator:
     """skill/模板 生成器：原文 → 可执行候选（真实 LLM，无工具单次调用）。
 
-    S58：mode 区分——writing（文风/叙事技巧，target=writing）/ main
-    （类型/结构指导，target=main，给主循环看）/ plot（S69：剧情模式模板，
+    S58：mode 区分——writing（文风/叙事技巧，type=writing）/ main
+    （类型/结构指导，type=main，给主循环看）/ plot（S69：剧情模式模板，
     四要素元数据，给探索的 template 来源派生方向）。
+    S127：target 语义并入 type（PLAN-SKILL-UNIFY 阶段 1）——候选输出 type 键。
     """
 
     def __init__(self, model: object) -> None:
@@ -543,7 +577,7 @@ class SkillGenerator:
             )
             cands = _parse_skills(output.text)[:1]
             for c in cands:
-                c["target"] = "both"  # 拆书方法论：文风给写作、结构给主循环
+                c["type"] = "both"  # 拆书方法论：文风给写作、结构给主循环
             return cands
         prompt = GENERATE_PROMPT_MAIN if mode == "main" else GENERATE_PROMPT
         prompt += f"\n{source_text[:6000]}\n"
@@ -555,23 +589,26 @@ class SkillGenerator:
             [],
         )
         cands = _parse_skills(output.text)[:max_items]
-        # 模式一致性：main 模式的候选强制 target=main（防模型漏标）
+        # 模式一致性：main 模式的候选强制 type=main（防模型漏标）
         if mode == "main":
             for c in cands:
-                c["target"] = "main"
+                c["type"] = "main"
         return cands
 
     def generate_book(
         self, source_text: str, hint: str = "", book_name: str = ""
     ) -> list[dict[str, str]]:
-        """S106+S114：拆书（整本书）——三层提炼成「书名」方法论 + 架构机关技法。
+        """S106+S114+S127：拆书（整本书）——三层提炼 + 剧情模式双落。
 
         ① 微观技法（_generate_book_micro）：结构感知选章（按卷分层整章拼批）→
            分批拆解 → 归并成一份「书名」skill（name=书名，一次点名拿到整本写法）
         ② 骨架扫描（_scan_skeleton）：卷+章标题（无正文）→ 全书结构笔记
            （跨卷叙事机关/主角目的/阶段——抽样+局部提炼结构上抓不到的全局关系）
         ③ 定点精读（_refine_architecture）：从笔记定位机关章 → 精读原文
-           （先原文后提问，防案例幻觉）→ 提炼架构技法 skill（target=main）
+           （先原文后提问，防案例幻觉）→ 提炼架构技法 skill（type=main）
+        ④ 剧情模式（_derive_plot_from_skeleton，S127 双落）：骨架笔记 → 剧情模式
+           plot 子条（type=plot，四要素扩展元数据）——骨架笔记一鱼两吃：
+           既定位机关章（③），又派生剧情模式（④），拆书一次产出整包各 type 子条。
 
         book_name：书名（注入 prompt，修复 name=书名引用单位的准确性；
         缺省空串=不注入，回退旧行为）。
@@ -589,9 +626,11 @@ class SkillGenerator:
             return []
         note = self._scan_skeleton(chapters, book_name)
         arch = self._refine_architecture(chapters, note, book_name)
-        result = micro + arch
+        # S127 双落：骨架笔记 → 剧情模式 plot 子条（骨架笔记空则跳过）
+        plot = self._derive_plot_from_skeleton(note, book_name)
+        result = micro + arch + plot
         for c in result:
-            c.setdefault("target", "both")
+            c.setdefault("type", "both")
         return result
 
     def _book_label(self, book_name: str) -> str:
@@ -651,7 +690,7 @@ class SkillGenerator:
             merged = []
         final = merged or fallback
         for c in final:
-            c["target"] = "both"  # 拆书方法论：文风给写作、结构给主循环
+            c["type"] = "both"  # 拆书方法论：文风给写作、结构给主循环
         return final
 
     def _generate_book_micro(
@@ -709,8 +748,59 @@ class SkillGenerator:
             merged = []
         final = merged or fallback
         for c in final:
-            c["target"] = "both"
+            c["type"] = "both"
         return final
+
+    def _derive_plot_from_skeleton(self, note: str, book_name: str = "") -> list[dict[str, str]]:
+        """S127 拆书双落：骨架笔记 → 剧情模式 plot 子条（type=plot）。
+
+        与定点精读（_refine_architecture）共用骨架笔记：那个提炼架构机关技法
+        （type=main，主循环规划）；这里提炼剧情模式模板（type=plot，探索
+        派生方向）——四要素元数据（granularity/position/function/params）存
+        ext 扩展 JSON，机制校验枚举回落默认（复用 _parse_templates）。
+        失败/空笔记返回 []（不影响拆书主产出）。
+        """
+        if not note.strip():
+            return []
+        name = book_name.strip() or "本书"
+        prompt = (
+            GENERATE_PROMPT_PLOT_FROM_SKELETON + f"\n（本书：《{name}》 结构笔记）\n{note[:6000]}\n"
+        )
+        try:
+            out = self._model.respond(  # type: ignore[attr-defined]
+                [Message(role="system", content=prompt)], []
+            )
+        except Exception as exc:
+            logger.warning("拆书剧情模式提炼失败: %s", _classify_model_error(exc))
+            return []
+        cands = _parse_templates(out.text)
+        # 剧情模式 → plot skill：四要素进 ext（扩展字段），content 保留模式说明
+        import json as _json
+
+        result: list[dict[str, str]] = []
+        for c in cands:
+            # _parse_templates 把 params 归一为逗号串；ext 里还原成列表（阶段 2 探索消费）
+            params = [p.strip() for p in c["params"].split(",") if p.strip()]
+            result.append(
+                {
+                    "name": c["name"],
+                    "description": c["description"],
+                    "content": f"剧情模式：{c['description']}",
+                    "example": "",
+                    "tags": "剧情模式",
+                    "type": "plot",
+                    "ext": _json.dumps(
+                        {
+                            "granularity": c["granularity"],
+                            "position": c["position"],
+                            "function": c["function"],
+                            "params": params,
+                        },
+                        ensure_ascii=False,
+                    ),
+                }
+            )
+        return result
 
     def _scan_skeleton(self, chapters: list[tuple[str, str]], book_name: str = "") -> str:
         """S114 骨架扫描：全部章标题（无正文）→ 结构笔记（机关/目的/阶段）。
@@ -743,7 +833,7 @@ class SkillGenerator:
         """S114 定点精读：从结构笔记提取机关章号 → 精读原文 → 架构技法 skill。
 
         防案例幻觉：精读 prompt 先给原文、后中立提问（不预先告知答案），
-        example 强制逐字摘录。target 统一 main（架构机关给主循环规划用）。
+        example 强制逐字摘录。type 统一 main（架构机关给主循环规划用）。
         """
         if not note.strip():
             return []
@@ -782,7 +872,7 @@ class SkillGenerator:
             return []
         cands = _parse_skills(out.text)
         for c in cands:
-            c["target"] = "main"  # 架构机关给主循环
+            c["type"] = "main"  # 架构机关给主循环
         return _sanitize_examples(cands, excerpt)
 
     def generate_main(
@@ -791,7 +881,7 @@ class SkillGenerator:
         hint: str = "",
         max_items: int = 5,
     ) -> list[dict[str, str]]:
-        """S58：类型/结构指导生成（target=main，给主循环看）。"""
+        """S58：类型/结构指导生成（type=main，给主循环看）。"""
         return self.generate(source_text, hint, max_items, mode="main")
 
     def generate_plot(

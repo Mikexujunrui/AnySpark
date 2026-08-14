@@ -186,7 +186,7 @@ def refine_skill_drafts(
                 content=c["content"],
                 example=c["example"],
                 tags=c["tags"],
-                target=c.get("target", "writing"),  # S57
+                type=c.get("type", "writing"),  # S127：type 替代 target
                 source="mental",  # mental(心智联动) 或 signal(信号驱动) 统一落草稿
             )
             if r:

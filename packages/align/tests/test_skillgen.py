@@ -113,23 +113,23 @@ def test_generate_api_and_confirm() -> None:
 
 
 def test_generate_main_mode_forces_target_main() -> None:
-    """S58：main 模式用结构指导 prompt，候选 target 强制 main。"""
-    model = FakeSkillModel(GOOD_OUTPUT)  # 输出不含 target → 应强制 main
+    """S58/S127：main 模式用结构指导 prompt，候选 type 强制 main。"""
+    model = FakeSkillModel(GOOD_OUTPUT)  # 输出不含 type → 应强制 main
     gen = SkillGenerator(model)
     cands = gen.generate_main("废柴流开局：主角受辱三年，偶得金手指。")
     assert cands, "应产出候选"
-    assert all(c["target"] == "main" for c in cands)
+    assert all(c["type"] == "main" for c in cands)
     # prompt 用主循环结构指导（区别于文风 prompt）
     assert "叙事组织指导" in model.prompts[0]
     assert "结构/类型/节奏" in model.prompts[0]
 
 
 def test_generate_mode_writing_keeps_target() -> None:
-    """S58：writing 模式保持模型标的 target（缺省 writing）。"""
+    """S58/S127：writing 模式保持模型标的 type（缺省 writing）。"""
     model = FakeSkillModel(GOOD_OUTPUT)
     cands = SkillGenerator(model).generate("萧炎，三年之约已到。")
     assert cands
-    assert all(c.get("target", "writing") in ("writing", "main", "both") for c in cands)
+    assert all(c.get("type", "writing") in ("writing", "main", "both", "plot") for c in cands)
 
 
 def test_generate_book_sampling_and_merge() -> None:
@@ -169,7 +169,7 @@ def test_generate_book_sampling_and_merge() -> None:
         f"应抽 {_BOOK_SAMPLES} 段+1 归并，实际 {model.calls} 次"
     )
     assert len(cands) == 1
-    assert cands[0]["target"] == "both"  # 拆书方法论双目标
+    assert cands[0]["type"] == "both"  # 拆书方法论双目标
     assert "全书方法论" in cands[0]["name"]
     # 每段喂的是抽样片段（含段标记，非开头截断）
     assert all("代表段" in p for p in model.sample_prompts)
@@ -184,10 +184,11 @@ def test_generate_book_sampling_and_merge() -> None:
 
 
 def test_generate_book_structural_three_layer() -> None:
-    """S114：有章节结构的书走三层拆书——微观（选章拼批+归并）+ 骨架扫描 + 定点精读。
+    """S114+S127：有章节结构的书走三层拆书 + 剧情模式双落。
 
     结构感知 vs S106 均匀抽样：抽样单位=整章（章节边界完整），选章按位置均匀
-    覆盖全书；骨架扫描从标题轨迹发现跨卷机关；精读先给原文（防案例幻觉）。
+    覆盖全书；骨架扫描从标题轨迹发现跨卷机关；精读先给原文（防案例幻觉）；
+    S127：骨架笔记一鱼两吃——既定位机关章，又派生剧情模式 plot 子条（type=plot）。
     """
     from anyspark.align.skillgen import _BATCH_SIZE, _MAX_SELECT
 
@@ -203,6 +204,10 @@ def test_generate_book_structural_three_layer() -> None:
             if "关键章节原文" in prompt:  # 定点精读（先原文后提问 + 骨架笔记作线索）
                 return ModelOutput(
                     text='[{"name": "时间回环·闭环", "description": "d", "content": "负面：不要先验告知；正面：伏笔-揭示-回收-代价。", "example": "原文摘录", "tags": "科幻,悬疑"}]'
+                )
+            if "剧情模式提炼器" in prompt and "结构分析笔记" in prompt:  # S127 双落
+                return ModelOutput(
+                    text='[{"name": "时间回环·宿命闭环", "description": "主角反复回到起点，每轮携带记忆增量，终点揭示闭环成因。可变参数：回环触发点、记忆保留方式。", "granularity": "全书", "position": "发展", "function": "悬念", "params": ["回环触发点", "记忆保留方式"]}]'
                 )
             if "结构分析师" in prompt:  # 骨架扫描 → 结构笔记（含机关章号引用）
                 return ModelOutput(
@@ -228,16 +233,24 @@ def test_generate_book_structural_three_layer() -> None:
     gen = SkillGenerator(model)
     cands = gen.generate_book(text, hint="侧重悬念", book_name="测试书")
 
-    # 三层调用：选章拆解批 + 1 归并 + 1 骨架 + 1 精读
+    # 四步调用：选章拆解批 + 1 归并 + 1 骨架 + 1 精读 + 1 剧情模式双落
     n_batches = -(-_MAX_SELECT // _BATCH_SIZE)  # ceil(24/4)=6
-    assert model.calls == n_batches + 3, f"三层调用数应 {n_batches + 3}，实际 {model.calls}"
-    # 产出：书名方法论 + 架构技法
-    assert len(cands) == 2
+    assert model.calls == n_batches + 4, f"四步调用数应 {n_batches + 4}，实际 {model.calls}"
+    # 产出：书名方法论 + 架构技法 + 剧情模式 plot 子条
+    assert len(cands) == 3
     assert cands[0]["name"] == "测试书"  # name=书名（引用单位）
-    assert cands[0]["target"] == "both"
+    assert cands[0]["type"] == "both"
     assert cands[1]["name"] == "时间回环·闭环"
-    assert cands[1]["target"] == "main"  # 架构机关给主循环
-    # 书名注入：拆解/骨架/精读 prompt 都带书名
+    assert cands[1]["type"] == "main"  # 架构机关给主循环
+    assert cands[2]["name"] == "时间回环·宿命闭环"
+    assert cands[2]["type"] == "plot"  # 剧情模式给探索（阶段 2 接线）
+    # plot 子条四要素进 ext（扩展字段），description 保留模式说明
+    import json as _json
+
+    ext = _json.loads(cands[2]["ext"])
+    assert ext["granularity"] == "全书" and ext["position"] == "发展" and ext["function"] == "悬念"
+    assert ext["params"] == ["回环触发点", "记忆保留方式"]
+    # 书名注入：拆解/骨架/精读/剧情模式 prompt 都带书名
     assert any("测试书" in p and "代表批" in p for p in model.prompts)
     # 骨架扫描：喂的是章标题轨迹（无正文）
     skeleton_p = next(p for p in model.prompts if "结构分析师" in p)
@@ -247,6 +260,9 @@ def test_generate_book_structural_three_layer() -> None:
     head, _, tail = refine_p.partition("关键章节原文如下")
     assert "仅供参考" in head  # 骨架笔记标注为需验证的线索
     assert "第85章" in tail  # 原文里含机关章（笔记引用章排最前）
+    # 剧情模式双落：输入是骨架笔记（结构分析笔记），不是原文
+    plot_p = next(p for p in model.prompts if "剧情模式提炼器" in p and "结构分析笔记" in p)
+    assert "第85章到第90章" in plot_p  # 骨架笔记作为输入
     # hint 注入
     assert any("侧重悬念" in p for p in model.prompts)
 
@@ -295,7 +311,7 @@ def test_sanitize_examples_removes_fabricated() -> None:
 
 
 def test_generate_api_main_mode() -> None:
-    """S58：API 传 mode=main 产出 target=main 候选。"""
+    """S58/S127：API 传 mode=main 产出 type=main 候选。"""
     model = FakeSkillModel(GOOD_OUTPUT)
     db = Path(tempfile.mkdtemp()) / "t.db"
     client = TestClient(build_app(model=model, db_path=db))
@@ -305,7 +321,7 @@ def test_generate_api_main_mode() -> None:
     )
     assert r.status_code == 200
     assert r.json()["candidates"], "应产出候选"
-    assert all(c["target"] == "main" for c in r.json()["candidates"])
+    assert all(c["type"] == "main" for c in r.json()["candidates"])
 
 
 def test_draft_promote_flow() -> None:
@@ -320,19 +336,20 @@ def test_draft_promote_flow() -> None:
         content="不要铺垫环境再推进",
         example="原文摘录",
         tags="高潮",
-        target="main",  # S57
+        type="main",  # S127：type 替代 target
         source="mental",
     )
     assert d is not None
+    assert d["type"] == "main"  # S127：草稿带 type
     # 同名校验：草稿或正式存在 → 拒绝
     assert store.add_draft(name="短句直给", description="", content="x") is None
     # 列出
     drafts = store.list_drafts()
     assert any(x["name"] == "短句直给" for x in drafts)
-    # 转正：进 writing_skills + 草稿删除 + target 保留
+    # 转正：进 writing_skills + 草稿删除 + type 保留
     s = store.promote_draft(d["id"])
     assert s is not None and s.name == "短句直给"
-    assert s.target == "main"  # S57：转正保留 target
+    assert s.type == "main"  # S127：转正保留 type
     assert all(x["name"] != "短句直给" for x in store.list_drafts())
     assert any(x.name == "短句直给" for x in store.list_skills())
 

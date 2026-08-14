@@ -515,7 +515,9 @@ class WritingSkillIn(BaseModel):
     content: str
     example: str = ""  # 具体情形案例（提升文笔：样例比抽象指令有效）
     tags: str = ""  # 场景标签（逗号分隔，支撑按需选取）
-    target: str = "writing"  # S57：writing(写作调用)/main(主循环)/both
+    type: str = "writing"  # S127：writing(写作调用)/main(主循环)/plot(探索)/both(两者)
+    target: str = ""  # S127 兼容：前端旧字段，等价映射到 type（type 优先）
+    ext: str = ""  # S127：扩展字段（plot 四要素 JSON）
     enabled: bool = True
 
 
@@ -525,7 +527,9 @@ class WritingSkillPatch(BaseModel):
     content: str | None = None
     example: str | None = None
     tags: str | None = None
-    target: str | None = None
+    type: str | None = None  # S127
+    target: str | None = None  # S127 兼容：前端旧字段
+    ext: str | None = None
     enabled: bool | None = None
 
 

@@ -32,10 +32,11 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
     def generate_skill(req: SkillGenerateIn) -> dict[str, object]:
         """S54/S58：从原文提炼 skill 候选（人工确认后走 /api/skills 入库）。
 
-        mode=writing：文风/叙事技法（target=writing，写作调用用）；
-        mode=main：类型/结构组织指导（target=main，主循环用）。
+        mode=writing：文风/叙事技法（type=writing，写作调用用）；
+        mode=main：类型/结构组织指导（type=main，主循环用）。
         S72：material_id 支持从资料库取原文（文风参考书 → skill 提炼链路），
         与 source_text 二选一。
+        S127：候选带 type 键（target 语义并入）。
         """
         source_text = req.source_text.strip()
         if req.material_id:
@@ -100,7 +101,7 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
             content=s.content,
             example=s.example,
             tags=s.tags,
-            target=s.target,
+            type=s.type,
         )
         safe = quote(f"{s.name}.skill.md")
         from fastapi.responses import PlainTextResponse
@@ -115,8 +116,9 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
 
     @router.post("/api/skills", response_model=dict[str, Any])
     def add_skill(req: WritingSkillIn) -> dict[str, Any]:
+        typ = req.type or req.target or "writing"  # S127：type 优先，target 兼容
         s = deps.skills.add(
-            req.name, req.description, req.content, req.example, req.tags, req.target
+            req.name, req.description, req.content, req.example, req.tags, typ, req.ext
         )
         return s.to_dict()
 
@@ -143,6 +145,7 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
 
     @router.patch("/api/skills/{skill_id}", response_model=dict[str, Any])
     def patch_skill(skill_id: str, req: WritingSkillPatch) -> dict[str, Any]:
+        typ = req.type or req.target  # S127：type 优先，target 兼容；None=不变
         s = deps.skills.update(
             skill_id,
             req.name,
@@ -150,7 +153,8 @@ def make_skills_router(deps: AppDeps) -> APIRouter:
             req.content,
             req.example,
             req.tags,
-            req.target,
+            typ,
+            req.ext,
             req.enabled,
         )
         if s is None:

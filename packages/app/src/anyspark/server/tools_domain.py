@@ -1662,7 +1662,7 @@ def make_skill_refine_implementer(
                     content=str(c.get("content", "")),
                     example=str(c.get("example", ""))[:2000],
                     tags=str(c.get("tags", "")),
-                    target=str(c.get("target", "writing")),
+                    type=str(c.get("type", "writing")),
                     source="agent",
                 )
                 if d:

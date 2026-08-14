@@ -114,23 +114,49 @@ def test_skills_api_and_injection() -> None:
 
 
 def test_skill_target_routing() -> None:
-    """S57/S61：target 只影响索引可见性与点名注入；写作调用不自动选。"""
+    """S57/S61/S127：type 只影响索引可见性与点名注入；写作调用不自动选。
+
+    S127：target 语义并入 type（PLAN-SKILL-UNIFY 阶段 1）——路由等价保留：
+    writing 收 writing/both；main 收 main/both；both 两消费方可达。
+    """
     from anyspark.align import render_skill_index, render_skills_by_name
 
     store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk3.db")
-    # 三目标各造一条
-    store.add(name="类型指导A", description="主循环用", content="结构指导", target="main")
-    store.add(name="文笔技巧B", description="写作用", content="句子技法", target="writing")
-    store.add(name="通用技巧C", description="都可用", content="通用", target="both")
+    # 三类各造一条
+    store.add(name="类型指导A", description="主循环用", content="结构指导", type="main")
+    store.add(name="文笔技巧B", description="写作用", content="句子技法", type="writing")
+    store.add(name="通用技巧C", description="都可用", content="通用", type="both")
     skills = store.list_skills()
-    # 主循环索引 = 全部（target 不限，S60：决策者看全部才能点名）
+    # 主循环索引 = 全部（type 不限，S60：决策者看全部才能点名）
     idx = render_skill_index(skills, target="")
     assert "类型指导A" in idx and "文笔技巧B" in idx and "通用技巧C" in idx
-    # 点名注入：按名字精确匹配，与 target 无关（主循环点名了就该进写作调用）
+    # 点名注入：按名字精确匹配，与 type 无关（主循环点名了就该进写作调用）
     block = render_skills_by_name(skills, ["文笔技巧B"])
     assert "句子技法" in block
     block2 = render_skills_by_name(skills, ["类型指导A"])
     assert "结构指导" in block2
+
+
+def test_skill_type_plot_routing() -> None:
+    """S127：plot 类路由——不进主循环索引（探索消费方阶段 2 接线），
+    点名注入也不进写作上下文（纪律 3：main/plot 子条绝不进写作上下文）。"""
+    from anyspark.align import render_skill_index, render_skills_by_name
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "sk3b.db")
+    store.add(name="护送式旅程", description="剧情模式", content="护送明线+暗线洒落", type="plot")
+    store.add(name="文笔技巧B", description="写作用", content="句子技法", type="writing")
+    skills = store.list_skills()
+    # 主循环索引（target=""）不含 plot（阶段 1 探索未接线，防误点名进写作）
+    idx = render_skill_index(skills, target="")
+    assert "文笔技巧B" in idx and "护送式旅程" not in idx
+    # plot 视角（阶段 2 探索用）可见 plot 子条
+    idx_plot = render_skill_index(skills, target="plot")
+    assert "护送式旅程" in idx_plot and "文笔技巧B" not in idx_plot
+    # 点名注入：plot 子条绝不进写作上下文（纪律 3）
+    block = render_skills_by_name(skills, ["护送式旅程"])
+    assert block == ""
+    block2 = render_skills_by_name(skills, ["文笔技巧B"])
+    assert "句子技法" in block2
 
 
 def test_skills_legacy_seed_migration() -> None:
@@ -157,6 +183,82 @@ def test_skills_legacy_seed_migration() -> None:
     names = [s.name for s in store2.list_skills()]
     assert "粒度感知" not in names
     assert "镜头感与视角" in names
+
+
+def test_skill_type_migration_from_target() -> None:
+    """S127：旧库 target 列 → type 列迁移（PLAN-SKILL-UNIFY 阶段 1）。
+
+    模拟旧代码建的库（只有 target 列，无 type 列）→ 新代码打开时 ALTER 补 type
+    并迁移：target=main → type=main；target=both → type=both（过渡值保留，
+    两消费方都可达——保留语义）。
+    """
+    import sqlite3 as _sqlite3
+    import uuid as _uuid
+
+    db = Path(tempfile.mkdtemp()) / "mig.db"
+    # 手工建旧结构表（无 type 列，target 列带数据）
+    conn = _sqlite3.connect(str(db))
+    conn.execute(
+        "CREATE TABLE writing_skills ("
+        "id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT NOT NULL DEFAULT '', "
+        "content TEXT NOT NULL, example TEXT NOT NULL DEFAULT '', tags TEXT NOT NULL DEFAULT '', "
+        "target TEXT NOT NULL DEFAULT 'writing', enabled INTEGER NOT NULL DEFAULT 1, "
+        "order_index INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)"
+    )
+    now = "2026-01-01T00:00:00+00:00"
+    conn.execute(
+        "INSERT INTO writing_skills (id, name, description, content, target, enabled, "
+        "order_index, created_at) VALUES (?,?,?,?,?,1,0,?)",
+        (_uuid.uuid4().hex, "旧技法A", "d", "c", "main", now),
+    )
+    conn.execute(
+        "INSERT INTO writing_skills (id, name, description, content, target, enabled, "
+        "order_index, created_at) VALUES (?,?,?,?,?,1,1,?)",
+        (_uuid.uuid4().hex, "旧技法B", "d", "c", "both", now),
+    )
+    conn.commit()
+    conn.close()
+    store2 = WritingSkillStore(db)  # 触发 ALTER + 迁移
+    by_name = {s.name: s for s in store2.list_skills()}
+    assert by_name["旧技法A"].type == "main"  # target→type 迁移
+    assert by_name["旧技法B"].type == "both"  # both 过渡值保留（两消费方可达）
+    # 新写入 type 优先
+    s = store2.add("新技法", "d", "c", type="plot")
+    assert s.type == "plot"
+    assert s.to_dict()["target"] == "plot"  # 兼容镜像（前端仍读 target）
+    got = store2.get(s.id)
+    assert got is not None and got.type == "plot" and got.ext == ""
+    # plot 四要素 ext 存取
+    import json as _json
+
+    s2 = store2.add(
+        "时间回环", "d", "剧情模式说明", type="plot", ext=_json.dumps({"granularity": "全书"})
+    )
+    got2 = store2.get(s2.id)
+    assert got2 is not None and got2.ext and _json.loads(got2.ext)["granularity"] == "全书"
+
+
+def test_skill_draft_type_and_ext_promote() -> None:
+    """S127：plot 草稿带 type/ext → 转正保留（拆书双落产物完整落 skill 表）。"""
+    from anyspark.align import WritingSkillStore
+
+    store = WritingSkillStore(Path(tempfile.mkdtemp()) / "d.db")
+    import json as _json
+
+    d = store.add_draft(
+        name="护送式旅程",
+        description="护送明线+暗线洒落",
+        content="剧情模式：护送为明线，暗线逐章洒落，终点汇合。",
+        type="plot",
+        ext=_json.dumps(
+            {"granularity": "全书", "position": "发展", "function": "悬念", "params": ["护送目标"]}
+        ),
+        source="library",
+    )
+    assert d is not None and d["type"] == "plot"
+    s = store.promote_draft(d["id"])
+    assert s is not None and s.type == "plot"
+    assert s.ext != "" and _json.loads(s.ext)["granularity"] == "全书"
 
 
 def test_skill_description_preserved_full() -> None:

@@ -8,7 +8,7 @@ anyspark.server.skill_io — skill 文件格式（S118 提案 D：内容生态�
 ```markdown
 ---
 name: 悬念钩子
-target: writing
+type: writing
 tags: 悬疑,节奏
 description: 每章结尾用未解问题钩住读者
 ---
@@ -16,9 +16,11 @@ description: 每章结尾用未解问题钩住读者
 ---
 （example 案例——可选，具体情形摘录）
 ```
-- front-matter = 首个 `---` 块内的键值行（name 必填；target/tags/description 可选）
+- front-matter = 首个 `---` 块内的键值行（name 必填；type/tags/description 可选）
 - 其余正文按 `---` 分隔：第一段=content（必填），第二段=example（可选）
 - 判别严格：name + content 都非空才认（普通 md 笔记不被误判为 skill）
+- S127：type 键替代 target（PLAN-SKILL-UNIFY 阶段 1）；解析兼容旧文件
+  的 `target:` 键（两者都收，type 优先），输出统一 type 键
 """
 
 from __future__ import annotations
@@ -26,15 +28,16 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# target 合法值（对齐 WritingSkillStore）
-_VALID_TARGETS = ("writing", "main", "both")
+# type 合法值（对齐 WritingSkillStore，S127：writing/main/plot/both）
+_VALID_TARGETS = ("writing", "main", "plot", "both")
 
 
 def parse_skill_file(text: str) -> dict[str, Any] | None:
-    """解析 skill 文件 → {name, description, content, example, tags, target} | None。
+    """解析 skill 文件 → {name, description, content, example, tags, type} | None。
 
     None = 不是 skill 文件（无 front-matter 或 name/content 缺失）——
     ingest 判别据此走原 card/chapters 分支，防误判。
+    S127：front-matter 收 type/target 两键（旧文件 target 兼容），输出 type。
     """
     if not text or not text.strip():
         return None
@@ -57,7 +60,7 @@ def parse_skill_file(text: str) -> dict[str, Any] | None:
             continue
         k, _, v = ln.partition(":")
         k = k.strip().lower()
-        if k in ("name", "description", "content", "example", "tags", "target"):
+        if k in ("name", "description", "content", "example", "tags", "type", "target"):
             fm[k] = v.strip()
     name = fm.get("name", "").strip()
     if not name:
@@ -74,16 +77,16 @@ def parse_skill_file(text: str) -> dict[str, Any] | None:
         example = fm.get("example", "").strip()
     if not content:
         return None
-    target = fm.get("target", "writing").strip()
-    if target not in _VALID_TARGETS:
-        target = "writing"
+    typ = (fm.get("type") or fm.get("target") or "writing").strip()
+    if typ not in _VALID_TARGETS:
+        typ = "writing"
     return {
         "name": name,
         "description": fm.get("description", "").strip(),
         "content": content,
         "example": example,
         "tags": fm.get("tags", "").strip(),
-        "target": target,
+        "type": typ,
     }
 
 
@@ -93,13 +96,16 @@ def render_skill_file(
     content: str = "",
     example: str = "",
     tags: str = "",
-    target: str = "writing",
+    type: str = "writing",
 ) -> str:
-    """渲染 skill 为文件（front-matter 五段式，与 parse_skill_file 闭环）。"""
-    target = target if target in _VALID_TARGETS else "writing"
+    """渲染 skill 为文件（front-matter 五段式，与 parse_skill_file 闭环）。
+
+    S127：front-matter 键用 type（替代 target）；旧文件 target 键解析仍兼容。
+    """
+    type = type if type in _VALID_TARGETS else "writing"
     lines = ["---", f"name: {name}"]
-    if target:
-        lines.append(f"target: {target}")
+    if type:
+        lines.append(f"type: {type}")
     if tags:
         lines.append(f"tags: {tags}")
     if description:

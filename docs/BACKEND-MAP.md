@@ -86,21 +86,23 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 固化：方向卡 → explore/archive（项目档案）；约束 = 设定档"世界观规则"类别条目直接注入（不匹配，模型判断）
 ```
 
-### 2.5 拆书链路（S78：参考书 → 「书名」skill + 架构技法 → 点名注入）
+### 2.5 拆书链路（S78→S127：参考书 → 「书名」skill + 架构技法 + 剧情模式 → 点名注入）
 ```
 用户"拆这本书" → skill_refine(mode=book) / POST /api/library/{book_id}/refine-skill
-  → S114 三层拆书（generate_book）：
+  → S114+S127 拆书（generate_book，四步）：
       ① 微观方法论：结构感知选章（按卷分层整章拼批，无章结构回退字符均匀）
          → 分批拆解（GENERATE_PROMPT_BOOK 7 维）→ MERGE 归并成一份「书名」skill
-         （name=书名，book_name 注入修复自编书名；target=both）
+         （name=书名，book_name 注入修复自编书名；type=both）
       ② 骨架扫描：卷+章标题轨迹（无正文）→ 全书结构笔记（跨卷机关/主角目的/阶段）
       ③ 定点精读：笔记机关关键词定位原文揭示段 + 机关章 + 首尾章 → 精读
          （骨架笔记仅作线索需原文验证；example 机器校验防编造）→ 架构技法
-         skill（target=main，如「坏档与重开：时间循环式叙事」）
-  → 多条候选存草稿（方法论 + 架构技法各自确认，人工闸门）
-  → 确认后入库 skills 表
+         skill（type=main，如「坏档与重开：时间循环式叙事」）
+      ④ 剧情模式双落（S127）：骨架笔记 → 剧情模式 plot 子条（type=plot，
+         四要素存 ext 扩展 JSON；探索消费方阶段 2 接线）
+  → 多条候选存草稿（方法论 + 架构技法 + 剧情模式各自确认，人工闸门）
+  → 确认后入库 skills 表（type 字段：both/main/plot）
   → 写"这本书风格"时 write_chapter 的 skills 点名「书名」→ 方法论注入；
-    主循环规划时点名架构技法 → 全书机关参考
+    主循环规划时点名架构技法 → 全书机关参考；探索（阶段 2）读 type=plot 派生方向
 ```
 
 ## 3. 路由层职责表（16 router，~166 端点）
@@ -115,7 +117,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_settings | 设定档 categories/CRUD/uncensored/extract | settings/model/workspace |
 | routes_mode | 快速模式 GET/POST /api/settings/mode（模式/槽位/任务映射 S98） | mode_store/models |
 | — 任务分流（S98/S98b） | chat 写作→writing；explore/play 推演→planning；摘要/提炼/摄入→extraction；审读/改写/检测→editing；规则编译/后台杂项→general | model_for_task(deps, task) 全路由接入 |
-| routes_skills | 技巧 generate/CRUD/drafts + S118 export（skill 文件导出）+ bias | skills/skill_generator/bias |
+| routes_skills | 技巧 generate/CRUD/drafts + S118 export（skill 文件导出）+ bias（S127：type 字段 writing/main/plot/both，target 兼容） | skills/skill_generator/bias |
 | routes_agency | 能动性 CRUD/generate + 批量改写/审读 | agency/bias/batches/bg_queue |
 | routes_explore | intent/cards/path/dims/archive + check | dim_store/archive/explore |
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials | plots/templates_external/materials |
@@ -142,7 +144,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | setting_query | 设定档查证 | enable_domain |
 | search_chapters / read_context | 正文检索/锚点阅读 | enable_domain |
 | mind_register / mind_manage | 心智登记/管理 | enable_domain |
-| skill_refine | 技巧提炼候选 / 拆书（mode=book 三层：结构感知微观方法论 + 骨架扫描 + 定点精读架构技法，S78/S114） | enable_domain |
+| skill_refine | 技巧提炼候选 / 拆书（mode=book 四步：结构感知微观方法论 + 骨架扫描 + 定点精读架构技法 + 剧情模式双落，S78/S114/S127） | enable_domain |
 | role_play | 角色推演 | enable_domain |
 | ingest_document | 资料消化（⚠️与端点重复见审计） | enable_domain |
 | register_tool | 扩展工具注册 | enable_domain |
@@ -164,7 +166,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | ManualStore | align/manual | manual_entries/manual_notices | 心智全链 |
 | BiasStore | align/bias | ai_bias | agent 注入/skills 面板 |
 | AgencyStore | align/agency | agency_levels/agency_state | 能动性全链 |
-| WritingSkillStore | align/skills | writing_skills/drafts | 技巧注入 |
+| WritingSkillStore | align/skills | writing_skills/drafts（type 列 + ext 扩展列，S127） | 技巧注入/剧情模式 |
 | SignalStore | align/signals | signals | 信号采集 |
 | StoryPlanStore | align/plan | chapter_plans | 计划 |
 | StoryTreeStore/StoryThreadStore | align/storytree | story_nodes/story_threads | 叙事树/线进度 |

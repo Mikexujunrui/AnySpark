@@ -97,7 +97,7 @@ def ingest_pipeline(
                     content=skill["content"],
                     example=skill["example"],
                     tags=skill["tags"],
-                    target=skill["target"],
+                    type=skill["type"],
                     source="import",
                 )
                 if draft is None:

@@ -16,7 +16,7 @@ from anyspark.server.skill_io import parse_skill_file, render_skill_file
 def test_parse_skill_file_basic() -> None:
     md = """---
 name: 悬念钩子
-target: writing
+type: writing
 tags: 悬疑,节奏
 description: 每章结尾用未解问题钩住读者
 ---
@@ -27,10 +27,27 @@ description: 每章结尾用未解问题钩住读者
     s = parse_skill_file(md)
     assert s is not None
     assert s["name"] == "悬念钩子"
-    assert s["target"] == "writing"
+    assert s["type"] == "writing"  # S127：type 键
     assert s["tags"] == "悬疑,节奏"
     assert "未解决的问题" in s["content"]
     assert "走廊尽头" in s["example"]
+
+
+def test_parse_skill_file_legacy_target_key() -> None:
+    """S127：旧文件 target 键兼容（type 优先，target 回落）。"""
+    md = """---
+name: 旧文件
+target: main
+tags: 结构
+---
+正文内容
+"""
+    s = parse_skill_file(md)
+    assert s is not None and s["type"] == "main"
+    # type 优先于 target
+    md2 = "---\nname: 新文件\ntype: plot\ntarget: main\n---\n正文\n"
+    s2 = parse_skill_file(md2)
+    assert s2 is not None and s2["type"] == "plot"
 
 
 def test_parse_skill_file_not_skill() -> None:
@@ -45,20 +62,24 @@ def test_parse_skill_file_not_skill() -> None:
 
 
 def test_parse_skill_file_target_fallback() -> None:
-    md = "---\nname: X\ntarget: 非法值\n---\n正文内容\n"
+    md = "---\nname: X\ntype: 非法值\n---\n正文内容\n"
     s = parse_skill_file(md)
-    assert s is not None and s["target"] == "writing"
+    assert s is not None and s["type"] == "writing"
+    # 旧文件 target 键非法值同样回落
+    md2 = "---\nname: X2\ntarget: 非法值\n---\n正文内容\n"
+    s2 = parse_skill_file(md2)
+    assert s2 is not None and s2["type"] == "writing"
 
 
 def test_render_parse_roundtrip() -> None:
-    """导出格式 = 导入判别格式（闭环）。"""
+    """导出格式 = 导入判别格式（闭环）。S127：type 键往返。"""
     orig = {
         "name": "对白机锋",
         "description": "用潜台词代替直白信息",
         "content": "对白里只给一半信息，让读者自己补。",
         "example": "「你来了。」「我来过。」",
         "tags": "对白,张力",
-        "target": "writing",
+        "type": "writing",
     }
     rendered = render_skill_file(**orig)
     parsed = parse_skill_file(rendered)
@@ -68,7 +89,17 @@ def test_render_parse_roundtrip() -> None:
     assert parsed["content"] == orig["content"]
     assert parsed["example"] == orig["example"]
     assert parsed["tags"] == orig["tags"]
-    assert parsed["target"] == orig["target"]
+    assert parsed["type"] == orig["type"]
+
+
+def test_render_plot_type_roundtrip() -> None:
+    """S127：plot 类型 skill 导出导入闭环（四要素在 content/description）。"""
+    rendered = render_skill_file(
+        name="时间回环", description="剧情模式说明", content="主线以回环组织。", type="plot"
+    )
+    assert "type: plot" in rendered
+    parsed = parse_skill_file(rendered)
+    assert parsed is not None and parsed["type"] == "plot"
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +138,7 @@ def test_ingest_skill_file_to_draft() -> None:
         name="导入测试技法",
         description="上传判别测试",
         content="写作时先定节奏，再填内容。",
-        target="writing",
+        type="writing",
     )
     r = ws.save_upload("main", "test_skill.skill.md", skill_md.encode())
     assert r.exists()
