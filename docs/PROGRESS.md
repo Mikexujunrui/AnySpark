@@ -3403,7 +3403,7 @@ S127 拆书 plot 子条从此进入探索模板源，生产/消费闭环打通�
 的多步 LLM 管道声明化为预置 workflow 模板——确定性步骤作 script 节点、LLM 步骤作 agent
 节点；验证标准：模板结果与现工具同输入对拍一致（含骨架/精读/案例校验全链路）。
 
-**交付（commit `TODO`）**：
+**交付（commit `21a58df`）**：
 
 1. **引擎补集合遍历原语（W3-A 落地，workflow/engine.py + definition.py）**：
    - loop 支持 collection_var 指向上游 JSON 数组（或 {batches:[...]} 对象），逐项写入
