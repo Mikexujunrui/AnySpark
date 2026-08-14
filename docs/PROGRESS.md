@@ -45,7 +45,6 @@
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
-> [S135] 正在改 `tools_domain.py` + `toolkit.py` + `app.py`：WORKFLOW 收尾（skill_refine mode=book 变快捷入口→底层走「拆书提炼」模板，W1-B 归一不降级）——已声明（完成提交后删本行）
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
@@ -3740,3 +3739,38 @@ docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回
 
 **下一步**：阶段 C 中规模实测（真实库 10-20 章：中断→resume→rollback 闭环）→
 阶段 D 收编内存 batch（A+B+C 全绿后）。
+
+---
+
+## S139 阶段 C 中规模实测——中断→重启→续跑→回滚闭环（PLAN-SCALE-SAFETY 阶段 C）（已完成 ✅）
+
+**背景**：PLAN-SCALE-SAFETY 阶段 C——验证 A（resume）+ B（回溯）在规模化场景真可用，
+才算"规模化可信赖"成立。自动化（可重复）+ 真实库冒烟（实战链路）双层验证。
+
+**交付（commit `TODO`）**：
+
+1. **自动化测试（test_scale_phase_c.py 2 用例）**：
+   - 20 章大 loop（图谱抽取，无 approval）全量跑完，引擎稳定；同名实体合并为 1 条
+     （图库按名去重，非 bug）
+   - 「章节加料」loop 中途中断（engine.request_stop → cancelled）→ 同 db 新实例
+     （模拟服务重启）→ resume 续跑完成 → 每章版本历史恰 1 条（断点续跑不重跑
+     已 done 章节——若重跑该章会出现第 2 条版本记录）
+   - 关键设计：用加料（写回章节）而非图谱抽取验证"不重复处理"——同名实体合并
+     会掩盖重跑，版本条数是最精确的重复检测
+
+2. **真实库冒烟（curl 实战链路）**：
+   - 备份第八/九章 → 「批量改写」2 章（真实模型，指令"语言更凝练"）→ done
+   - 版本历史带 `批量任务/任务{task_id}` 标识（B1 生效）
+   - rollback → 两章内容逐字节还原（977/2299 与备份完全一致）→ 二次 rollback 幂等
+     （restored 空）
+
+**验证**：全量 579 绿；ruff+format+mypy strict 全绿（196 文件）。
+
+**踩坑**：
+- 图谱抽取实体同名合并 → 不能用于检测续跑重跑；改用加料版本条数
+- approve 端点同步阻塞（内部 run_task 跑完整个 loop）→ 中断测试须在独立线程
+  approve + 主线程 request_stop 同一引擎实例（不同实例 stop 不到对方线程）
+- python urllib 对本地服务偶发 502（keep-alive/代理怪癖）→ 实测统一用 curl
+
+**下一步**：阶段 D 收编内存 batch（A+B+C 全绿，前提满足）——删 routes_agency batch
+路由 + deps batches/queue/lock + tasks run_batch_*；前端 BatchPanel 只留工作流模式。

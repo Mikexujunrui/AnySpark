@@ -66,6 +66,9 @@ B 回溯安全网 ─┘
   支持再次回滚/重跑。
 
 ## 六、实施记录
-- **S138**：阶段 A（resume 端点）+ 阶段 B（回溯三件套）核心实施完成（commit 见 PROGRESS）。
-  阶段 A 全绿：resume done 幂等、note 带任务标识、单章恢复可再回滚、批级回滚全还原+幂等。
-- 剩余：阶段 C（中规模实测）→ 阶段 D（收编内存 batch，前提 A+B+C 全绿）。
+- **S138**：阶段 A（resume 端点）+ 阶段 B（回溯三件套）实施完成（commit `c7afaa5`）。
+- **S139**：阶段 C 中规模实测完成（自动化 20 章中断→重启→续跑→不重复写回 + 真实库
+  批量改写→rollback→逐字节还原→二次幂等）。**A+B+C 全绿，阶段 D 前置条件满足。**
+- 剩余：阶段 D（收编内存 batch）——删 routes_agency /api/batch/* + deps
+  batches/batch_queue/batch_lock + tasks run_batch_rewrite/review；前端 BatchPanel
+  只留工作流模式。
