@@ -824,6 +824,11 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   （或 {batches: [...]} 对象），逐项写入 item_var（缺省 "item"）供 body 引用，迭代数=
   集合长度（max_iterations 安全上限）；与 continue_condition 条件循环二选一（校验互斥）。
   断点恢复：从 output 记录迭代数续跑，前几轮累计结果已持久化不重跑。
+- S133（WORKFLOW 第 2 批）：**预置批量模板**——「批量改写」（重操作：loop 前 approval
+  闸门，逐章 agent 改写 → write_chapter 落盘，覆盖前旧版进版本历史）与「批量审读」
+  （轻操作只读不改，无闸门）。script 函数 batch_prepare（章节 id 集合）/chapter_by_id
+  （原文）/chapter_title_by_id（标题）；集合遍历逐章，断点恢复/失败重试。前端
+  BatchPanel 加工作流模式开关（归一不降级：旧内存任务与新模板并存）。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/

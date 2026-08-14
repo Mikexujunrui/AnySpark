@@ -39,8 +39,8 @@
 >   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1 ✅ + S128 阶段 2 ✅ + S130 阶段 3 ✅ 三阶段全部完成（容器统一收官）
 >   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）——S129 第 1 批（拆书模板化打样）已实施
 > - **下一步开工（建议顺序）**：
->   1. ~~SKILL 阶段 1/2/3~~ ✅（S127/S128/S130）；~~WORKFLOW 第 1 批：拆书模板化打样~~ ✅（S129）
->   2. WORKFLOW 第 2 批：批量改写/审读 → 模板（集合遍历已验证 + approval 闸门 + 进度回传）
+>   1. ~~SKILL 阶段 1/2/3~~ ✅（S127/S128/S130）；~~WORKFLOW 第 1 批拆书打样~~ ✅（S129）；~~WORKFLOW 第 2 批批量模板~~ ✅（S133）
+>   2. WORKFLOW 第 3 批：图谱抽取/信号收集/摘要等轻流程 → 非全程模板（直接出结果）
 >   3. 加料模板（先实测 NSFW 审核坎）/ 本地 vLLM/LM Studio 适配文档（S131 接续）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
@@ -56,7 +56,7 @@
   4. **设定档渐进式披露**：条目多时分段/按需注入（当前全量）
   5. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
   6. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
-  7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路；S129 第 1 批拆书打样已完成）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书打样 ✅→批量→轻流程），每批对拍验证可回退
+  7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路；S129 第 1 批拆书打样 ✅ + S133 第 2 批批量模板 ✅）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书 ✅→批量 ✅→轻流程），每批对拍验证可回退
   8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127/S128/S130 三阶段全部完成 ✅）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（pack_id 聚合，整包引用写作只取 writing/both——纪律 3），拆书一次产出整包（含剧情模式骨架派生）；templates 已并入 ✅；workflow（执行）保持独立——加 type ✅ → 并 templates ✅ → 书名包 ✅，skills/templates 归属竞争彻底消除
 - ~~httpx2 迁移~~ ✅（S66 完成）；~~Autopilot~~ —— 已划掉：S59 工作流（loop+gate+approval+AI 生成流程）已吸收其全部机制价值，需要"全书自动连写"时用 workflow_generate + 人工确认 + 跑循环即可，不另起包（同评审团判断逻辑）
 - 纪律：每阶段开工前向主人确认；对设计的偏离/新增先确认再改 DESIGN.md
@@ -3509,3 +3509,48 @@ skills/templates 归属竞争彻底消除。
 
 **下一步**：WORKFLOW 第 2 批（批量改写/审读 → 模板，集合遍历已验证 + approval 闸门）
 + 加料模板（先实测 NSFW 审核坎）；PLAN-SKILL-UNIFY 三阶段全部完成，容器统一收官。
+
+---
+
+## S133 WORKFLOW 第 2 批——批量改写/审读 → 预置模板（approval 闸门 + 集合遍历）（已完成 ✅）
+
+**背景**：PLAN-WORKFLOW-UNIFY 第 2 批（W1-B/W2 已拍板）。目标：批量改写/审读从内存级
+后台队列（deps.batches，无持久化/无断点）迁移为预置 workflow 模板——重操作（改写覆盖原稿）
+带 approval 闸门（W2），轻操作（审读只读）无闸门；集合遍历逐章（W3-A 已验证）；前端
+BatchPanel 对接（归一不降级：旧任务与新模板并存）。
+
+**交付（commit `TODO`）**：
+
+1. **script 函数 3 个（app.py _wf_run_script）**：
+   - batch_prepare：收集章节 id 集合（params.chapter_ids JSON/逗号串，缺省全部章节）→
+     JSON 数组（loop collection_var 遍历源）
+   - chapter_by_id：按 chapter_id 读原文（标题+正文，>20000 告知边界对齐 run_batch_rewrite）
+   - chapter_title_by_id：按 chapter_id 取标题（write_chapter/review_chapter 落盘定位用）
+
+2. **预置模板 2 个（app.py 种子，幂等）**：
+   - 「批量改写」：prep → approval 闸门（覆盖前人工确认，W2 重操作强制）→
+     loop[read → title → rewrite agent → write_chapter script]（集合遍历逐章，
+     覆盖前旧版进版本历史）
+   - 「批量审读」：prep → loop[read → title → review_chapter script]（轻操作无闸门）
+
+3. **前端对接（BatchPanel.tsx）**：
+   - 工作流模式开关（勾选后改写/审读走预置模板，否则旧内存任务）
+   - 任务轮询（进度条 + 节点完成数）；改写闸门弹窗（确认覆盖/取消）；
+     结束可关闭进度；approval 后自动续跑轮询
+
+4. **验证（test_workflow_batch.py 4 用例）**：
+   - 两模板已种入 + 结构断言（改写含 approval/审读无 approval + 集合遍历）
+   - 审读轻操作直跑完（逐章报告落任务）
+   - 改写停在闸门（waiting_approval，确认前不执行改写）→ approve 后逐章改写落盘
+   - 改写驳回 → 任务失败，章节未被覆盖
+
+**测试**：新增 4 用例；全量 552 绿；ruff+format+mypy strict 全绿；前端 tsc/lint/build 全绿。
+
+**踩坑**：
+- 阶段号撞车：并行会话已用 S131（多模型）/S132（心智模型接线）——本批实为 S133
+  （开工时尚未知，代码先写 S132，提交前全局改回 S133）
+- signals.py 格式债：并行 S132 提交未过 ruff format（门禁红），本节机械修复（纯格式）
+- 批量改写 approval 前禁用按钮 + 确认前不执行改写（fake 模型验证 prompts 无改写调用）
+
+**下一步**：WORKFLOW 第 3 批（图谱抽取/信号收集/摘要等轻流程 → 非全程模板）；加料模板
+（先实测 NSFW 审核坎）。

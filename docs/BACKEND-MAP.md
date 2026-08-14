@@ -130,7 +130,7 @@ _bg_queue（deps.bg_queue）→ 7 种任务：
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials（S128：模式库读 skill 表 type=plot） | plots/skills/materials |
 | routes_graph | 图谱 types/entities/relations/events/context/extract/impact | graph/graph_extractor/impact |
 | routes_story | 计划 plan/叙事树 nodes/threads/layout | plans/story_tree/story_threads |
-| routes_workflow | 工作流模板/草稿/任务 CRUD+run（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置拆书模板 S129：script 函数 book_refine_prepare/titles/accumulate/refine_input/finish） | workflow_store/engine/generator |
+| routes_workflow | 工作流模板/草稿/任务 CRUD+run（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129（book_refine_* script）+ 批量改写/审读 S133（batch_prepare/chapter_by_id/chapter_title_by_id script，改写带 approval 闸门）） | workflow_store/engine/generator |
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 

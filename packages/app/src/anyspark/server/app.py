@@ -186,6 +186,19 @@ def _migrate_templates_to_skills(skills: WritingSkillStore, db_path: str | Path)
 # agent 节点（可断点恢复/可重试/节点级记账）。prompt 文本种子时从 skillgen 常量
 # 内联进模板（模板=数据：用户改节点指令即改拆解要求，不碰代码）。
 def _seed_book_refine_template(workflow_store: Any) -> None:
+    """预置拆书/批量改写/批量审读 workflow 模板（WORKFLOW 第 1+2 批）。"""
+    from anyspark.workflow import WorkflowDef
+
+    existing = {t["name"] for t in workflow_store.list_templates()}
+    if "拆书提炼" not in existing:
+        _seed_refine_template(workflow_store, WorkflowDef)
+    if "批量改写" not in existing:
+        _seed_batch_rewrite_template(workflow_store, WorkflowDef)
+    if "批量审读" not in existing:
+        _seed_batch_review_template(workflow_store, WorkflowDef)
+
+
+def _seed_refine_template(workflow_store: Any, wf_def_cls: Any) -> None:
     from anyspark.align.skillgen import (
         GENERATE_PROMPT_BOOK,
         GENERATE_PROMPT_PLOT_FROM_SKELETON,
@@ -193,13 +206,8 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
         REFINE_PROMPT,
         SKELETON_PROMPT,
     )
-    from anyspark.workflow import WorkflowDef
 
-    # 同名幂等：已存在（含用户改过）则跳过
-    existing = {t["name"] for t in workflow_store.list_templates()}
-    if "拆书提炼" in existing:
-        return
-    wf = WorkflowDef.from_dict(
+    wf = wf_def_cls.from_dict(
         {
             "name": "拆书提炼",
             "description": (
@@ -338,6 +346,184 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
     errors = wf.validate()
     if errors:
         raise ValueError(f"拆书模板校验失败: {errors}")
+    workflow_store.add_template(wf)
+
+
+def _seed_batch_rewrite_template(workflow_store: Any, wf_def_cls: Any) -> None:
+    """S133：批量改写模板——多章统一指令改写（重操作：loop 前强制 approval 闸门）。
+
+    prep 收集章节集合 → approval 人工确认（覆盖原稿前把关，W2 重操作强制）→
+    loop 集合遍历逐章：chapter_by_id 读原文 → agent 按指令改写 → write_chapter 落盘
+    （覆盖前旧版进版本历史，与 run_batch_rewrite 一致）。
+    运行参数：chapter_ids（JSON 数组或逗号串，缺省全部章节）+ instruction。
+    """
+    wf = wf_def_cls.from_dict(
+        {
+            "name": "批量改写",
+            "description": (
+                "多章统一指令改写（改文风/改情节）。覆盖原稿前人工确认闸门；"
+                "逐章集合遍历（断点恢复/失败重试）；覆盖前旧版进版本历史。"
+                "运行参数：chapter_ids=章节id数组或逗号串（缺省全部）；instruction=改写指令。"
+            ),
+            "nodes": [
+                {
+                    "id": "prep",
+                    "kind": "script",
+                    "label": "收集章节",
+                    "params": {
+                        "function": "batch_prepare",
+                        "chapter_ids": "{{chapter_ids}}",
+                        "output_key": "chapter_ids",
+                    },
+                },
+                {
+                    "id": "gate_confirm",
+                    "kind": "approval",
+                    "label": "确认覆盖",
+                    "params": {"prompt": "批量改写将覆盖所选章节（旧版进版本历史），确认执行？"},
+                },
+                {
+                    "id": "loop",
+                    "kind": "loop",
+                    "label": "逐章改写",
+                    "params": {
+                        "body": ["read", "title", "rewrite", "save"],
+                        "max_iterations": 500,  # 安全上限（实际=章节集合长度）
+                        "collection_var": "chapter_ids",
+                        "item_var": "cid",
+                    },
+                },
+                {
+                    "id": "read",
+                    "kind": "script",
+                    "label": "读原文",
+                    "params": {
+                        "function": "chapter_by_id",
+                        "item_var": "cid",
+                        "output_key": "chapter_text",
+                    },
+                },
+                {
+                    "id": "title",
+                    "kind": "script",
+                    "label": "取标题",
+                    "params": {
+                        "function": "chapter_title_by_id",
+                        "item_var": "cid",
+                        "output_key": "chapter_title",
+                    },
+                },
+                {
+                    "id": "rewrite",
+                    "kind": "agent",
+                    "label": "按指令改写",
+                    "params": {
+                        "instruction": (
+                            "按用户指令改写以下章节。保持剧情走向/人物/设定/时间线一致，"
+                            "只按指令调整（风格/情节/表达）。直接输出改写后的完整正文，"
+                            "不要解释。\n【指令】{{instruction}}\n【原章】\n{{chapter_text}}\n"
+                            "【改写后正文】"
+                        ),
+                        "output_key": "rewritten",
+                    },
+                },
+                {
+                    "id": "save",
+                    "kind": "script",
+                    "label": "写回章节",
+                    "params": {
+                        "function": "write_chapter",
+                        "chapter_title": "{{chapter_title}}",
+                        "text_key": "rewritten",
+                        "output_key": "saved",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "prep", "target": "gate_confirm"},
+                {"source": "gate_confirm", "target": "loop"},
+            ],
+        }
+    )
+    errors = wf.validate()
+    if errors:
+        raise ValueError(f"批量改写模板校验失败: {errors}")
+    workflow_store.add_template(wf)
+
+
+def _seed_batch_review_template(workflow_store: Any, wf_def_cls: Any) -> None:
+    """S133：批量审读模板——多章检测网审读（轻操作：只读不改，无 approval 闸门）。
+
+    prep 收集章节集合 → loop 集合遍历逐章：chapter_by_id 读原文 → review_chapter
+    检测网审读。逐章报告落任务 results（断点恢复/失败重试）。
+    运行参数：chapter_ids（JSON 数组或逗号串，缺省全部章节）。
+    """
+    wf = wf_def_cls.from_dict(
+        {
+            "name": "批量审读",
+            "description": (
+                "多章检测网审读（一致性/动机因果/情感连贯等）。只读不改，无人工闸门；"
+                "逐章集合遍历。运行参数：chapter_ids=章节id数组或逗号串（缺省全部）。"
+            ),
+            "nodes": [
+                {
+                    "id": "prep",
+                    "kind": "script",
+                    "label": "收集章节",
+                    "params": {
+                        "function": "batch_prepare",
+                        "chapter_ids": "{{chapter_ids}}",
+                        "output_key": "chapter_ids",
+                    },
+                },
+                {
+                    "id": "loop",
+                    "kind": "loop",
+                    "label": "逐章审读",
+                    "params": {
+                        "body": ["read", "title", "review"],
+                        "max_iterations": 500,
+                        "collection_var": "chapter_ids",
+                        "item_var": "cid",
+                    },
+                },
+                {
+                    "id": "read",
+                    "kind": "script",
+                    "label": "读原文",
+                    "params": {
+                        "function": "chapter_by_id",
+                        "item_var": "cid",
+                        "output_key": "chapter_text",
+                    },
+                },
+                {
+                    "id": "title",
+                    "kind": "script",
+                    "label": "取标题",
+                    "params": {
+                        "function": "chapter_title_by_id",
+                        "item_var": "cid",
+                        "output_key": "chapter_title",
+                    },
+                },
+                {
+                    "id": "review",
+                    "kind": "script",
+                    "label": "检测网审读",
+                    "params": {
+                        "function": "review_chapter",
+                        "chapter_title": "{{chapter_title}}",
+                        "output_key": "review_report",
+                    },
+                },
+            ],
+            "edges": [{"source": "prep", "target": "loop"}],
+        }
+    )
+    errors = wf.validate()
+    if errors:
+        raise ValueError(f"批量审读模板校验失败: {errors}")
     workflow_store.add_template(wf)
 
 
@@ -766,6 +952,60 @@ def build_app(
             if len(lines) == 1:
                 return NodeResult(output=f"参考书中未命中「{keyword}」（含图谱/设定层）。")
             return NodeResult(output="\n\n".join(lines))
+        if fn == "batch_prepare":
+            """S133（WORKFLOW 第 2 批）：批量任务准备——收集章节 id 集合（遍历源）。
+
+            params：chapter_ids（逗号分隔或 JSON 数组，支持 {{var}} 从 run params 传入）；
+            缺省=当前项目全部章节（list_chapters 同源）。输出 JSON 数组供 loop collection_var。
+            """
+            import json as _json
+
+            raw = _wf_resolve(str(node.params.get("chapter_ids") or ""), ctx).strip()
+            ids: list[str] = []
+            if raw:
+                try:
+                    parsed = _json.loads(raw)
+                    if isinstance(parsed, list):
+                        ids = [str(x) for x in parsed]
+                except Exception:
+                    ids = [x.strip() for x in raw.split(",") if x.strip()]
+            if not ids:
+                # 缺省全部章节
+                ids = [c.id for c in chapters.list_by_book(ctx.book_id)]
+            if not ids:
+                return NodeResult(error="batch_prepare 无章节（chapter_ids 为空且项目无章节）")
+            return NodeResult(output=_json.dumps(ids, ensure_ascii=False))
+        if fn == "chapter_by_id":
+            """S133：按 chapter_id 读章节（标题+正文）——loop 集合遍历逐项喂 agent。
+
+            读 params.item_var（缺省 "item"）为 chapter_id，输出「标题\n正文」；
+            超长章（>20000）告知边界（对齐 run_batch_rewrite）。
+            """
+            cid = str(ctx.var(str(node.params.get("item_var") or "item")) or "").strip()
+            if not cid:
+                return NodeResult(error="chapter_by_id 缺 item（chapter_id）")
+            ch = chapters.get(cid)
+            if ch is None:
+                return NodeResult(error=f"章节不存在: {cid}")
+            ch_content = ch.content or ""
+            if len(ch_content) > 20000:
+                ch_content = (
+                    f"【注意：本章全文 {len(ch.content)} 字，以下仅前 20000 字，"
+                    "末尾部分未展示】\n" + ch_content[:20000]
+                )
+            return NodeResult(output=f"【{ch.title}】\n{ch_content}")
+        if fn == "chapter_title_by_id":
+            """S133：按 chapter_id 取章标题（write_chapter 落盘用）。
+
+            读 params.item_var（缺省 "item"）为 chapter_id → 输出标题。
+            """
+            cid = str(ctx.var(str(node.params.get("item_var") or "item")) or "").strip()
+            if not cid:
+                return NodeResult(error="chapter_title_by_id 缺 item（chapter_id）")
+            ch = chapters.get(cid)
+            if ch is None:
+                return NodeResult(error=f"章节不存在: {cid}")
+            return NodeResult(output=ch.title)
         if fn == "book_refine_prepare":
             """S129（WORKFLOW 第 1 批）：拆书准备——从书库读全书 → 选章 → 分批。
 
@@ -955,9 +1195,9 @@ def build_app(
                 return NodeResult(error="skills 未装配（无法落草稿）")
             cands: list[dict[str, str]] = []
             # 书名方法论（GENERATE_PROMPT_BOOK 单元素输出）→ both
-            for raw in _ps(merge_raw)[:1]:
-                raw["type"] = "both"
-                cands.append(raw)
+            for mk in _ps(merge_raw)[:1]:
+                mk["type"] = "both"
+                cands.append(mk)
             # 架构技法（REFINE_PROMPT 多元素）→ main + 案例机器校验
             arch_cands = _ps(arch_raw)
             for ac in arch_cands:

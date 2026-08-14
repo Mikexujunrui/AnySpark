@@ -122,8 +122,7 @@ class SignalStore:
         """
         with self._lock:
             rows = self._conn.execute(
-                "SELECT * FROM signals WHERE book_id=? AND processed=0 "
-                "ORDER BY rowid ASC LIMIT ?",
+                "SELECT * FROM signals WHERE book_id=? AND processed=0 ORDER BY rowid ASC LIMIT ?",
                 (book_id, limit),
             ).fetchall()
         return [_signal_from_row(r) for r in rows]
@@ -133,9 +132,7 @@ class SignalStore:
         if not ids:
             return
         with self._lock:
-            self._conn.executemany(
-                "UPDATE signals SET processed=1 WHERE id=?", [(i,) for i in ids]
-            )
+            self._conn.executemany("UPDATE signals SET processed=1 WHERE id=?", [(i,) for i in ids])
             self._conn.commit()
 
     def close(self) -> None:
