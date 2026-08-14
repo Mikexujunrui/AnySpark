@@ -80,6 +80,15 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
             raise HTTPException(status_code=404, detail="文件不存在")
         return FileResponse(p)
 
+    @router.delete("/api/upload/{book_id}/{filename}", response_model=dict[str, Any])
+    def delete_upload_file(book_id: str, filename: str) -> dict[str, Any]:
+        """S144：删除上传区素材（传错/重复清理；文件名消毒防穿越）。"""
+        removed = deps.workspace.delete_upload(book_id, filename)
+        if not removed:
+            raise HTTPException(status_code=404, detail="文件不存在")
+        logger.info("上传区删除: %s/%s", book_id, filename)
+        return {"ok": True, "name": filename}
+
     # ------------------------------------------------------------------
     # S141（审计缺口①修复）：AI 文件沙箱浏览——read_file/write_file 的产物
     # （笔记/灵感/参考资料）前端可见。人能看到 AI 记的东西（内容自然语言可编辑）。

@@ -45,6 +45,7 @@
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
  > 当前无会话声明。
+> [S145] 正在改 `agent_factory.py`（补 library 装配）+ `schemas.py`/`tools_domain.py`（图谱注入过期文案纠偏）+ `scripts/current_state.py`（硬编码 46 → 动态）+ `frontend/` ChatPanel/MessageList（校验按钮接 /api/check）+ `check/reviewers.py`（6000 截断分块）+ docs/uml + BACKEND-MAP——第三方评审修复（REVIEW-THIRD-PARTY*.md），不碰 S144 的 workspace.py/routes_workspace.py/UploadPanel.tsx/uploadStore.ts（完成提交后删本行）
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
@@ -3930,3 +3931,28 @@ AI 文件编辑闭环（人改 AI 笔记）；敏感指令加料按需实测。
 
 **下一步**：无剩余缺口。候选：CURRENT-STATE 接前端状态面板（--json）；敏感指令
 加料按需实测；文件删除入口（FilesPanel 暂无删除）。
+
+---
+
+## S144 上传区删除——素材区 CRUD 补全（主人实需驱动）（已完成 ✅）
+
+**背景**：主人指出"上传区=素材区，应该能删文件"——此前只有上传/读取/消化，
+传错/重复的素材删不掉（只能留或手动去文件系统）。CRUD 完整性真实缺口。
+
+**交付（commit `TODO`）**：
+
+1. **后端**：Workspace.delete_upload（文件名消毒防穿越）+ DELETE
+   /api/upload/{book_id}/{filename}（不存在 404，删除 200）
+2. **前端**：api/upload.ts deleteUploadFile + uploadStore.deleteUpload +
+   UploadPanel 每项加"删除"按钮（**确认防误删**：点删除→确认删/取消，
+   删除后刷新列表）
+
+**验证**：
+- 测试（test_workspace.py +1）：上传→列表可见→删除→列表消失→再删 404
+- 全量 585 绿；ruff+format+mypy strict 全绿；前端 tsc/lint/build 绿
+- 真实链路 curl：上传→删除 200→再删 404→列表清空
+
+**踩坑**：python urllib 对重启后服务偶发 502（keep-alive 怪癖）→ 实测统一 curl。
+
+**下一步**：无剩余缺口。候选：CURRENT-STATE 接前端状态面板（--json，意义低待
+主人需要）、敏感指令加料按需实测、AI 文件沙箱删除入口（同上传区模式按需）。

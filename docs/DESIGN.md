@@ -870,6 +870,9 @@ workflow finish 三路一致）；整包引用=write_chapter 点名 pack_id → 
   工具写前查标记——人工保存过的文件不再静默覆盖（返回提示让 agent 告知用户，尊重
   人的改动）；③ FilesPanel 加编辑/保存（textarea 编辑态）；④ 沙箱列表排除隐藏标记文件。
   "内容自然语言可编辑"完整闭环：AI 写 → 人看 → 人改 → AI 不覆盖。
+- S144（主人实需：上传区=素材区应可删）：DELETE /api/upload/{book}/{filename}——素材
+  传错/重复清理；前端 UploadPanel 每项加删除按钮（确认防误删）；Workspace.delete_upload
+  （文件名消毒防穿越）。上传区 CRUD 补全。
 - 条件两种：**硬规则**（{{var}} 比较表达式，照搬 DeterminFlow condition_parser 语法：
   ==/!=/>/>=/</<= + AND/OR/NOT + 括号）与**模型判断**（自然语言条件）。
 - 断点恢复：任务启动时冻结定义快照；每节点状态落盘 SQLite（pending/running/done/

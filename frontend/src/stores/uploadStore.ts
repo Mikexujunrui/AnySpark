@@ -2,6 +2,7 @@ import { create } from "zustand";
 import {
   uploadFile,
   ingestFile,
+  deleteUploadFile,
   listWorkspace,
   type UploadItem,
   type IngestResult,
@@ -32,6 +33,7 @@ interface UploadState {
   fetchUploads: (bookId?: string) => Promise<void>;
   uploadAndIngest: (file: File, mode: IngestMode, bookId?: string) => Promise<void>;
   ingest: (filename: string, mode: IngestMode, bookId?: string) => Promise<void>;
+  deleteUpload: (filename: string, bookId?: string) => Promise<void>;
   clearMsg: () => void;
 }
 
@@ -80,6 +82,17 @@ export const useUploadStore = create<UploadState>((set, get) => ({
   },
 
   clearMsg: () => set({ ingestMsg: null, error: null }),
+
+  // S144：删除上传区素材
+  deleteUpload: async (filename, bookId = "main") => {
+    set({ loading: true, error: null });
+    try {
+      await deleteUploadFile(filename, bookId);
+      await get().fetchUploads(bookId);
+    } catch (e) {
+      set({ error: (e as Error).message, loading: false });
+    }
+  },
 }));
 
 function formatIngestMsg(result: IngestResult): string {

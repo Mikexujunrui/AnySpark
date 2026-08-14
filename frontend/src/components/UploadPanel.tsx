@@ -30,11 +30,13 @@ export default function UploadPanel({ open, onClose, embedded = false, bookId = 
   const fetchUploads = useUploadStore((s) => s.fetchUploads);
   const uploadAndIngest = useUploadStore((s) => s.uploadAndIngest);
   const ingest = useUploadStore((s) => s.ingest);
+  const deleteUpload = useUploadStore((s) => s.deleteUpload);
   const clearMsg = useUploadStore((s) => s.clearMsg);
 
   const [file, setFile] = useState<File | null>(null);
   const [mode, setMode] = useState<IngestMode>("auto");
   const [busyName, setBusyName] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null); // S144：删除确认
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -60,6 +62,14 @@ export default function UploadPanel({ open, onClose, embedded = false, bookId = 
     setBusyName(name);
     await ingest(name, m, bookId);
     setBusyName(null);
+  };
+
+  // S144：删除上传区素材（确认后执行）
+  const handleDelete = async (name: string) => {
+    setBusyName(name);
+    await deleteUpload(name, bookId);
+    setBusyName(null);
+    setConfirmDelete(null);
   };
 
   // S79：图片类型判断（素材库缩略图）
@@ -179,11 +189,38 @@ export default function UploadPanel({ open, onClose, embedded = false, bookId = 
                   </select>
                   <button
                     onClick={() => handleIngest(u.name, mode)}
-                    disabled={loading}
+                    disabled={loading || busyName !== null}
                     className="text-[11px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-200 rounded"
                   >
                     {busyName === u.name ? "消化中..." : "消化"}
                   </button>
+                  {/* S144：删除上传区素材（确认防误删） */}
+                  {confirmDelete === u.name ? (
+                    <>
+                      <button
+                        onClick={() => handleDelete(u.name)}
+                        disabled={busyName !== null}
+                        className="text-[11px] px-2 py-1 bg-red-600 hover:bg-red-500 text-white rounded"
+                      >
+                        确认删
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(null)}
+                        className="text-[11px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded"
+                      >
+                        取消
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => setConfirmDelete(u.name)}
+                      disabled={busyName !== null}
+                      title="删除该素材文件"
+                      className="text-[11px] px-2 py-1 bg-zinc-800 hover:bg-red-900/50 hover:text-red-300 text-zinc-500 rounded border border-zinc-700/60"
+                    >
+                      删除
+                    </button>
+                  )}
                 </div>
               </div>
             ))

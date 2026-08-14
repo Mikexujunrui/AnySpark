@@ -351,3 +351,44 @@ def _writing_tool_pair(client: TestClient, name: str) -> tuple[ToolSpec, ToolImp
     pair = reg.get(name)
     assert pair is not None, f"工具 {name} 未注册"
     return pair
+
+
+def test_upload_delete_removes_file() -> None:
+    """S144：上传区删除——DELETE /api/upload/{book}/{file} 删素材；不存在 404。"""
+    import base64
+    import tempfile
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    class _M:
+        model_name = "fake"
+
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="好的。")
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=_M(), db_path=db))
+    # 上传一个测试素材
+    data = base64.b64encode("测试素材内容".encode()).decode()
+    r = client.post(
+        "/api/upload",
+        json={"filename": "删除测试.txt", "data_b64": data, "book_id": "main"},
+    )
+    assert r.status_code == 200
+    name = r.json()["name"]
+    # 在列表里可见
+    ws = client.get("/api/workspace").json()
+    assert any(u["name"] == name for u in ws["uploads"])
+    # 删除 → 从列表消失
+    r2 = client.delete(f"/api/upload/main/{name}")
+    assert r2.status_code == 200 and r2.json()["ok"]
+    ws2 = client.get("/api/workspace").json()
+    assert all(u["name"] != name for u in ws2["uploads"])
+    # 已删除文件再删 → 404
+    r3 = client.delete(f"/api/upload/main/{name}")
+    assert r3.status_code == 404

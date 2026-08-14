@@ -1,4 +1,4 @@
-import { apiGet, apiPost } from "./client";
+import { apiDelete, apiGet, apiPost } from "./client";
 
 // 上传区文件项（GET /api/workspace → uploads）
 export interface UploadItem {
@@ -76,4 +76,14 @@ export function ingestFile(
     mode,
     book_id: bookId,
   });
+}
+
+// S144：删除上传区素材（传错/重复清理）
+export function deleteUploadFile(
+  filename: string,
+  bookId: string = "main"
+): Promise<{ ok: boolean; name: string }> {
+  return apiDelete<{ ok: boolean; name: string }>(
+    `/api/upload/${encodeURIComponent(bookId)}/${encodeURIComponent(filename)}`
+  );
 }

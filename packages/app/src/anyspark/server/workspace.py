@@ -212,6 +212,17 @@ class Workspace:
         p = self.upload_dir(book_id) / safe
         return p if p.exists() and p.is_file() else None
 
+    def delete_upload(self, book_id: str, filename: str) -> bool:
+        """S144：删除上传区文件（素材传错/重复可删；文件名消毒防穿越）。"""
+        p = self.read_upload(book_id, filename)
+        if p is None:
+            return False
+        try:
+            p.unlink()
+            return True
+        except OSError:
+            return False
+
     # -- 卡片区 --
     def write_card(self, book_id: str, kind: str, name: str, content: str) -> Path:
         """写卡片文件：{kind}-{name}.md（kind 如 角色卡/场景卡/摘要卡）。"""
