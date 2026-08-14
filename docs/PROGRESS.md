@@ -3705,7 +3705,7 @@ NSFW 审核坎）；本地 vLLM/LM Studio 适配文档（S131 接续）。
 docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回溯）在前，收编
 内存 batch 在后。
 
-**交付（commit `TODO`）**：
+**交付（commit `c7afaa5`）**：
 
 1. **阶段 A：resume 续跑**（routes_workflow.py）：
    - POST /api/workflows/tasks/{id}/resume：对非 done 任务后台线程再跑 run_task
