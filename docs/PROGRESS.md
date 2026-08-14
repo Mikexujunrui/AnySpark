@@ -3783,7 +3783,7 @@ docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回
 收编内存 batch 是无风险减法。归一不降级：能力（批量改写/审读）保留在 workflow 模板，
 且带断点/续跑/回滚安全网。
 
-**交付（commit `TODO`）**：
+**交付（commit `cf37686`）**：
 
 1. **后端删除（routes_agency/deps/tasks/app）**：
    - routes_agency：/api/batch/rewrite、/api/batch/review、/api/batch/{id} 路由移除
