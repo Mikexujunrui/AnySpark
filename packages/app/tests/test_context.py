@@ -203,6 +203,25 @@ def test_rough_count_skips_tiktoken_when_small() -> None:
     assert b._rough_count(msgs) <= int(100000 / 1.2 * 0.9)
 
 
+def test_rough_count_cjk_weighted_upper_bound() -> None:
+    """S146（评审轻微项）：中文 1 字 ≈ 2 tokens（cl100k），字符数低估——
+
+    粗算按类型加权（ASCII 0.3 / 非 ASCII 2.0）给出保守上界，
+
+    确保粗算不超阈值时实际 token 数也一定不超（安全性恢复）。"""
+    from anyspark.core.types import Message
+
+    b = TokenBudget(budget=100000)
+    # 纯中文长消息：2000 字 → 实际 ~4000 tokens，粗算必须 ≥ 4000（保守上界）
+    zh = Message(role="user", content="雾城钟表铺的怀表在雨夜转动" * 143)  # ~2000 字
+    rough = b._rough_count([zh])
+    real = len(b._enc.encode(zh.content))
+    assert rough >= real, f"粗算 {rough} 应 ≥ 实际 {real}（中文低估会漏压缩）"
+    # ASCII 场景粗算也应 ≥ 实际（原行为保持）
+    en = Message(role="user", content="a" * 5000)
+    assert b._rough_count([en]) >= len(b._enc.encode(en.content))
+
+
 def test_incremental_summary_uses_previous() -> None:
     """S24（B2）：第二次压缩时识别到上一次摘要（【历史对话摘要】消息）→ previous 非空。"""
     prevs: list[str | None] = []

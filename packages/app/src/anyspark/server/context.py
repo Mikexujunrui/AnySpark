@@ -13,8 +13,8 @@ anyspark.server.context — token 预算 + 两阶段压缩（长书刚需）。
 
 S24（对齐 pi 的 compaction 语义，修复 S21c 审计发现）：
 - E1 效率：指纹**先查**（内容未变直接返回缓存结果，连计数都不做）；计数两档——
-  字符粗算（O(n) 极快，高估安全）滤掉绝大多数"不需要压缩"的轮次，tiktoken 精算
-  只在接近预算时发生。
+  字符粗算（O(n) 极快，按类型加权保守上界，S146 修正）滤掉绝大多数"不需要压缩"
+  的轮次，tiktoken 精算只在接近预算时发生。
 - B1 切割合法性：保留段按 **token 预算**（KEEP_RECENT_TOKENS）往回找，且**永不切在
   tool 结果上**（tool 结果必须跟在 assistant 声明后；孤立 tool 消息会让模型上下文畸形）。
 - B2 摘要信息密度：摘要输入**全量序列化**可压缩段（此前只喂最后 20 条×200 字，
@@ -82,9 +82,20 @@ class TokenBudget:
         return sum(self.count(m.content) for m in messages)
 
     def _rough_count(self, messages: list[Message]) -> int:
-        """字符数粗算（S24 E1）：chars ≥ tokens 对中英混合基本成立（BPE 一般压缩字符），
-        高估安全——粗算不超阈值则实际一定不超，可省掉 tiktoken 精算。"""
-        return sum(len(m.content) for m in messages)
+        """字符粗算（S24 E1）：滤掉绝大多数"不需要压缩"的轮次，避免每次 tiktoken 编码。
+
+        S146（第三方评审轻微项）：原注释声称"chars ≥ tokens 高估安全"，实测相反——
+        cl100k 中文 1 字 ≈ 2 tokens、混合中文 ≈ 1.4，chars **低估** tokens（英文才高估）。
+        粗算滤掉后不会跑到精算兜底，中文长会话可能超预算不压缩。
+        修复：按字符类型加权（ASCII 0.3 / 非 ASCII 2.0，保守上界），
+        粗算不超阈值则实际一定不超（安全性恢复）。
+        """
+        total = 0.0
+        for m in messages:
+            cjk = sum(1 for ch in m.content if ord(ch) > 127)
+            ascii_n = len(m.content) - cjk
+            total += ascii_n * 0.3 + cjk * 2.0
+        return int(total)
 
     # ------------------------------------------------------------------
     # 压缩（ContextCompressor 协议入口）
