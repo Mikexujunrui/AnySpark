@@ -232,6 +232,18 @@ class Workspace:
         f.write_text(content, encoding="utf-8")
         return f
 
+    def read_card(self, book_id: str, kind: str, name: str) -> str:
+        """S152f：读卡片文件内容（不存在返回空串）。"""
+        safe_kind = _safe_title(kind)
+        safe_name = _safe_title(name)
+        f = self.cards_dir(book_id) / f"{safe_kind}-{safe_name}.md"
+        if not f.exists():
+            return ""
+        try:
+            return f.read_text(encoding="utf-8").strip()
+        except OSError:
+            return ""
+
     def list_cards(self, book_id: str = "main") -> list[dict[str, Any]]:
         return [
             {"filename": f.name, "path": str(f)}

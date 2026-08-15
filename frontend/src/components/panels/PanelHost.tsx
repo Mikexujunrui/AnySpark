@@ -13,6 +13,7 @@ import ReviewPanel from '../ReviewPanel'
 import MaterialsPanel from '../MaterialsPanel'
 import StoryTreeView from '../StoryTreeView'
 import WorkflowPanel from '../WorkflowPanel'
+import CharactersPanel from '../CharactersPanel'
 import PlotPanel from '../PlotPanel'
 import SkillPanel from '../SkillPanel'
 
@@ -44,6 +45,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {panelKey === 'chapters' && <div className="h-full min-h-0 flex flex-col"><ChaptersPanel bookId={bookId} /></div>}
       {panelKey === 'explore' && <div className="h-full min-h-0 flex flex-col"><ExploreView bookId={bookId} /></div>}
       {panelKey === 'knowledge' && <div className="h-full min-h-0 flex flex-col"><KnowledgePanel bookId={bookId} /></div>}
+      {panelKey === 'characters' && <div className="h-full min-h-0 flex flex-col"><CharactersPanel bookId={bookId} /></div>}
       {panelKey === 'outline' && <div className="h-full min-h-0 flex flex-col"><OutlinePanel bookId={bookId} /></div>}
       {panelKey === 'foreshadows' && <div className="h-full min-h-0 flex flex-col"><PlotPanel bookId={bookId} /></div>}
       {panelKey === 'styles' && <div className="h-full min-h-0 flex flex-col"><SkillPanel open embedded onClose={onPanelClose || (() => {})} /></div>}

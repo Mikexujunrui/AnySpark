@@ -26,6 +26,15 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
         """项目工作区结构总览：上传存档 / 章节文件 / 卡片（按书）。"""
         return deps.workspace.describe(book_id)
 
+    @router.get("/api/card", response_model=dict[str, Any])
+    def read_card(kind: str, name: str, book_id: str = "main") -> dict[str, Any]:
+        """S152f：读卡片文件内容（如 角色卡/陈渡 → 卡片/角色卡-陈渡.md）。"""
+        return {
+            "kind": kind,
+            "name": name,
+            "content": deps.workspace.read_card(book_id, kind, name),
+        }
+
     @router.post("/api/workspace/import", response_model=dict[str, Any])
     def workspace_import_chapters() -> dict[str, Any]:
         """S48：扫描章节 md 文件 → 同步入库（人工直接编辑 md 后调用）。

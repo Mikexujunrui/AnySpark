@@ -115,3 +115,33 @@ def test_roleplay_engine_empty_fallback() -> None:
     engine = RolePlayEngine(_EmptyModel(), n=4)
     result = engine.play("# 角色", "", "场景")
     assert result.best is None and result.candidates == []
+
+
+def test_role_card_isolated_by_book() -> None:
+    """S152f：角色卡按项目（book_id）写入 + 读卡端点按项目读取。
+
+    此前 POST /api/role/card 硬编码 write_card("main", ...)——跨项目角色卡
+    写错书；本测试锁住隔离语义 + GET /api/card 读取闭环。
+    """
+    from fastapi.testclient import TestClient
+
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
+    # 项目 A 写卡
+    r = client.post(
+        "/api/role/card",
+        json={"name": "陈渡", "content": "身世成谜的年轻侦探", "book_id": "book-a"},
+    )
+    assert r.status_code == 200, r.text
+    # 项目 B 写同名卡（不同内容）
+    client.post(
+        "/api/role/card",
+        json={"name": "陈渡", "content": "港口的老船长", "book_id": "book-b"},
+    )
+    # 读卡：各自项目读到各自内容（文件按项目目录隔离）
+    a = client.get("/api/card?kind=角色卡&name=陈渡&book_id=book-a").json()
+    b = client.get("/api/card?kind=角色卡&name=陈渡&book_id=book-b").json()
+    assert a["content"] == "身世成谜的年轻侦探"
+    assert b["content"] == "港口的老船长"
+    # main 项目无卡
+    m = client.get("/api/card?kind=角色卡&name=陈渡").json()
+    assert m["content"] == ""

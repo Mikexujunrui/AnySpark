@@ -85,6 +85,7 @@ class RoleCardIn(BaseModel):
 
     name: str
     content: str
+    book_id: str = "main"  # S152f：按项目写卡（此前硬编码 main 跨项目）
 
 
 class ToolUpdateIn(BaseModel):

@@ -38,7 +38,8 @@ def make_play_router(deps: AppDeps) -> APIRouter:
     @router.post("/api/role/card", response_model=dict[str, Any])
     def role_card_upsert(req: RoleCardIn) -> dict[str, Any]:
         """创建/更新角色卡（卡片/角色卡-{name}.md）。"""
-        f = deps.workspace.write_card("main", "角色卡", req.name, req.content)
+        # S152f：按当前项目写（此前硬编码 main，跨项目角色卡写错书）
+        f = deps.workspace.write_card(req.book_id, "角色卡", req.name, req.content)
         return {"ok": True, "name": req.name, "file": f.name}
 
     @router.post("/api/role/play", response_model=dict[str, Any])

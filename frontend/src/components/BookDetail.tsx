@@ -33,6 +33,7 @@ const TAB_GROUPS: TabGroup[] = [
   {
     label: '设定',
     tabs: [
+      { key: 'characters', label: '人物', icon: 'users' },
       { key: 'knowledge', label: '知识库', icon: 'database' },
       { key: 'outline', label: '大纲', icon: 'list' },
       { key: 'foreshadows', label: '伏笔', icon: 'target' },
