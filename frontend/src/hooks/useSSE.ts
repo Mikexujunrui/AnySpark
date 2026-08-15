@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { parseSSE } from "../sse"
+import { playDone, playFail } from "../lib/sound"
 
 // V4 适配版 useSSE：壳的 hook 接口（sendMessage/cancel/streaming），内部走 V4 /api/chat/stream 协议。
 // V4 事件：turn_start / text_delta / tool_call / tool_execution_start / tool_execution_end / tool_result / done / error
@@ -169,6 +170,8 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
           case 'tool_result':
             break
           case 'done': {
+            // S155：整个循环彻底结束 → 完成提示音（主人要求：主循环只在彻底结束时响）
+            playDone()
             if (data?.conversation_id) convIdRef.current = String(data.conversation_id)
             if (mountedRef.current) {
               onProgress?.(null)
@@ -212,6 +215,7 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
             break
           }
           case 'error':
+            playFail()  // S155：失败提示音
             onError?.(new Error(String((data as Record<string, unknown>)?.message || '未知错误')), msg)
             break
         }

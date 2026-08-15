@@ -9,6 +9,7 @@ import type {
 } from "../api/workflow";
 import ConfirmModal from "./ui/ConfirmModal";
 import { loopVirtualEdges, layoutEdges, snapGrid, wouldCreateCycle, flowTerminalNodes } from "../lib/workflowLayout";
+import { playSound } from "../lib/sound"
 
 /* ── 节点样式 ── */
 const KIND_META: Record<
@@ -118,6 +119,8 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
   // 运行状态
   const [runningTask, setRunningTask] = useState<WorkflowTask | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const lastRunStatusRef = useRef<string | null>(null); // S155：状态变化才提示音
+  const lastStatusChangeRef = useRef<number>(Date.now()); // S155：卡住检测（状态最后变化时间）
   const dragRef = useRef<{ id: string; dx: number; dy: number; moved: boolean } | null>(null);
   const panRef = useRef<{ x0: number; y0: number; px: number; py: number } | null>(null);
 
@@ -507,11 +510,24 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
       const taskId = await startRun(id, bookId, params);
       const task = await refreshTask(taskId);
       setRunningTask(task);
+      lastRunStatusRef.current = null; // S155：重置状态变化检测
+      lastStatusChangeRef.current = Date.now(); // S155：卡住检测起点
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = setInterval(async () => {
         try {
           const t = await refreshTask(taskId);
           setRunningTask(t);
+          // S155：任务状态变化 → 提示音（待确认/完成/失败/取消）
+          if (t.status !== lastRunStatusRef.current) {
+            if (t.status === "waiting_approval") playSound("attention")
+            else if (t.status === "done") playSound("done")
+            else if (t.status === "failed" || t.status === "cancelled") playSound("fail")
+            lastRunStatusRef.current = t.status
+            lastStatusChangeRef.current = Date.now()
+          } else if (t.status === "running" && Date.now() - lastStatusChangeRef.current > 5 * 60 * 1000) {
+            playSound("stuck") // S155：running 超 5 分钟无进展 → 卡住警报（一次性）
+            lastStatusChangeRef.current = Date.now()
+          }
           if (t.status === "done" || t.status === "failed" || t.status === "cancelled") {
             if (pollRef.current) clearInterval(pollRef.current);
             fetchAll();

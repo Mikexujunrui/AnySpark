@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import PanelHeader from "./ui/PanelHeader";
 import { listChapters } from "../api/chapters";
 import { parseLoopItems, extractFallbackResult } from "../lib/workflowParse";
+import { playSound } from "../lib/sound";
 import {
   approveTask,
   getWorkflowTask,
@@ -42,6 +43,8 @@ export default function BatchPanel({ open, onClose, embedded = false, bookId = "
   } | null>(null);
   // S145b：任务结果明细（loop 迭代累积——每章审读/改写输出）
   const [wfItems, setWfItems] = useState<Record<string, string>[]>([]);
+  const lastWfStatusRef = useRef<string | null>(null); // S155：状态变化才提示音
+  const lastWfChangeRef = useRef<number>(Date.now()); // S155：卡住检测
   // S147b：旧引擎任务 fallback——loop 无 items 时展示顶层结果（至少最后一章可见）
   const [wfResults, setWfResults] = useState<Record<string, unknown> | null>(null);
   const [wfPendingApprove, setWfPendingApprove] = useState(false);
@@ -92,6 +95,17 @@ export default function BatchPanel({ open, onClose, embedded = false, bookId = "
           done,
           total,
         });
+        // S155：任务状态变化（待确认/完成/失败/取消）→ 提示音（首次变化才响）
+        if (t.status !== lastWfStatusRef.current) {
+          if (t.status === "waiting_approval") playSound("attention")
+          else if (t.status === "done") playSound("done")
+          else if (t.status === "failed" || t.status === "cancelled") playSound("fail")
+          lastWfStatusRef.current = t.status
+          lastWfChangeRef.current = Date.now()
+        } else if (t.status === "running" && Date.now() - lastWfChangeRef.current > 5 * 60 * 1000) {
+          playSound("stuck") // S155：running 超 5 分钟无进展 → 卡住警报（一次性）
+          lastWfChangeRef.current = Date.now()
+        }
         if (t.status === "waiting_approval") {
           setWfPendingApprove(true);
           stopWfPoll();

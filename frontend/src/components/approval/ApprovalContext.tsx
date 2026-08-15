@@ -4,6 +4,7 @@
 //   const ok = await requestApproval({ title, desc, estSeconds, cost })
 //   返回 true = 同意执行；false = 用户拒绝
 import { createContext, useCallback, useContext, useRef, useState } from 'react'
+import { playAttention } from '../../lib/sound'
 
 export interface ApprovalRequest {
   id: string
@@ -38,6 +39,8 @@ export function ApprovalProvider({ children }: { children: React.ReactNode }) {
       const id = `appr-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
       resolverRef.current = resolve
       setPending({ ...req, id })
+      // S155：需要人类操作（授权/确认）→ 提示音（主循环内仅此场景响）
+      playAttention()
     })
   }, [])
 
