@@ -53,7 +53,7 @@ def build_subagent_registry(
             review_panel=deps.review_panel,
             skill_generator=deps.skill_generator,
             book_id=book_id,
-            templates=[f"{s.name}：{s.description}" for s in deps.skills.plot_skills()[:12]],
+            templates=[f"{s.name}：{s.description}" for s in deps.skills.plot_skills()],
         ),
         enable_domain=True,
         enable_search=enable_search,

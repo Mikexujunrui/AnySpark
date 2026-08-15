@@ -115,10 +115,12 @@ def make_graph_query_implementer(graph: Any, book_id: str = "main") -> tuple[Any
                 state = getattr(e, "state", "") or ""
                 desc = getattr(e, "description", "") or ""
                 line = f"- {e.name}（{e.entity_type}）"
+                # S157：不截断——graph_query 是写作前精确查证工具，返回实体少（关键词过滤），
+                # 状态/描述全量注入避免 agent 漏关键设定（8-15 截断审查：写全了却截断没道理）
                 if state:
-                    line += f" 当前状态：{state[:80]}"
+                    line += f" 当前状态：{state}"
                 elif desc:
-                    line += f" {desc[:80]}"
+                    line += f" {desc}"
                 lines.append(line)
             # 相关关系（实体参与的三元组）
             relations = graph.list_relations(book_id, limit=_RELATION_LIMIT)
@@ -461,8 +463,12 @@ def make_setting_implementer(settings: Any, book_id: str = "main") -> tuple[Any,
                 for e in entries:
                     cats.setdefault(e.category, []).append(e)
                 for cat, items in cats.items():
-                    lines.append(f"【{cat}】")
-                    lines.extend(f"- {e.name}：{e.content[:60]}" for e in items[:8])
+                    lines.append(f"【{cat}】（共 {len(items)} 条）")
+                    # S157：条目内容不截断（写全了却截断没道理）；超 8 条时明确告知可精查
+                    for e in items[:8]:
+                        lines.append(f"- {e.name}：{e.content}")
+                    if len(items) > 8:
+                        lines.append(f"  …共 {len(items)} 条，仅列前 8，带关键词精查")
                 return ToolResult(call=call, ok=True, content="\n".join(lines))
             matched = [e for e in entries if q in e.name or q in e.content or q in e.category]
             if not matched:
@@ -1736,7 +1742,7 @@ def make_skill_refine_implementer(
         lines = [f"【{tag} {len(candidates)} 条（已存草稿，待人工确认生效）】"]
         for i, c in enumerate(candidates, 1):
             name = c.get("name", f"候选{i}")
-            desc = str(c.get("description", ""))[:60]
+            desc = str(c.get("description", ""))  # S157：候选描述不截断（草稿数量有限，全量供判断）
             lines.append(f"{i}. {name}：{desc}")
         if mode == "book" and not via_template:
             content = str(candidates[0].get("content", ""))
@@ -1987,9 +1993,8 @@ def render_reference_knowledge(
             for s in settings.list(ref_book_id):
                 blob = f"{s.name} {s.content} {s.category}"
                 if keyword.lower() in blob.lower():
-                    lines.append(
-                        f"设定[{s.category}] {s.name or s.content[:20]}：{s.content[:150]}"
-                    )
+                    # S157：设定查证全量注入（按需精查场景，截断会丢关键设定）
+                    lines.append(f"设定[{s.category}] {s.name}：{s.content}")
         except Exception:
             pass
     return lines

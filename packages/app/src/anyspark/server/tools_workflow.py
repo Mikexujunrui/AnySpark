@@ -14,6 +14,7 @@ anyspark.server.tools_workflow — 工作流 agent 工具（S59 补充：Agent �
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from anyspark.core import ToolCall
@@ -36,6 +37,9 @@ def make_workflow_tools(
         description=(
             "列出已保存的工作流模板（固定的分析/改书流程，如'章节质量把关'）。"
             "需要知道有哪些现成流程可跑时使用。"
+            "【优先原则】面对非标准化/大批量/重复性任务（批量改写、批量审读、"
+            "逐章图谱抽取、拆书提炼、章节加料等），优先 workflow_list 查看现成模板"
+            "再 workflow_run，不要逐个手动调用原子工具。"
         ),
         params=[],
     )
@@ -54,7 +58,10 @@ def make_workflow_tools(
             )
         lines = [f"可用工作流模板（{len(templates)} 个）："]
         for t in templates:
-            lines.append(f"- {t['id']} | {t['name']} | {t.get('description', '')[:80]}")
+            # S157：不截断——模板 description 自带运行参数说明（如 chapter_ids=...），
+            # 截断会让 agent 看不到参数怎么传（8-15 事故教训：agent 找不到'提取前50章图谱'的入口）
+            desc = str(t.get("description") or "")
+            lines.append(f"- {t['id']} | {t['name']} | {desc}")
         return ToolResult(call=call, ok=True, content="\n".join(lines))
 
     # ------------------------------------------------------------------
@@ -65,6 +72,8 @@ def make_workflow_tools(
         description=(
             "运行一个工作流模板（如章节质量把关：审读→发现硬伤→改写→作者确认）。"
             "传 template_id（用 workflow_list 查）+ book_id（缺省当前项目，跨书操作时显式指定）。"
+            "模板运行参数（如 chapter_ids 章节范围）用 params 传 JSON 对象字符串——"
+            "各模板支持什么参数看 workflow_list 返回的模板描述。"
             "后台执行，返回 task_id；用 workflow_status 查进度。"
         ),
         params=[
@@ -80,6 +89,15 @@ def make_workflow_tools(
                 required=False,
                 description="目标书（缺省 main）",
             ),
+            ParamSpec(
+                name="params",
+                type="string",
+                required=False,
+                description=(
+                    '模板运行参数 JSON 对象字符串，如 \'{"chapter_ids": ["id1","id2"]}\'。'
+                    "不传=用模板缺省（多为全部章节）。"
+                ),
+            ),
         ],
     )
 
@@ -90,11 +108,34 @@ def make_workflow_tools(
         final_book = str(arguments.get("book_id") or book_id)
         if not template_id:
             return ToolResult(call=call, ok=False, content="缺少参数 template_id。")
+        # S157：透传模板运行参数（chapter_ids 等）——params 为 JSON 对象字符串或对象
+        run_params: dict[str, Any] | None = None
+        raw_params = arguments.get("params")
+        if raw_params:
+            try:
+                if isinstance(raw_params, str):
+                    run_params = json.loads(raw_params)
+                else:
+                    run_params = dict(raw_params)
+                if not isinstance(run_params, dict):
+                    return ToolResult(
+                        call=call,
+                        ok=False,
+                        content=f"params 应为 JSON 对象，得到: {raw_params!r}",
+                    )
+            except Exception as exc:
+                return ToolResult(
+                    call=call,
+                    ok=False,
+                    content=f"params 不是合法 JSON 对象: {raw_params!r}（{exc}）",
+                )
         try:
             wf = workflow_store.get_template(template_id)
             if wf is None:
                 return ToolResult(call=call, ok=False, content=f"模板不存在: {template_id}")
-            task_id = workflow_store.create_task(wf, book_id=final_book, template_id=template_id)
+            task_id = workflow_store.create_task(
+                wf, book_id=final_book, template_id=template_id, params=run_params
+            )
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"启动失败: {exc}")
 

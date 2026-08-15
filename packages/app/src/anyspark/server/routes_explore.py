@@ -47,7 +47,7 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
         ]
         # S68→S128：探索注入真实模板库（skill 表 type=plot 类，L2 默认+L3 外部
         # 已物理并入；阶段 2 后探索只读 plot 类，纪律 2 防其他 type 污染）
-        templates = [f"{s.name}：{s.description}" for s in deps.skills.plot_skills()[:12]]
+        templates = [f"{s.name}：{s.description}" for s in deps.skills.plot_skills()]
         cards = run_exploration(
             model_for_task(deps, "planning"),
             req.seed,

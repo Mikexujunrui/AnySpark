@@ -97,7 +97,7 @@ def make_agent(
             # S121：子 Agent 内核装配依赖（主循环 run_subagent 工具）
             subagent_deps=deps,
             # S68→S128：探索注入真实模板库（skill 表 type=plot 类，L2+L3 物理并入）
-            templates=[f"{s.name}：{s.description}" for s in deps.skills.plot_skills()[:12]],
+            templates=[f"{s.name}：{s.description}" for s in deps.skills.plot_skills()],
             # S145（第三方评审 P0-1）：参考书库装配补传——此前漏传 library，
             # reference_lookup 工具因 ctx.library is None 在生产装配中永不注册
             # （S86 声称"检索走 agent 工具"实际落空；仅 workflow query_reference

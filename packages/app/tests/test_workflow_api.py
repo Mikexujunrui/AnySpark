@@ -268,3 +268,59 @@ def test_builtin_template_protected_from_delete() -> None:
     if users:
         r2 = client.delete(f"/api/workflows/{users[0]['id']}")
         assert r2.status_code == 200
+
+
+def test_workflow_agent_run_passes_params() -> None:
+    """S157：agent workflow_run 透传模板运行参数（chapter_ids 等）→ 任务变量。
+
+    8-15 事故配套：agent 跑「图谱抽取」模板需能指定章节范围；此前 workflow_run
+    工具不透传 params（create_task 无 params），agent 只能跑模板缺省（全部章节）。
+    HTTP 端点 run_workflow 早已支持 params（WorkflowRunIn.params），工具层补齐对齐。
+    """
+    import json as _json
+
+    from anyspark.core.protocol import ToolSpec
+    from anyspark.server.tools_workflow import make_workflow_tools
+    from anyspark.workflow.definition import WorkflowDef, WorkflowNode
+    from anyspark.workflow.store import WorkflowStore
+
+    db = Path(tempfile.mkdtemp()) / "wf.db"
+    store = WorkflowStore(db)
+    wf = WorkflowDef(
+        id="wf-extract-test",
+        name="图谱抽取",
+        description="逐章图谱抽取（实体/关系/事件）。运行参数：chapter_ids=章节id数组或逗号串（缺省全部）。",
+        nodes=[
+            WorkflowNode(
+                id="prep",
+                kind="script",
+                label="收集章节",
+                params={
+                    "function": "batch_prepare",
+                    "chapter_ids": "{{chapter_ids}}",
+                    "output_key": "chapter_ids",
+                },
+            )
+        ],
+    )
+    store.add_template(wf, builtin=True)
+
+    tools = make_workflow_tools(
+        store, workflow_engine=None, workflow_generator=None, book_id="main"
+    )
+    run_impl = {spec.name: impl for spec, impl in tools}["workflow_run"]
+    res = run_impl(
+        ToolSpec(name="workflow_run"),
+        {"template_id": "wf-extract-test", "params": '{"chapter_ids": ["c1", "c2"]}'},
+    )
+    assert res.ok, res.content
+    tid = store.list_tasks(limit=1)[0]["id"]
+    task = store.get_task(tid)
+    assert task is not None
+    # get_task 已把 results 解析为 dict（初始变量 = 模板运行参数）
+    assert task["results"] == {"chapter_ids": ["c1", "c2"]}
+
+    # 非法 params → 明确报错（不静默忽略）
+    res2 = run_impl(ToolSpec(name="workflow_run"), {"template_id": "wf-extract-test", "params": "不是json"})
+    assert not res2.ok
+    assert "JSON" in res2.content or "不是合法" in res2.content

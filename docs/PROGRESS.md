@@ -4271,3 +4271,32 @@ turn 1（list_chapters，项目 1282 章）+ turn 2（完整回答生成，recor
 **未做（YAGNI）**：会话列表跨会话消息合并（前端持有的会话级消息数组，编辑/整理语义
 不变，仅防丢）；后端主动断开挂起连接（依赖前端超时先行，send 失败自动清理）。
 
+
+## S158: 工作流可发现性 + 截断审查（8-15 图谱任务配套，主人需求驱动）（已完成 ✅）
+
+**背景**：主人追问"提取指定章节图谱这类任务不可以通过工作流完成吗"——查证：预置模板
+「图谱抽取」早已存在（wf-9b4439cb，逐章抽取+伏笔回收+学习审查），agent 也有
+workflow_list/run/status 工具，但 8-15 那轮 agent 全程没想起工作流（只找图谱单工具）。
+主人拍板三点 + 第四项截断审查。
+
+**交付**：
+1. **workflow_list 全量介绍**：模板 description 不再截断 80 字（description 自带运行参数
+   说明如 chapter_ids=...，截断会让 agent 看不到参数怎么传——8-15 事故直接教训）
+2. **workflow_run 参数透传**：新增 `params`（JSON 对象字符串）→ create_task 初始变量
+   （{{var}} 模板引用）——agent 现在能跑「图谱抽取 + chapter_ids=前50章」；HTTP 端点
+   run_workflow 早已支持（WorkflowRunIn.params），工具层补齐对齐。非法 JSON 明确报错
+3. **优先原则提示**：DEFAULT_SYSTEM + workflow_list 描述注入"非标准化/大批量/重复性任务
+   （批量改写/审读/逐章图谱抽取/拆书/加料）优先 workflow_list 查模板再 workflow_run"
+4. **截断审查**（184 处切片全扫，分类处理）：
+   - **取消**（写全了却截断，agent 会漏信息）：plot 技巧索引 [:12]（agent_factory/
+     subagent/routes_explore 三处，7 个技巧暂未触发但未来踩坑）；graph_query 状态/描述
+     [:80]；设定档条目 [:60]；skill 候选描述 [:60]；设定查证 [:150]；workflow read_settings
+     条目 [:200] / read_graph 状态 [:150]
+   - **加告知**（保留防爆但明示截断）：拆书精读正文 [:4000]/笔记 [:2500] 附字数告知；
+     read_settings 超 limit 附"共 N 条已列 M 条"
+   - **保留**（合理防爆+已有告知）：正文 15k/20k+"末尾未展示"、评审 20k+"读全文"提示、
+     异常 [:160]、id 前缀、搜索摘要、操作预览
+   - 分类原则：本质是索引/查证信息 → 全量；本质是防爆（正文/长文注入）→ 保留截断但必须告知
+
+**测试 +1**（test_workflow_api：workflow_run 透传 params 到任务变量 + 非法 params 报错）；
+ruff/format/mypy 全绿；test_workflow_api + test_tools_extras 15 全过。

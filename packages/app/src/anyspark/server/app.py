@@ -1136,11 +1136,17 @@ def build_app(
         for s in items:
             if keyword and keyword.lower() not in f"{s.name} {s.content} {s.category}".lower():
                 continue
-            lines.append(f"[{s.category}] {s.name or s.content[:20]}：{s.content[:200]}")
+            # S157：条目内容不截断（设定条目是查证核心信息，写全了却截断没道理）
+            lines.append(f"[{s.category}] {s.name or s.content[:30]}：{s.content}")
             if len(lines) >= limit:
                 break
         if not lines:
             return NodeResult(output=f"（项目「{ctx.book_id}」设定档无匹配条目）")
+        # S157：超限告知（limit 可调，但 agent 需知道还有更多条目）
+        if len(items) > len(lines):
+            lines.append(
+                f"（设定档共 {len(items)} 条，已列 {len(lines)}，可调 limit 或带关键词精查）"
+            )
         return NodeResult(output="\n".join(lines))
 
     _wf_scripts["read_settings"] = _wf_script_read_settings
@@ -1169,8 +1175,9 @@ def build_app(
             rels = []
         for e in ents:
             state = (e.state or e.description or "").strip()
+            # S157：状态不截断（图谱实体状态是写作查证核心；实体数由 limit 控制防爆）
             line = f"实体[{e.entity_type}] {e.name}（出场{e.weight}章）" + (
-                f"：{state[:150]}" if state else ""
+                f"：{state}" if state else ""
             )
             for r in rels:
                 if r.from_name == e.name or r.to_name == e.name:
@@ -1529,10 +1536,13 @@ def build_app(
         parts = []
         for i in ordered:
             t, body = chaps[i]
-            parts.append(f"【第{i + 1}章 {t}】\n{body[:4000]}")
+            # S157：截断保留（防爆）但必须告知——agent 知道片段不完整，需要时用 read_chapter 读全文
+            cut = f"（正文 {len(body)} 字，仅列前 4000）" if len(body) > 4000 else ""
+            parts.append(f"【第{i + 1}章 {t}】{cut}\n{body[:4000]}")
         passages = _locate_passages(chaps, note)
         excerpt = "\n\n".join([*passages, *parts])
-        return NodeResult(output=f"{note[:2500]}\n\n{excerpt}")
+        note_cut = f"（笔记 {len(note)} 字，仅列前 2500）" if len(note) > 2500 else ""
+        return NodeResult(output=f"{note[:2500]}{note_cut}\n\n{excerpt}")
 
     _wf_scripts["book_refine_refine_input"] = _wf_script_book_refine_refine_input
 
