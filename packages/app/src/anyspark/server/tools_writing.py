@@ -333,7 +333,8 @@ class WritingTools:
             )
         all_chapters = self._chapters.list_by_book(self._book_id)
         existing = next((c for c in all_chapters if c.title == title), None)
-        order = existing.order_index if existing else len(all_chapters)
+        # S152j：原子分配 order（锁内 MAX+1），并发新建不撞序
+        order = existing.order_index if existing else self._chapters.next_order(self._book_id)
         cid = self._write_dual(title, content, order, line)
         if cid is None:
             return ToolResult(

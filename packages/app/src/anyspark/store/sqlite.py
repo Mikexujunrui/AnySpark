@@ -169,6 +169,16 @@ class SqliteConversationStore(ConversationStore):
                 ),
             )
 
+    def last_user_message_time(self, conversation_id: str) -> str | None:
+        """S154（会话回滚）：最后一条 user 消息时间（本轮起点 t0）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT created_at FROM messages WHERE conversation_id = ? AND role = 'user' "
+                "ORDER BY seq DESC LIMIT 1",
+                (conversation_id,),
+            ).fetchone()
+        return str(row["created_at"]) if row else None
+
     def messages(self, conversation_id: str) -> list[Message]:
         rows = self._conn.execute(
             "SELECT role, content, metadata FROM messages WHERE conversation_id = ? ORDER BY seq",
@@ -301,6 +311,18 @@ class ChapterStore:
             )
         self._conn.commit()
 
+    def next_order(self, book_id: str) -> int:
+        """S152j：原子分配下一章节序号（MAX+1，锁内）——两会话并发新建不再撞序。
+
+        此前调用方各自 `max(order)+1` / `len(all_chapters)` 非原子，并发同序。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT COALESCE(MAX(order_index), -1) AS mx FROM chapters WHERE book_id = ?",
+                (book_id,),
+            ).fetchone()
+            return int(row["mx"]) + 1
+
     def upsert(
         self,
         book_id: str,
@@ -314,33 +336,48 @@ class ChapterStore:
 
         note（S138 回溯安全网 B1）：版本来源标识，默认 '修改前'；批量任务/工作流
         可传来源（如 '批量改写/任务{task_id}'）供批级回滚按来源聚合定位。
+        S152j：全程锁内——读-改-写原子（此前开头 SELECT 无锁，并发共享连接崩溃）；
+        新建时若 order 已被其他章占用（并发取号撞序）自动顺延到空闲序号。
         """
         now = _now()
-        existing = self._conn.execute(
-            "SELECT id FROM chapters WHERE book_id = ? AND title = ?", (book_id, title)
-        ).fetchone()
-        if existing:
-            cid = existing["id"]
-            old = self._conn.execute("SELECT content FROM chapters WHERE id = ?", (cid,)).fetchone()
-            with self._conn:
-                self._conn.execute(
-                    "INSERT INTO chapter_versions (chapter_id, content, note, saved_at) "
-                    "VALUES (?, ?, ?, ?)",
-                    (cid, old["content"], note, now),
-                )
-                self._conn.execute(
-                    "UPDATE chapters SET content = ?, title = ?, order_index = ?, "
-                    "narrative_line = ?, updated_at = ? WHERE id = ?",
-                    (content, title, order_index, narrative_line, now, cid),
-                )
-        else:
-            cid = uuid.uuid4().hex
-            with self._conn:
-                self._conn.execute(
-                    "INSERT INTO chapters (id, book_id, title, content, order_index, "
-                    "narrative_line, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                    (cid, book_id, title, content, order_index, narrative_line, now, now),
-                )
+        with self._lock:
+            existing = self._conn.execute(
+                "SELECT id FROM chapters WHERE book_id = ? AND title = ?", (book_id, title)
+            ).fetchone()
+            if existing:
+                cid = existing["id"]
+                old = self._conn.execute(
+                    "SELECT content FROM chapters WHERE id = ?", (cid,)
+                ).fetchone()
+                with self._conn:
+                    self._conn.execute(
+                        "INSERT INTO chapter_versions (chapter_id, content, note, saved_at) "
+                        "VALUES (?, ?, ?, ?)",
+                        (cid, old["content"], note, now),
+                    )
+                    self._conn.execute(
+                        "UPDATE chapters SET content = ?, title = ?, order_index = ?, "
+                        "narrative_line = ?, updated_at = ? WHERE id = ?",
+                        (content, title, order_index, narrative_line, now, cid),
+                    )
+            else:
+                cid = uuid.uuid4().hex
+                with self._conn:
+                    # 并发新建防撞序：同项目已有章节占用的 order 顺延到空闲（锁内判定）
+                    occupied = {
+                        r["order_index"]
+                        for r in self._conn.execute(
+                            "SELECT order_index FROM chapters WHERE book_id = ?",
+                            (book_id,),
+                        )
+                    }
+                    while order_index in occupied:
+                        order_index += 1
+                    self._conn.execute(
+                        "INSERT INTO chapters (id, book_id, title, content, order_index, "
+                        "narrative_line, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (cid, book_id, title, content, order_index, narrative_line, now, now),
+                    )
         return self.get(cid)  # type: ignore[return-value]
 
     def restore_version(self, chapter_id: str, version_id: int) -> Chapter | None:
@@ -396,6 +433,35 @@ class ChapterStore:
             }
             for r in rows
         ]
+
+    def versions_after(self, book_id: str, t0: str) -> list[str]:
+        """S154（会话回滚）：t0 之后有过版本记录的章节 id（回滚候选）。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT v.chapter_id AS cid FROM chapter_versions v "
+                "JOIN chapters c ON c.id = v.chapter_id "
+                "WHERE c.book_id = ? AND v.saved_at >= ?",
+                (book_id, t0),
+            ).fetchall()
+        return [str(r["cid"]) for r in rows]
+
+    def first_version_after(self, chapter_id: str, t0: str) -> dict[str, Any] | None:
+        """S154（会话回滚）：saved_at >= t0 的第一条版本 = 本轮第一次覆盖存的旧版。
+
+        版本表语义：每次 upsert 覆盖前把旧版存入 chapter_versions。因此
+        saved >= t0 最早一条 = 本轮第一次修改前的状态（即 t0 时章节内容）——
+        回滚目标。本轮新建章节（无版本记录）返回 None（保守不动）。
+        """
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, content FROM chapter_versions "
+                "WHERE chapter_id = ? AND saved_at >= ? "
+                "ORDER BY saved_at ASC, id ASC LIMIT 1",
+                (chapter_id, t0),
+            ).fetchone()
+        if row is None:
+            return None
+        return {"id": row["id"], "content": row["content"]}
 
     def get(self, chapter_id: str) -> Chapter | None:
         with self._lock:

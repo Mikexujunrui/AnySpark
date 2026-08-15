@@ -148,6 +148,50 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
             deps.conv_queues.pop(conv_id, None)
         return {"ok": True}
 
+    @router.post("/api/conversations/{conv_id}/rollback", response_model=dict[str, object])
+    def rollback_conversation_turn(conv_id: str) -> dict[str, object]:
+        """S154（主人定案方案 1）：一键回滚本轮修改——章节（完美）+ 图谱（增量）。
+
+        本轮 = 最后一条 user 消息（t0）之后的所有修改：
+        ① 章节：chapter_versions 里 saved_at > t0 的章 → 恢复到 t0 前最新版本；
+           无改前快照（本轮新建章）保守跳过
+        ② 图谱：删 created_at > t0 的实体/关系/事件增量（正文派生副作用）
+        不回滚：叙事树/伏笔/计划（独立创作决策）、信号/说明书/skill（学习数据）。
+        """
+        conv = deps.store.get(conv_id)
+        if conv is None:
+            raise HTTPException(status_code=404, detail="会话不存在")
+        t0 = deps.store.last_user_message_time(conv_id)
+        if not t0:
+            return {"ok": True, "restored": [], "graph_removed": {}, "note": "会话无 user 消息"}
+        # ① 章节回滚（完美：恢复到改前快照）
+        cids = deps.chapters.versions_after(conv.book_id, t0)
+        restored: list[dict[str, object]] = []
+        # S152j：来源分布——t0 后被回滚章节的版本 note 类型（'修改前'=会话编辑，
+        # '批量任务/任务X'=工作流写回，'恢复前'=之前回滚）。供前端提示：回滚会
+        # 覆盖 t0 后**所有来源**的修改（含其他会话的编辑/其他任务写回）。
+        source_counts: dict[str, int] = {}
+        for cid in cids:
+            before = deps.chapters.first_version_after(cid, t0)
+            if before is None:
+                continue  # 本轮新建章无改前快照 → 保守不动
+            ch = deps.chapters.restore_version(cid, int(before["id"]))
+            if ch is not None:
+                restored.append(
+                    {"chapter_id": cid, "title": ch.title, "restored_at": ch.updated_at}
+                )
+                src = str(before.get("note") or "修改前")
+                source_counts[src] = source_counts.get(src, 0) + 1
+        # ② 图谱增量回滚（派生副作用）
+        graph_removed = deps.graph.delete_after(conv.book_id, t0)
+        return {
+            "ok": True,
+            "restored": restored,
+            "restored_count": len(restored),
+            "graph_removed": graph_removed,
+            "source_counts": source_counts,
+        }
+
     # -----------------------------------------------------------------------
     # S47 运行时模型配置：注册表 CRUD + 激活切换（换供应商/换模型/选思考强度）
     # -----------------------------------------------------------------------

@@ -115,8 +115,8 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         title = req.title.strip()
         if not title:
             raise HTTPException(status_code=422, detail="标题不能为空")
-        chs = deps.chapters.list_by_book(req.book_id)
-        order = max((c.order_index for c in chs), default=-1) + 1
+        # S152j：原子分配 order（锁内 MAX+1），并发新建不撞序
+        order = deps.chapters.next_order(req.book_id)
         ch = deps.chapters.upsert(req.book_id, title, req.content, order)
         deps.workspace.write_chapter(req.book_id, order, ch.title, ch.content)
         return ChapterOut(

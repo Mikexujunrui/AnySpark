@@ -44,6 +44,7 @@
 >   3. WORKFLOW 收尾后续：/api/batch 内存实现可再收编（前端已工作流模式并存，按需）
 >   4. ~~质量债修复清单~~ ✅（S148 A 死代码 + S149 B 决策三删 + S150 C 测试装配 helper + S151 D1 _wf_run_script 拆分；D2 app.py 瘦身留待按需——见 docs/REPAIR-LIST.md）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
+> [S154] 正在改 `routes_conversations.py` + `ChatPanel.tsx`：会话级一键回滚本轮修改（章节完美回滚 + 图谱增量回滚，方案1）——已声明（完成提交后删本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
 > ⚠️ S152 撞号裹挟留痕（归属说明，勿删）：并行会话 commit `ffc383a`（S152 预置模板保护）提交时裹挟了本会话对 `api/workflow.ts`/`WorkflowPanel.tsx`/`routes_workflow.py`/`test_workflow_api.py` 的**未提交**改动（工作流画布打开 setDraft/原地保存 id/运行绑 bookId）。代码无丢失、可编译；但该提交的 `req.id` 与 `startRun(bookId)` 依赖本会话的 `schemas.py`/`workflowStore.ts` 未提交改动——二者已随本会话提交 `b9xxxx` 补齐，HEAD 才完整。
 > [S145] 已提交完成（6 commits：311e94b/5fdfa93/624a515/fd5acbb/1b3e36f/edc0984，第三方评审修复）——声明行随 S145 提交后删除
@@ -4212,3 +4213,31 @@ V4 对应物已齐：ToolContext.book_id（S74）+ 前端显式传（S152 系）
 
 **验证**：扫描脚本自测（probe 命中调用点、正确排除声明）；当前代码库 0 检出
 （S152g 已清干净，证明此前 7 处修复彻底）；全量 gate 绿（601 pytest + 前端全过）。
+
+## S152j: 并发/同步安全检查——文件锁 + order 原子 + 回滚知情（主人质询驱动）（已完成 ✅）
+
+**背景**：主人问"一个会话批量撤回、另一个会话正在编辑会不会相互影响？"——系统性检查
+并发/同步关系，确认冲突存在并修复。
+
+**检查结论**：
+- 🔴 会话回滚（S154 按时间 t0）会连带回滚**其他会话** t0 后的编辑（版本 note 只有
+  修改前/批量任务/恢复前，区分不了会话来源）
+- 🟠 章节 md 文件写无锁（write_text 非原子，文件是权威却无保护）
+- 🟠 order 分配非原子（max+1 / len()，并发新建撞序 → md 文件同路径互踩）
+- 🟠 upsert 开头 SELECT 无锁（共享 sqlite 连接并发崩溃——测试暴露）
+- 🟢 已安全：SQLite WAL+30s busy_timeout（S75）、版本历史兜底（内容不丢）、
+  图谱抽取单线程队列、stop Event 共享（无实际触发路径，标记潜在）
+
+**修复（S152j）**：
+1. Workspace 文件写锁（threading.Lock 串行化 write/delete_chapter_file）
+2. ChapterStore.next_order（锁内 MAX+1）+ create_chapter/write_chapter 用它；
+   upsert 全程锁内 + 新建时同序顺延到空闲（并发防撞序的最终保障）
+3. S154 会话回滚响应加 source_counts（被回滚章节的版本来源分布），前端提示
+   "含其他会话/任务的修改，改动前内容在版本历史可找回"（知情而非静默覆盖）
+   ——前端提示部分在 ChatPanel（含并行会话未提交的 S154 前端，未裹挟）
+
+**测试 +3**（next_order 顺序/并发唯一/文件锁存在）；全量 pytest 通过。
+
+**未做（YAGNI/已知）**：stop Event 共享（无用户级取消入口）；跨进程锁
+（发布版单进程）；"版本→会话"归属追踪（需工具层会话上下文，改动大收益低——
+知情提示已覆盖风险）。

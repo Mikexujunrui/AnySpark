@@ -19,6 +19,7 @@ anyspark.server.workspace — 项目工作区（S48 工作区化：每项目一�
 from __future__ import annotations
 
 import re
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -56,6 +57,9 @@ class Workspace:
     def __init__(self, root: Path = WORKSPACE_ROOT) -> None:
         self.root = Path(root)
         self.root.mkdir(parents=True, exist_ok=True)
+        # S152j：文件写锁——md 是权威（章节/卡片/上传），多会话并发写同一文件
+        # 需串行化（进程内锁；发布版单进程场景足够）
+        self._file_lock = threading.Lock()
 
     # -- 目录解析 --
     def project_dir(self, book_id: str = "main") -> Path:
@@ -123,9 +127,9 @@ class Workspace:
 
     def is_immersive(self, book_id: str = "main") -> bool:
         """该书是否开启沉浸模式（写作自由度：不设题材禁区）。兼容旧破限标志。"""
-        return self.immersive_flag(book_id).exists() or self._legacy_uncensored_flag(
-            book_id
-        ).exists()
+        return (
+            self.immersive_flag(book_id).exists() or self._legacy_uncensored_flag(book_id).exists()
+        )
 
     def set_immersive(
         self, book_id: str = "main", enabled: bool = True, custom_prompt: str | None = None
@@ -181,16 +185,18 @@ class Workspace:
             return None
 
     def write_chapter(self, book_id: str, order: int, title: str, content: str) -> Path:
-        """写章节正文（覆盖；权威在文件）。"""
+        """写章节正文（覆盖；权威在文件）。S152j：文件写锁串行化并发写。"""
         f = self.chapter_file(book_id, order, title)
         f.parent.mkdir(parents=True, exist_ok=True)
-        f.write_text(content, encoding="utf-8")
+        with self._file_lock:
+            f.write_text(content, encoding="utf-8")
         return f
 
     def delete_chapter_file(self, book_id: str, order: int, title: str) -> bool:
         f = self.chapter_file(book_id, order, title)
         if f.exists():
-            f.unlink()
+            with self._file_lock:
+                f.unlink()
             return True
         return False
 
