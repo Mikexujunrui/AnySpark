@@ -112,6 +112,7 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
   // S152d：右键菜单 / 迷你地图 / 适配视图
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; kind: "node" | "edge" | "canvas"; id?: string } | null>(null);
   const [showMiniMap, setShowMiniMap] = useState(true);
+  const [showExecLog, setShowExecLog] = useState(false); // S152e：执行明细浮层
   const canvasWrapRef = useRef<HTMLDivElement>(null);
 
   // 运行状态
@@ -174,6 +175,31 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
     for (const s of runningTask?.node_states ?? []) m[s.node_id] = s;
     return m;
   }, [runningTask]);
+
+  // S152e：运行反馈——当前执行节点/完成统计/进度百分比/当前节点名
+  const runningNodeId = useMemo(() => {
+    if (!runningTask) return null;
+    return (
+      runningTask.current_node_id ??
+      (runningTask.node_states ?? []).find((s) => s.status === "running")?.node_id ??
+      null
+    );
+  }, [runningTask]);
+  const runningDoneCount = useMemo(
+    () => (runningTask?.node_states ?? []).filter((s) => s.status === "done").length,
+    [runningTask]
+  );
+  const runningTotalCount = draft?.nodes.length ?? 1;
+  const runningProgressPct = Math.min(
+    100,
+    Math.round((runningDoneCount / Math.max(runningTotalCount, 1)) * 100)
+  );
+  const runningCurrentLabel = useMemo(() => {
+    if (!runningTask) return "";
+    const cid = runningNodeId;
+    if (cid) return draft?.nodes.find((n) => n.id === cid)?.label ?? cid;
+    return runningTask.status;
+  }, [runningTask, runningNodeId, draft]);
 
   const nodeStroke = (n: WorkflowNode): string => {
     const st = nodeStateMap[n.id];
@@ -582,9 +608,29 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
             保存模板
           </button>
         )}
-        <span className="ml-auto text-[11px] text-zinc-600">
-          {runningTask ? `运行中任务: ${runningTask.status}` : "滚轮缩放 · 拖背景平移 · 拖节点移动 · 点节点右侧◎拖到目标节点连线（gate 可拖多条）"}
-        </span>
+        {/* S152e：任务进度条（运行中时） */}
+        {runningTask && (
+          <div className="ml-auto flex items-center gap-2 select-none">
+            <div className="w-44 h-1.5 bg-zinc-800 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-500"
+                style={{
+                  width: `${runningProgressPct}%`,
+                  background: runningTask.status === "failed" ? "#ef4444" : "#10b981",
+                }}
+              />
+            </div>
+            <span className="text-[11px] text-zinc-400 whitespace-nowrap">
+              {runningDoneCount}/{runningTotalCount}{" "}
+              {runningTask.status === "done" ? "· 完成" : runningTask.status === "failed" ? "· 失败" : runningTask.status === "waiting_approval" ? "· 等待确认" : runningTask.status === "cancelled" ? "· 已取消" : `· 正在执行: ${runningCurrentLabel}`}
+            </span>
+          </div>
+        )}
+        {!runningTask && (
+          <span className="ml-auto text-[11px] text-zinc-600">
+            滚轮缩放 · 拖背景平移 · 拖节点移动 · 点节点右侧◎拖到目标节点连线（gate 可拖多条）
+          </span>
+        )}
       </div>
 
       {/* 运行参数输入条（可选 JSON：{{var}} 初始值，如 {"chapter_title":"第五章"}） */}
@@ -976,13 +1022,26 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                       const d = edgePath(from, to, diamond);
                       const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
                       const label = condText(e);
+                      // S152e：执行路径染色——已完成路径变绿；流向当前节点的边黄流动动画
+                      const srcDone = nodeStateMap[e.source]?.status === "done";
+                      const tgtDone = nodeStateMap[e.target]?.status === "done";
+                      const flowToCurrent = !!runningNodeId && e.target === runningNodeId;
+                      const isDonePath = srcDone && tgtDone;
+                      const strokeColor = sel
+                        ? "#fbbf24"
+                        : flowToCurrent
+                          ? "#facc15"
+                          : isDonePath
+                            ? "rgba(16,185,129,0.65)"
+                            : "rgba(113,113,122,0.55)";
                       return (
                         <g key={e.id} className="cursor-pointer">
                           <path
                             d={d}
                             fill="none"
-                            stroke={sel ? "#fbbf24" : "rgba(113,113,122,0.55)"}
-                            strokeWidth={sel ? 2.5 : 1.5}
+                            stroke={strokeColor}
+                            strokeWidth={sel ? 2.5 : flowToCurrent ? 2 : 1.5}
+                            strokeDasharray={flowToCurrent ? "7 7" : undefined}
                             onClick={(ev) => {
                               ev.stopPropagation();
                               setSelectedEdgeId(e.id);
@@ -995,7 +1054,18 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                               setSelectedNodeId(null);
                               setCtxMenu({ x: ev.clientX, y: ev.clientY, kind: "edge", id: e.id });
                             }}
-                          />
+                          >
+                            {/* 数据流动画：流向当前节点的边虚线流动 */}
+                            {flowToCurrent && (
+                              <animate
+                                attributeName="stroke-dashoffset"
+                                from="14"
+                                to="0"
+                                dur="0.7s"
+                                repeatCount="indefinite"
+                              />
+                            )}
+                          </path>
                           {label && (
                             <g
                               onClick={(ev) => {
@@ -1133,6 +1203,34 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                           >
                             {KIND_LABEL[n.kind]}
                           </text>
+                          {/* S152e：运行状态徽标（✓完成 / ✗失败 / 旋转指示 running） */}
+                          {st?.status === "done" && (
+                            <g transform={`translate(${NODE_W + 6}, ${NODE_H / 2 - 16})`} style={{ pointerEvents: "none" }}>
+                              <circle r={8} fill="rgba(16,185,129,0.2)" stroke="#10b981" strokeWidth={1.5} />
+                              <path d="M -3.5 0.5 L -1 3 L 3.5 -3" fill="none" stroke="#34d399" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" />
+                            </g>
+                          )}
+                          {st?.status === "failed" && (
+                            <g transform={`translate(${NODE_W + 6}, ${NODE_H / 2 - 16})`} style={{ pointerEvents: "none" }}>
+                              <circle r={8} fill="rgba(239,68,68,0.2)" stroke="#ef4444" strokeWidth={1.5} />
+                              <path d="M -3 -3 L 3 3 M 3 -3 L -3 3" stroke="#f87171" strokeWidth={1.8} strokeLinecap="round" />
+                            </g>
+                          )}
+                          {st?.status === "running" && (
+                            <>
+                              {/* 脉冲扩散光圈 */}
+                              <circle cx={NODE_W / 2} cy={NODE_H / 2} r={NODE_H / 2} fill="none" stroke="#facc15" strokeWidth={2} style={{ pointerEvents: "none" }}>
+                                <animate attributeName="r" values={`${NODE_H / 2};${NODE_H / 2 + 14}`} dur="1s" repeatCount="indefinite" />
+                                <animate attributeName="opacity" values="0.9;0" dur="1s" repeatCount="indefinite" />
+                              </circle>
+                              {/* 旋转指示 */}
+                              <g transform={`translate(${NODE_W / 2}, ${NODE_H / 2})`} style={{ pointerEvents: "none" }}>
+                                <circle r={7} fill="none" stroke="#facc15" strokeWidth={2} strokeDasharray="10 22" strokeLinecap="round">
+                                  <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="0.9s" repeatCount="indefinite" />
+                                </circle>
+                              </g>
+                            </>
+                          )}
                           {/* 运行状态角标 */}
                           {st && (
                             <g transform={`translate(${NODE_W / 2}, -10)`}>
@@ -1193,13 +1291,26 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                     ⛶
                   </button>
                   <button
-                    onClick={() => setShowMiniMap(!showMiniMap)}
-                    className={`w-7 h-7 rounded bg-zinc-900/90 border text-xs leading-none ${showMiniMap ? "border-zinc-600 text-zinc-200" : "border-zinc-700 text-zinc-500 hover:bg-zinc-800"}`}
-                    title={showMiniMap ? "隐藏迷你地图" : "显示迷你地图"}
+                    onClick={() => setShowExecLog(!showExecLog)}
+                    className={`w-7 h-7 rounded bg-zinc-900/90 border text-xs leading-none ${showExecLog ? "border-zinc-600 text-zinc-200" : "border-zinc-700 text-zinc-500 hover:bg-zinc-800"}`}
+                    title={showExecLog ? "隐藏执行明细" : "显示执行明细"}
                   >
-                    ▦
+                    ☰
                   </button>
                 </div>
+
+                {/* S152e：执行明细浮层（右下角，任务运行时/结束后可看） */}
+                {showExecLog && runningTask && (
+                  <ExecLogPanel
+                    runningTask={runningTask}
+                    nodesById={nodesById}
+                    onLocate={(nodeId) => {
+                      setSelectedNodeId(nodeId);
+                      setSelectedEdgeId(null);
+                    }}
+                    onClose={() => setShowExecLog(false)}
+                  />
+                )}
 
                 {/* S152d：迷你地图（右下角） */}
                 {showMiniMap && draft.nodes.length > 0 && (
@@ -1472,6 +1583,84 @@ function NodeEditor({
       >
         删除节点
       </button>
+    </div>
+  );
+}
+
+/* ── S152e：执行明细浮层（节点状态时间线） ── */
+const EXEC_STATUS_TEXT: Record<string, string> = {
+  done: "完成",
+  failed: "失败",
+  running: "执行中",
+  skipped: "跳过",
+  pending: "等待",
+  queued: "排队",
+};
+const EXEC_STATUS_COLOR: Record<string, string> = {
+  done: "#10b981",
+  failed: "#ef4444",
+  running: "#facc15",
+  skipped: "#71717a",
+  pending: "#3f3f46",
+  queued: "#3f3f46",
+};
+
+function ExecLogPanel({
+  runningTask,
+  nodesById,
+  onLocate,
+  onClose,
+}: {
+  runningTask: WorkflowTask;
+  nodesById: Record<string, WorkflowNode>;
+  onLocate: (nodeId: string) => void;
+  onClose: () => void;
+}) {
+  const states = [...(runningTask.node_states ?? [])].reverse(); // 最新在前
+  const statusText = runningTask.status;
+  return (
+    <div className="absolute bottom-2 left-2 w-72 max-h-64 flex flex-col bg-zinc-900/95 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
+      <div className="flex items-center justify-between px-2 py-1.5 border-b border-zinc-800 bg-zinc-900">
+        <span className="text-[10px] text-zinc-400 font-medium">
+          执行明细 · {statusText === "done" ? "✓ 完成" : statusText === "failed" ? "✗ 失败" : statusText === "waiting_approval" ? "⏸ 等待确认" : `● ${statusText}`}
+        </span>
+        <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300 text-xs leading-none">×</button>
+      </div>
+      <div className="flex-1 overflow-auto p-1">
+        {states.length === 0 && <p className="text-[11px] text-zinc-600 px-2 py-2">暂无节点明细（任务初始化中）</p>}
+        {states.map((s) => {
+          const n = nodesById[s.node_id];
+          const color = EXEC_STATUS_COLOR[s.status] ?? "#3f3f46";
+          const text = EXEC_STATUS_TEXT[s.status] ?? s.status;
+          const summary = (s.output ?? s.error ?? "")
+            .replace(/\n+/g, " ")
+            .slice(0, 48);
+          return (
+            <button
+              key={s.node_id}
+              onClick={() => onLocate(s.node_id)}
+              className={`w-full text-left px-2 py-1 rounded hover:bg-zinc-800 transition-colors ${s.status === "running" ? "bg-zinc-800/60" : ""}`}
+              title={summary || n?.label || s.node_id}
+            >
+              <div className="flex items-center gap-1.5">
+                <span
+                  className="w-1.5 h-1.5 rounded-full shrink-0"
+                  style={{ background: color }}
+                />
+                <span className="text-[11px] text-zinc-300 truncate flex-1">
+                  {n?.label ?? s.node_id}
+                </span>
+                <span className="text-[10px] text-zinc-500 shrink-0" style={{ color }}>
+                  {text}
+                </span>
+              </div>
+              {summary && (
+                <p className="text-[10px] text-zinc-600 truncate pl-3">{summary}</p>
+              )}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
