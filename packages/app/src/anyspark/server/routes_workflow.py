@@ -101,6 +101,26 @@ def make_workflow_router(deps: AppDeps) -> APIRouter:
         except (KeyError, ValueError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+    @router.post("/api/workflows/tasks/{task_id}/cancel", response_model=dict[str, Any])
+    def cancel_workflow_task(task_id: str) -> dict[str, Any]:
+        """S152k：用户取消任务——引擎在下一检查点中断，任务置 cancelled（可 resume 续跑）。
+
+        任务级 stop：只停指定任务，不影响并行任务（此前 stop 为引擎级全局，
+        取消 A 会误停 B）。已完成任务幂等返回。
+        """
+        task = deps.workflow_store.get_task(task_id)
+        if task is None:
+            raise HTTPException(status_code=404, detail="任务不存在")
+        status = str(task.get("status") or "")
+        if status in ("done", "failed", "cancelled"):
+            return {"task_id": task_id, "status": status, "note": "任务已结束，无需取消"}
+        workflow_engine.request_stop(task_id)
+        return {
+            "task_id": task_id,
+            "status": "cancelling",
+            "note": "已请求取消，引擎将在下一检查点中断",
+        }
+
     @router.post("/api/workflows/tasks/{task_id}/resume", response_model=dict[str, Any])
     def resume_workflow_task(task_id: str) -> dict[str, Any]:
         """S138（PLAN-SCALE-SAFETY 阶段 A）：断点续跑——服务重启/中断后拉起未完成任务。

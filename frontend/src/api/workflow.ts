@@ -159,3 +159,13 @@ export function approveTask(
 ): Promise<WorkflowTask> {
   return apiPost<WorkflowTask>(`/api/workflows/tasks/${taskId}/approve`, { decision });
 }
+
+// S152k：用户取消任务（任务级 stop，不影响并行任务；cancelled 后可 resume 续跑）
+export function cancelTask(
+  taskId: string
+): Promise<{ task_id: string; status: string; note?: string }> {
+  return apiPost<{ task_id: string; status: string; note?: string }>(
+    `/api/workflows/tasks/${taskId}/cancel`,
+    {}
+  );
+}

@@ -12,9 +12,11 @@ import {
   listWorkflowTasks,
   getWorkflowTask,
   approveTask,
+  cancelTask,
   type WorkflowDef,
   type WorkflowSummary,
   type WorkflowTask,
+  type TaskStatus,
 } from "../api/workflow";
 
 interface WorkflowState {
@@ -35,6 +37,7 @@ interface WorkflowState {
   startRun: (id: string, bookId: string, params?: Record<string, string>) => Promise<string>;
   refreshTask: (taskId: string) => Promise<WorkflowTask>;
   decide: (taskId: string, decision: "ok" | "reject") => Promise<void>;
+  cancel: (taskId: string) => Promise<void>; // S152k：用户取消任务
   setError: (msg: string | null) => void;
 }
 
@@ -160,6 +163,23 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
       }));
     } catch (e) {
       set({ error: e instanceof Error ? e.message : "审批失败" });
+      throw e;
+    }
+  },
+
+  // S152k：用户取消——引擎下一检查点中断，状态变 cancelled（可 resume 续跑）
+  cancel: async (taskId) => {
+    try {
+      const res = await cancelTask(taskId);
+      set({ error: null });
+      // 轮询会刷新到最终 cancelled 状态；立即回填"取消中"
+      set((s) => ({
+        tasks: s.tasks.map((t) =>
+          t.id === taskId ? { ...t, status: (res.status as TaskStatus) || t.status } : t
+        ),
+      }));
+    } catch (e) {
+      set({ error: e instanceof Error ? e.message : "取消失败" });
       throw e;
     }
   },

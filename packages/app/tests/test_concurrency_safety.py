@@ -61,3 +61,66 @@ def test_workspace_file_lock_present() -> None:
     assert f.read_text(encoding="utf-8") == "正文"
     assert ws.delete_chapter_file("main", 0, "第一章") is True
     assert not f.exists()
+
+
+def test_cancel_one_task_keeps_others_running() -> None:
+    """S152k：任务级取消——取消任务 A 不影响并行任务 B（此前 stop 引擎级全局，停 A 停 B）。"""
+    import json
+    import tempfile
+    import time
+
+    from anyspark.workflow import NodeResult, WorkflowDef, WorkflowEngine, WorkflowStore
+
+    db = Path(tempfile.mkdtemp()) / "wf.db"
+    store = WorkflowStore(db)
+    wf = WorkflowDef.from_dict(
+        {
+            "name": "慢循环",
+            "nodes": [
+                {
+                    "id": "loop",
+                    "kind": "loop",
+                    "params": {"body": ["work"], "max_iterations": 200, "collection_var": "items"},
+                },
+                {"id": "work", "kind": "script", "params": {"function": "noop"}},
+            ],
+            "edges": [],
+        }
+    )
+
+    # runner：模拟耗时工作（每次迭代 sleep，让取消有机会触发）
+    from typing import Any as _Any
+
+    calls: dict[str, int] = {}
+
+    def slow_runner(ctx: _Any, node: _Any) -> NodeResult:
+        calls[node.id] = calls.get(node.id, 0) + 1
+        time.sleep(0.02)
+        return NodeResult(output="x")
+
+    engine = WorkflowEngine(store, slow_runner)
+    ta = store.create_task(wf, book_id="main", params={"items": json.dumps([1] * 100)})
+    tb = store.create_task(wf, book_id="main", params={"items": json.dumps([1] * 100)})
+
+    def run(tid: str) -> None:
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            engine.run_task(tid)
+
+    import threading as _th
+
+    a = _th.Thread(target=run, args=(ta,), daemon=True)
+    b = _th.Thread(target=run, args=(tb,), daemon=True)
+    a.start()
+    b.start()
+    time.sleep(0.15)  # 两任务都在跑
+    engine.request_stop(ta)  # 只取消 A
+    a.join(timeout=5)
+    # A 应被取消
+    status_a = store.get_task(ta)
+    assert status_a is not None and status_a["status"] == "cancelled", status_a
+    # B 不受影响，继续跑到 done
+    b.join(timeout=15)
+    status_b = store.get_task(tb)
+    assert status_b is not None and status_b["status"] == "done", status_b

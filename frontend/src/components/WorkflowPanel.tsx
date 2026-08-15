@@ -90,7 +90,7 @@ interface State {
 }
 
 export default function WorkflowPanel({ bookId }: { bookId: string }) {
-  const { templates, drafts, tasks, loading, fetchAll, openWorkflow, saveWorkflow, removeWorkflow, aiGenerate, promote, discardDraft, startRun, refreshTask, decide, setError } =
+  const { templates, drafts, tasks, loading, fetchAll, openWorkflow, saveWorkflow, removeWorkflow, aiGenerate, promote, discardDraft, startRun, refreshTask, decide, cancel, setError } =
     useWorkflowStore();
 
   // 编辑中的定义（本地草稿态）
@@ -843,6 +843,31 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                         className="text-[10px] text-red-500 hover:text-red-400"
                       >
                         拒绝 ✗
+                      </button>
+                      <button
+                        onClick={() =>
+                          cancel(t.id)
+                            .then(() => fetchAll())
+                            .catch(() => {})
+                        }
+                        className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                      >
+                        取消
+                      </button>
+                    </div>
+                  )}
+                  {(t.status === "running" || t.status === "queued") && (
+                    <div className="flex gap-2 mt-1">
+                      <button
+                        onClick={() =>
+                          cancel(t.id)
+                            .then(() => fetchAll())
+                            .catch(() => {})
+                        }
+                        className="text-[10px] text-zinc-500 hover:text-red-400"
+                        title="取消任务（已写章节保留在版本历史，可 resume 续跑）"
+                      >
+                        ✕ 取消
                       </button>
                     </div>
                   )}

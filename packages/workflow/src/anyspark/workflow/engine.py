@@ -88,13 +88,35 @@ class WorkflowEngine:
         self._runner = runner
         self._model_judge = model_judge
         self._sleep = sleep
-        self._stop = threading.Event()
+        # S152k：任务级取消——stop 从全局 Event 改为 per-task flags。
+        # _global_stop 保留（无参 request_stop = 服务中断/进程被杀场景，全停）；
+        # request_stop(task_id) 只停指定任务（用户取消，不影响并行任务）。
+        self._global_stop = threading.Event()
+        self._stops: dict[str, threading.Event] = {}
 
-    def request_stop(self) -> None:
-        self._stop.set()
+    def request_stop(self, task_id: str | None = None) -> None:
+        """请求停止。task_id 指定 → 仅停该任务（用户取消）；缺省 → 全局中断（服务场景）。"""
+        if task_id is None:
+            self._global_stop.set()
+        else:
+            self._stops.setdefault(task_id, threading.Event()).set()
 
-    def clear_stop(self) -> None:
-        self._stop.clear()
+    def clear_stop(self, task_id: str | None = None) -> None:
+        """清除停止标记（重新运行前）。task_id 缺省清全局。"""
+        if task_id is None:
+            self._global_stop.clear()
+        else:
+            flag = self._stops.get(task_id)
+            if flag is not None:
+                flag.clear()
+
+    def _check_stop(self, task_id: str) -> None:
+        """S152k：检查点——全局中断或本任务取消即抛 _StopRequested。"""
+        if self._global_stop.is_set():
+            raise _StopRequested()
+        flag = self._stops.get(task_id)
+        if flag is not None and flag.is_set():
+            raise _StopRequested()
 
     # ------------------------------------------------------------------
     # 公开入口
@@ -104,7 +126,7 @@ class WorkflowEngine:
 
         幂等可恢复：已 done 节点跳过；loop 从记录迭代数续跑。
         """
-        self._stop.clear()
+        self.clear_stop(task_id)  # S152k：重跑前清除本任务取消标记（全局中断保留）
         task = self._store.get_task(task_id)
         if task is None:
             raise KeyError(f"任务不存在: {task_id}")
@@ -176,8 +198,7 @@ class WorkflowEngine:
     def _execute_node(self, ctx: RunContext, node: WorkflowNode, *, force: bool = False) -> None:
         """执行单个节点（含 loop 展开）。幂等：done 跳过（force=True 强制重跑）。"""
         task_id = ctx.task_id
-        if self._stop.is_set():
-            raise _StopRequested()
+        self._check_stop(task_id)  # S152k：任务级/全局取消检查
         # 断点恢复：done 节点跳过但沿已记录去向推进（gate 用记录的 target）
         if not force and self._store.node_status(task_id, node.id) == "done":
             logger.info("[%s] 节点 %s 已 done，跳过（断点恢复）", task_id, node.id)
@@ -318,8 +339,7 @@ class WorkflowEngine:
             # 已执行轮次直接跳过（前几轮累计结果已在 results/partials 持久化）
             iteration = start_iter
             while iteration < len(collection) and iteration < max_iter:
-                if self._stop.is_set():
-                    raise _StopRequested()
+                self._check_stop(ctx.task_id)  # S152k：任务级/全局取消检查
                 ctx.results[item_var] = collection[iteration]
                 for nid in body_ids:
                     body_node = ctx.definition.node(nid)
@@ -355,8 +375,7 @@ class WorkflowEngine:
 
         iteration = start_iter
         while iteration < max_iter:
-            if self._stop.is_set():
-                raise _StopRequested()
+            self._check_stop(ctx.task_id)  # S152k：任务级/全局取消检查
             iteration += 1
             for nid in body_ids:
                 body_node = ctx.definition.node(nid)
