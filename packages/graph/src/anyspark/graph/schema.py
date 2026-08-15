@@ -841,6 +841,46 @@ class GraphStore:
             self._conn.commit()
         return cur.rowcount > 0
 
+    def delete_after(self, book_id: str, t0: str) -> dict[str, int]:
+        """S154（会话回滚）：删 created_at > t0 的图谱增量（派生副作用回滚）。
+
+        实体删除走 delete_entity（级联 FTS/state/关联关系）；关系/事件按 id 删。
+        改前已有的实体（created_at <= t0）保留——靠后续重新抽取合并纠正。
+        """
+        with self._lock:
+            rel_ids = [
+                str(r["id"])
+                for r in self._conn.execute(
+                    "SELECT id FROM graph_relations WHERE book_id = ? AND created_at >= ?",
+                    (book_id, t0),
+                ).fetchall()
+            ]
+            ev_ids = [
+                str(r["id"])
+                for r in self._conn.execute(
+                    "SELECT id FROM graph_events WHERE book_id = ? AND created_at >= ?",
+                    (book_id, t0),
+                ).fetchall()
+            ]
+            ent_names = [
+                str(r["name"])
+                for r in self._conn.execute(
+                    "SELECT name FROM graph_entities WHERE book_id = ? AND created_at >= ?",
+                    (book_id, t0),
+                ).fetchall()
+            ]
+        removed = {"entities": 0, "relations": 0, "events": 0}
+        for rid in rel_ids:
+            self.delete_relation(rid)
+            removed["relations"] += 1
+        for eid in ev_ids:
+            self.delete_event(eid)
+            removed["events"] += 1
+        for name in ent_names:
+            if self.delete_entity(book_id, name):
+                removed["entities"] += 1
+        return removed
+
     def list_events(
         self, book_id: str, chapter_ref: str | None = None, limit: int = 200
     ) -> list[GraphEvent]:

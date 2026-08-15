@@ -150,7 +150,7 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
 
     @router.post("/api/conversations/{conv_id}/rollback", response_model=dict[str, object])
     def rollback_conversation_turn(conv_id: str) -> dict[str, object]:
-        """S154（主人定案方案 1）：一键回滚本轮修改——章节（完美）+ 图谱（增量）。
+        """S154：一键回滚本轮修改——章节（完美）+ 图谱（增量）。
 
         本轮 = 最后一条 user 消息（t0）之后的所有修改：
         ① 章节：chapter_versions 里 saved_at > t0 的章 → 恢复到 t0 前最新版本；

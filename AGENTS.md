@@ -80,11 +80,20 @@
    `> [S6x] 正在改 app.py：<改动内容>（完成提交后删本行）`
 5. 提交前跑门禁（分层，见下）+ `git status --short` 确认归属后显式 add
 
-### 提交前门禁（分层 + gate.py 自动判定——S96 升级，替代 S81 三档手动判定）
-- **直接跑 `uv run python scripts/gate.py`**：自动按 `git diff` 改动面判定——只改前端→前端层；只改 `.py`→后端层；前后端都有→全量；纯文档→跳过（不跑无关面，全量 pytest ~12 分钟不白烧）
-- 显式覆盖：`--all`（发布/复检/大改动）、`--python`、`--frontend`；`--pytest <路径>` 缩小子集（默认 pytest 全量）
-- **敏感文件强制全量**：命中 pyproject.toml / uv.lock / package.json / package-lock.json / .gitattributes / scripts/package_release.py / packages/*/pyproject.toml 时自动全量——S88b 打包脚本漏 format 事故的机制堵截（不再靠人脑判定"该不该跑全量"）
+### 提交前门禁（分级——S96 自动分层 + S157 主人定案：日常快速、发布全量）
+
+**原则：pytest 全量（~12 分钟）只在发布/大改动/敏感文件跑；日常提交按改动级别选最小检查。**
+
+| 级别 | 改动类型 | 提交前必跑 | 耗时 |
+|---|---|---|---|
+| L1 快速 | 注释/文档/纯文案/脚本删除 | 改到的文件单文件检查（`ruff check <文件>` / `npx tsc -b`） | 几十秒 |
+| L2 常规 | 逻辑改动（后端/前端功能） | 分层 + 相关测试子集：`gate.py --pytest <相关测试路径>`（ruff+mypy+tsc 照常） | 1~3 分钟 |
+| L3 发布 | 发布/复检/大改动/前后端都改 | **全量** `uv run python scripts/gate.py`（含全量 pytest） | ~12 分钟 |
+
+- 自动分层照旧（S96）：只改前端→前端层；只改 `.py`→后端层；前后端都有→全量（L3）；纯文档→跳过
+- **敏感文件强制全量（L3）**：命中 pyproject.toml / uv.lock / package.json / package-lock.json / .gitattributes / scripts/package_release.py / packages/*/pyproject.toml 时自动全量——S88b 打包脚本漏 format 事故的机制堵截
 - S67 教训仍有效：**禁只跑 check 不跑 format --check**（Python 层两者都跑，gate.py 已内置）
+- **全量 pytest 不拦截日常提交**（S157 主人定案）：日常提交不跑全量 pytest，发布前（`--push` 公开快照 / L3 场景）必须全量
 - 无论哪层，先看 gate.py 开头的「最近提交 + 改动归属」核查块（S70+S96），**逐文件确认该文件的未提交 diff 是否全部属于本次任务**再显式 add——含并行会话改动的文件禁止 add（S81/S89 裹挟教训）
 
 ### 新包注册清单（6 处，逐项勾，漏一处就逃检查/跑不起来）

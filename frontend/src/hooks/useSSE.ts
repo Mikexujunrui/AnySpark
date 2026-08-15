@@ -191,7 +191,7 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
           case 'tool_result':
             break
           case 'done': {
-            // S155：整个循环彻底结束 → 完成提示音（主人要求：主循环只在彻底结束时响）
+            // S155：整个循环彻底结束 → 完成提示音（只在彻底结束时响）
             playDone()
             if (data?.conversation_id) convIdRef.current = String(data.conversation_id)
             if (mountedRef.current) {
