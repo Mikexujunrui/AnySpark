@@ -8,6 +8,7 @@ anyspark.server.app — FastAPI 后端（真实 API 层）。
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import queue
 import sys
@@ -1010,7 +1011,14 @@ def build_app(
         def _repl(m: re.Match[str]) -> str:
             key = m.group(1)
             val = ctx.results.get(key, "")
-            return str(val) if val else f"{{{{{key}}}}}"
+            if val is None or val == "":
+                return f"{{{{{key}}}}}"
+            # S158：list/dict 变量 JSON 序列化——str(list) 是 python repr（单引号），
+            # 下游 json.loads 会失败（8-15 实测：agent 传 chapter_ids 数组 → batch_prepare
+            # 解析失败 → 误跑全部 1282 章 + loop 0 次）
+            if isinstance(val, (list, dict)):
+                return json.dumps(val, ensure_ascii=False)
+            return str(val)
 
         return re.sub(r"\{\{\s*([A-Za-z0-9_.\-]+)\s*\}\}", _repl, text)
 
@@ -1255,6 +1263,12 @@ def build_app(
             return NodeResult(error="chapter_extract 缺 item（chapter_id）")
         ch = chapters.get(cid)
         if ch is None:
+            # S158：宽容回退——按标题/序号查（batch_prepare 已归一，此为直跑/手写模板兜底）
+            for c in chapters.list_by_book(ctx.book_id):
+                if c.title == cid or str(c.order_index) == cid:
+                    ch = c
+                    break
+        if ch is None:
             return NodeResult(error=f"章节不存在: {cid}")
         _tasks.extract_chapter(deps, ctx.book_id, ch.title, ch.content or "", ch.order_index)
         return NodeResult(output=f"图谱抽取完成: 《{ch.title}》")
@@ -1329,17 +1343,32 @@ def build_app(
         raw = _wf_resolve(str(node.params.get("chapter_ids") or ""), ctx).strip()
         ids: list[str] = []
         if raw:
+            raw_items: list[str] = []
             try:
                 parsed = _json.loads(raw)
-                if isinstance(parsed, list):
-                    ids = [str(x) for x in parsed]
+                raw_items = [str(x) for x in parsed] if isinstance(parsed, list) else [str(parsed)]
             except Exception:
-                ids = [x.strip() for x in raw.split(",") if x.strip()]
+                raw_items = [x.strip() for x in raw.split(",") if x.strip()]
+            # S158：宽容解析——id/标题/序号都接受（8-15 实测：agent 拿不到 id 时
+            # 会传标题数组或序号，直接原样透传 chapter_extract 会查不到章节）
+            all_chs = chapters.list_by_book(ctx.book_id)
+            by_title = {c.title: c.id for c in all_chs}
+            by_order = {str(c.order_index): c.id for c in all_chs}
+            existing = {c.id for c in all_chs}
+            for it in raw_items:
+                if it in existing:
+                    ids.append(it)
+                elif it in by_title:
+                    ids.append(by_title[it])
+                elif it in by_order:
+                    ids.append(by_order[it])
         if not ids:
             # 缺省全部章节
             ids = [c.id for c in chapters.list_by_book(ctx.book_id)]
         if not ids:
             return NodeResult(error="batch_prepare 无章节（chapter_ids 为空且项目无章节）")
+        # S158：output 保持纯 JSON 数组（loop 的 collection_var 直接 json.loads）——
+        # 之前把 unresolved 报告拼在 JSON 后面会破坏解析（loop 读到空 collection 0 次）
         return NodeResult(output=_json.dumps(ids, ensure_ascii=False))
 
     _wf_scripts["batch_prepare"] = _wf_script_batch_prepare

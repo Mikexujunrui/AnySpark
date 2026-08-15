@@ -270,7 +270,9 @@ class WritingTools:
         items = self._chapters.list_by_book(self._book_id)
         if not items:
             return ToolResult(call=call, ok=True, content="暂无已写章节。")
-        lines = "\n".join(f"{c.order_index}: {c.title}" for c in items)
+        # S158：行尾带 id——批量/工作流场景 agent 需要章节 id 精准传参
+        # （8-15 实测：无 id 时 agent 只能猜标题/序号/缺省，重复建任务试错）
+        lines = "\n".join(f"{c.order_index}: {c.title} (id={c.id})" for c in items)
         return ToolResult(call=call, ok=True, content=lines)
 
     def read_chapter(self, spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
