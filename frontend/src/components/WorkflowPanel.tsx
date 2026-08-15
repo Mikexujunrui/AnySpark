@@ -8,6 +8,7 @@ import type {
   WorkflowTask,
 } from "../api/workflow";
 import ConfirmModal from "./ui/ConfirmModal";
+import { loopVirtualEdges, layoutEdges, snapGrid, wouldCreateCycle, flowTerminalNodes } from "../lib/workflowLayout";
 
 /* ── 节点样式 ── */
 const KIND_META: Record<
@@ -126,7 +127,7 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
     };
   }, []);
 
-  /* ── 布局：迭代最长路径分层 ── */
+  /* ── 布局：迭代最长路径分层（真实边 + loop body 虚拟边，环回边不参与）── */
   const layout = useMemo(() => {
     const pos: Record<string, Pos> = {};
     if (!draft) return pos;
@@ -135,7 +136,8 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
     // 迭代：target 层 = max(所有入边 source 层 + 1)，最多 60 轮收敛
     for (let iter = 0; iter < 60; iter++) {
       let changed = false;
-      for (const e of draft.edges) {
+      for (const e of layoutEdges(draft)) {
+        if (layer[e.source] === undefined || layer[e.target] === undefined) continue;
         const src = layer[e.source] ?? 0;
         const tgt = layer[e.target] ?? 0;
         if (tgt < src + 1) {
@@ -198,7 +200,8 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
         fail: { auto_retry_count: 0, auto_retry_interval_seconds: 0, fail_auto_skip: false },
       };
       d.nodes.push(node);
-      setManualPos((prev) => ({ ...prev, [node.id]: { x, y } }));
+      // S152c：放置位置 snap 网格
+      setManualPos((prev) => ({ ...prev, [node.id]: { x: snapGrid(x), y: snapGrid(y) } }));
       setSelectedNodeId(node.id);
       setSelectedEdgeId(null);
       return d;
@@ -215,8 +218,16 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
     setSelectedNodeId(null);
   };
 
-  const addEdge = (source: string, target: string) => {
-    if (source === target) return;
+  // S152c：加边带防环校验（与后端 validate 一致；loop 节点豁免回边）
+  const addEdge = (source: string, target: string): boolean => {
+    if (source === target) return false;
+    const loopIds = new Set(draft?.nodes.filter((n) => n.kind === "loop").map((n) => n.id));
+    const ok = !wouldCreateCycle(source, target, draft?.edges ?? [], loopIds);
+    if (!ok) {
+      setError("⚠️ 该连线会形成循环（loop 除外）——已拦截");
+      return false;
+    }
+    setError(null);
     patchDraft((d) => {
       // 去重：同 source→target 已存在则跳过
       if (d.edges.some((e) => e.source === source && e.target === target)) return d;
@@ -229,6 +240,7 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
       });
       return d;
     });
+    return true;
   };
 
   const removeEdge = (id: string) => {
@@ -261,18 +273,29 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
     if (!dragRef.current) return;
     const d = dragRef.current;
     d.moved = true;
+    // S152c：拖拽位置 snap 10px 网格
     setManualPos((prev) => ({
       ...prev,
-      [d.id]: { x: (e.clientX - d.dx) / zoom, y: (e.clientY - d.dy) / zoom },
+      [d.id]: {
+        x: snapGrid((e.clientX - d.dx) / zoom),
+        y: snapGrid((e.clientY - d.dy) / zoom),
+      },
     }));
   };
   const onNodePointerUp = (e: React.PointerEvent, id: string) => {
     if (dragRef.current) {
       if (!dragRef.current.moved) {
-        setSelectedNodeId(id);
-        setSelectedEdgeId(null);
-        setPlaceKind(null);
-        setConnectingFrom(null);
+        // S152c：两段式连线——处于连接态时点击目标节点完成连线
+        if (connectingFrom && connectingFrom !== id) {
+          const from = connectingFrom;
+          setConnectingFrom(null);
+          addEdge(from, id);
+        } else {
+          setSelectedNodeId(id);
+          setSelectedEdgeId(null);
+          setPlaceKind(null);
+          setConnectingFrom(null);
+        }
       }
       dragRef.current = null;
     }
@@ -458,7 +481,7 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
           </button>
         )}
         <span className="ml-auto text-[11px] text-zinc-600">
-          {runningTask ? `运行中任务: ${runningTask.status}` : "滚轮缩放 · 拖背景平移 · 拖节点移动 · 点节点右侧◎连线"}
+          {runningTask ? `运行中任务: ${runningTask.status}` : "滚轮缩放 · 拖背景平移 · 拖节点移动 · 点节点右侧◎拖到目标节点连线（gate 可拖多条）"}
         </span>
       </div>
 
@@ -697,6 +720,142 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                   onClick={onCanvasClick}
                 >
                   <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
+                    {/* S152b：loop 循环体虚拟边（虚线，纯显示；不入定义/引擎） */}
+                    {loopVirtualEdges(draft).map((v, vi) => {
+                      if (!nodesById[v.source] || !nodesById[v.target]) return null;
+                      const from = finalPos(v.source);
+                      const to = finalPos(v.target);
+                      const d = edgePath(from, to, false);
+                      const mid = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 };
+                      return (
+                        <g key={`vloop-${v.loopId}-${vi}`} style={{ pointerEvents: "none" }}>
+                          <path
+                            d={d}
+                            fill="none"
+                            stroke={v.back ? "rgba(244,63,94,0.45)" : "rgba(244,63,94,0.65)"}
+                            strokeWidth={1.4}
+                            strokeDasharray="6 4"
+                          />
+                          {/* 链首标“循环体”，环回标“回环” */}
+                          {(vi === 0 || v.back) && (
+                            <g>
+                              <rect
+                                x={mid.x - 22}
+                                y={mid.y - 9}
+                                width={44}
+                                height={14}
+                                rx={4}
+                                fill="#18181b"
+                                stroke="rgba(244,63,94,0.5)"
+                              />
+                              <text x={mid.x} y={mid.y + 1} textAnchor="middle" fontSize={8} fill="#fda4af">
+                                {v.back ? "回环" : "循环体"}
+                              </text>
+                            </g>
+                          )}
+                        </g>
+                      );
+                    })}
+
+                    {/* S152c：START/END 虚拟节点（不入定义，仅显示流程起终点） */}
+                    {(() => {
+                      const { startNodeId, endNodeIds } = flowTerminalNodes(draft);
+                      // 计算所有节点坐标范围（手动/布局）
+                      const allNodes = draft.nodes;
+                      if (allNodes.length === 0) return null;
+                      const xMin = Math.min(...allNodes.map((n) => finalPos(n.id).x));
+                      const xMax = Math.max(...allNodes.map((n) => finalPos(n.id).x + NODE_W));
+                      const startNode = startNodeId ? nodesById[startNodeId] : null;
+                      const endAnchor = endNodeIds.length ? endNodeIds[0] : null;
+                      return (
+                        <g style={{ pointerEvents: "none" }}>
+                          {/* START → 起始节点 */}
+                          {startNode && startNodeId && (
+                            <>
+                              <path
+                                d={(() => {
+                                  const sp = finalPos(startNodeId);
+                                  const x1 = xMin - LAYER_GAP + 36;
+                                  const y1 = sp.y + NODE_H / 2;
+                                  const x2 = sp.x;
+                                  const y2 = sp.y + NODE_H / 2;
+                                  const mx = (x1 + x2) / 2;
+                                  return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+                                })()}
+                                fill="none"
+                                stroke="rgba(16,185,129,0.5)"
+                                strokeWidth={1.3}
+                                strokeDasharray="5 4"
+                              />
+                              <circle
+                                cx={xMin - LAYER_GAP + 20}
+                                cy={finalPos(startNodeId).y + NODE_H / 2}
+                                r={15}
+                                fill="rgba(6,78,59,0.55)"
+                                stroke="#10b981"
+                                strokeWidth={1.6}
+                              />
+                              <text
+                                x={xMin - LAYER_GAP + 20}
+                                y={finalPos(startNodeId).y + NODE_H / 2 + 4}
+                                textAnchor="middle"
+                                fontSize={9}
+                                fill="#6ee7b7"
+                                fontWeight={600}
+                              >
+                                START
+                              </text>
+                            </>
+                          )}
+                          {/* 无出边节点 → END */}
+                          {endAnchor && nodesById[endAnchor] &&
+                            endNodeIds.map((eid) => {
+                              if (!nodesById[eid]) return null;
+                              const ep = finalPos(eid);
+                              return (
+                                <path
+                                  key={`endline-${eid}`}
+                                  d={(() => {
+                                    const x1 = ep.x + NODE_W;
+                                    const y1 = ep.y + NODE_H / 2;
+                                    const x2 = xMax + LAYER_GAP - 36;
+                                    const y2 = ep.y + NODE_H / 2;
+                                    const mx = (x1 + x2) / 2;
+                                    return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+                                  })()}
+                                  fill="none"
+                                  stroke="rgba(239,68,68,0.45)"
+                                  strokeWidth={1.3}
+                                  strokeDasharray="5 4"
+                                />
+                              );
+                            })}
+                          {endAnchor && nodesById[endAnchor] && (
+                            <circle
+                              cx={xMax + LAYER_GAP - 20}
+                              cy={finalPos(endAnchor).y + NODE_H / 2}
+                              r={15}
+                              fill="rgba(127,29,29,0.55)"
+                              stroke="#ef4444"
+                              strokeWidth={1.6}
+                            />
+                          )}
+                          {endAnchor && nodesById[endAnchor] && (
+                            <text
+                              x={xMax + LAYER_GAP - 20}
+                              y={finalPos(endAnchor).y + NODE_H / 2 + 4}
+                              textAnchor="middle"
+                              fontSize={9}
+                              fill="#fca5a5"
+                              fontWeight={600}
+                            >
+                              END
+                            </text>
+                          )}
+                        </g>
+                      );
+                    })()}
+
                     {/* 边 */}
                     {draft.edges.map((e) => {
                       const from = finalPos(e.source);
@@ -797,33 +956,37 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                           onPointerMove={onNodePointerMove}
                           onPointerUp={(e) => onNodePointerUp(e, n.id)}
                         >
-                          {/* 连线出口（右侧手柄） */}
+                          {/* 连线出口（右侧手柄）：S152c 两段式——点一下开始，再点目标节点完成 */}
                           <circle
                             cx={NODE_W + 6}
                             cy={NODE_H / 2}
                             r={7}
                             fill="#3f3f46"
                             stroke={connectingFrom === n.id ? "#fbbf24" : "#71717a"}
-                            strokeWidth={1.5}
-                            onPointerDown={(e) => {
-                              e.stopPropagation();
-                              setConnectingFrom(n.id);
-                              setSelectedNodeId(n.id);
-                              setSelectedEdgeId(null);
-                            }}
-                            onPointerUp={(e) => {
+                            strokeWidth={connectingFrom === n.id ? 2 : 1.5}
+                            onClick={(e) => {
                               e.stopPropagation();
                               if (connectingFrom === n.id) {
                                 setConnectingFrom(null);
+                              } else {
+                                setConnectingFrom(n.id);
+                                setSelectedNodeId(n.id);
+                                setSelectedEdgeId(null);
                               }
                             }}
-                            onMouseEnter={() => {
-                              if (connectingFrom && connectingFrom !== n.id) {
-                                addEdge(connectingFrom, n.id);
-                                setConnectingFrom(null);
-                              }
-                            }}
-                            aria-label="连线出口"
+                            aria-label="连线出口（点一下开始连线）"
+                          />
+                          <title>连线出口：点一下开始连线，再点目标节点完成（gate 可重复多分支）</title>
+                          {/* S152c：左侧入点端口（视觉对称；连线目标=节点本身，点击节点即连入） */}
+                          <circle
+                            cx={-6}
+                            cy={NODE_H / 2}
+                            r={4.5}
+                            fill="#27272a"
+                            stroke="#52525b"
+                            strokeWidth={1.2}
+                            style={{ pointerEvents: "none" }}
+                            aria-label="连线入口"
                           />
                           {renderShape(n, 0, 0, sel, stroke)}
                           {/* 标签 */}
