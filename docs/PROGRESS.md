@@ -49,6 +49,7 @@
 > [S145] 已提交完成（6 commits：311e94b/5fdfa93/624a515/fd5acbb/1b3e36f/edc0984，第三方评审修复）——声明行随 S145 提交后删除
 > [S146] 已提交完成（7 commits：5976551/77417f9/090dc45/09ffa40/a4ad7f4/795cc9c/588de6c，评审未修项批 E-I）——声明行随 S146 提交后删除
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
+> [S154] 正在改 `frontend/src/lib/entityTypes.ts`（新建：isPersonType 共享）+ `frontend/src/components/FullGraphView.tsx`（图谱角色子视图预设视角按钮）+ `frontend/src/components/CharactersPanel.tsx`（改用共享 isPersonType）：图谱内“只看角色”子视图，风格与 S153 FullGraphView 统一（不碰其他并行会话文件）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 
 - **候选清单（下一步，按优先级）**：
@@ -4165,3 +4166,26 @@ GraphInsights/TimelineView/WorldMap/章节依赖图）。主人拍板：① 表�
 - d3 7.x 无内置类型 → 装 @types/d3（devDependency），触发 gate 敏感文件强制全量
 - 提交前 git status 发现并行会话 13 个文件（routes_mind/chapters/schemas/tasks/toolkit/BiasPanel/PanelHost 等）
   在改——本提交只显式 add 本阶段 8 文件，不裹挟
+
+## S152h: book_id 硬编码根治——静态扫描门禁 + 项目隔离纪律（主人质询驱动）（已完成 ✅）
+
+**背景**：主人问"main bug 怎么修好多次？根治合理吗？V3 怎么处理的？"
+
+**V3 调研结论**（参考不照搬）：V3 不做"book_id 必填 422"，靠两板斧——
+① 存储层单库 + project_id 外键强制隔离（无 project_id 查不到/写不进，结构上杜绝静默错库）；
+② AgentContext frozen dataclass 贯穿工具链（book_id 默认**空串**非魔法值 main，忘传=显式失败）。
+V4 对应物已齐：ToolContext.book_id（S74）+ 前端显式传（S152 系）+ 单库按 book_id 分库。
+
+**根治方案评估**："全必填 422"不合理——全局端点（skills/dims/tools）被迫传无意义参数、
+单书用户被卡、FastAPI 区分不了"没传"与"传 main"，只把静默错库变报错不防新增。
+正解 = 上下文贯穿（已有）+ 前端显式传（已有）+ **提交前机制化防新增（本轮补）**。
+
+**本轮落地**：
+- `scripts/scan_main_hardcode.py`：扫描 packages/ 后端**调用点** `book_id="main"` 字面量
+  （排除：单行 def 默认参数 / `book_id: str = "main"` 字段注解 / 注释 / tests）；命中即 fail
+- `gate.py` 后端层接线（ruff/mypy 同级，检出即闸）
+- `AGENTS.md` 新增「项目隔离纪律」：跨项目数据路径 book_id 必须来自请求/ToolContext，
+  新建 implementer 必须接 book_id=ctx.book_id
+
+**验证**：扫描脚本自测（probe 命中调用点、正确排除声明）；当前代码库 0 检出
+（S152g 已清干净，证明此前 7 处修复彻底）；全量 gate 绿（601 pytest + 前端全过）。
