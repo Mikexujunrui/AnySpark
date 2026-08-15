@@ -1,0 +1,1167 @@
+"""
+anyspark.graph.schema — 知识图谱存储（实体/关系/事件 + FTS 检索）。
+
+设计（DESIGN §8 数据设计第 3/7 项）：实体（角色/地点/事件/物件/设定）/ 关系 / 时间线事件
+= AI 事实源。写作时"当前时空点已知事实"检索注入（模型局限弥补表）。
+模型无关：全部承载物为明确无歧义自然语言（name/aliases/description/rel_type/time_point）。
+旧系统 novel.db 的 entities/relations/timeline_events/entities_fts 仅作思想参考，不复刻代码。
+
+存储策略（幂等，可重复抽取）：
+- 实体按 (book_id, name) 合并：别名取并集、描述覆盖、出现章节范围累计
+- 关系按 (from_id, to_id, rel_type) 去重：描述覆盖
+- 事件按 (book_id, chapter_ref, label) 去重：整体替换
+- FTS5 trigram 派生索引（≥3 字子串检索），短名（1-2 字）回退 LIKE
+"""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+import uuid
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from anyspark.core.db import connect as sqlite_connect
+
+from .extract import Extraction
+
+
+def _merge_state(old_state: str, delta: str) -> str:
+    """状态增量拼接：旧状态 + 本章变化（S20 角色/地点随时间演化）。
+
+    - 无变化（delta 空）→ 保留旧状态
+    - 旧状态空 → 直接取 delta
+    - 都有 → "旧；本章：变化"（自然语言承载，模型无关）
+    """
+    d = delta.strip().rstrip("；;").strip()
+    o = old_state.strip().rstrip("；;").strip()
+    if not d:
+        return old_state
+    if not o:
+        return d
+    return f"{o}；{d}"
+
+
+# 实体类型：明确无歧义的自然语言分类（模型无关）
+ENTITY_TYPES = ("角色", "地点", "事件", "物件", "设定")
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+@dataclass
+class Entity:
+    """图谱实体（角色/地点/事件/物件/设定）。"""
+
+    id: str
+    book_id: str
+    entity_type: str
+    name: str
+    aliases: list[str] = field(default_factory=list)
+    description: str = ""
+    state: str = ""  # 截至最新章节的状态（自然语言增量拼接；S20 角色/地点随时间演化）
+    first_chapter: str = ""
+    last_chapter: str = ""
+    first_order: int = 0
+    last_order: int = 0
+    # S37（重要性信号）：实体出现的**不同章节数**（中性事实——出场越广=贯穿性越强）。
+    # 注入时"高频保底 + 最近补充"混合选取，保证百章级超长书早期主线不丢（S37）。
+    weight: int = 0
+    # S29（多线叙事）：实体出现过的叙事线（如 ["main", "line_b"]）——时序校验按线比较，
+    # 跨线首现不误报"时空倒置"（A 线第 3 章提到 B 线第 5 章才首现的角色是并行叙事，非倒叙）。
+    lines: list[str] = field(default_factory=lambda: ["main"])
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "book_id": self.book_id,
+            "entity_type": self.entity_type,
+            "name": self.name,
+            "aliases": self.aliases,
+            "description": self.description,
+            "state": self.state,
+            "first_chapter": self.first_chapter,
+            "last_chapter": self.last_chapter,
+            "first_order": self.first_order,
+            "last_order": self.last_order,
+            "weight": self.weight,
+            "lines": self.lines,
+        }
+
+
+@dataclass
+class Relation:
+    """实体间关系（自然语言类型 + 描述）。"""
+
+    id: str
+    book_id: str
+    from_id: str
+    from_name: str
+    to_id: str
+    to_name: str
+    rel_type: str
+    description: str = ""
+    chapter_ref: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "book_id": self.book_id,
+            "from_id": self.from_id,
+            "from_name": self.from_name,
+            "to_id": self.to_id,
+            "to_name": self.to_name,
+            "rel_type": self.rel_type,
+            "description": self.description,
+            "chapter_ref": self.chapter_ref,
+        }
+
+
+@dataclass
+class GraphEvent:
+    """时间线事件（时间点自然语言，如"第3章"）。"""
+
+    id: str
+    book_id: str
+    chapter_ref: str
+    chapter_order: int
+    time_point: str
+    label: str
+    description: str = ""
+    involved: list[str] = field(default_factory=list)  # 涉及实体名
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "book_id": self.book_id,
+            "chapter_ref": self.chapter_ref,
+            "chapter_order": self.chapter_order,
+            "time_point": self.time_point,
+            "label": self.label,
+            "description": self.description,
+            "involved": self.involved,
+        }
+
+
+class GraphStore:
+    """知识图谱存储（SQLite）：实体/关系/事件 + FTS5 派生索引。"""
+
+    def __init__(self, db_path: str | Path) -> None:
+        self._db = str(db_path)
+        # S79：连接配置收敛到 anyspark.core.db.connect（WAL/timeout/多线程一处定义，
+        # check_same_thread=False 供 FastAPI 多线程 endpoint 共用）
+        self._conn = sqlite_connect(self._db)
+        self._lock = threading.Lock()
+        self._init_schema()
+
+    def _init_schema(self) -> None:
+        self._conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS graph_entity_types (
+                id TEXT PRIMARY KEY,
+                book_id TEXT NOT NULL,
+                name TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                order_index INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                UNIQUE(book_id, name)
+            );
+            CREATE TABLE IF NOT EXISTS graph_entities (
+                id TEXT PRIMARY KEY,
+                book_id TEXT NOT NULL,
+                entity_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                aliases TEXT NOT NULL DEFAULT '[]',
+                description TEXT NOT NULL DEFAULT '',
+                state TEXT NOT NULL DEFAULT '',
+                first_chapter TEXT NOT NULL DEFAULT '',
+                last_chapter TEXT NOT NULL DEFAULT '',
+                first_order INTEGER NOT NULL DEFAULT 0,
+                last_order INTEGER NOT NULL DEFAULT 0,
+                weight INTEGER NOT NULL DEFAULT 0,
+                lines TEXT NOT NULL DEFAULT '["main"]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                UNIQUE(book_id, name)
+            );
+            CREATE TABLE IF NOT EXISTS entity_states (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                entity_id TEXT NOT NULL,
+                chapter_ref TEXT NOT NULL DEFAULT '',
+                state_after TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_entity_states_eid
+                ON entity_states(entity_id, id);
+            CREATE TABLE IF NOT EXISTS graph_relations (
+                id TEXT PRIMARY KEY,
+                book_id TEXT NOT NULL,
+                from_id TEXT NOT NULL,
+                to_id TEXT NOT NULL,
+                rel_type TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                chapter_ref TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(from_id, to_id, rel_type)
+            );
+            CREATE TABLE IF NOT EXISTS graph_events (
+                id TEXT PRIMARY KEY,
+                book_id TEXT NOT NULL,
+                chapter_ref TEXT NOT NULL,
+                chapter_order INTEGER NOT NULL DEFAULT 0,
+                time_point TEXT NOT NULL DEFAULT '',
+                label TEXT NOT NULL,
+                description TEXT NOT NULL DEFAULT '',
+                involved TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                UNIQUE(book_id, chapter_ref, label)
+            );
+            CREATE VIRTUAL TABLE IF NOT EXISTS graph_entities_fts USING fts5(
+                name, aliases, id UNINDEXED, tokenize='trigram'
+            );
+            CREATE INDEX IF NOT EXISTS idx_graph_entities_book
+                ON graph_entities(book_id, last_order);
+            CREATE INDEX IF NOT EXISTS idx_graph_relations_book
+                ON graph_relations(book_id);
+            CREATE INDEX IF NOT EXISTS idx_graph_events_book
+                ON graph_events(book_id, chapter_order);
+            """
+        )
+        # 旧库兼容（S20 state / S29 lines / S37 weight）
+        cols = {r[1] for r in self._conn.execute("PRAGMA table_info(graph_entities)")}
+        if "state" not in cols:
+            self._conn.execute(
+                "ALTER TABLE graph_entities ADD COLUMN state TEXT NOT NULL DEFAULT ''"
+            )
+        if "lines" not in cols:
+            self._conn.execute(
+                "ALTER TABLE graph_entities ADD COLUMN lines TEXT NOT NULL DEFAULT '[\"main\"]'"
+            )
+        if "weight" not in cols:
+            # S37 遗留：声称"老库 ALTER 补列回填 1"但实际漏写——已存在实体至少出场 1 章
+            self._conn.execute(
+                "ALTER TABLE graph_entities ADD COLUMN weight INTEGER NOT NULL DEFAULT 0"
+            )
+            self._conn.execute("UPDATE graph_entities SET weight = 1 WHERE weight = 0")
+        # S50：实体类型集内容化——默认种子（角色/地点/事件/物件/设定），可增删改
+        n_types = self._conn.execute("SELECT COUNT(*) AS c FROM graph_entity_types").fetchone()["c"]
+        if n_types == 0:
+            now = _now()
+            for i, t in enumerate(ENTITY_TYPES):
+                self._conn.execute(
+                    "INSERT INTO graph_entity_types "
+                    "(id, book_id, name, enabled, order_index, created_at) "
+                    "VALUES (?,?,?,1,?,?)",
+                    (uuid.uuid4().hex, "main", t, i, now),
+                )
+        self._conn.commit()
+
+    # -- S50 实体类型集（内容化：项目级可增删改；存储结构保留） --
+    def types_for(self, book_id: str = "main") -> list[str]:
+        """该书启用的实体类型（缺省回退默认 ENTITY_TYPES）。
+
+        只读查询不加锁（upsert_entity 锁内会调用；SQLite 读线程安全）。
+        """
+        rows = self._conn.execute(
+            "SELECT name FROM graph_entity_types "
+            "WHERE book_id=? AND enabled=1 ORDER BY order_index, rowid",
+            (book_id,),
+        ).fetchall()
+        types = [r["name"] for r in rows]
+        return types if types else list(ENTITY_TYPES)
+
+    def list_types(self, book_id: str = "main") -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM graph_entity_types WHERE book_id=? ORDER BY order_index, rowid",
+                (book_id,),
+            ).fetchall()
+        out = [dict(r) for r in rows]
+        if not out:
+            for i, t in enumerate(ENTITY_TYPES):
+                out.append(
+                    {
+                        "id": f"default-{t}",
+                        "book_id": book_id,
+                        "name": t,
+                        "enabled": 1,
+                        "order_index": i,
+                    }
+                )
+        return out
+
+    def add_type(self, name: str, book_id: str = "main") -> dict[str, Any] | None:
+        name = name.strip()
+        if not name:
+            return None
+        with self._lock:
+            exists = self._conn.execute(
+                "SELECT 1 FROM graph_entity_types WHERE book_id=? AND name=?",
+                (book_id, name),
+            ).fetchone()
+            if exists:
+                return None
+            max_order = self._conn.execute(
+                "SELECT COALESCE(MAX(order_index), -1) AS m FROM graph_entity_types "
+                "WHERE book_id=?",
+                (book_id,),
+            ).fetchone()["m"]
+            tid = uuid.uuid4().hex
+            now = _now()
+            self._conn.execute(
+                "INSERT INTO graph_entity_types "
+                "(id, book_id, name, enabled, order_index, created_at) "
+                "VALUES (?,?,?,1,?,?)",
+                (tid, book_id, name, int(max_order) + 1, now),
+            )
+            self._conn.commit()
+            return {"id": tid, "book_id": book_id, "name": name, "enabled": 1}
+
+    def set_type_enabled(self, type_id: str, enabled: bool) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM graph_entity_types WHERE id=?", (type_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            self._conn.execute(
+                "UPDATE graph_entity_types SET enabled=? WHERE id=?",
+                (1 if enabled else 0, type_id),
+            )
+            self._conn.commit()
+        return dict(row) | {"enabled": 1 if enabled else 0}
+
+    def delete_type(self, type_id: str) -> bool:
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM graph_entity_types WHERE id=?", (type_id,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def close(self) -> None:
+        self._conn.close()
+
+    # ------------------------------------------------------------------
+    # 实体
+    # ------------------------------------------------------------------
+    def upsert_entity(
+        self,
+        book_id: str,
+        name: str,
+        entity_type: str,
+        aliases: list[str] | None = None,
+        description: str = "",
+        chapter_ref: str = "",
+        chapter_order: int = 0,
+        state_delta: str = "",
+        line: str = "main",
+    ) -> Entity:
+        """同名实体合并：别名并集、描述覆盖、出现章节范围累计。
+
+        state_delta（S20）：本章状态变化——增量拼接到旧状态（"旧；本章：变化"），
+        并记录演化快照到 entity_states（角色/地点随时间自然变化）。
+        line（S29 多线叙事）：实体出现的叙事线并入 lines（跨线并行不覆盖）。
+        """
+        aliases = aliases or []
+        eid = uuid.uuid4().hex
+        now = _now()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM graph_entities WHERE book_id=? AND name=?",
+                (book_id, name),
+            ).fetchone()
+            if row:
+                eid = row["id"]
+                # 类型：空串=保留原类型（S20 states 只更新状态时用）
+                etype = (
+                    entity_type if entity_type in self.types_for(book_id) else row["entity_type"]
+                )
+                merged = list(dict.fromkeys(json.loads(row["aliases"]) + aliases))
+                first_ch = row["first_chapter"] or chapter_ref
+                first_ord = row["first_order"] or chapter_order
+                last_ch = chapter_ref if chapter_order >= row["last_order"] else row["last_chapter"]
+                last_ord = max(row["last_order"], chapter_order)
+                # S37 重要性：新章节首次出现 → weight+1（同章重复 upsert 不累计）
+                new_weight = int(row["weight"] or 0) + (
+                    1 if chapter_order > row["last_order"] else 0
+                )
+                # 状态增量拼接（S20）：旧状态 + 本章变化
+                old_state = str(row["state"] or "")
+                new_state = _merge_state(old_state, state_delta)
+                # S29：叙事线并入（跨线并行不覆盖）
+                old_lines = json.loads(row["lines"] or '["main"]')
+                merged_lines = list(dict.fromkeys([*old_lines, line]))
+                self._conn.execute(
+                    "UPDATE graph_entities SET entity_type=?, aliases=?, description=?, "
+                    "state=?, first_chapter=?, last_chapter=?, first_order=?, "
+                    "last_order=?, weight=?, lines=?, updated_at=? WHERE id=?",
+                    (
+                        etype,
+                        json.dumps(merged, ensure_ascii=False),
+                        description,
+                        new_state,
+                        first_ch,
+                        last_ch,
+                        first_ord,
+                        last_ord,
+                        new_weight,
+                        json.dumps(merged_lines, ensure_ascii=False),
+                        now,
+                        eid,
+                    ),
+                )
+            else:
+                etype = entity_type if entity_type in self.types_for(book_id) else "设定"
+                new_state = state_delta
+                new_weight = 1  # S37：新实体首章出现，出场章节数=1
+                self._conn.execute(
+                    "INSERT INTO graph_entities (id, book_id, entity_type, name, aliases, "
+                    "description, state, first_chapter, last_chapter, first_order, "
+                    "last_order, weight, lines, created_at, updated_at) VALUES "
+                    "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        eid,
+                        book_id,
+                        etype,
+                        name,
+                        json.dumps(aliases, ensure_ascii=False),
+                        description,
+                        new_state,
+                        chapter_ref,
+                        chapter_ref,
+                        chapter_order,
+                        chapter_order,
+                        new_weight,
+                        json.dumps([line], ensure_ascii=False),
+                        now,
+                        now,
+                    ),
+                )
+            # 状态演化快照（S20）：有变化才记录
+            if new_state and (not row or new_state != str(row["state"] or "")):
+                self._conn.execute(
+                    "INSERT INTO entity_states (entity_id, chapter_ref, state_after, created_at) "
+                    "VALUES (?,?,?,?)",
+                    (eid, chapter_ref, new_state, now),
+                )
+            self._sync_fts(eid, name, aliases)
+            self._conn.commit()
+        ent = self.get_entity(book_id, name)
+        assert ent is not None
+        return ent
+
+    def update_entity_fields(
+        self,
+        book_id: str,
+        name: str,
+        *,
+        aliases: list[str] | None = None,
+        description: str | None = None,
+        state: str | None = None,
+        entity_type: str | None = None,
+    ) -> Entity | None:
+        """S72：手动编辑实体字段（按 name 定位，只改传入字段）。
+
+        与 upsert_entity 的区别：不动章节统计/权重/叙事线（那些是自动抽取维护的
+        派生数据）——用户编辑 aliases/description/state/type 不应被误改出场记录。
+        aliases 更新后同步 FTS。
+        """
+        row = self._conn.execute(
+            "SELECT * FROM graph_entities WHERE book_id=? AND name=?", (book_id, name)
+        ).fetchone()
+        if not row:
+            return None
+        eid = row["id"]
+        new_aliases = (
+            list(dict.fromkeys(aliases)) if aliases is not None else json.loads(row["aliases"])
+        )
+        with self._lock:
+            self._conn.execute(
+                "UPDATE graph_entities SET aliases=?, description=COALESCE(?, description), "
+                "state=COALESCE(?, state), entity_type=COALESCE(?, entity_type), "
+                "updated_at=? WHERE id=?",
+                (
+                    json.dumps(new_aliases, ensure_ascii=False),
+                    description,
+                    state,
+                    entity_type,
+                    _now(),
+                    eid,
+                ),
+            )
+            self._sync_fts(eid, row["name"], new_aliases)
+            self._conn.commit()
+        return self.get_entity(book_id, name)
+
+    def delete_entity(self, book_id: str, name: str) -> bool:
+        """S72：删除实体及其关联关系（防悬空引用污染 JOIN 查询）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM graph_entities WHERE book_id=? AND name=?", (book_id, name)
+            ).fetchone()
+            if not row:
+                return False
+            eid = row["id"]
+            self._conn.execute("DELETE FROM graph_relations WHERE from_id=? OR to_id=?", (eid, eid))
+            self._conn.execute("DELETE FROM graph_entities_fts WHERE id=?", (eid,))
+            self._conn.execute("DELETE FROM entity_states WHERE entity_id=?", (eid,))
+            self._conn.execute("DELETE FROM graph_entities WHERE id=?", (eid,))
+            self._conn.commit()
+        return True
+
+    def _sync_fts(self, eid: str, name: str, aliases: list[str]) -> None:
+        """同步 FTS 派生索引（trigram 内联表：删旧插新）。"""
+        self._conn.execute("DELETE FROM graph_entities_fts WHERE id=?", (eid,))
+        self._conn.execute(
+            "INSERT INTO graph_entities_fts (name, aliases, id) VALUES (?,?,?)",
+            (name, json.dumps(aliases, ensure_ascii=False), eid),
+        )
+
+    def get_entity(self, book_id: str, name: str) -> Entity | None:
+        row = self._conn.execute(
+            "SELECT * FROM graph_entities WHERE book_id=? AND name=?", (book_id, name)
+        ).fetchone()
+        return self._entity_from_row(row) if row else None
+
+    def list_entities(
+        self,
+        book_id: str,
+        q: str | None = None,
+        entity_type: str | None = None,
+        limit: int = 200,
+    ) -> list[Entity]:
+        where = "book_id=?"
+        args: list[Any] = [book_id]
+        if q:
+            where += " AND (name LIKE ? OR aliases LIKE ?)"
+            args += [f"%{q}%", f"%{q}%"]
+        if entity_type:
+            where += " AND entity_type=?"
+            args.append(entity_type)
+        rows = self._conn.execute(
+            f"SELECT * FROM graph_entities WHERE {where} "
+            "ORDER BY last_order DESC, rowid DESC LIMIT ?",
+            (*args, limit),
+        ).fetchall()
+        return [self._entity_from_row(r) for r in rows]
+
+    def search(self, book_id: str, query: str, limit: int = 10) -> list[Entity]:
+        """FTS5 trigram 优先（≥3 字子串），短名（<3 字）回退 LIKE。"""
+        q = query.strip()
+        if not q:
+            return []
+        if len(q) >= 3:
+            phrase = '"' + q.replace('"', "") + '"'
+            rows = self._conn.execute(
+                "SELECT e.* FROM graph_entities_fts f "
+                "JOIN graph_entities e ON e.id = f.id "
+                "WHERE f.graph_entities_fts MATCH ? AND e.book_id=? "
+                "ORDER BY e.last_order DESC, e.rowid DESC LIMIT ?",
+                (phrase, book_id, limit),
+            ).fetchall()
+            if rows:
+                return [self._entity_from_row(r) for r in rows]
+        rows = self._conn.execute(
+            "SELECT * FROM graph_entities WHERE book_id=? "
+            "AND (name LIKE ? OR aliases LIKE ?) "
+            "ORDER BY last_order DESC, rowid DESC LIMIT ?",
+            (book_id, f"%{q}%", f"%{q}%", limit),
+        ).fetchall()
+        return [self._entity_from_row(r) for r in rows]
+
+    def resolve_names(self, book_id: str, names: list[str]) -> list[Entity]:
+        """把材料/事件里的名字解析到图谱实体（按实体去重、保序、最佳命中）。"""
+        seen_input: set[str] = set()
+        seen_ids: set[str] = set()
+        out: list[Entity] = []
+        for raw in names:
+            n = str(raw).strip()
+            if not n or n in seen_input:
+                continue
+            seen_input.add(n)
+            matches = self.search(book_id, n, limit=1)
+            if matches and matches[0].id not in seen_ids:
+                seen_ids.add(matches[0].id)
+                out.append(matches[0])
+        return out
+
+    # ------------------------------------------------------------------
+    # 关系
+    # ------------------------------------------------------------------
+    def upsert_relation(
+        self,
+        book_id: str,
+        from_name: str,
+        to_name: str,
+        rel_type: str,
+        description: str = "",
+        chapter_ref: str = "",
+    ) -> Relation | None:
+        """按名字解析两端实体，同三元组去重。任一端解析失败返回 None。"""
+        f = self.get_entity(book_id, from_name)
+        t = self.get_entity(book_id, to_name)
+        if not f or not t:
+            return None
+        rid = uuid.uuid4().hex
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM graph_relations WHERE from_id=? AND to_id=? AND rel_type=?",
+                (f.id, t.id, rel_type),
+            ).fetchone()
+            if row:
+                rid = row["id"]
+                self._conn.execute(
+                    "UPDATE graph_relations SET description=?, chapter_ref=? WHERE id=?",
+                    (description, chapter_ref, rid),
+                )
+            else:
+                self._conn.execute(
+                    "INSERT INTO graph_relations (id, book_id, from_id, to_id, rel_type, "
+                    "description, chapter_ref, created_at) VALUES (?,?,?,?,?,?,?,?)",
+                    (rid, book_id, f.id, t.id, rel_type, description, chapter_ref, _now()),
+                )
+            self._conn.commit()
+        return Relation(
+            id=rid,
+            book_id=book_id,
+            from_id=f.id,
+            from_name=f.name,
+            to_id=t.id,
+            to_name=t.name,
+            rel_type=rel_type,
+            description=description,
+            chapter_ref=chapter_ref,
+        )
+
+    def update_relation_fields(
+        self,
+        rid: str,
+        *,
+        rel_type: str | None = None,
+        description: str | None = None,
+    ) -> Relation | None:
+        """S72：手动编辑关系字段（按 id 定位）。"""
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM graph_relations WHERE id=?", (rid,)).fetchone()
+            if not row:
+                return None
+            self._conn.execute(
+                "UPDATE graph_relations SET rel_type=COALESCE(?, rel_type), "
+                "description=COALESCE(?, description) WHERE id=?",
+                (rel_type, description, rid),
+            )
+            self._conn.commit()
+            f = self._entity_by_id(row["from_id"])
+            t = self._entity_by_id(row["to_id"])
+        return Relation(
+            id=rid,
+            book_id=row["book_id"],
+            from_id=row["from_id"],
+            from_name=f.name if f else "",
+            to_id=row["to_id"],
+            to_name=t.name if t else "",
+            rel_type=rel_type or row["rel_type"],
+            description=description if description is not None else row["description"],
+            chapter_ref=row["chapter_ref"],
+        )
+
+    def delete_relation(self, rid: str) -> bool:
+        """S72：删除关系（按 id）。"""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM graph_relations WHERE id=?", (rid,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def _entity_by_id(self, eid: str) -> Entity | None:
+        row = self._conn.execute("SELECT * FROM graph_entities WHERE id=?", (eid,)).fetchone()
+        return self._entity_from_row(row) if row else None
+
+    def list_relations(self, book_id: str, limit: int = 200) -> list[Relation]:
+        rows = self._conn.execute(
+            "SELECT r.*, fe.name AS from_name, te.name AS to_name "
+            "FROM graph_relations r "
+            "JOIN graph_entities fe ON fe.id = r.from_id "
+            "JOIN graph_entities te ON te.id = r.to_id "
+            "WHERE r.book_id=? ORDER BY r.rowid DESC LIMIT ?",
+            (book_id, limit),
+        ).fetchall()
+        return [self._relation_from_row(r) for r in rows]
+
+    def relations_of(self, book_id: str, entity_id: str, limit: int = 50) -> list[Relation]:
+        """某实体涉及的全部关系（双向）。"""
+        rows = self._conn.execute(
+            "SELECT r.*, fe.name AS from_name, te.name AS to_name "
+            "FROM graph_relations r "
+            "JOIN graph_entities fe ON fe.id = r.from_id "
+            "JOIN graph_entities te ON te.id = r.to_id "
+            "WHERE r.book_id=? AND (r.from_id=? OR r.to_id=?) "
+            "ORDER BY r.rowid DESC LIMIT ?",
+            (book_id, entity_id, entity_id, limit),
+        ).fetchall()
+        return [self._relation_from_row(r) for r in rows]
+
+    def network_of(
+        self, book_id: str, center: str, depth: int = 2
+    ) -> tuple[list[Entity], list[Relation]]:
+        """以某实体为中心的邻居子图（BFS 展开 depth 层，含中心自身）。
+
+        S153：前端图谱"聚焦子视图"数据源——点实体看其 ego-network，
+        不拉全图。center 支持 name（限定书）或内部 id（回退，同 S72 语义）。
+        depth 钳制 1-3。返回 (实体集, 关系集)，关系仅含子图内两端的。
+        """
+        depth = max(1, min(int(depth), 3))
+        center_ent = self.get_entity(book_id, center)
+        if center_ent is None:
+            center_ent = self._entity_by_id(center)
+        if center_ent is None:
+            return [], []
+        seen: set[str] = {center_ent.id}
+        frontier: list[str] = [center_ent.id]
+        entities: dict[str, Entity] = {center_ent.id: center_ent}
+        relations: dict[str, Relation] = {}
+        for _ in range(depth):
+            nxt: list[str] = []
+            for eid in frontier:
+                for r in self.relations_of(book_id, eid, limit=200):
+                    relations[r.id] = r
+                    for other_id in (r.from_id, r.to_id):
+                        if other_id in seen:
+                            continue
+                        seen.add(other_id)
+                        other = self._entity_by_id(other_id)
+                        if other is not None and other.book_id == book_id:
+                            entities[other.id] = other
+                            nxt.append(other.id)
+            frontier = nxt
+            if not frontier:
+                break
+        return list(entities.values()), list(relations.values())
+
+    # ------------------------------------------------------------------
+    # 事件（时间线）
+    # ------------------------------------------------------------------
+    def upsert_event(
+        self,
+        book_id: str,
+        chapter_ref: str,
+        chapter_order: int,
+        time_point: str,
+        label: str,
+        description: str = "",
+        involved: list[str] | None = None,
+    ) -> GraphEvent:
+        """按 (book_id, chapter_ref, label) 去重：整体替换。"""
+        involved = involved or []
+        eid = uuid.uuid4().hex
+        now = _now()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id FROM graph_events WHERE book_id=? AND chapter_ref=? AND label=?",
+                (book_id, chapter_ref, label),
+            ).fetchone()
+            if row:
+                eid = row["id"]
+                self._conn.execute(
+                    "UPDATE graph_events SET chapter_order=?, time_point=?, description=?, "
+                    "involved=? WHERE id=?",
+                    (
+                        chapter_order,
+                        time_point,
+                        description,
+                        json.dumps(involved, ensure_ascii=False),
+                        eid,
+                    ),
+                )
+            else:
+                self._conn.execute(
+                    "INSERT INTO graph_events (id, book_id, chapter_ref, chapter_order, "
+                    "time_point, label, description, involved, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (
+                        eid,
+                        book_id,
+                        chapter_ref,
+                        chapter_order,
+                        time_point,
+                        label,
+                        description,
+                        json.dumps(involved, ensure_ascii=False),
+                        now,
+                    ),
+                )
+            self._conn.commit()
+        return GraphEvent(
+            id=eid,
+            book_id=book_id,
+            chapter_ref=chapter_ref,
+            chapter_order=chapter_order,
+            time_point=time_point,
+            label=label,
+            description=description,
+            involved=involved,
+        )
+
+    def update_event_fields(
+        self,
+        eid: str,
+        *,
+        time_point: str | None = None,
+        label: str | None = None,
+        description: str | None = None,
+        involved: list[str] | None = None,
+    ) -> GraphEvent | None:
+        """S72：手动编辑事件字段（按 id 定位）。"""
+        with self._lock:
+            row = self._conn.execute("SELECT * FROM graph_events WHERE id=?", (eid,)).fetchone()
+            if not row:
+                return None
+            self._conn.execute(
+                "UPDATE graph_events SET time_point=COALESCE(?, time_point), "
+                "label=COALESCE(?, label), description=COALESCE(?, description), "
+                "involved=COALESCE(?, involved) WHERE id=?",
+                (
+                    time_point,
+                    label,
+                    description,
+                    json.dumps(involved, ensure_ascii=False) if involved is not None else None,
+                    eid,
+                ),
+            )
+            self._conn.commit()
+        row = self._conn.execute("SELECT * FROM graph_events WHERE id=?", (eid,)).fetchone()
+        return self._event_from_row(row) if row else None
+
+    def delete_event(self, eid: str) -> bool:
+        """S72：删除事件（按 id）。"""
+        with self._lock:
+            cur = self._conn.execute("DELETE FROM graph_events WHERE id=?", (eid,))
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def delete_after(self, book_id: str, t0: str) -> dict[str, int]:
+        """S154（会话回滚）：删 created_at > t0 的图谱增量（派生副作用回滚）。
+
+        实体删除走 delete_entity（级联 FTS/state/关联关系）；关系/事件按 id 删。
+        改前已有的实体（created_at <= t0）保留——靠后续重新抽取合并纠正。
+        """
+        with self._lock:
+            rel_ids = [
+                str(r["id"])
+                for r in self._conn.execute(
+                    "SELECT id FROM graph_relations WHERE book_id = ? AND created_at >= ?",
+                    (book_id, t0),
+                ).fetchall()
+            ]
+            ev_ids = [
+                str(r["id"])
+                for r in self._conn.execute(
+                    "SELECT id FROM graph_events WHERE book_id = ? AND created_at >= ?",
+                    (book_id, t0),
+                ).fetchall()
+            ]
+            ent_names = [
+                str(r["name"])
+                for r in self._conn.execute(
+                    "SELECT name FROM graph_entities WHERE book_id = ? AND created_at >= ?",
+                    (book_id, t0),
+                ).fetchall()
+            ]
+        removed = {"entities": 0, "relations": 0, "events": 0}
+        for rid in rel_ids:
+            self.delete_relation(rid)
+            removed["relations"] += 1
+        for eid in ev_ids:
+            self.delete_event(eid)
+            removed["events"] += 1
+        for name in ent_names:
+            if self.delete_entity(book_id, name):
+                removed["entities"] += 1
+        return removed
+
+    def list_events(
+        self, book_id: str, chapter_ref: str | None = None, limit: int = 200
+    ) -> list[GraphEvent]:
+        where = "book_id=?"
+        args: list[Any] = [book_id]
+        if chapter_ref:
+            where += " AND chapter_ref=?"
+            args.append(chapter_ref)
+        rows = self._conn.execute(
+            f"SELECT * FROM graph_events WHERE {where} ORDER BY chapter_order, rowid LIMIT ?",
+            (*args, limit),
+        ).fetchall()
+        return [self._event_from_row(r) for r in rows]
+
+    # ------------------------------------------------------------------
+    # 已知事实（当前时空点检索注入）
+    # ------------------------------------------------------------------
+    def known_facts(
+        self,
+        book_id: str,
+        up_to_order: int | None = None,
+        max_entities: int = 15,
+        max_relations: int = 20,
+        max_events: int = 8,
+    ) -> dict[str, list[Any]]:
+        """当前时空点已知事实：最近出现实体 + 其间关系 + 最近事件。
+
+        up_to_order：截止章节序号（写作第 N 章时注入 ≤N 的已知事实）。
+        """
+        where = "book_id=?"
+        args: list[Any] = [book_id]
+        if up_to_order is not None:
+            where += " AND last_order<=?"
+            args.append(up_to_order)
+        # S37：最近 N×2/3 + 高频 N/3 混合（高频=出场章节数多=贯穿主线，保证早期核心不丢）
+        n_recent = max(1, int(max_entities * 2 / 3))
+        n_high = max_entities - n_recent
+        rows = self._conn.execute(
+            f"SELECT * FROM graph_entities WHERE {where} "
+            "ORDER BY last_order DESC, rowid DESC LIMIT ?",
+            (*args, n_recent),
+        ).fetchall()
+        recent_ids = [r["id"] for r in rows]
+        if n_high > 0:
+            placeholders = ",".join("?" * len(recent_ids)) or "NULL"
+            extra = self._conn.execute(
+                f"SELECT * FROM graph_entities WHERE {where} AND id NOT IN ({placeholders}) "
+                "ORDER BY weight DESC, last_order DESC LIMIT ?",
+                (*args, *recent_ids, n_high),
+            ).fetchall()
+            rows = rows + extra
+        entities = [self._entity_from_row(r) for r in rows]
+        ids = {e.id for e in entities}
+        rels = [r for r in self.list_relations(book_id) if r.from_id in ids and r.to_id in ids][
+            :max_relations
+        ]
+
+        ewhere = "book_id=?"
+        eargs: list[Any] = [book_id]
+        if up_to_order is not None:
+            ewhere += " AND chapter_order<=?"
+            eargs.append(up_to_order)
+        erows = self._conn.execute(
+            f"SELECT * FROM graph_events WHERE {ewhere} "
+            "ORDER BY chapter_order DESC, rowid DESC LIMIT ?",
+            (*eargs, max_events),
+        ).fetchall()
+        events = [self._event_from_row(r) for r in erows]
+        return {"entities": entities, "relations": rels, "events": events}
+
+    def impact_chapters(
+        self,
+        book_id: str,
+        changed_order: int,
+        entities: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """S45 影响分析（连锁修改）：改第 changed_order 章（涉及实体）→
+        后续章节中引用这些实体的事件/关系所在章 = 受影响下游。
+
+        输入：被改章节序号 + 涉及实体（缺省自动取该章图谱事件涉及的实体）。
+        输出：受影响章节列表（按 order 排序，含涉及实体与事件摘要）。
+        """
+        changed_entities: set[str] = set(entities or [])
+        if not changed_entities:
+            # 自动提取：该章图谱事件 involved 并集
+            rows = self._conn.execute(
+                "SELECT involved FROM graph_events WHERE book_id=? AND chapter_order=?",
+                (book_id, changed_order),
+            ).fetchall()
+            for r in rows:
+                for name in json.loads(r["involved"] or "[]"):
+                    changed_entities.add(str(name))
+        if not changed_entities:
+            return []
+        # 受影响章节：后续事件/关系涉及这些实体
+        hits: dict[str, dict[str, Any]] = {}
+        for name in changed_entities:
+            ev_rows = self._conn.execute(
+                "SELECT DISTINCT chapter_ref, chapter_order, label FROM graph_events "
+                "WHERE book_id=? AND chapter_order>? AND involved LIKE ?",
+                (book_id, changed_order, f"%{name}%"),
+            ).fetchall()
+            for r in ev_rows:
+                key = r["chapter_ref"]
+                hit = hits.setdefault(
+                    key,
+                    {
+                        "chapter_ref": key,
+                        "order": int(r["chapter_order"]),
+                        "entities": set(),
+                        "events": [],
+                    },
+                )
+                hit["entities"].add(name)
+                hit["events"].append(r["label"])
+            rel_rows = self._conn.execute(
+                "SELECT DISTINCT r.chapter_ref, e.chapter_order AS o FROM graph_relations r "
+                "JOIN graph_entities fe ON fe.id = r.from_id "
+                "JOIN graph_entities te ON te.id = r.to_id "
+                "JOIN graph_events e ON e.chapter_ref = r.chapter_ref "
+                "WHERE r.book_id=? AND (fe.name=? OR te.name=?) AND e.chapter_order>?",
+                (book_id, name, name, changed_order),
+            ).fetchall()
+            for r in rel_rows:
+                hits.setdefault(
+                    r["chapter_ref"],
+                    {
+                        "chapter_ref": r["chapter_ref"],
+                        "order": int(r["o"]),
+                        "entities": set(),
+                        "events": [],
+                    },
+                )["entities"].add(name)
+        result = []
+        for h in hits.values():
+            result.append(
+                {
+                    "chapter_ref": h["chapter_ref"],
+                    "chapter_order": h["order"],
+                    "entities": sorted(h["entities"]),
+                    "events": list(dict.fromkeys(h["events"]))[:5],
+                }
+            )
+        result.sort(key=lambda x: x["chapter_order"])
+        return result
+
+    def ingest_chapter(
+        self,
+        book_id: str,
+        chapter_ref: str,
+        chapter_order: int,
+        extraction: Extraction,
+        line: str = "main",
+    ) -> None:
+        """把抽取结果幂等落库（实体合并/关系三元组去重/事件替换）。
+
+        引用完整性：关系/事件里引用但未被抽出的名字，自动补建"设定"占位实体。
+        """
+        entities = extraction.entities
+        relations = extraction.relations
+        events = extraction.events
+        for e in entities:
+            self.upsert_entity(
+                book_id,
+                e.name,
+                e.entity_type,
+                e.aliases,
+                e.description,
+                chapter_ref,
+                chapter_order,
+                getattr(e, "state", ""),
+                line,
+            )
+        # 补建引用缺失实体（引用完整性）
+        referenced: list[str] = []
+        for r in relations:
+            referenced.extend([r.from_name, r.to_name])
+        for ev in events:
+            referenced.extend(ev.involved)
+        for name in referenced:
+            if not self.get_entity(book_id, name):
+                self.upsert_entity(
+                    book_id, name, "设定", [], "", chapter_ref, chapter_order, "", line
+                )
+        # S20：已有实体状态更新（仅更新已存在实体的 state，不建新实体）
+        states = extraction.states
+        for st in states:
+            if not self.get_entity(book_id, st.name):
+                continue  # states 语义=已有实体；不存在则跳过（防误建）
+            self.upsert_entity(
+                book_id,
+                st.name,
+                "",
+                None,
+                "",
+                chapter_ref,
+                chapter_order,
+                st.state,
+                line,
+            )
+        for r in relations:
+            self.upsert_relation(
+                book_id, r.from_name, r.to_name, r.rel_type, r.description, chapter_ref
+            )
+        for ev in events:
+            self.upsert_event(
+                book_id,
+                chapter_ref,
+                chapter_order,
+                ev.time_point or chapter_ref,
+                ev.label,
+                ev.description,
+                ev.involved,
+            )
+
+    def _ensure_weight_column(self) -> None:
+        """S37：旧库 ALTER 补 weight 列（老数据 weight=1 起步，后续按新逻辑累计）。"""
+        with self._lock:
+            cols = [r[1] for r in self._conn.execute("PRAGMA table_info(graph_entities)")]
+            if "weight" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE graph_entities ADD COLUMN weight INTEGER NOT NULL DEFAULT 0"
+                )
+                self._conn.execute("UPDATE graph_entities SET weight=1 WHERE weight=0")
+                self._conn.commit()
+
+    def rebuild_fts(self) -> None:
+        """重建 FTS 派生索引（可恢复）。"""
+        with self._lock:
+            self._conn.execute("DELETE FROM graph_entities_fts")
+            for r in self._conn.execute("SELECT id, name, aliases FROM graph_entities").fetchall():
+                self._conn.execute(
+                    "INSERT INTO graph_entities_fts (name, aliases, id) VALUES (?,?,?)",
+                    (r["name"], r["aliases"], r["id"]),
+                )
+            self._conn.commit()
+
+    # ------------------------------------------------------------------
+    # 行转换
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _entity_from_row(row: sqlite3.Row) -> Entity:
+        return Entity(
+            id=row["id"],
+            book_id=row["book_id"],
+            entity_type=row["entity_type"],
+            name=row["name"],
+            aliases=json.loads(row["aliases"] or "[]"),
+            description=row["description"],
+            state=row["state"] or "",
+            first_chapter=row["first_chapter"],
+            last_chapter=row["last_chapter"],
+            first_order=row["first_order"],
+            last_order=row["last_order"],
+            weight=int(row["weight"] or 0),
+            lines=json.loads(row["lines"] or '["main"]'),
+        )
+
+    @staticmethod
+    def _relation_from_row(row: sqlite3.Row) -> Relation:
+        return Relation(
+            id=row["id"],
+            book_id=row["book_id"],
+            from_id=row["from_id"],
+            from_name=row["from_name"],
+            to_id=row["to_id"],
+            to_name=row["to_name"],
+            rel_type=row["rel_type"],
+            description=row["description"],
+            chapter_ref=row["chapter_ref"],
+        )
+
+    @staticmethod
+    def _event_from_row(row: sqlite3.Row) -> GraphEvent:
+        return GraphEvent(
+            id=row["id"],
+            book_id=row["book_id"],
+            chapter_ref=row["chapter_ref"],
+            chapter_order=row["chapter_order"],
+            time_point=row["time_point"],
+            label=row["label"],
+            description=row["description"],
+            involved=json.loads(row["involved"] or "[]"),
+        )
