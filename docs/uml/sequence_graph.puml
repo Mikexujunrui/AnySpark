@@ -39,4 +39,7 @@ GI --> Chat: 注入块「已固化事实（知识图谱）」
 Agent --> User: 写作基于已知事实，不冲突
 User -> GR: 图谱面板查看/编辑
 GR -> GS: entities/relations/events CRUD
+User -> GR: 点击实体 → 聚焦子视图（S153）
+GR -> GS: network_of(center, depth 1-3) BFS 邻居子图
+GS --> GR: {entities, relations}（仅该实体 ego-network）
 @enduml

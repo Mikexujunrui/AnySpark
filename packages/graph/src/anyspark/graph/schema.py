@@ -703,6 +703,43 @@ class GraphStore:
         ).fetchall()
         return [self._relation_from_row(r) for r in rows]
 
+    def network_of(
+        self, book_id: str, center: str, depth: int = 2
+    ) -> tuple[list[Entity], list[Relation]]:
+        """以某实体为中心的邻居子图（BFS 展开 depth 层，含中心自身）。
+
+        S153：前端图谱"聚焦子视图"数据源——点实体看其 ego-network，
+        不拉全图。center 支持 name（限定书）或内部 id（回退，同 S72 语义）。
+        depth 钳制 1-3。返回 (实体集, 关系集)，关系仅含子图内两端的。
+        """
+        depth = max(1, min(int(depth), 3))
+        center_ent = self.get_entity(book_id, center)
+        if center_ent is None:
+            center_ent = self._entity_by_id(center)
+        if center_ent is None:
+            return [], []
+        seen: set[str] = {center_ent.id}
+        frontier: list[str] = [center_ent.id]
+        entities: dict[str, Entity] = {center_ent.id: center_ent}
+        relations: dict[str, Relation] = {}
+        for _ in range(depth):
+            nxt: list[str] = []
+            for eid in frontier:
+                for r in self.relations_of(book_id, eid, limit=200):
+                    relations[r.id] = r
+                    for other_id in (r.from_id, r.to_id):
+                        if other_id in seen:
+                            continue
+                        seen.add(other_id)
+                        other = self._entity_by_id(other_id)
+                        if other is not None and other.book_id == book_id:
+                            entities[other.id] = other
+                            nxt.append(other.id)
+            frontier = nxt
+            if not frontier:
+                break
+        return list(entities.values()), list(relations.values())
+
     # ------------------------------------------------------------------
     # 事件（时间线）
     # ------------------------------------------------------------------

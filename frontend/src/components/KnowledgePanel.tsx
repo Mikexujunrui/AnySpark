@@ -303,7 +303,7 @@ export default function KnowledgePanel({ bookId }: { bookId: string }) {
         )}
       </div>
 
-      {/* 图谱视图（FullGraphView 为 stub，暂空；列表为默认） */}
+      {/* 图谱视图（S153：d3-force 全图 + 聚焦子视图双模式；列表为默认） */}
       {viewMode === 'graph' && (
         <div className="flex-1 overflow-hidden flex">
           <FullGraphView bookId={bookId} />

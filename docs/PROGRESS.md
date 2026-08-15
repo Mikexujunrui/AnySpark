@@ -49,7 +49,6 @@
 > [S145] 已提交完成（6 commits：311e94b/5fdfa93/624a515/fd5acbb/1b3e36f/edc0984，第三方评审修复）——声明行随 S145 提交后删除
 > [S146] 已提交完成（7 commits：5976551/77417f9/090dc45/09ffa40/a4ad7f4/795cc9c/588de6c，评审未修项批 E-I）——声明行随 S146 提交后删除
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
-> [S82] 正在改 `routes_chat.py`（chat_stream 事件订阅区：record→reasoning、done→parts）+ `useSSE.ts` + `ChatPanel.tsx`：补工具调用卡片/思考过程/步骤进度链路（不动并行会话的 create(book_id) 两行）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 
 - **候选清单（下一步，按优先级）**：
@@ -4132,3 +4131,37 @@ ruff+format+mypy strict 全绿；前端 tsc+build 绿；ChatPanel 1186→1055 �
 **踩坑**：
 - 并行会话撞 S152 号 + 裹挟提交（工作流 4 文件）——依赖链在提交后被验证半坏（HEAD 的 `req.id`/`startRun(bookId)` 引用未提交代码），需本提交补全；教训：改共享文件（尤其 schemas/routes/workflow 链路）前先写声明区，且提交前 `git status` 逐文件核对归属
 - `listChapters` 无参调用方有 3 处（BatchPanel/ChatPanel/impactStore），参数化时须全部同步改
+
+## S153 图谱表现力 + 聚焦子视图（主人需求驱动：子视图缺失 + 表现力不如 v3）（已完成 ✅）
+
+**背景**：主人提问：v4 前端图谱是否实现子视图、表现力不如 v3。盘点结论：v4 图谱 = S75 整合时的最小可用版
+（275 行手写 SVG 力导向，无子视图、无搜索/图例/箭头/标签）；v3 有整套视图簇（多跳邻居展开 RelationGraph/
+GraphInsights/TimelineView/WorldMap/章节依赖图）。主人拍板：① 表现力基础 + ② 子视图一起做。
+
+**交付 1：后端邻居子图端点（子视图数据源）**
+- `GraphStore.network_of(book_id, center, depth)`（graph/schema.py）：BFS 展开 depth 层（钳 1-3）邻居，
+  center 支持 name（限定书）或内部 id（回退，S72 语义），返回 (实体集, 关系集)，关系仅含子图内两端
+- `GET /api/graph/network?entity_id=&depth=&book_id=`（routes_graph.py）：返回 {center, entities, relations}
+- 测试 +2：BFS 分层（1/2/3 度）、depth 钳制、按 id 定位、跨书隔离（同名只返回自身不带他书关系）、孤立中心
+
+**交付 2：FullGraphView 重写（S153，d3-force + 双模式）**
+- 布局：d3-force（link/charge/collide/center/x/y）替代手写 150 迭代版；重建保留旧位置收敛 + 拖拽固定点；
+  新增 @types/d3 devDependency（d3 包无内置类型，tsc 报 TS2339）
+- 表现力：类型图标（TYPE_ICONS）、边方向箭头（marker）、关系标签（hover/选中/开关全显）、图例 chips
+  （类型色板+计数，点击即过滤）、搜索（名称/别名/类型/描述）、hover 高亮 1 度邻居、滚轮缩放
+- 子视图：点实体详情卡“聚焦此实体” → ego-network 模式（中心锚定画布中心，1/2 度逐步展开，2 度半透明），
+  点邻居“以此实体为中心”换中心，横幅返回全图；按类型过滤天然形成“类型子视图”（DESIGN §12.42 提法）
+- 其它：重置清固定点、KnowledgePanel 过时注释更新
+
+**验证**：
+- 后端：graph 包测试全绿（32+2）；curl 实测 network（江心楼 1 度=4 实体 3 关系 / 2 度=12/12 / 不存在实体空结果）
+- 前端：tsc + vite build + vitest 18 绿；后端相关 pytest 35 绿
+- gate：⚠️ 全量 mypy 被**并行会话半成品**挡（routes_mind.py `ManualEntryIn.book_id` attr 错误，
+  S152g 项目级条目方向，非本阶段改动）；本阶段文件面（ruff format/check + mypy 单文件 + pytest 子集 + 前端全链）全绿
+
+**踩坑**：
+- 测试断言首次写反 Unicode 排序（‘老’U+8001 < ‘陈’U+9648）——中文名排序按码点，改用集合断言
+- 跨书同名实体：network_of 按 name 定位返回该书的实体自身（不带他书关系），初版断言误写空结果
+- d3 7.x 无内置类型 → 装 @types/d3（devDependency），触发 gate 敏感文件强制全量
+- 提交前 git status 发现并行会话 13 个文件（routes_mind/chapters/schemas/tasks/toolkit/BiasPanel/PanelHost 等）
+  在改——本提交只显式 add 本阶段 8 文件，不裹挟

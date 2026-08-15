@@ -132,7 +132,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | routes_agency | 能动性 CRUD/generate（S140：/api/batch/* 收编移除——批量走预置模板） | agency/bias/bg_queue |
 | routes_explore | intent/cards/path/dims/archive + check | dim_store/archive/explore |
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials（S128：模式库读 skill 表 type=plot） | plots/skills/materials |
-| routes_graph | 图谱 types/entities/relations/events/context/extract/impact | graph/graph_extractor/impact |
+| routes_graph | 图谱 types/entities/relations/events/network（S153 邻居子图）/context/extract/impact | graph/graph_extractor/impact |
 | routes_story | 计划 plan/叙事树 nodes/threads/layout | plans/story_tree/story_threads |
 | routes_workflow | 工作流模板/草稿/任务 CRUD+run+resume（S138 续跑）+rollback（S138 批级回滚）（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134 + 章节加料 S137） | workflow_store/engine/generator |
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |

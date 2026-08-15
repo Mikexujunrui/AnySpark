@@ -178,6 +178,49 @@ def test_relation_upsert_dedup_and_name_resolution() -> None:
     assert len(rels) == 1 and rels[0].rel_type == "师徒"
 
 
+def test_network_of_bfs_depth() -> None:
+    """S153：邻居子图 BFS——1 度只有直连，2 度含间接，跨书/不存在的中心隔离。"""
+    g = _store()
+    for name in ("陈渡", "老周", "苏晚", "雾城"):
+        g.upsert_entity("main", name, "角色", [], "", "第一章", 1)
+    g.upsert_entity("other", "陈渡", "角色", [], "", "第一章", 1)
+    g.upsert_relation("main", "陈渡", "老周", "师徒", "", "第一章")
+    g.upsert_relation("main", "老周", "苏晚", "父女", "", "第一章")
+    g.upsert_relation("main", "苏晚", "雾城", "生于", "", "第一章")
+    # 1 度：陈渡 老周（不含苏晚/雾城）
+    ents1, rels1 = g.network_of("main", "陈渡", depth=1)
+    assert sorted(e.name for e in ents1) == ["老周", "陈渡"]
+    assert len(rels1) == 1
+    # 2 度：加入苏晚（雾城仍在外）
+    ents2, rels2 = g.network_of("main", "陈渡", depth=2)
+    assert sorted(e.name for e in ents2) == ["老周", "苏晚", "陈渡"]
+    assert len(rels2) == 2
+    # 3 度：全链
+    ents3, _ = g.network_of("main", "陈渡", depth=3)
+    assert {e.name for e in ents3} == {"老周", "苏晚", "陈渡", "雾城"}
+    # depth 钳制：负数/超限不炸
+    assert g.network_of("main", "陈渡", depth=0)[0]
+    assert g.network_of("main", "陈渡", depth=99)[0]
+    # 按内部 id 定位（跨书同名取主书实体）
+    by_name, _ = g.network_of("main", "陈渡", depth=1)
+    cid = next(e.id for e in by_name)
+    ents_id, _ = g.network_of("main", cid, depth=1)
+    assert {e.name for e in ents_id} == {"老周", "陈渡"}
+    # 不存在 / 跨书：不存在则空；跨书同名实体只返回自身，不带其他书的关系
+    assert g.network_of("main", "不存在的人") == ([], [])
+    ents_other, rels_other = g.network_of("other", "陈渡")
+    assert [e.name for e in ents_other] == ["陈渡"] and rels_other == []
+
+
+def test_network_of_isolated_center() -> None:
+    """S153：孤立实体（无任何关系）子图 = 只有自身。"""
+    g = _store()
+    g.upsert_entity("main", "独行者", "角色", [], "", "第一章", 1)
+    ents, rels = g.network_of("main", "独行者", depth=2)
+    assert [e.name for e in ents] == ["独行者"]
+    assert rels == []
+
+
 def test_event_upsert_replace() -> None:
     g = _store()
     e1 = g.upsert_event("main", "第一章", 1, "第一章", "抵达雾城", "旧描述", ["陈渡"])

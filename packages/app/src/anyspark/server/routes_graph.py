@@ -68,6 +68,20 @@ def make_graph_router(deps: AppDeps) -> APIRouter:
     def list_graph_relations(book_id: str = "main") -> list[dict[str, Any]]:
         return [r.to_dict() for r in deps.graph.list_relations(book_id)]
 
+    @router.get("/api/graph/network", response_model=dict[str, Any])
+    def graph_network(entity_id: str, depth: int = 2, book_id: str = "main") -> dict[str, Any]:
+        """S153：以某实体为中心的邻居子图（聚焦子视图数据源）。
+
+        entity_id 支持 name（限定书）或内部 id（回退，同 S72 语义）；
+        depth 钳制 1-3（前端逐步展开用）。返回 {center, entities, relations}。
+        """
+        ents, rels = deps.graph.network_of(book_id, entity_id, depth)
+        return {
+            "center": entity_id,
+            "entities": [e.to_dict() for e in ents],
+            "relations": [r.to_dict() for r in rels],
+        }
+
     @router.get("/api/graph/events", response_model=list[dict[str, Any]])
     def list_graph_events(book_id: str = "main") -> list[dict[str, Any]]:
         return [e.to_dict() for e in deps.graph.list_events(book_id)]

@@ -49,6 +49,24 @@ export interface GraphType {
   created_at: string;
 }
 
+/* ── 邻居子图（S153：聚焦子视图数据源）── */
+
+export interface GraphNetwork {
+  center: string;
+  entities: GraphEntity[];
+  relations: GraphRelation[];
+}
+
+export function fetchGraphNetwork(
+  entityId: string,
+  depth: number,
+  bookId: string,
+): Promise<GraphNetwork> {
+  return apiFetch<GraphNetwork>(
+    `/api/graph/network?entity_id=${encodeURIComponent(entityId)}&depth=${depth}&book_id=${encodeURIComponent(bookId || "main")}`,
+  );
+}
+
 /* ── 请求体 ── */
 
 export interface CreateEntityRequest {
