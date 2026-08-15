@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# anyspark-explore — 探索引擎包（多智能体探索/意图理解/策略集/方向卡/固化）
+# 依赖：core（单向）。设计规格：DESIGN.md 机制 7
+# marker: S3
+# ---------------------------------------------------------------------------
+[project]
+name = "anyspark-explore"
+version = "0.0.1"
+description = "AnySpark v4 探索引擎：意图理解 / 探索策略集 / 多智能体探索者 / 方向卡 / 项目档案固化"
+requires-python = ">=3.11"
+dependencies = [
+    "anyspark-core==0.0.1",  # workspace 成员
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anyspark"]
+
+[tool.uv.sources]
+anyspark-core = { workspace = true }

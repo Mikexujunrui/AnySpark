@@ -1,0 +1,27 @@
+# ---------------------------------------------------------------------------
+# anyspark-desktop — 桌面壳（轻量自研：Python WebView + PyInstaller 打包）
+# 依赖：app（后端）。不引入 Electron/Tauri 重型依赖。
+# marker: S6
+# ---------------------------------------------------------------------------
+[project]
+name = "anyspark-desktop"
+version = "0.0.1"
+description = "AnySpark v4 桌面壳：Python WebView + PyInstaller"
+requires-python = ">=3.11"
+dependencies = [
+    "anyspark-app==0.0.1",  # workspace 成员（后端）
+    "pywebview==5.4",
+]
+
+[project.scripts]
+anyspark-desktop = "anyspark.desktop:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anyspark"]
+
+[tool.uv.sources]
+anyspark-app = { workspace = true }

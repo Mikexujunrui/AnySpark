@@ -1,0 +1,68 @@
+# ---- AnySpark v4 用户数据，绝不入库 ----
+data/
+chapters/
+data_backup_*/
+testdata/
+*.db
+*.db-journal
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+*.spec.bak
+
+# ---- 前端 ----
+node_modules/
+frontend/dist/
+*.tsbuildinfo
+
+# ---- 工具缓存 ----
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.coverage
+.cov_data/
+
+# ---- IDE / 系统 ----
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ---- 日志与临时 ----
+*.log
+*.tmp
+# 测试残留输出（对话/取消响应，绝不入库）
+cancel_resp.txt
+readtest*.txt
+resume*.txt
+s[0-9].txt
+
+# ---- 密钥 / 本地配置（绝不入库）----
+.env
+.env.*
+!.env.example
+
+# ---- benchmarks 运行产物（代码入库，产物不入库）----
+benchmarks/report/
+benchmarks/assets/
+benchmarks/unit/gold/
+benchmarks/hp_compare/hp_test.db
+
+# ---- benchmark 实验数据（代码/报告入库，原始产物不入库）----
+benchmarks/context_compare/out/
+benchmarks/writing/hp/
+benchmarks/writing/hunter/
+
+# ---- pi 运行时产物 ----
+.pi-subagents/
+frontend_v4_backup/
+
+# ---- 第三方评审/临时排查产物（S145）----
+.review_tmp/
+.pi/

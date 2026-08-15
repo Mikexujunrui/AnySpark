@@ -1,0 +1,25 @@
+# ---------------------------------------------------------------------------
+# anyspark-graph — 知识图谱包（AI 事实源：实体/关系/事件 + FTS 检索）
+# 依赖：core（单向）。设计规格：DESIGN.md §8 数据设计第 3/7 项 + 模型局限弥补表
+# 功能：章节落盘后自动抽取入库；写作时"当前时空点已知事实"检索注入；
+#       资料摘要卡图谱关联（机制 10 补齐）；确定性校验基础（图谱比对证据）
+# marker: S7
+# ---------------------------------------------------------------------------
+[project]
+name = "anyspark-graph"
+version = "0.0.1"
+description = "AnySpark v4 知识图谱：实体/关系/事件存储 + FTS 检索 + 抽取/注入/校验"
+requires-python = ">=3.11"
+dependencies = [
+    "anyspark-core==0.0.1",  # workspace 成员
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anyspark"]
+
+[tool.uv.sources]
+anyspark-core = { workspace = true }
