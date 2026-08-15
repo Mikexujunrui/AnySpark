@@ -274,11 +274,10 @@ def test_sandbox_human_edit_blocks_ai_overwrite(
     import anyspark.server.tools_writing as tw_mod
     from anyspark.server.app import build_app
 
-    # 隔离沙箱：patch 模块级常量（函数内延迟 import 会读到新值）
+    # 隔离沙箱：patch 根目录（S152i：按项目，main 落在 sandbox/main/）
     sandbox = tmp_path / "sandbox"
     sandbox.mkdir()
-    monkeypatch.setattr(tw_mod, "SANDBOX_DIR", sandbox)
-    monkeypatch.setattr(tw_mod, "_HUMAN_EDIT_FILE", sandbox / ".human_edited.json")
+    monkeypatch.setattr(tw_mod, "_SANDBOX_ROOT", sandbox)
 
     class _M:
         model_name = "fake"
@@ -301,8 +300,8 @@ def test_sandbox_human_edit_blocks_ai_overwrite(
         json={"path": "notes/闭环测试.md", "content": "人工改过的版本"},
     )
     assert r2.status_code == 200
-    marks = json.loads((sandbox / ".human_edited.json").read_text(encoding="utf-8"))
-    assert "notes/闭环测试.md" in marks  # 标记落盘
+    marks = json.loads((sandbox / "main" / ".human_edited.json").read_text(encoding="utf-8"))
+    assert "notes/闭环测试.md" in marks  # 标记落盘（main 项目沙箱）
     # ③ AI 再写 → 被拦（不覆盖人工修改）
     r3 = impl(spec, {"path": "notes/闭环测试.md", "content": "AI 想覆盖"})
     assert not r3.ok and "人工修改" in r3.content

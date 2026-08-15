@@ -66,7 +66,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {panelKey === 'dims' && <div className="h-full min-h-0 flex flex-col"><DimsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'codex' && <div className="h-full min-h-0 flex flex-col"><CodexPanel /></div>}
       {panelKey === 'upload' && <div className="h-full min-h-0 flex flex-col"><UploadPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
-      {panelKey === 'files' && <div className="h-full min-h-0 flex flex-col"><FilesPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
+      {panelKey === 'files' && <div className="h-full min-h-0 flex flex-col"><FilesPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
     </div>
   )
 }

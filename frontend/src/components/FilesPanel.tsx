@@ -17,6 +17,7 @@ interface Props {
   open?: boolean
   onClose?: () => void
   embedded?: boolean
+  bookId?: string // S152i：沙箱按项目隔离（缺省 main 兼容旧调用）
 }
 
 function fmtSize(n: number): string {
@@ -25,7 +26,7 @@ function fmtSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)}MB`
 }
 
-export default function FilesPanel({ open = true, onClose, embedded = false }: Props) {
+export default function FilesPanel({ open = true, onClose, embedded = false, bookId = "main" }: Props) {
   const [files, setFiles] = useState<SandboxFile[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
@@ -41,7 +42,7 @@ export default function FilesPanel({ open = true, onClose, embedded = false }: P
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const r = await fetch('/api/sandbox')
+      const r = await fetch(`/api/sandbox?book_id=${encodeURIComponent(bookId)}`)
       const d = await r.json()
       const list: SandboxFile[] = d.files || []
       setFiles(list)
@@ -68,7 +69,7 @@ export default function FilesPanel({ open = true, onClose, embedded = false }: P
     setEditing(false)
     setContentLoading(true)
     try {
-      const r = await fetch(`/api/sandbox/file?path=${encodeURIComponent(path)}`)
+      const r = await fetch(`/api/sandbox/file?path=${encodeURIComponent(path)}&book_id=${encodeURIComponent(bookId)}`)
       if (!r.ok) throw new Error((await r.json()).detail || '读取失败')
       const d = await r.json()
       setContent(d.content || '')
@@ -89,7 +90,7 @@ export default function FilesPanel({ open = true, onClose, embedded = false }: P
       const r = await fetch('/api/sandbox/file', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: selected, content: editText }),
+        body: JSON.stringify({ path: selected, content: editText, book_id: bookId }),
       })
       if (!r.ok) throw new Error((await r.json()).detail || '保存失败')
       setContent(editText)

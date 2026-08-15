@@ -73,20 +73,21 @@ def test_sandbox_resolves_relative_only() -> None:
 
 def test_file_tools_sandbox_read_write() -> None:
 
-    # 用独立沙箱目录测试（避免污染真实 data/sandbox）
+    # 用独立沙箱目录测试（避免污染真实 data/sandbox）——S152i：根目录注入
     tmp = Path(tempfile.mkdtemp())
     import anyspark.server.tools_writing as tw
 
-    orig = tw.SANDBOX_DIR
-    tw.SANDBOX_DIR = tmp
+    orig = tw._SANDBOX_ROOT
+    tw._SANDBOX_ROOT = tmp
     try:
         tools = WritingTools.__new__(WritingTools)  # 只测文件工具，跳过 store
+        tools._book_id = "main"  # 沙箱按项目：文件落在 tmp/main/
         spec = make_spec("write_file")
         r = tools.write_file(
             spec,
             {"path": "notes/a.md", "content": "雾城设定：永远下雨。"},
         )
-        assert r.ok and (tmp / "notes" / "a.md").exists()
+        assert r.ok and (tmp / "main" / "notes" / "a.md").exists()
         r2 = tools.read_file(spec, {"path": "notes/a.md"})
         assert r2.ok and "雾城设定" in r2.content
         # 越界
@@ -96,7 +97,7 @@ def test_file_tools_sandbox_read_write() -> None:
         r4 = tools.write_file(spec, {"path": "big.txt", "content": "x" * 60000})
         assert not r4.ok and "超长" in r4.content
     finally:
-        tw.SANDBOX_DIR = orig
+        tw._SANDBOX_ROOT = orig
 
 
 def make_spec(name: str) -> Any:

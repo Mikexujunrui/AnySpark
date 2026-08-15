@@ -103,19 +103,22 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
     # （笔记/灵感/参考资料）前端可见。人能看到 AI 记的东西（内容自然语言可编辑）。
     # ------------------------------------------------------------------
     @router.get("/api/sandbox", response_model=dict[str, Any])
-    def sandbox_list() -> dict[str, Any]:
-        """列 AI 文件沙箱（data/sandbox/）文件树：相对路径/大小/修改时间。
+    def sandbox_list(book_id: str = "main") -> dict[str, Any]:
+        """列 AI 文件沙箱（data/sandbox/{book_id}/）文件树：相对路径/大小/修改时间。
 
-        read_file/write_file 工具（S60 纯文档通道）的产物都在此；前端文件面板
-        据此展示，人类可读 AI 笔记/灵感/参考资料。仅 .txt/.md/.json 等文本。
+        S152i：按项目隔离（此前全局共享）。read_file/write_file 工具
+        （S60 纯文档通道）的产物都在此；前端文件面板据此展示，人类可读
+        AI 笔记/灵感/参考资料。仅 .txt/.md/.json 等文本。
         """
-        from anyspark.server.tools_writing import SANDBOX_DIR
+        from anyspark.server.tools_writing import _migrate_legacy_sandbox, _sandbox_dir
 
+        _migrate_legacy_sandbox()  # S152i：旧全局文件一次性归入 main
+        sbox = _sandbox_dir(book_id)
         files: list[dict[str, Any]] = []
-        if SANDBOX_DIR.exists():
-            for f in sorted(SANDBOX_DIR.rglob("*")):
+        if sbox.exists():
+            for f in sorted(sbox.rglob("*")):
                 if f.is_file() and not f.name.startswith("."):  # S143：隐藏标记文件不列
-                    rel = str(f.relative_to(SANDBOX_DIR)).replace("\\", "/")
+                    rel = str(f.relative_to(sbox)).replace("\\", "/")
                     files.append(
                         {
                             "path": rel,
@@ -124,14 +127,14 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
                             "mtime": f.stat().st_mtime,
                         }
                     )
-        return {"root": str(SANDBOX_DIR), "files": files, "count": len(files)}
+        return {"root": str(sbox), "files": files, "count": len(files)}
 
     @router.get("/api/sandbox/file", response_model=dict[str, Any])
-    def sandbox_read_file(path: str) -> dict[str, Any]:
+    def sandbox_read_file(path: str, book_id: str = "main") -> dict[str, Any]:
         """读沙箱文本文件内容（相对路径；防穿越）。"""
         from anyspark.server.tools_writing import _resolve_sandbox_path
 
-        p = _resolve_sandbox_path(path)
+        p = _resolve_sandbox_path(path, book_id)
         if p is None:
             raise HTTPException(status_code=400, detail="路径越界：仅允许沙箱内相对路径")
         if not p.exists() or not p.is_file():
@@ -147,23 +150,24 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
         """S143（AI 文件编辑闭环）：人工保存沙箱文件——写内容 + 记人工修改标记。
 
         写标记后 AI write_file 不再静默覆盖该文件（人改过的 AI 尊重）；
-        新建文件（path 不存在）同样落标记（人建的归人管）。
+        新建文件（path 不存在）同样落标记（人建的归人管）。S152i：按项目。
         """
         from anyspark.server.tools_writing import _mark_human_edit, _resolve_sandbox_path
 
         raw = str(req.get("path", "")).strip()
         content = str(req.get("content", ""))
+        book_id = str(req.get("book_id") or "main")
         if not raw:
             raise HTTPException(status_code=400, detail="path 不能为空")
         if len(content) > 50_000:
             raise HTTPException(status_code=400, detail="内容超过 50000 字上限")
-        p = _resolve_sandbox_path(raw)
+        p = _resolve_sandbox_path(raw, book_id)
         if p is None:
             raise HTTPException(status_code=400, detail="路径越界：仅允许沙箱内相对路径")
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
             p.write_text(content, encoding="utf-8")
-            _mark_human_edit(raw)
+            _mark_human_edit(raw, book_id)  # S152i：标记按项目
         except OSError as exc:
             raise HTTPException(status_code=500, detail=f"保存失败: {exc}") from exc
         return {"ok": True, "path": raw, "size": len(content)}

@@ -20,11 +20,19 @@ from anyspark.store import ChapterStore
 
 # 默认当前写作书籍（阶段1 单本书；多书/切换在后续阶段引入）
 DEFAULT_BOOK_ID = "main"
-# 文件工具沙箱：只允许读写此目录下文件（越界保护：阻止绝对路径与 ..）
-SANDBOX_DIR = Path(__file__).resolve().parents[5] / "data" / "sandbox"
+# S152i：AI 文件沙箱按项目隔离——data/sandbox/{book_id}/（此前全局共享，
+# 所有项目的 AI 笔记混在一起；现每项目独立目录 + 独立人工修改标记）
+_SANDBOX_ROOT = Path(__file__).resolve().parents[5] / "data" / "sandbox"
+
+
+def _sandbox_dir(book_id: str = DEFAULT_BOOK_ID) -> Path:
+    """当前项目的沙箱目录（data/sandbox/{book_id}/）。"""
+    return _SANDBOX_ROOT / (book_id or DEFAULT_BOOK_ID)
+
+
 # S143（AI 文件编辑闭环）：人工修改标记——人在前端保存过（PUT /api/sandbox/file）
-# 的文件，AI write_file 不再静默覆盖（内容自然语言可编辑：人改过的 AI 尊重）
-_HUMAN_EDIT_FILE = SANDBOX_DIR / ".human_edited.json"
+# 的文件，AI write_file 不再静默覆盖（内容自然语言可编辑：人改过的 AI 尊重）。
+# 按项目隔离：data/sandbox/{book_id}/.human_edited.json
 # 单次文件读写上限（越界保护：防注入超长/超大文件）
 MAX_FILE_CHARS = 50_000
 
@@ -42,52 +50,79 @@ UNCENSORED_PROMPT = (
 )
 
 
-def _resolve_sandbox_path(raw: str) -> Path | None:
-    """把相对路径解析到沙箱内；越界（绝对路径/..）返回 None。"""
+def _resolve_sandbox_path(raw: str, book_id: str = DEFAULT_BOOK_ID) -> Path | None:
+    """把相对路径解析到当前项目沙箱内；越界（绝对路径/..）返回 None。"""
     p = Path(raw)
     if p.is_absolute():
         return None
-    resolved = (SANDBOX_DIR / p).resolve()
-    if not str(resolved).startswith(str(SANDBOX_DIR.resolve())):
+    root = _sandbox_dir(book_id)
+    resolved = (root / p).resolve()
+    if not str(resolved).startswith(str(root.resolve())):
         return None
     return resolved
 
 
-def _read_human_edits() -> dict[str, str]:
+def _human_edit_file(book_id: str = DEFAULT_BOOK_ID) -> Path:
+    """当前项目的人工修改标记文件（S152i：按项目隔离）。"""
+    return _sandbox_dir(book_id) / ".human_edited.json"
+
+
+def _read_human_edits(book_id: str = DEFAULT_BOOK_ID) -> dict[str, str]:
     """读人工修改标记：{相对路径: 人工保存时间 ISO}。标记文件不存在=无人改过。"""
-    if not _HUMAN_EDIT_FILE.exists():
+    f = _human_edit_file(book_id)
+    if not f.exists():
         return {}
     try:
         import json as _json
 
-        data = _json.loads(_HUMAN_EDIT_FILE.read_text(encoding="utf-8"))
+        data = _json.loads(f.read_text(encoding="utf-8"))
         return data if isinstance(data, dict) else {}
     except Exception:
         return {}
 
 
-def _mark_human_edit(rel_path: str) -> None:
+def _mark_human_edit(rel_path: str, book_id: str = DEFAULT_BOOK_ID) -> None:
     """记录人工保存标记（PUT /api/sandbox/file 调用）。"""
     import json as _json
 
-    marks = _read_human_edits()
+    marks = _read_human_edits(book_id)
     from datetime import UTC, datetime
 
     marks[rel_path] = datetime.now(UTC).isoformat()
-    _HUMAN_EDIT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _HUMAN_EDIT_FILE.write_text(_json.dumps(marks, ensure_ascii=False, indent=2), encoding="utf-8")
+    f = _human_edit_file(book_id)
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(_json.dumps(marks, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _clear_human_edit(rel_path: str) -> None:
+def _clear_human_edit(rel_path: str, book_id: str = DEFAULT_BOOK_ID) -> None:
     """清除人工修改标记（文件删除时清理，避免残留）。"""
     import json as _json
 
-    marks = _read_human_edits()
+    marks = _read_human_edits(book_id)
     if rel_path in marks:
         del marks[rel_path]
-        _HUMAN_EDIT_FILE.write_text(
-            _json.dumps(marks, ensure_ascii=False, indent=2), encoding="utf-8"
-        )
+        f = _human_edit_file(book_id)
+        f.write_text(_json.dumps(marks, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _migrate_legacy_sandbox() -> None:
+    """S152i：一次性迁移——旧全局沙箱（data/sandbox/ 直接文件）移入 main/ 项目。
+
+    此前所有项目共享 data/sandbox/；隔离后每项目独立子目录，历史文件归 main
+    （默认单书场景数据不丢）。幂等：仅当存在非子目录的直接文件时迁移一次。
+    """
+    if not _SANDBOX_ROOT.exists():
+        return
+    legacy = [f for f in _SANDBOX_ROOT.iterdir() if f.is_file() and not f.name.startswith(".")]
+    if not legacy:
+        return
+    main_dir = _sandbox_dir(DEFAULT_BOOK_ID)
+    main_dir.mkdir(parents=True, exist_ok=True)
+    import contextlib
+
+    for f in legacy:
+        with contextlib.suppress(OSError):
+            f.rename(main_dir / f.name)
 
 
 def apply_patch(content: str, operations: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
@@ -370,10 +405,12 @@ class WritingTools:
     def read_file(self, spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec.name, arguments=arguments)
         raw = str(arguments.get("path", "")).strip()
-        path = _resolve_sandbox_path(raw)
+        path = _resolve_sandbox_path(raw, self._book_id)  # S152i：按项目沙箱
         if path is None:
             return ToolResult(
-                call=call, ok=False, content="路径越界：只允许沙箱目录内相对路径（data/sandbox/）。"
+                call=call,
+                ok=False,
+                content="路径越界：只允许沙箱目录内相对路径（data/sandbox/{当前项目}/）。",
             )
         if not path.exists():
             return ToolResult(call=call, ok=False, content=f"文件不存在：{raw}")
@@ -408,15 +445,17 @@ class WritingTools:
         content = str(arguments.get("content", ""))
         if len(content) > MAX_FILE_CHARS:
             return ToolResult(call=call, ok=False, content=f"内容超长（>{MAX_FILE_CHARS} 字）。")
-        path = _resolve_sandbox_path(raw)
+        path = _resolve_sandbox_path(raw, self._book_id)  # S152i：按项目沙箱
         if path is None:
             return ToolResult(
-                call=call, ok=False, content="路径越界：只允许沙箱目录内相对路径（data/sandbox/）。"
+                call=call,
+                ok=False,
+                content="路径越界：只允许沙箱目录内相对路径（data/sandbox/{当前项目}/）。",
             )
         # S143（AI 文件编辑闭环）：人工修改过的文件不静默覆盖——
         # 人在前端保存过（PUT /api/sandbox/file）即标记；AI 再写被拦，
         # 返回提示让 agent 告知用户（内容自然语言可编辑：人改过的 AI 尊重）。
-        if path.exists() and raw in _read_human_edits():
+        if path.exists() and raw in _read_human_edits(self._book_id):
             return ToolResult(
                 call=call,
                 ok=False,
