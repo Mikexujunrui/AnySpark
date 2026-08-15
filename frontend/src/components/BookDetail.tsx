@@ -13,6 +13,7 @@ import { useSplitLayout } from "../hooks/useSplitLayout"
 import SettingsModal from './SettingsModal'
 import ThemeToggle from './ThemeToggle'
 import CommandPalette from './CommandPalette'
+import { forkConversation } from '../api/conversations'
 
 interface TabConfig { key: string; label: string; icon: string }
 interface TabGroup { label: string; tabs: TabConfig[] }
@@ -215,6 +216,21 @@ function BookDetail() {
     }
   }
 
+  // S161：会话继承派生（fork）——从源会话创建继承它的新会话（复制消息+链条可追溯）
+  async function handleForkSession(s: Record<string, any>) {
+    try {
+      const r = await forkConversation(s.id, `从会话「${s.title || '会话'}」分支`)
+      const newId = (r as any).conversation_id
+      const sess = await api.getSessions(bookId!)
+      setSessions(sess as Record<string, any>[])
+      switchSession(newId)
+      setShowSessionMenu(false)
+      showToast('已创建分支会话（继承上下文）')
+    } catch {
+      showToast('分支失败', 'error')
+    }
+  }
+
   async function handleDeleteSession() {
     if (!deleteSessionId) return
     const deletedSession = sessions.find(s => s.id === deleteSessionId)
@@ -314,6 +330,9 @@ function BookDetail() {
                   <div key={s.id} className={`flex items-center gap-1 px-2 ${s.id === sessionId ? 'bg-zinc-700/50' : ''}`}>
                     <button onClick={() => switchSession(s.id)} className="flex-1 px-1 py-2 text-left text-xs text-zinc-300 hover:text-zinc-100 truncate">
                       {s.title || '会话'}
+                    </button>
+                    <button onClick={() => handleForkSession(s)} className="p-1 text-zinc-600 hover:text-accent rounded" title="分支（fork）：从该会话继承上下文开新会话" aria-label="分支会话">
+                      <Icon name="git-branch" size={12} />
                     </button>
                     <button onClick={() => setDeleteSessionId(s.id)} className="p-1 text-zinc-600 hover:text-red-400 rounded" title="删除会话" aria-label="删除会话">
                       <Icon name="trash-2" size={12} />

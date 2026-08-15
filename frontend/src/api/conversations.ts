@@ -33,3 +33,13 @@ export function renameConversation(convId: string, title: string): Promise<void>
 export function deleteConversation(convId: string): Promise<void> {
   return apiFetch<void>(`/api/conversations/${convId}`, { method: "DELETE" });
 }
+
+// S161：会话继承派生（fork）——从源会话创建继承它的新会话（复制消息 + 链条可追溯）
+export function forkConversation(
+  convId: string,
+  forkPoint = "从会话末尾继承"
+): Promise<{ conversation_id: string; parent_id: string | null; fork_point: string; chain: string[] }> {
+  return apiFetch(`/api/conversations/${convId}/fork?fork_point=${encodeURIComponent(forkPoint)}`, {
+    method: "POST",
+  });
+}
