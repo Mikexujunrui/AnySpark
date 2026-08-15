@@ -30,8 +30,8 @@ export default function Bookshelf() {
   const txtInputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
   // 沉浸模式状态（每书）：book_id → true/false
-  const [immersiveMap, setUncensoredMap] = useState<Record<string, boolean>>({})
-  const [immersiveBusy, setUncensoredBusy] = useState<string | null>(null)
+  const [immersiveMap, setImmersiveMap] = useState<Record<string, boolean>>({})
+  const [immersiveBusy, setImmersiveBusy] = useState<string | null>(null)
 
   useEffect(() => {
     loadBooks()
@@ -50,14 +50,14 @@ export default function Bookshelf() {
           if (!cancelled) map[b.id] = Boolean(d.enabled)
         } catch { /* 静默 */ }
       }
-      if (!cancelled) setUncensoredMap(map)
+      if (!cancelled) setImmersiveMap(map)
     })()
     return () => { cancelled = true }
   }, [books])
 
-  async function toggleUncensored(bookId: string, e: React.MouseEvent) {
+  async function toggleImmersive(bookId: string, e: React.MouseEvent) {
     e.stopPropagation()
-    setUncensoredBusy(bookId)
+    setImmersiveBusy(bookId)
     const next = !immersiveMap[bookId]
     try {
       await fetch('/api/immersive', {
@@ -65,9 +65,9 @@ export default function Bookshelf() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ book_id: bookId, enabled: next }),
       })
-      setUncensoredMap(prev => ({ ...prev, [bookId]: next }))
+      setImmersiveMap(prev => ({ ...prev, [bookId]: next }))
     } catch { /* 静默 */ }
-    setUncensoredBusy(null)
+    setImmersiveBusy(null)
   }
 
   async function loadBooks() {
@@ -353,7 +353,7 @@ export default function Bookshelf() {
                     </div>
                     {/* 沉浸模式开关（S70：书籍级写作自由度） */}
                     <button
-                      onClick={(e) => toggleUncensored(book.id, e)}
+                      onClick={(e) => toggleImmersive(book.id, e)}
                       className={`absolute bottom-2 left-2 z-20 flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded transition-all ${immersiveMap[book.id] ? 'bg-red-500/80 text-white' : 'bg-white/10 text-white/50 hover:bg-white/20'}`}
                       title={immersiveMap[book.id] ? '沉浸模式已开启 — 点击关闭（不设题材禁区）' : '沉浸模式已关闭 — 点击开启（写作自由度：不设题材禁区）'}
                     >
