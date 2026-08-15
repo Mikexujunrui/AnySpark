@@ -109,6 +109,10 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
   const [showGenerate, setShowGenerate] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [pendingDeleteWf, setPendingDeleteWf] = useState<string | null>(null);
+  // S152d：右键菜单 / 迷你地图 / 适配视图
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; kind: "node" | "edge" | "canvas"; id?: string } | null>(null);
+  const [showMiniMap, setShowMiniMap] = useState(true);
+  const canvasWrapRef = useRef<HTMLDivElement>(null);
 
   // 运行状态
   const [runningTask, setRunningTask] = useState<WorkflowTask | null>(null);
@@ -216,6 +220,104 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
       edges: d.edges.filter((e) => e.source !== id && e.target !== id),
     }));
     setSelectedNodeId(null);
+    setCtxMenu(null);
+  };
+
+  // S152d：复制节点（新 id + 位置偏移；复制其出边指向原下游；入边不复制避免双输入）
+  const duplicateNode = (id: string) => {
+    patchDraft((d) => {
+      const src = d.nodes.find((n) => n.id === id);
+      if (!src) return d;
+      const clone: WorkflowNode = {
+        ...structuredClone(src),
+        id: genId("n"),
+        label: (src.label || src.id) + " 副本",
+      };
+      const p = finalPos(id);
+      const cloneId = clone.id;
+      d.nodes.push(clone);
+      setManualPos((prev) => ({ ...prev, [cloneId]: { x: snapGrid(p.x + 24), y: snapGrid(p.y + 24) } }));
+      // 复制出边（源指向原下游；入边不复制）
+      for (const e of d.edges) {
+        if (e.source === id) {
+          d.edges.push({ ...structuredClone(e), id: genId("e"), source: cloneId });
+        }
+      }
+      setSelectedNodeId(cloneId);
+      return d;
+    });
+    setCtxMenu(null);
+  };
+
+  // S152d：右键菜单操作
+  const handleCtxAction = (action: "delete" | "duplicate") => {
+    if (!ctxMenu) return;
+    if (ctxMenu.kind === "node" && ctxMenu.id) {
+      if (action === "delete") removeNode(ctxMenu.id);
+      else duplicateNode(ctxMenu.id);
+    } else if (ctxMenu.kind === "edge" && ctxMenu.id) {
+      if (action === "delete") removeEdge(ctxMenu.id);
+    } else if (ctxMenu.kind === "canvas") {
+      if (action === "delete") {
+        setSelectedNodeId(null);
+        setSelectedEdgeId(null);
+      }
+    }
+    setCtxMenu(null);
+  };
+
+  // S152d：键盘 Delete/Backspace 删除选中（输入框聚焦时不触发）+ 点击外部关闭右键菜单
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Delete" && e.key !== "Backspace") return;
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (ctxMenu) {
+        setCtxMenu(null);
+        return;
+      }
+      if (selectedNodeId) {
+        e.preventDefault();
+        removeNode(selectedNodeId);
+      } else if (selectedEdgeId) {
+        e.preventDefault();
+        removeEdge(selectedEdgeId);
+      }
+    };
+    const onDocDown = (e: MouseEvent) => {
+      if (!ctxMenu) return;
+      const el = e.target as HTMLElement | null;
+      if (el && el.closest?.("[data-wf-context-menu]")) return;
+      setCtxMenu(null);
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("mousedown", onDocDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("mousedown", onDocDown);
+    };
+  });
+
+  // S152d：适配视图——缩放/平移使全部节点可见
+  const fitView = () => {
+    const wrap = canvasWrapRef.current;
+    if (!wrap || !draft || draft.nodes.length === 0) return;
+    const xs = draft.nodes.map((n) => finalPos(n.id).x);
+    const x2s = draft.nodes.map((n) => finalPos(n.id).x + NODE_W);
+    const ys = draft.nodes.map((n) => finalPos(n.id).y);
+    const y2s = draft.nodes.map((n) => finalPos(n.id).y + NODE_H);
+    const x0 = Math.min(...xs) - LAYER_GAP;
+    const x1 = Math.max(...x2s) + LAYER_GAP;
+    const y0 = Math.min(...ys) - ROW_GAP;
+    const y1 = Math.max(...y2s) + ROW_GAP;
+    const bw = x1 - x0;
+    const bh = y1 - y0;
+    const scale = Math.min(
+      2,
+      Math.max(0.3, Math.min(wrap.clientWidth / bw, wrap.clientHeight / bh))
+    );
+    setZoom(scale);
+    setPan({ x: 24 - x0 * scale, y: 24 - y0 * scale });
   };
 
   // S152c：加边带防环校验（与后端 validate 一致；loop 节点豁免回边）
@@ -709,7 +811,7 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
           {draft ? (
             <>
               {/* 画布区 */}
-              <div className="flex-1 min-h-0 overflow-hidden relative bg-zinc-950">
+              <div ref={canvasWrapRef} className="flex-1 min-h-0 overflow-hidden relative bg-zinc-950">
                 <svg
                   className="w-full h-full touch-none cursor-grab active:cursor-grabbing"
                   onPointerDown={onCanvasPointerDown}
@@ -718,6 +820,12 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                   onPointerLeave={onCanvasPointerUp}
                   onWheel={onWheel}
                   onClick={onCanvasClick}
+                  onContextMenu={(e) => {
+                    e.preventDefault();
+                    setCtxMenu({ x: e.clientX, y: e.clientY, kind: "canvas" });
+                    setConnectingFrom(null);
+                    setPlaceKind(null);
+                  }}
                 >
                   <g transform={`translate(${pan.x}, ${pan.y}) scale(${zoom})`}>
                     {/* S152b：loop 循环体虚拟边（虚线，纯显示；不入定义/引擎） */}
@@ -880,6 +988,13 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                               setSelectedEdgeId(e.id);
                               setSelectedNodeId(null);
                             }}
+                            onContextMenu={(ev) => {
+                              ev.preventDefault();
+                              ev.stopPropagation();
+                              setSelectedEdgeId(e.id);
+                              setSelectedNodeId(null);
+                              setCtxMenu({ x: ev.clientX, y: ev.clientY, kind: "edge", id: e.id });
+                            }}
                           />
                           {label && (
                             <g
@@ -955,6 +1070,13 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                           onPointerDown={(e) => onNodePointerDown(e, n.id)}
                           onPointerMove={onNodePointerMove}
                           onPointerUp={(e) => onNodePointerUp(e, n.id)}
+                          onContextMenu={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setSelectedNodeId(n.id);
+                            setSelectedEdgeId(null);
+                            setCtxMenu({ x: e.clientX, y: e.clientY, kind: "node", id: n.id });
+                          }}
                         >
                           {/* 连线出口（右侧手柄）：S152c 两段式——点一下开始，再点目标节点完成 */}
                           <circle
@@ -1046,6 +1168,102 @@ export default function WorkflowPanel({ bookId }: { bookId: string }) {
                     )}
                   </g>
                 </svg>
+
+                {/* S152d：缩放控件（右上角浮动） */}
+                <div className="absolute top-2 right-2 flex flex-col gap-1 select-none">
+                  <button
+                    onClick={() => setZoom((z) => Math.min(2, z * 1.2))}
+                    className="w-7 h-7 rounded bg-zinc-900/90 border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-sm leading-none"
+                    title="放大"
+                  >
+                    +
+                  </button>
+                  <button
+                    onClick={() => setZoom((z) => Math.max(0.3, z / 1.2))}
+                    className="w-7 h-7 rounded bg-zinc-900/90 border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-sm leading-none"
+                    title="缩小"
+                  >
+                    −
+                  </button>
+                  <button
+                    onClick={fitView}
+                    className="w-7 h-7 rounded bg-zinc-900/90 border border-zinc-700 text-zinc-300 hover:bg-zinc-800 text-xs leading-none"
+                    title="适配视图（全部节点可见）"
+                  >
+                    ⛶
+                  </button>
+                  <button
+                    onClick={() => setShowMiniMap(!showMiniMap)}
+                    className={`w-7 h-7 rounded bg-zinc-900/90 border text-xs leading-none ${showMiniMap ? "border-zinc-600 text-zinc-200" : "border-zinc-700 text-zinc-500 hover:bg-zinc-800"}`}
+                    title={showMiniMap ? "隐藏迷你地图" : "显示迷你地图"}
+                  >
+                    ▦
+                  </button>
+                </div>
+
+                {/* S152d：迷你地图（右下角） */}
+                {showMiniMap && draft.nodes.length > 0 && (
+                  <MiniMapOverlay
+                    draft={draft}
+                    finalPos={finalPos}
+                    zoom={zoom}
+                    pan={pan}
+                    viewportW={canvasWrapRef.current?.clientWidth ?? 800}
+                    viewportH={canvasWrapRef.current?.clientHeight ?? 600}
+                    onNavigate={(nx, ny) => setPan({ x: nx, y: ny })}
+                  />
+                )}
+
+                {/* S152d：右键菜单浮层 */}
+                {ctxMenu && (
+                  <div
+                    data-wf-context-menu
+                    className="fixed z-50 min-w-[140px] py-1 rounded-lg bg-zinc-800/95 border border-zinc-700 shadow-xl text-xs"
+                    style={{ left: ctxMenu.x, top: ctxMenu.y }}
+                    onContextMenu={(e) => e.preventDefault()}
+                  >
+                    {ctxMenu.kind === "node" && (
+                      <>
+                        <button
+                          onClick={() => handleCtxAction("duplicate")}
+                          className="w-full text-left px-3 py-1.5 text-zinc-300 hover:bg-zinc-700"
+                        >
+                          复制节点
+                        </button>
+                        <button
+                          onClick={() => handleCtxAction("delete")}
+                          className="w-full text-left px-3 py-1.5 text-red-400 hover:bg-zinc-700"
+                        >
+                          删除节点（含边）
+                        </button>
+                      </>
+                    )}
+                    {ctxMenu.kind === "edge" && (
+                      <button
+                        onClick={() => handleCtxAction("delete")}
+                        className="w-full text-left px-3 py-1.5 text-red-400 hover:bg-zinc-700"
+                      >
+                        删除连线
+                      </button>
+                    )}
+                    {ctxMenu.kind === "canvas" && (
+                      <>
+                        <button
+                          onClick={fitView}
+                          className="w-full text-left px-3 py-1.5 text-zinc-300 hover:bg-zinc-700"
+                        >
+                          适配视图
+                        </button>
+                        <button
+                          onClick={() => setCtxMenu(null)}
+                          className="w-full text-left px-3 py-1.5 text-zinc-500 hover:bg-zinc-700"
+                        >
+                          取消选择
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* 底部：属性编辑 */}
@@ -1254,6 +1472,141 @@ function NodeEditor({
       >
         删除节点
       </button>
+    </div>
+  );
+}
+
+/* ── S152d：迷你地图（画布导航） ── */
+function MiniMapOverlay({
+  draft,
+  finalPos,
+  zoom,
+  pan,
+  viewportW,
+  viewportH,
+  onNavigate,
+}: {
+  draft: WorkflowDef;
+  finalPos: (id: string) => Pos;
+  zoom: number;
+  pan: Pos;
+  viewportW: number;
+  viewportH: number;
+  onNavigate: (x: number, y: number) => void;
+}) {
+  const MAP_W = 176;
+  const MAP_H = 116;
+  const PAD = 8;
+  const dragRef = useRef<{ startClientX: number; startClientY: number; startPanX: number; startPanY: number } | null>(null);
+
+  // 内容包围盒（真实节点）
+  const xs = draft.nodes.map((n) => finalPos(n.id).x);
+  const x2s = draft.nodes.map((n) => finalPos(n.id).x + NODE_W);
+  const ys = draft.nodes.map((n) => finalPos(n.id).y);
+  const y2s = draft.nodes.map((n) => finalPos(n.id).y + NODE_H);
+  const x0 = Math.min(...xs, ...x2s) - PAD;
+  const x1 = Math.max(...xs, ...x2s) + PAD;
+  const y0 = Math.min(...ys, ...y2s) - PAD;
+  const y1 = Math.max(...ys, ...y2s) + PAD;
+  const cw = Math.max(x1 - x0, 1);
+  const ch = Math.max(y1 - y0, 1);
+  const scale = Math.min((MAP_W - 4) / cw, (MAP_H - 4) / ch);
+  const offX = 2 + (MAP_W - cw * scale) / 2 - x0 * scale;
+  const offY = 2 + (MAP_H - ch * scale) / 2 - y0 * scale;
+  const toX = (x: number) => x * scale + offX;
+  const toY = (y: number) => y * scale + offY;
+
+  // 视口矩形（当前 pan/zoom 可视范围）
+  const vx0 = pan.x;
+  const vy0 = pan.y;
+  const vx1 = pan.x + viewportW / zoom;
+  const vy1 = pan.y + viewportH / zoom;
+  const rx = toX(vx0);
+  const ry = toY(vy0);
+  const rw = (vx1 - vx0) * scale;
+  const rh = (vy1 - vy0) * scale;
+
+  // 点击/拖动小地图 → 平移主画布（视口中心对齐指针）
+  const jumpTo = (e: React.PointerEvent) => {
+    const rect = (e.currentTarget as SVGSVGElement).getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const wx = (mx - offX) / scale;
+    const wy = (my - offY) / scale;
+    onNavigate(wx - viewportW / zoom / 2, wy - viewportH / zoom / 2);
+  };
+  const onPointerDown = (e: React.PointerEvent) => {
+    e.stopPropagation();
+    dragRef.current = { startClientX: e.clientX, startClientY: e.clientY, startPanX: pan.x, startPanY: pan.y };
+    jumpTo(e);
+    (e.currentTarget as Element).setPointerCapture?.(e.pointerId);
+  };
+  const onPointerMove = (e: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d) return;
+    // 小地图像素位移 → 世界坐标位移（÷ scale）；视口跟随鼠标同向移动
+    const dx = (e.clientX - d.startClientX) / scale;
+    const dy = (e.clientY - d.startClientY) / scale;
+    onNavigate(d.startPanX + dx, d.startPanY + dy);
+  };
+  const onPointerUp = () => {
+    dragRef.current = null;
+  };
+
+  return (
+    <div className="absolute bottom-2 right-2 bg-zinc-900/90 border border-zinc-700 rounded-lg p-1 select-none shadow-lg">
+      <svg
+        width={MAP_W}
+        height={MAP_H}
+        className="touch-none"
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerUp}
+        style={{ cursor: "crosshair" }}
+      >
+        {/* 边 */}
+        {draft.edges.map((e) => {
+          const a = finalPos(e.source);
+          const b = finalPos(e.target);
+          return (
+            <line
+              key={e.id}
+              x1={toX(a.x + NODE_W / 2)}
+              y1={toY(a.y + NODE_H / 2)}
+              x2={toX(b.x + NODE_W / 2)}
+              y2={toY(b.y + NODE_H / 2)}
+              stroke="rgba(113,113,122,0.5)"
+              strokeWidth={0.8}
+            />
+          );
+        })}
+        {/* 节点 */}
+        {draft.nodes.map((n) => (
+          <rect
+            key={n.id}
+            x={toX(finalPos(n.id).x)}
+            y={toY(finalPos(n.id).y)}
+            width={Math.max(2, NODE_W * scale)}
+            height={Math.max(2, NODE_H * scale)}
+            rx={1.5}
+            fill={KIND_META[n.kind].stroke}
+            opacity={0.8}
+          />
+        ))}
+        {/* 视口矩形 */}
+        <rect
+          x={rx}
+          y={ry}
+          width={rw}
+          height={rh}
+          fill="rgba(251,191,36,0.08)"
+          stroke="#fbbf24"
+          strokeWidth={1}
+          pointerEvents="none"
+        />
+      </svg>
+      <div className="text-[9px] text-zinc-600 text-center">迷你地图（点/拖跳转）</div>
     </div>
   );
 }
