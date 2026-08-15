@@ -216,3 +216,57 @@ def test_history_filters_empty_assistant_messages() -> None:
     msgs = client.get(f"/api/conversations/{conv_id}/messages").json()
     texts = [m["content"] for m in msgs]
     assert texts == ["你好", "正常回复", "工具后回复"], f"空消息应被过滤: {texts}"
+
+
+def test_conversation_rollback_restores_chapters_and_graph() -> None:
+    """S154：会话级一键回滚本轮修改——章节完美回滚 + 图谱增量回滚。
+
+    本轮 = 最后一条 user 消息之后：章节恢复到改前快照；图谱删 created_at>t0 增量。
+    """
+    import tempfile
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    class _M:
+        model_name = "fake"
+
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="好的。")
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=_M(), db_path=db))
+    # 建会话 + 第一章
+    r = client.post("/api/conversations", json={"title": "回滚测试", "book_id": "main"})
+    conv_id = r.json()["id"]
+    ch = client.post("/api/chapters", json={"title": "回滚章", "content": "V0 原始"})
+    cid = ch.json()["id"]
+    # 用户消息（本轮起点 t0）
+    client.post(
+        f"/api/conversations/{conv_id}/messages",
+        json={"messages": [{"role": "user", "content": "写这章"}]},
+    )
+    import time as _time
+
+    _time.sleep(0.05)  # 模拟 LLM 间隔（真实场景 t0 与修改相差几十秒）
+    # 本轮内：修改章节（触发版本）+ 改图谱
+    client.put(f"/api/chapters/{cid}", json={"content": "V1 本轮修改"})
+    client.post(
+        "/api/graph/entities",
+        json={"book_id": "main", "name": "临时角色", "type": "角色", "description": "本轮新增"},
+    )
+    assert client.get(f"/api/chapters/{cid}").json()["content"] == "V1 本轮修改"
+    ents = client.get("/api/graph/entities", params={"book_id": "main"}).json()
+    assert any(e["name"] == "临时角色" for e in ents)
+    # 一键回滚
+    rb = client.post(f"/api/conversations/{conv_id}/rollback").json()
+    assert rb["ok"] and rb["restored_count"] == 1, rb
+    # 章节回到 V0
+    assert client.get(f"/api/chapters/{cid}").json()["content"] == "V0 原始"
+    # 图谱增量清除（临时角色没了）
+    ents2 = client.get("/api/graph/entities", params={"book_id": "main"}).json()
+    assert not any(e["name"] == "临时角色" for e in ents2), ents2

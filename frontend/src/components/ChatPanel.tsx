@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import Icon from './ui/Icon'
+import { showToast } from './ui/toast-utils'
 import { useApproval } from './approval/ApprovalContext'
 import { SLASH_COMMANDS as COMMAND_REGISTRY, handleSlashInput } from '../lib/commands'
 import { useSSE } from "../hooks/useSSE"
@@ -57,6 +58,9 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     + '自然语言描述则走 Agent 智能路由。' }
 
   const [messages, setMessages] = useState([welcomeMsg])
+  // S154：本轮完成标记（done 帧到达）——显示'回滚本轮修改'按钮
+  const [turnDone, setTurnDone] = useState(false)
+  const [rollbackBusy, setRollbackBusy] = useState(false)
   const [loaded, setLoaded] = useState(false)
   const [input, setInput] = useState('')
   const [uploading, setUploading] = useState(false)
@@ -258,6 +262,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     },
     onMetrics: (data) => {
       setMetrics(data)
+      setTurnDone(true) // S154：done 帧到达 = 本轮结束，可回滚
     },
     // S99 第二步：接力轮开始——把队列消息作为 user 消息显示、队列条同步减少
     onQueueConsume: (data) => {
@@ -500,6 +505,32 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     }
   }
 
+  // S154：一键回滚本轮修改（章节完美回滚 + 图谱增量回滚）
+  async function rollbackTurn() {
+    if (!sessionId || rollbackBusy) return
+    setRollbackBusy(true)
+    try {
+      const r = await fetch(`/api/conversations/${sessionId}/rollback`, { method: 'POST' })
+      if (!r.ok) throw new Error((await r.json()).detail || '回滚失败')
+      const d = await r.json()
+      const n = d.restored_count || 0
+      const g = d.graph_removed || {}
+      // S152j：回滚来源提示——t0 后可能有其他会话/任务的修改被连带回滚
+      const srcs = d.source_counts || {}
+      const srcDesc = Object.entries(srcs)
+        .map(([k, v]) => `${v} 章(${k})`)
+        .join('、')
+      showToast(`已回滚本轮修改：章节 ${n} 章，图谱清除 ${g.entities || 0} 实体/${g.relations || 0} 关系/${g.events || 0} 事件${srcDesc ? ` · 来源：${srcDesc}` : ''}`)
+      triggerRefresh()
+      setMessages(prev => [...prev, { role: 'agent', text: `[已回滚本轮修改] 章节 ${n} 章 · 图谱增量已清除${srcDesc ? `（含 ${srcDesc}——可能覆盖其他会话/任务的修改，改动前内容在版本历史可找回）` : ''}` }])
+      setTurnDone(false)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '回滚失败', 'error')
+    } finally {
+      setRollbackBusy(false)
+    }
+  }
+
   function handleRevert(idx) {
     setRevertIdx(idx)
   }
@@ -560,6 +591,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     setShowSlash(false)
     setSlashFilter('')
     setMessages(prev => [...prev, { role: 'user', text: msg }])
+    setTurnDone(false) // S154：新轮开始，清除上轮回滚按钮
     setMetrics(null)  // Reset metrics from previous run
     lastSentMsgRef.current = msg
 
@@ -979,6 +1011,20 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
                 onSlashNavigate={(i) => setSlashIdx(i)}
                 onSlashClose={() => setShowSlash(false)}
               />
+              {/* S154：本轮结束 → 一键回滚本轮修改（章节 + 图谱增量） */}
+              {turnDone && (
+                <div className="mt-1.5 flex items-center gap-2">
+                  <button
+                    onClick={() => void rollbackTurn()}
+                    disabled={rollbackBusy}
+                    className="text-[11px] px-2.5 py-1 rounded-lg bg-amber-600/20 border border-amber-700/50 text-amber-300 hover:bg-amber-600/30 transition-colors disabled:opacity-50 flex items-center gap-1"
+                    title="回滚本轮会话对章节/图谱的全部修改（不影响叙事树/伏笔/计划/学习数据）"
+                  >
+                    {rollbackBusy ? "回滚中..." : "↩ 回滚本轮修改"}
+                  </button>
+                  <span className="text-[10px] text-zinc-600">本轮章节+图谱可回滚；叙事树/伏笔/计划/学习不动</span>
+                </div>
+              )}
         </div>
       </div>
 
