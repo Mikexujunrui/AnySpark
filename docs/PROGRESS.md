@@ -4346,3 +4346,42 @@ items 49 条无失败标记）；图谱实体 first_chapter 正确标记。
 **测试 +3**（system notice 往返 / notify 完成+失败 / workflow_status 15 轮轮询不误伤）；
 ruff/mypy 全绿；端到端验证：3 章任务 done → system 通知落库 → 新会话注入
 （【系统】行在通知块，16 条未读全部渲染）。
+
+## S156: 书架页 txt 直接上传成书（已完成 ✅，git a4b37e0）
+
+POST /api/books/import-txt 原子建项目+上传+拆章+失败回滚；txt/md 编码检测 utf-8→gb18030 回退（国内书籍 GBK 不再乱码）；chapterize 跳过空卷标题；4 测试。
+
+## S157: 开源发布准备——敏感清理 + S154 图谱回滚补全 + 门禁分级（已完成 ✅，git b106569）
+
+- graph.delete_after（S154 会话回滚图谱副作用补全）
+- 删除内部/盗版脚本 3 个（batch_ingest_hunter/current_state/skillgen_compare——含盗版书路径/引用 PROGRESS）
+- 注释清理 6 处（主人/搜书吧/猎手准则 → 中性表述）
+- AGENTS.md 门禁分级 L1/L2/L3（主人定案：日常快速检查、发布才全量 pytest）
+
+## S159: 注释纪律（已完成 ✅，git 4288c02）
+
+禁"谁要求/谁拍板"记录性注释；注释只写"为什么"（因果/实测/约束）；Sxxx 前缀可留必须带因果。desktop 白屏注释微调。
+
+## S160: exe 发布打包脚本（已完成 ✅，git 4d2d751）
+
+scripts/build_release.sh：前端 build → PyInstaller → 标准 zip（shutil.make_archive，bsdtar 产物 python 不认已避开）。与 package_release.py（源码分发）职责分离：Release 只挂 exe。
+
+## S161: 前端会话 fork 入口（已完成 ✅，git 9f57ea0）
+
+会话管理菜单每行加 git-branch 分支按钮：forkConversation API + handleForkSession（fork 后刷新列表并切换新会话）。实测消息复制/chain/parent/fork_point 中文全通。
+
+## S163: v4.0.0 开源发布上线 + worktree remote 事故（已完成 ✅）
+
+**上线**：公开仓库 https://github.com/Mikexujunrui/AnySpark main = v4 纯净快照（单条 b2bb9bf，420 文件，无历史）；Release v4.0.0 挂 AnySpark_Windows_x64_v4.0.0.zip（24MB，CRC 校验通过，在纯净快照 worktree 里打包保证 exe=发布代码）；README 含群号 805461309/商业邮箱/双许可证。
+
+**事故与修复（worktree remote 坑）**：
+- publish --push 第一次推错仓库——PUB worktree 共享主仓库 .git/config，origin=私有仓库 AnySpark-private，v4 快照被 force push 到私有仓库 main
+- 发现：ls-remote 对比公开/私有 main；公开仓库未污染（仍旧 v3 24706e0）
+- 恢复：reflog 查私有仓库原 main=f4e1ad0（本地 main 分支同值），force push 恢复；验证一致
+- 根治：publish 脚本 push 改**显式 URL**（git@github.com:Mikexujunrui/AnySpark.git public:main），不依赖共享 origin
+- 教训：worktree 共享 remote 配置——涉及 push 的脚本一律显式 URL
+
+**发布链路（已固化）**：
+- 代码：bash publish_anyspark.sh --push（git archive HEAD 只导出已提交内容，未提交/并行会话半成品不进快照）
+- exe：bash scripts/build_release.sh（可在 PUB 纯净快照里打包）
+- Release：gh release create v4.0.0 <zip> --repo Mikexujunrui/AnySpark
