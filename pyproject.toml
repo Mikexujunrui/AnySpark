@@ -1,0 +1,147 @@
+# ---------------------------------------------------------------------------
+# AnySpark v4 — uv workspace 根
+# 纪律：依赖 pin `==` + 锁文件（uv.lock）；新增包成员需在此声明
+# marker: S0
+# ---------------------------------------------------------------------------
+[project]
+name = "anyspark"
+version = "4.0.9"  # S194：v4.0.9 发布（S189-S193 远程部署双 bug + 配对守卫/转换纯映射/配置单源/编辑历史）
+description = "AnySpark v4 创作引擎（workspace 根项目）"
+requires-python = ">=3.11"
+dependencies = [
+    "anyspark-core",     # 工作区成员（editable），版本由成员包自身约束
+    "anyspark-app",      # 工作区成员：真实模型接入 + 后端 API
+    "anyspark-align",    # 工作区成员：对齐系统
+    "anyspark-explore",  # 工作区成员：探索引擎
+    "anyspark-check",    # 工作区成员：检测网
+    "anyspark-template", # 工作区成员：模式库+资料
+    "anyspark-graph",    # 工作区成员：知识图谱（AI 事实源）
+    "anyspark-workflow", # 工作区成员：工作流（S59 可选增强：顺序/分支/循环 + 断点恢复）
+    "anyspark-review",   # 工作区成员：拟人化评审团（S64 可选增强：YAML 人设 + 并发评审 + 主席汇总）
+    "anyspark-library", # 工作区成员：参考书库（S86 可选增强：全局书库 + 项目选参考书 + 只读检索）
+    "anyspark-desktop",  # 工作区成员：桌面壳
+]
+
+[tool.uv.workspace]
+members = [
+    "packages/*",
+]
+
+[tool.uv.sources]
+anyspark-core = { workspace = true }
+anyspark-app = { workspace = true }
+anyspark-align = { workspace = true }
+anyspark-explore = { workspace = true }
+anyspark-check = { workspace = true }
+anyspark-template = { workspace = true }
+anyspark-graph = { workspace = true }
+anyspark-play = { workspace = true }
+anyspark-workflow = { workspace = true }
+anyspark-review = { workspace = true }
+anyspark-desktop = { workspace = true }
+anyspark-library = { workspace = true }
+
+
+# 门禁工具版本（pin）
+[tool.uv]
+default-groups = ["dev"]
+
+[dependency-groups]
+dev = [
+    "pytest==7.4.3",
+    "ruff==0.16.1",
+    "mypy==1.11.2",
+    "types-PyYAML==6.0.12",  # S64：review 包 yaml 类型桩
+    "pyinstaller==6.11.1",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = [
+    "packages/core",
+    "packages/app",
+    "packages/align",
+    "packages/explore",
+    "packages/check",
+    "packages/template",
+    "packages/graph",
+    "packages/workflow",
+    "packages/review",
+    "packages/play",
+    "packages/library",
+    "scripts",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "N", "RUF", "ASYNC"]
+ignore = [
+    # 本项目以中文承载内容，Unicode 混淆检测会误报中文，关闭
+    "RUF001",  # ambiguous-unicode-character-string
+    "RUF002",  # ambiguous-unicode-docstring
+    "RUF003",  # ambiguous-unicode-comment
+]
+
+[tool.ruff.lint.per-file-ignores]
+"packages/core/src/anyspark/__init__.py" = ["F401"]  # 纯 API 再导出 shim
+# S54：生成 prompt/测试样例是长中文行（JSON 格式说明），断行破坏内容
+"packages/align/src/anyspark/align/skillgen.py" = ["E501"]
+"packages/align/tests/test_skillgen.py" = ["E501"]
+# S59：工作流生成目录/测试样例是长中文行（JSON 定义），断行破坏内容
+"packages/workflow/src/anyspark/workflow/generator.py" = ["E501"]
+"packages/workflow/tests/test_workflow.py" = ["E501"]
+"packages/app/tests/test_workflow_api.py" = ["E501"]
+# S59 补充：workflow model 条件冒烟脚本是长中文 JSON 行
+"scripts/workflow_model_cond_smoke.py" = ["E501"]
+# S64：评审团提示词是给 LLM 看的内容（JSON 示例紧凑性优先），断行破坏语义
+"packages/review/src/anyspark/review/prompts.py" = ["E501"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["anyspark"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+plugins = []
+files = [
+    "packages/core",
+    "packages/app",
+    "packages/align",
+    "packages/explore",
+    "packages/check",
+    "packages/template",
+    "packages/graph",
+    "packages/workflow",
+    "packages/play",
+    "packages/review",
+    "packages/library/src",
+]
+mypy_path = [
+    "packages/core/src",
+    "packages/app/src",
+    "packages/align/src",
+    "packages/explore/src",
+    "packages/check/src",
+    "packages/template/src",
+    "packages/graph/src",
+    "packages/workflow/src",
+    "packages/play/src",
+    "packages/review/src",
+    "packages/library/src",
+]
+explicit_package_bases = true
+
+[tool.pytest.ini_options]
+testpaths = [
+    "packages/core/tests",
+    "packages/app/tests",
+    "packages/align/tests",
+    "packages/explore/tests",
+    "packages/check/tests",
+    "packages/template/tests",
+    "packages/graph/tests",
+    "packages/workflow/tests",
+    "packages/review/tests",
+    "packages/library/tests",
+]
+addopts = "-q"

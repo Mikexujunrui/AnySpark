@@ -1,0 +1,68 @@
+name: Release Build
+
+# 打 tag（v*）自动构建三平台发布包并挂到 GitHub Release
+# 用法：git tag v4.1.0 && git push --tags
+on:
+  push:
+    tags: ["v*"]
+
+# GITHUB_TOKEN 需要 contents: write 才能创建/上传 Release（缺了 403）
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            artifact: Windows_x64
+            ext: zip
+          - os: macos-latest
+            artifact: macOS_arm64
+            ext: zip
+          - os: ubuntu-latest
+            artifact: Linux_x64
+            ext: tar.gz
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+
+      - name: Install Python deps
+        run: uv sync --locked
+
+      - name: PyInstaller (platform branch in anyspark.spec)
+        run: uv run pyinstaller anyspark.spec --noconfirm
+
+      - name: Assemble + package
+        shell: bash
+        env:
+          BUILD_OUT_DIR: "${{ github.workspace }}/dist_upload"
+        run: bash scripts/build_release.sh ${{ github.ref_name }}
+
+      - name: Upload release asset
+        shell: bash  # Windows runner 默认 pwsh 不支持 \ 续行/||，必须显式 bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create ${{ github.ref_name }} dist_upload/* \
+            --title "${{ github.ref_name }}" \
+            --notes "AnySpark ${{ github.ref_name }} 自动构建（三平台）" \
+            --repo ${{ github.repository }} || \
+          gh release upload ${{ github.ref_name }} dist_upload/* --clobber \
+            --repo ${{ github.repository }}
