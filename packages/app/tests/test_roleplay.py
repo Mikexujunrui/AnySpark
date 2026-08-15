@@ -145,3 +145,28 @@ def test_role_card_isolated_by_book() -> None:
     # main 项目无卡
     m = client.get("/api/card?kind=角色卡&name=陈渡").json()
     assert m["content"] == ""
+
+
+def test_role_play_book_scoped() -> None:
+    """S162：/api/role/play 读角色卡按 book_id（此前固定 main，跨项目角色卡读不到）。"""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
+    # book-a 项目建卡（main 无此卡）
+    r = client.post(
+        "/api/role/card",
+        json={"name": "陈渡", "content": "身世成谜的年轻侦探", "book_id": "book-a"},
+    )
+    assert r.status_code == 200, r.text
+
+    # 不带 book_id（默认 main）→ 404（main 无卡）
+    r = client.post("/api/role/play", json={"role": "陈渡", "scenario": "对峙"})
+    assert r.status_code == 404
+    # 带 book_id=book-a → 200（读对项目卡）
+    r = client.post(
+        "/api/role/play",
+        json={"role": "陈渡", "scenario": "顾欣桐说出真相", "book_id": "book-a"},
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["best"] is not None and len(d["candidates"]) == 4

@@ -46,7 +46,7 @@ def make_play_router(deps: AppDeps) -> APIRouter:
     def role_play(req: RolePlayIn) -> dict[str, Any]:
         """角色推演：角色卡 + 当前状态 + 场景 → N 路隔离推演 → 判别选优（作为参考）。"""
         # 角色卡：文件优先，缺省从图谱实体描述兜底（S63 收敛到 load_role_card 共享）
-        role_card, state = load_role_card(deps.workspace, deps.graph, req.role)
+        role_card, state = load_role_card(deps.workspace, deps.graph, req.role, book_id=req.book_id)
         if not role_card.strip():
             raise HTTPException(
                 status_code=404,

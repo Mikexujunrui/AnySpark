@@ -7,10 +7,11 @@ interface RolePanelProps {
   open: boolean;
   onClose: () => void;
   embedded?: boolean;
+  bookId?: string; // S162：项目隔离（缺省 main 兼容旧调用）
 }
 
 // S48-P4 角色推演：角色卡 + 场景 → N 路隔离推演 → 判别选优
-export default function RolePanel({ open, onClose, embedded = false }: RolePanelProps) {
+export default function RolePanel({ open, onClose, embedded = false, bookId = "main" }: RolePanelProps) {
   const { requestApproval } = useApproval()
   const candidates = useRoleStore((s) => s.candidates);
   const best = useRoleStore((s) => s.best);
@@ -34,7 +35,7 @@ export default function RolePanel({ open, onClose, embedded = false }: RolePanel
     if (!cardName.trim() || !cardContent.trim()) return;
     setCardMsg("");
     try {
-      await saveCard(cardName.trim(), cardContent.trim());
+      await saveCard(cardName.trim(), cardContent.trim(), bookId);
       setCardMsg(`角色卡已保存：${cardName.trim()}`);
       setRole(cardName.trim());
     } catch (e) {
@@ -51,7 +52,7 @@ export default function RolePanel({ open, onClose, embedded = false }: RolePanel
       estSeconds: 18,
       cost: 'high',
     })
-    if (ok) await runPlay(role.trim(), scenario.trim(), n);
+    if (ok) await runPlay(role.trim(), scenario.trim(), n, bookId);
   };
 
   return (

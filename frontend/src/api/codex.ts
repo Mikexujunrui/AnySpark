@@ -8,9 +8,9 @@ export interface CodexResult {
   error: string;
 }
 
-export function runCodex(code: string, timeout = 10): Promise<CodexResult> {
+export function runCodex(code: string, timeout = 10, bookId = "main"): Promise<CodexResult> {
   return apiFetch<CodexResult>("/api/codex/run", {
     method: "POST",
-    body: JSON.stringify({ code, timeout }),
+    body: JSON.stringify({ code, timeout, book_id: bookId }),
   });
 }

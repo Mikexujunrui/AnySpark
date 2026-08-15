@@ -8,7 +8,7 @@ chs = ws_chapters()  # 全部章节 [{order, title, chars}]
 total = sum(c["chars"] for c in chs)
 print(f"共 {len(chs)} 章，{total} 字")`;
 
-export default function CodexPanel() {
+export default function CodexPanel({ bookId = "main" }: { bookId?: string }) {
   const [code, setCode] = useState(SAMPLE);
   const [result, setResult] = useState<{ ok: boolean; stdout: string; stderr: string; error: string } | null>(null);
   const [running, setRunning] = useState(false);
@@ -17,7 +17,7 @@ export default function CodexPanel() {
     if (!code.trim()) return;
     setRunning(true);
     try {
-      const r = await runCodex(code);
+      const r = await runCodex(code, 10, bookId);
       setResult(r);
     } catch (e) {
       setResult({ ok: false, stdout: "", stderr: "", error: (e as Error).message });

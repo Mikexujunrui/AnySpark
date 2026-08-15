@@ -13,6 +13,7 @@ from anyspark.core.types import Message, ModelOutput, ToolResult
 from anyspark.server.app import build_app
 from anyspark.server.codex import run_code
 from anyspark.server.tools_domain import make_codex_implementer
+from anyspark.server.workspace import Workspace
 
 # ---------------------------------------------------------------------------
 # 沙箱执行器
@@ -247,3 +248,83 @@ def test_run_code_minimal_env() -> None:
         assert r["ok"] is False and "blocks" in r["error"]
     finally:
         _os.environ.pop("DEEPSEEK_API_KEY", None)
+
+
+def test_run_code_def_run_auto_called() -> None:
+    """S162：代码定义了 run(args) 且无显式调用 → 自动调用一次并输出返回值。
+
+    契约统一：codex 沙箱与扩展工具（execute_extension）一致——写 def run(args)
+    就能跑（此前仅 exec 从不调用，def 包装的代码体静默不执行）。
+    """
+    r = run_code(
+        "def run(args):\n"
+        "    out = []\n"
+        "    for i in range(5):\n"
+        "        out.append(i * i)\n"
+        "    return str(out)"
+    )
+    assert r["ok"] is True, r["error"]
+    assert "[0, 1, 4, 9, 16]" in r["stdout"]
+
+
+def test_run_code_def_run_not_double_called() -> None:
+    """S162：已有显式 run 调用（扩展工具 wrapped 形态）→ 不重复自动调用。"""
+    r = run_code(
+        "def run(args):\n"
+        "    return str(args.get('n', 0))\n"
+        "__args = {'n': 7}\n"
+        "__res = run(__args)\n"
+        "print(__res, end='')"
+    )
+    assert r["ok"] is True, r["error"]
+    assert r["stdout"].strip() == "7"  # 只调用一次（非 7\n7）
+
+
+def test_run_code_def_run_with_args_and_print() -> None:
+    """S162：run 内部既 print 又 return → 自动调用后输出含两者（不丢 print）。"""
+    r = run_code("def run(args):\n    print('inside-print')\n    return 'ret-value'")
+    assert r["ok"] is True, r["error"]
+    assert "inside-print" in r["stdout"]
+    assert "ret-value" in r["stdout"]
+
+
+def test_codex_data_env_book_scoped() -> None:
+    """S162：/api/codex/run 数据环境按 book_id 快照（此前固定 main）。"""
+    from fastapi.testclient import TestClient
+
+    db = _db()
+    ws = _ws()
+    from anyspark.store import ChapterStore
+
+    store = ChapterStore(db)
+    store.upsert("book-a", "第一章", "阿伦在雾城码头。", 0, "main")
+    client = TestClient(build_app(model=_ProbeModel(), db_path=db, workspace=ws))
+
+    # book-a 项目：数据环境应含 book-a 章节
+    r = client.post(
+        "/api/codex/run",
+        json={
+            "code": "def run(args):\n    chs = ws_chapters()\n    return f'count={len(chs)}'",
+            "book_id": "book-a",
+        },
+    ).json()
+    assert r["ok"] is True, r["error"]
+    assert "count=1" in r["stdout"]
+    # 默认 main：空项目
+    r2 = client.post(
+        "/api/codex/run",
+        json={
+            "code": "def run(args):\n    chs = ws_chapters()\n    return f'count={len(chs)}'",
+            "book_id": "main",
+        },
+    ).json()
+    assert r2["ok"] is True, r2["error"]
+    assert "count=0" in r2["stdout"]
+
+
+def _db() -> Path:
+    return Path(tempfile.mkdtemp()) / "t.db"
+
+
+def _ws() -> Workspace:
+    return Workspace(root=Path(tempfile.mkdtemp()) / "ws")

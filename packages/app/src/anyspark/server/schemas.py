@@ -112,6 +112,7 @@ class RolePlayIn(BaseModel):
     role: str  # 角色名（角色卡文件名 + 图谱实体）
     scenario: str  # 推演场景（自然语言）
     n: int = 4  # 推演路数（2-6）
+    book_id: str = "main"  # S162：读角色卡按项目（此前固定 main，跨项目角色卡读不到）
 
 
 class PlayCreateIn(BaseModel):
@@ -150,6 +151,7 @@ class CodexIn(BaseModel):
 
     code: str
     timeout: float = 10.0
+    book_id: str = "main"  # S162：数据环境按项目快照（此前固定 main，跨项目统计不到）
 
 
 class IngestIn(BaseModel):

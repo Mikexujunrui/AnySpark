@@ -13,8 +13,8 @@ interface RoleState {
   loading: boolean;
   error: string;
 
-  runPlay: (role: string, scenario: string, n?: number) => Promise<void>;
-  saveCard: (name: string, content: string) => Promise<void>;
+  runPlay: (role: string, scenario: string, n?: number, bookId?: string) => Promise<void>;
+  saveCard: (name: string, content: string, bookId?: string) => Promise<void>;
 }
 
 export const useRoleStore = create<RoleState>((set) => ({
@@ -24,10 +24,10 @@ export const useRoleStore = create<RoleState>((set) => ({
   loading: false,
   error: "",
 
-  runPlay: async (role, scenario, n) => {
+  runPlay: async (role, scenario, n, bookId) => {
     set({ loading: true, error: "" });
     try {
-      const result: RolePlayResult = await rolePlay(role, scenario, n);
+      const result: RolePlayResult = await rolePlay(role, scenario, n, bookId);
       set({
         candidates: result.candidates || [],
         best: result.best || null,
@@ -40,7 +40,7 @@ export const useRoleStore = create<RoleState>((set) => ({
     }
   },
 
-  saveCard: async (name, content) => {
-    await saveRoleCard(name, content);
+  saveCard: async (name, content, bookId) => {
+    await saveRoleCard(name, content, bookId);
   },
 }));

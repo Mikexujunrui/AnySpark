@@ -111,7 +111,7 @@ def make_tools_router(deps: AppDeps) -> APIRouter:
         return run_code(
             req.code,
             req.timeout,
-            data_env=make_data_env(deps.workspace, deps.chapters, deps.graph),
+            data_env=make_data_env(deps.workspace, deps.chapters, deps.graph, book_id=req.book_id),
         )
 
     # -----------------------------------------------------------------------

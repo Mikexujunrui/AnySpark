@@ -40,10 +40,10 @@ def test_notices_api_and_injection() -> None:
     assert n[0]["old_content"] == "对话克制"
     assert "感叹号" in n[0]["new_content"]
 
-    # 会话注入提醒块（agent 读到）+ 注入后标已读
+    # 会话注入提醒块（agent 读到）+ 注入后标已读（S158c 标题改为「通知」）
     client.post("/api/chat", json={"message": "写一段"})
     joined = "\n".join(model.prompts)
-    assert "心智变更通知" in joined
+    assert "# 通知" in joined
     assert "对话克制" in joined and "感叹号" in joined
     n_after = client.get("/api/manual/notices").json()
     assert len(n_after) == 1 and n_after[0]["read"] == 1  # 已标读（未读为空）

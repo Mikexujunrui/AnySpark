@@ -545,11 +545,7 @@ def test_workflow_status_polling_not_deadloop() -> None:
     from anyspark.core import ToolCall
 
     polls = [
-        ModelOutput(
-            tool_calls=[
-                ToolCall(name="workflow_status", arguments={"task_id": "task-x"})
-            ]
-        )
+        ModelOutput(tool_calls=[ToolCall(name="workflow_status", arguments={"task_id": "task-x"})])
         for _ in range(15)
     ]
     polls.append(_no_tool("任务还在跑，我先结束，后台继续。"))

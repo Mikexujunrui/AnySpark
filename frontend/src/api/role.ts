@@ -39,11 +39,12 @@ export function getCard(
   );
 }
 
-// 角色推演：角色卡 + 当前状态 + 场景 → N 路隔离推演 → 判别选优
+// 角色推演：角色卡 + 当前状态 + 场景 → N 路隔离推演 → 判别选优（S162 按项目）
 export function rolePlay(
   role: string,
   scenario: string,
-  n = 4
+  n = 4,
+  bookId = "main"
 ): Promise<RolePlayResult> {
-  return apiPost<RolePlayResult>("/api/role/play", { role, scenario, n });
+  return apiPost<RolePlayResult>("/api/role/play", { role, scenario, n, book_id: bookId });
 }

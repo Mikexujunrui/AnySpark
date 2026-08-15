@@ -228,6 +228,14 @@ def main():
         namespace = _make_namespace(snap, roots)
         with contextlib.redirect_stdout(ob), contextlib.redirect_stderr(eb):
             exec(compile(code, "<sandbox>", "exec"), namespace, namespace)
+            # S162：契约统一——代码定义了 run(args) 且无显式调用时自动调用一次并
+            # 输出返回值（与扩展工具 execute_extension 的 run 契约一致；后者 wrapped
+            # 代码含显式 `run(` 调用，不会被重复执行）。顶层脚本（print）行为不变。
+            _run = namespace.get("run")
+            if callable(_run) and re.search(r"(?<!def )\brun\s*\(", code) is None:
+                _res = _run({})
+                if _res is not None:
+                    print(_res if isinstance(_res, str) else str(_res), end="")
     except Exception as exc:
         out["ok"] = False
         out["error"] = type(exc).__name__ + ": " + str(exc)

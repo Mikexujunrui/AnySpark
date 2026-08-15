@@ -332,11 +332,8 @@ def test_workflow_completion_notify_system_notice() -> None:
 
     agent 下次会话装配时未读注入——"工作流完成后的汇报"闭环补齐。
     """
-    import json as _json
 
-    from anyspark.core.protocol import ToolSpec
     from anyspark.server.notify import notify_workflow_completion
-    from anyspark.server.tools_workflow import make_workflow_tools
     from anyspark.workflow.definition import WorkflowDef, WorkflowNode
     from anyspark.workflow.store import WorkflowStore
 
