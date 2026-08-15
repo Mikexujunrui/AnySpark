@@ -4101,3 +4101,34 @@ ruff+format+mypy strict 全绿；前端 tsc+build 绿；ChatPanel 1186→1055 �
 
 **下一步**：批量任务结果会话侧反馈（手动面板路径结果仍不进会话——如需可在
 批量面板 done 时发消息，按需）；CURRENT-STATE 接前端（意义低待需）。
+
+## S152 项目隔离三连修 + 工作流画布修复（主人实测驱动）（已完成 ✅）
+
+**背景**：主人实测两个问题：①叙事树跨项目（项目间看到同一棵树）；②已创建的工作流没法在画布打开修改。排查后发现是同一类病灶——前端多处硬编码 `book_id="main"` / 打开后不载入数据。
+
+**修复 1：叙事树按项目隔离**
+- 根因：后端 `story_nodes` 本就按 `book_id` 分库（路由全支持），但前端 `storyStore`/`StoryTreeView` 全部硬编码 `"main"`，`PanelHost` 也没传 `bookId` → 所有项目读写同一棵树
+- 修：`storyStore`/`api/story.ts` 全链路 bookId 参数化（含布局保存 `saveStoryLayout`），`StoryTreeView` 接收 `bookId` prop，切项目时重置本地布局/选中态再拉树
+
+**修复 2：工作流画布无法打开/保存变副本**
+- 根因 2a：`WorkflowPanel` 点击模板只调 `openWorkflow`（设 store.current），**漏 `setDraft(wf)`** → draft 恒 null → 画布永远空白
+- 根因 2b：`WorkflowIn` schema 无 `id` 字段 → POST 每次生成新模板（副本堆积）；后端 `add_template` 本是 upsert，传同 id 即原地更新
+- 修：`WorkflowIn` 加 `id`（缺省=新建）+ 路由透传 + 前端 `createWorkflow` 带 id；`promote` 转正后也载入画布
+- ⚠️ 此部分改动随并行会话 `ffc383a`（S152 预置模板保护）提交时**被裹挟**——代码无丢失（其 commit 含我全部 workflow 改动）；但其 `req.id` 依赖 `schemas.WorkflowIn.id`、`WorkflowPanel.startRun(bookId)` 依赖 `workflowStore.startRun` 新签名——依赖本会话提交 `90f2b90` 补齐，HEAD 才完整（S81 同型事故，留痕于声明区）
+
+**修复 3：同类跨项目问题排查（全链路 bookId 贯通）**
+- **探索 ExploreView**：`archiveDirection`/`explorePath`/`listArchived` 全走 main；后端 `explore_archive` 写叙事树硬编码 `book_id="main"`（探索生长的节点全进 main 项目）→ 修：前端传 bookId + 后端按 `req.book_id` 落树/归档
+- **推演 PlayPanel**：`createPlaySession` 硬编码 main；后端 `list_sessions` 无 book 过滤（全项目混显）→ 修：前端绑定 + store 按 `book_id` 过滤
+- **影响分析 ImpactPanel**：`analyzeImpact`/`fetchChapters` 不传 book_id（后端默认 main）→ 修：前端传
+- **批量任务 BatchPanel**：`runWorkflow`/`listChapters` 硬编码 main → 修：绑定当前项目
+- **listChapters 参数化**：顺带修复 ChatPanel 批量提交读错书
+- 确认无需改：bias（全局 AI 行为）/skills（pack 设计）/dims（全局配置）/tools（注册表全局）/codex/sandbox（全局）
+
+**验证**：
+- 测试 +5：workflow 带 id 原地更新、story 树按项目隔离、explore 归档+落树按项目、play 会话列表按项目（新 3 个在 test_path_api.py；workflow 1 个被 ffc383a 裹挟带走）
+- 全量 gate：ruff + mypy + pytest 596 绿 + 前端 tsc/lint/build/vitest 全绿
+- 手动验证：POST 带 id 更新 → 列表数量不变（更新而非复制）
+
+**踩坑**：
+- 并行会话撞 S152 号 + 裹挟提交（工作流 4 文件）——依赖链在提交后被验证半坏（HEAD 的 `req.id`/`startRun(bookId)` 引用未提交代码），需本提交补全；教训：改共享文件（尤其 schemas/routes/workflow 链路）前先写声明区，且提交前 `git status` 逐文件核对归属
+- `listChapters` 无参调用方有 3 处（BatchPanel/ChatPanel/impactStore），参数化时须全部同步改
