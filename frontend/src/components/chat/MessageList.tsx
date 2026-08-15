@@ -1,0 +1,307 @@
+import { useRef, useEffect, useState, memo } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import ProgressIndicator from './ProgressIndicator'
+import PlotCardSelector from './PlotCardSelector'
+import QuestionCard from './QuestionCard'
+import WorkflowProgress from './WorkflowProgress'
+import PatchNotification from './PatchNotification'
+import Icon from '../ui/Icon'
+
+const MemoizedMarkdown = memo(function MarkdownContent({ text }: { text: string }) {
+  return (
+    // S80：去 whitespace-pre-wrap（它保留 markdown 渲染后 HTML 的换行，与段落间距叠加成双换行/大间隙）
+    <div className="markdown-body min-w-0 break-words [overflow-wrap:anywhere] [&_pre]:max-w-full [&_pre]:overflow-x-auto [&_code]:break-words [&>p]:my-0.5 [&_li]:my-0">
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  )
+})
+
+function InlineEditor({ text, onSave, onCancel }) {
+  const [value, setValue] = useState(text)
+  const taRef = useRef(null)
+
+  useEffect(() => {
+    if (taRef.current) {
+      taRef.current.focus()
+      taRef.current.selectionStart = taRef.current.value.length
+    }
+  }, [])
+
+  useEffect(() => {
+    if (taRef.current) {
+      taRef.current.style.height = 'auto'
+      taRef.current.style.height = Math.min(taRef.current.scrollHeight, 500) + 'px'
+    }
+  }, [value])
+
+  function handleKeyDown(e) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      onCancel()
+    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault()
+      onSave(value)
+    }
+  }
+
+  return (
+    <div className="w-full">
+      <textarea
+        ref={taRef}
+        value={value}
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={handleKeyDown}
+        className="w-full bg-zinc-900 border border-zinc-600 rounded-lg px-3 py-2 text-sm text-zinc-200 resize-none focus:outline-none focus:border-sky-600"
+        rows={4}
+      />
+      <div className="flex gap-2 mt-1.5">
+        <button
+          onClick={() => onSave(value)}
+          className="text-[11px] px-2 py-0.5 bg-sky-700/60 hover:bg-sky-600/80 text-white rounded transition-colors"
+        >
+          保存 (Ctrl+Enter)
+        </button>
+        <button
+          onClick={onCancel}
+          className="text-[11px] px-2 py-0.5 text-zinc-400 hover:text-zinc-200 transition-colors"
+        >
+          取消 (Esc)
+        </button>
+      </div>
+    </div>
+  )
+}
+
+
+// ── Structured parts rendering (tool calls, chapter diffs, reasoning) ───────
+// Persisted turns carry a `parts` array so refresh/replay shows the full
+// execution history inline, not just the final visible text.
+
+function ToolCallCard({ part }) {
+  let argsPreview: string
+  try {
+    const parsed = typeof part.arguments === 'string' ? JSON.parse(part.arguments) : part.arguments
+    argsPreview = parsed ? JSON.stringify(parsed).slice(0, 80) : ''
+  } catch { argsPreview = (part.arguments || '').slice(0, 80) }
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 bg-zinc-900/60 border border-zinc-700/60 rounded-md px-2 py-1">
+      <Icon name="wrench" size={10} className="text-amber-400 shrink-0" />
+      <span className="text-zinc-300 font-mono">{part.name}</span>
+      {argsPreview && <span className="text-zinc-600 truncate">{argsPreview}</span>}
+    </div>
+  )
+}
+
+function ChapterDiffBadge({ part }) {
+  const opLabel = {
+    created: '新建', edited: '修改', patched: '补丁', deleted: '删除', reverted: '回退', imported: '导入',
+  }[part.operation] || part.operation
+  return (
+    <div className="flex items-center gap-1.5 text-[11px] text-emerald-300 bg-emerald-950/30 border border-emerald-800/40 rounded-md px-2 py-1">
+      <Icon name="file-text" size={10} className="shrink-0" />
+      <span>{part.chapter_title || part.chapter_id}</span>
+      <span className="text-emerald-500">{opLabel}</span>
+      {part.word_count > 0 && <span className="text-zinc-500">{part.word_count}字</span>}
+      {part.patch_count > 0 && <span className="text-zinc-500">{part.patch_count}处</span>}
+    </div>
+  )
+}
+
+function ReasoningBlock({ text, index }: { text: string; index?: number }) {
+  const [open, setOpen] = useState(false)
+  if (!text) return null
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center gap-1 text-[10px] text-zinc-500 hover:text-zinc-300 transition-colors"
+      >
+        <Icon name={open ? 'chevron-down' : 'chevron-right'} size={10} />
+        <Icon name="brain" size={10} />
+        思考过程{index ? ` ${index}` : ''}{open ? '' : `（${text.length}字）`}
+      </button>
+      {open && (
+        <div className="mt-1 text-[11px] text-zinc-500 bg-zinc-900/40 border border-zinc-800 rounded-md p-2 max-h-48 overflow-y-auto whitespace-pre-wrap italic">
+          {text}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TurnParts({ parts }) {
+  if (!parts || parts.length === 0) return null
+  // S98：按执行顺序逐条渲染——每条思维链独立折叠块（不再 join 成一个），
+  // 工具调用卡片/章节徽章穿插在对应轮次之间，完整还原每轮「思考→调用→结果」链路
+  let reasoningIdx = 0
+  return (
+    <div className="space-y-1 mb-2">
+      {parts.map((p, i) => {
+        if (p.type === 'reasoning') {
+          reasoningIdx += 1
+          return <ReasoningBlock key={i} text={p.text} index={reasoningIdx} />
+        }
+        if (p.type === 'tool_call') return <ToolCallCard key={i} part={p} />
+        if (p.type === 'chapter_diff') return <ChapterDiffBadge key={i} part={p} />
+        return null
+      })}
+    </div>
+  )
+}
+
+export default function MessageList({
+  messages,
+  streaming,
+  uploading,
+  progress,
+  plotCards,
+  question,
+  workflowData,
+  patchData,
+  showToolCalls,
+  onRevert,
+  onEdit,
+  onValidate,
+  onPlotCardSelect,
+  onPlotCardReject,
+  onQuestionReply,
+  onQuestionReject,
+  onRetry,
+}) {
+  const scrollContainerRef = useRef(null)
+  const bottomRef = useRef(null)
+  const isAtBottomRef = useRef(true)
+  const scrollRafRef = useRef<number | null>(null)
+  const [editingIdx, setEditingIdx] = useState(null)
+
+  // Throttled scrollIntoView: avoid layout thrashing on every chunk during streaming
+  useEffect(() => {
+    if (isAtBottomRef.current) {
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+      scrollRafRef.current = requestAnimationFrame(() => {
+        scrollRafRef.current = null
+        bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+      })
+    }
+    return () => {
+      if (scrollRafRef.current) cancelAnimationFrame(scrollRafRef.current)
+    }
+  }, [messages])
+
+  return (
+    <div
+      className="flex-1 overflow-y-auto px-6 py-5 space-y-5"
+      ref={scrollContainerRef}
+      onScroll={(e) => {
+        const el = e.target as HTMLElement
+        isAtBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+      }}
+    >
+      {(Array.isArray(messages) ? messages : []).map((msg, i) => (
+        <div key={i} className={`flex min-w-0 gap-3 group ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+          {msg.role === 'tool' ? (
+            <div className="w-full text-center">
+              <span className="inline-block text-[10px] text-zinc-600 bg-zinc-800/40 px-2 py-0.5 rounded">{msg.text}</span>
+            </div>
+          ) : (
+          <>
+          {msg.role === 'agent' && (
+            <div className="w-7 h-7 rounded-lg bg-sky-900/40 border border-sky-800/60 flex items-center justify-center shrink-0 mt-0.5">
+              <Icon name="lightbulb" size={13} className="text-sky-400" />
+            </div>
+          )}
+          <div className={`flex min-w-0 flex-col max-w-[min(640px,90%)] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
+            {msg.role === 'user' && (
+              <span className="text-[10px] text-zinc-500 mb-1 mr-1">你</span>
+            )}
+            <div className={`min-w-0 max-w-full rounded-xl px-4 py-3 text-sm leading-normal break-words [overflow-wrap:anywhere] ${
+              msg.autopilot
+                ? 'bg-purple-900/20 border border-purple-700/40 text-zinc-200'
+                : msg.role === 'user'
+                  ? 'bg-sky-900/20 border border-sky-800/40 text-zinc-100'
+                  : 'bg-zinc-800/80 border border-zinc-700 text-zinc-200'
+            }`}>
+              {editingIdx === i ? (
+                <InlineEditor
+                  text={msg.text || ''}
+                  onSave={(newText) => {
+                    setEditingIdx(null)
+                    onEdit(i, newText)
+                  }}
+                  onCancel={() => setEditingIdx(null)}
+                />
+              ) : msg.role === 'agent' ? (
+                <>
+                  {showToolCalls !== false && msg.parts && <TurnParts parts={msg.parts} />}
+                  <MemoizedMarkdown text={msg.text} />
+                </>
+              ) : (
+                <span className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{msg.text}</span>
+              )}
+            </div>
+            {msg.role === 'user' && i < messages.length - 1 && (
+              <button
+                onClick={() => onRevert(i)}
+                className="mt-1 text-[10px] text-zinc-600 hover:text-amber-400 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 flex items-center gap-1"
+                title="回退到此消息"
+              >
+                <Icon name="undo" size={10} /> 回退
+              </button>
+            )}
+            {!streaming && msg.text && editingIdx !== i && (
+              <button
+                onClick={() => setEditingIdx(i)}
+                className="mt-1 text-[10px] text-zinc-600 hover:text-sky-400 opacity-0 group-hover:opacity-100 transition-opacity px-2 py-0.5 flex items-center gap-1"
+                title="编辑此消息"
+              >
+                <Icon name="edit" size={10} /> 编辑
+              </button>
+            )}
+            {msg.role === 'agent' && onRetry && ((msg as any).retry || (msg.text && msg.text.startsWith('⚠️'))) && (
+              <button
+                onClick={() => onRetry(i)}
+                className="mt-1 text-[10px] text-zinc-500 hover:text-amber-400 transition-colors px-2 py-0.5 flex items-center gap-1"
+              >
+                <Icon name="refresh" size={10} /> 重试
+              </button>
+            )}
+            {msg.role === 'agent' && msg.text && msg.text.length > 100 && !msg.text.startsWith('✅') && !msg.text.startsWith('⚠️') && !msg.text.startsWith('🔍') && (
+              <button
+                onClick={() => onValidate(msg.text)}
+                className="mt-1 text-[10px] text-zinc-600 hover:text-zinc-400 px-2 py-0.5 transition-colors flex items-center gap-1"
+              >
+                <Icon name="search" size={10} /> 校验一致性
+              </button>
+            )}
+          </div>
+          </>
+          )}
+        </div>
+      ))}
+      {(streaming || uploading) && (
+        <div className="flex gap-3">
+          <div className="w-7 h-7 rounded-lg bg-sky-900/40 border border-sky-800/60 flex items-center justify-center shrink-0 mt-0.5">
+            <Icon name="lightbulb" size={13} className="text-sky-400" />
+          </div>
+          <div className="bg-zinc-800/80 border border-zinc-700 rounded-xl px-4 py-3">
+            <div className="flex items-center gap-2">
+              <div className="flex gap-1">
+                <span className="w-2 h-2 rounded-full bg-sky-400/70 animate-bounce" style={{ animationDelay: '0ms' }} />
+                <span className="w-2 h-2 rounded-full bg-sky-400/70 animate-bounce" style={{ animationDelay: '150ms' }} />
+                <span className="w-2 h-2 rounded-full bg-sky-400/70 animate-bounce" style={{ animationDelay: '300ms' }} />
+              </div>
+              <span className="text-[11px] text-zinc-500">{uploading ? '上传中...' : '处理中...'}</span>
+            </div>
+          </div>
+        </div>
+      )}
+      {progress && <ProgressIndicator progress={progress} />}
+      {workflowData && <WorkflowProgress data={workflowData} />}
+      {patchData && <PatchNotification data={patchData} />}
+      {plotCards && <PlotCardSelector data={plotCards} onSelect={onPlotCardSelect} onReject={onPlotCardReject} />}
+      {question && <QuestionCard question={question} onReply={onQuestionReply} onReject={onQuestionReject} />}
+      <div ref={bottomRef} />
+    </div>
+  )
+}
