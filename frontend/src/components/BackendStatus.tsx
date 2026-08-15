@@ -22,12 +22,30 @@ export default function BackendStatus() {
   const [status, setStatus] = useState<Status>('connecting')
   const [latencyMs, setLatencyMs] = useState<number | null>(null)
   const [failReason, setFailReason] = useState<string | null>(null)
+  const [updateInfo, setUpdateInfo] = useState<{ latest_version: string; release_url: string } | null>(null)
+  const updateCheckedRef = useRef(false)
   const mountedRef = useRef(true)
   const failCountRef = useRef(0)
   const nextTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const checkRef = useRef<() => void>(() => {
     console.warn(`${DIAG_PREFIX} BackendStatus — check() called before init, ignoring`)
   })
+
+  // S164：后端 online 后查一次 GitHub 最新 Release——有新版本显示提示条（只查一次，静默失败）
+  async function checkUpdate() {
+    if (updateCheckedRef.current) return
+    updateCheckedRef.current = true
+    try {
+      const res = await fetch('/api/update/check')
+      if (!res.ok) return
+      const d = await res.json()
+      if (d.has_update && d.latest_version && mountedRef.current) {
+        setUpdateInfo({ latest_version: d.latest_version, release_url: d.release_url || '' })
+      }
+    } catch {
+      /* 网络失败静默——不打扰用户 */
+    }
+  }
 
   // ── Helpers ──
 
@@ -55,6 +73,10 @@ export default function BackendStatus() {
       failCount: newFailCount,
       failReason: reason,
     })
+    // S164：首次连上后端后查一次版本（只查一次；offline 不查）
+    if (newStatus === 'online' || newStatus === 'degraded') {
+      checkUpdate()
+    }
     scheduleNext(nextDelay)
   }
 
@@ -172,6 +194,17 @@ export default function BackendStatus() {
       )}
       {status === 'degraded' && latencyMs !== null && (
         <span className="text-yellow-500 text-[9px]">{latencyMs}ms</span>
+      )}
+      {updateInfo && (
+        <a
+          href={updateInfo.release_url || 'https://github.com/Mikexujunrui/AnySpark/releases'}
+          target="_blank"
+          rel="noreferrer"
+          className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 text-[9px] font-medium transition-colors"
+          title={`发现新版本 ${updateInfo.latest_version}——点击前往 Release 下载`}
+        >
+          ↑ 新版 {updateInfo.latest_version.replace(/^v/i, '')}
+        </a>
       )}
     </div>
   )

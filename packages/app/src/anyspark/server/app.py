@@ -84,6 +84,7 @@ from anyspark.server.routes_settings import make_settings_router
 from anyspark.server.routes_skills import make_skills_router
 from anyspark.server.routes_story import make_story_router
 from anyspark.server.routes_tools import make_tools_router
+from anyspark.server.routes_update import make_update_router
 from anyspark.server.routes_workflow import make_workflow_router
 from anyspark.server.routes_workspace import make_workspace_router
 from anyspark.server.schemas import (
@@ -1865,6 +1866,7 @@ def build_app(
     app.include_router(make_skills_router(deps))
     app.include_router(make_story_router(deps))
     app.include_router(make_tools_router(deps))
+    app.include_router(make_update_router(deps))
     app.include_router(make_workflow_router(deps))
     app.include_router(make_workspace_router(deps))
 

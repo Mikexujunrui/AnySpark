@@ -23,6 +23,8 @@ a = Analysis(
         (str(FRONTEND_DIST), "frontend/dist"),
         # S109：.env 模板（frozen 启动时复制到 exe 同目录 data/）+ 系统评审员
         (str(ROOT / ".env.example"), "."),
+        # S164：frozen 时版本检测读本地版本（pyproject.toml 打进 exe 资源）
+        (str(ROOT / "pyproject.toml"), "."),
         (str(ROOT / "packages" / "review" / "reviewers"), "reviewers"),
         *_TIKTOKEN_DATAS,
     ],
