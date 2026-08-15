@@ -42,13 +42,13 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       </div>
 
       {panelKey === 'chapters' && <div className="h-full min-h-0 flex flex-col"><ChaptersPanel bookId={bookId} /></div>}
-      {panelKey === 'explore' && <div className="h-full min-h-0 flex flex-col"><ExploreView /></div>}
+      {panelKey === 'explore' && <div className="h-full min-h-0 flex flex-col"><ExploreView bookId={bookId} /></div>}
       {panelKey === 'knowledge' && <div className="h-full min-h-0 flex flex-col"><KnowledgePanel bookId={bookId} /></div>}
       {panelKey === 'outline' && <div className="h-full min-h-0 flex flex-col"><OutlinePanel bookId={bookId} /></div>}
       {panelKey === 'foreshadows' && <div className="h-full min-h-0 flex flex-col"><PlotPanel bookId={bookId} /></div>}
       {panelKey === 'styles' && <div className="h-full min-h-0 flex flex-col"><SkillPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
-      {panelKey === 'storytree' && <div className="h-full min-h-0 flex flex-col"><StoryTreeView /></div>}
-      {panelKey === 'workflow' && <div className="h-full min-h-0 flex flex-col"><WorkflowPanel /></div>}
+      {panelKey === 'storytree' && <div className="h-full min-h-0 flex flex-col"><StoryTreeView bookId={bookId} /></div>}
+      {panelKey === 'workflow' && <div className="h-full min-h-0 flex flex-col"><WorkflowPanel bookId={bookId} /></div>}
       {panelKey === 'search' && <div className="h-full min-h-0 flex flex-col"><SearchPanel bookId={bookId} /></div>}
       {panelKey === 'review' && <div className="h-full min-h-0 flex flex-col"><ReviewPanel bookId={bookId} /></div>}
       {panelKey === 'materials' && <div className="h-full min-h-0 flex flex-col"><MaterialsPanel bookId={bookId} /></div>}
@@ -57,10 +57,10 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {/* V4 工具面板（open/onClose 签名 → 内嵌常显） */}
       {panelKey === 'brief' && <div className="h-full min-h-0 flex flex-col"><BriefPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
       {panelKey === 'bias' && <div className="h-full min-h-0 flex flex-col"><BiasPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
-      {panelKey === 'batch' && <div className="h-full min-h-0 flex flex-col"><BatchPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
+      {panelKey === 'batch' && <div className="h-full min-h-0 flex flex-col"><BatchPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
       {panelKey === 'templates' && <div className="h-full min-h-0 flex flex-col"><TemplatePanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'tools' && <div className="h-full min-h-0 flex flex-col"><ToolsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
-      {panelKey === 'play' && <div className="h-full min-h-0 flex flex-col"><PlayPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
+      {panelKey === 'play' && <div className="h-full min-h-0 flex flex-col"><PlayPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
       {panelKey === 'dims' && <div className="h-full min-h-0 flex flex-col"><DimsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'codex' && <div className="h-full min-h-0 flex flex-col"><CodexPanel /></div>}
       {panelKey === 'upload' && <div className="h-full min-h-0 flex flex-col"><UploadPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}

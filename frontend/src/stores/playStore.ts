@@ -21,8 +21,8 @@ interface PlayState {
   path: PlayPathEntry[];
   loading: boolean;
 
-  listSessions: () => Promise<void>;
-  create: (role: string, seed: string, title?: string, maxDepth?: number) => Promise<PlaySession>;
+  listSessions: (bookId: string) => Promise<void>;
+  create: (role: string, seed: string, bookId: string, title?: string, maxDepth?: number) => Promise<PlaySession>;
   get: (id: string) => Promise<void>;
   choose: (optionId?: string, customText?: string) => Promise<void>;
   branch: (nodeId: string) => Promise<void>;
@@ -52,10 +52,10 @@ export const usePlayStore = create<PlayState>((set, get) => ({
   path: [],
   loading: false,
 
-  listSessions: async () => {
+  listSessions: async (bookId) => {
     set({ loading: true });
     try {
-      const sessions = await listPlaySessions();
+      const sessions = await listPlaySessions(bookId);
       set({ sessions, loading: false });
     } catch (error) {
       console.error("Failed to list play sessions:", error);
@@ -63,11 +63,11 @@ export const usePlayStore = create<PlayState>((set, get) => ({
     }
   },
 
-  create: async (role, seed, title, maxDepth) => {
-    const result = await createPlaySession(role, seed, title, maxDepth);
+  create: async (role, seed, bookId, title, maxDepth) => {
+    const result = await createPlaySession(role, seed, title, maxDepth, bookId);
     set({ session: result.session, node: result.node, tree: null, path: [] });
     await get().get(result.session.id);
-    await get().listSessions();
+    await get().listSessions(bookId);
     return result.session;
   },
 

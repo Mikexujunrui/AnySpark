@@ -14,6 +14,7 @@ interface BatchPanelProps {
   open: boolean;
   onClose: () => void;
   embedded?: boolean;
+  bookId?: string; // S152：项目隔离（缺省 main 兼容旧调用）
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -22,7 +23,7 @@ const STATUS_LABELS: Record<string, string> = {
   done: "完成",
 };
 
-export default function BatchPanel({ open, onClose, embedded = false }: BatchPanelProps) {
+export default function BatchPanel({ open, onClose, embedded = false, bookId = "main" }: BatchPanelProps) {
   const [chapters, setChapters] = useState<Chapter[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showRewrite, setShowRewrite] = useState(false);
@@ -51,10 +52,10 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
   });
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // 打开时拉取章节 + 预置工作流模板 id
+  // 打开时拉取章节 + 预置工作流模板 id（S152：按当前项目）
   useEffect(() => {
     if (!open) return;
-    listChapters()
+    listChapters(bookId)
       .then((list) => setChapters(list))
       .catch((e) => console.error("Failed to load chapters:", e));
     listWorkflows()
@@ -145,7 +146,7 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
     if (!wfTemplates.review) return;
     setWfBusy(true);
     try {
-      const r = await runWorkflow(wfTemplates.review, "main", {
+      const r = await runWorkflow(wfTemplates.review, bookId, {
         chapter_ids: JSON.stringify([...selected]),
       });
       startWfPoll(r.task_id);
@@ -161,7 +162,7 @@ export default function BatchPanel({ open, onClose, embedded = false }: BatchPan
     setWfBusy(true);
     setShowRewrite(false);
     try {
-      const r = await runWorkflow(wfTemplates.rewrite, "main", {
+      const r = await runWorkflow(wfTemplates.rewrite, bookId, {
         chapter_ids: JSON.stringify([...selected]),
         instruction: instruction.trim(),
       });

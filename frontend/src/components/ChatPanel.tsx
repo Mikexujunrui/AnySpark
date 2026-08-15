@@ -698,7 +698,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
 
     // 批准 → 章节标题解析为 id → 提交批量
     try {
-      const chs = await listChapters()
+      const chs = await listChapters(bookId)
       const ids = chs
         .filter(c => titles.some(t => c.title.includes(t) || t.includes(c.title)))
         .map(c => c.id)

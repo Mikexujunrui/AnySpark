@@ -84,8 +84,9 @@ def make_play_router(deps: AppDeps) -> APIRouter:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @router.get("/api/play/sessions", response_model=list[dict[str, Any]])
-    def play_list() -> list[dict[str, Any]]:
-        return deps.play_store.list_sessions()
+    def play_list(book_id: str = "main") -> list[dict[str, Any]]:
+        # S152：按项目过滤（此前全量跨项目混显）
+        return deps.play_store.list_sessions(book_id=book_id)
 
     @router.get("/api/play/sessions/{session_id}", response_model=dict[str, Any])
     def play_get(session_id: str) -> dict[str, Any]:

@@ -4,7 +4,7 @@ import type { DirectionCard } from "../api/explore";
 import { explorePath, type PathCandidate } from "../api/explore";
 import { useApproval } from "./approval/ApprovalContext";
 
-export default function ExploreView() {
+export default function ExploreView({ bookId = "main" }: { bookId?: string }) {
   const { requestApproval } = useApproval()
   const [pathMode, setPathMode] = useState(false);
   const {
@@ -23,10 +23,10 @@ export default function ExploreView() {
     reset,
   } = useExploreStore();
 
-  // 初始加载已固化方向
+  // 初始加载已固化方向（S152：按当前项目）
   useEffect(() => {
-    fetchArchived();
-  }, [fetchArchived]);
+    fetchArchived(bookId);
+  }, [bookId, fetchArchived]);
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden">
@@ -59,7 +59,7 @@ export default function ExploreView() {
       {/* 主内容区 */}
       <div className="flex-1 overflow-auto p-4">
         {pathMode ? (
-          <PathExplore />
+          <PathExplore bookId={bookId} />
         ) : (
         <>
         {/* 阶段 1：种子输入 */}
@@ -195,7 +195,7 @@ export default function ExploreView() {
                 <DirectionCardView
                   key={card.id}
                   card={card}
-                  onSelect={() => archiveCard(card)}
+                  onSelect={() => archiveCard(card, bookId)}
                   loading={loading}
                 />
               ))}
@@ -258,7 +258,7 @@ export default function ExploreView() {
 }
 
 // S67 路径探索组件：起点 A → 终点 B 的串联路径候选
-function PathExplore() {
+function PathExplore({ bookId }: { bookId: string }) {
   const [fromDesc, setFromDesc] = useState("");
   const [toDesc, setToDesc] = useState("");
   const [constraints, setConstraints] = useState("");
@@ -282,6 +282,7 @@ function PathExplore() {
           .map((c) => c.trim())
           .filter(Boolean),
         n: 4,
+        book_id: bookId, // S152：项目隔离（落树按当前项目）
       });
       setPaths(res.paths || []);
     } catch (e) {

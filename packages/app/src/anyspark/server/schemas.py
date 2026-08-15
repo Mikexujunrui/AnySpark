@@ -303,6 +303,7 @@ class PathExploreIn(BaseModel):
 class ExploreArchiveIn(BaseModel):
     card: dict[str, object]
     parent_node_id: str | None = None  # S59：叙事树父节点（探索分叉从哪长出）
+    book_id: str = "main"  # S152：项目隔离（固化方向 + 落叙事树按当前项目）
 
 
 class ExploreDimIn(BaseModel):
@@ -574,8 +575,13 @@ class ImpactIn(BaseModel):
 
 
 class WorkflowIn(BaseModel):
-    """S59：工作流定义写入（模板入库）。模块级（S13 坑：函数内定义 ForwardRef 失败）。"""
+    """S59：工作流定义写入（模板入库）。模块级（S13 坑：函数内定义 ForwardRef 失败）。
 
+    S152：id 可选——带 id = 原地更新（add_template 为 INSERT OR REPLACE，同 id 覆盖）；
+    缺省 = 新建（生成新 id）。
+    """
+
+    id: str = ""
     name: str
     description: str = ""
     nodes: list[dict[str, Any]]

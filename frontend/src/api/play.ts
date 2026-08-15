@@ -65,22 +65,23 @@ export interface PlayExportResult {
   markdown: string;
 }
 
-// 列出全部推演会话
-export function listPlaySessions(): Promise<PlaySession[]> {
-  return apiGet<PlaySession[]>("/api/play/sessions");
+// 列出推演会话（S152：按项目隔离）
+export function listPlaySessions(bookId = "main"): Promise<PlaySession[]> {
+  return apiGet<PlaySession[]>(`/api/play/sessions?book_id=${bookId}`);
 }
 
-// 创建推演会话
+// 创建推演会话（S152：bookId 绑定当前项目）
 export function createPlaySession(
   role: string,
   seed: string,
   title = "",
-  maxDepth = 20
+  maxDepth = 20,
+  bookId = "main"
 ): Promise<PlayCreateResult> {
   return apiPost<PlayCreateResult>("/api/play/sessions", {
     role,
     seed,
-    book_id: "main",
+    book_id: bookId,
     title,
     max_depth: maxDepth,
   });

@@ -16,11 +16,14 @@ export interface ImpactResult {
 }
 
 // 影响分析：改第 chapterOrder 章（可显式给涉及实体，缺省后端自动取该章图谱实体）
+// S152：bookId 项目隔离（此前前端不传，后端默认 main 跨项目分析）
 export function analyzeImpact(
   chapterOrder: number,
-  entities?: string[]
+  entities?: string[],
+  bookId = "main"
 ): Promise<ImpactResult> {
   return apiPost<ImpactResult>("/api/impact", {
+    book_id: bookId,
     chapter_order: chapterOrder,
     entities: entities || null,
   });

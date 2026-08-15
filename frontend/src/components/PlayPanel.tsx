@@ -8,9 +8,10 @@ interface PlayPanelProps {
   open: boolean;
   onClose: () => void;
   embedded?: boolean;
+  bookId?: string; // S152：项目隔离（缺省 main 兼容旧调用）
 }
 
-export default function PlayPanel({ open, onClose, embedded = false }: PlayPanelProps) {
+export default function PlayPanel({ open, onClose, embedded = false, bookId = "main" }: PlayPanelProps) {
   const sessions = usePlayStore((s) => s.sessions);
   const session = usePlayStore((s) => s.session);
   const node = usePlayStore((s) => s.node);
@@ -34,8 +35,8 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
   const [pendingBranch, setPendingBranch] = useState<{ nodeId: string; step: number } | null>(null);
 
   useEffect(() => {
-    if (open) listSessions();
-  }, [open, listSessions]);
+    if (open) listSessions(bookId);
+  }, [open, bookId, listSessions]);
 
   const handleCreate = async () => {
     setError("");
@@ -44,7 +45,7 @@ export default function PlayPanel({ open, onClose, embedded = false }: PlayPanel
       return;
     }
     try {
-      await create(role.trim(), seed.trim(), title.trim());
+      await create(role.trim(), seed.trim(), bookId, title.trim());
       setRole("");
       setSeed("");
       setTitle("");

@@ -96,6 +96,100 @@ def test_path_api_with_story_nodes() -> None:
     assert all(nid in node_ids for nid in d["archived"]["node_ids"])
 
 
+def test_story_tree_isolated_by_book() -> None:
+    """S152：叙事树按项目（book_id）隔离——不同项目的树互不可见。
+
+    前端此前硬编码 book_id=main，所有项目共用一棵树；后端存储本就带 book_id，
+    此测试锁住隔离语义，防止回归为跨项目共享。
+    """
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
+    # 项目 A 建两个节点
+    r = client.post(
+        "/api/story/nodes",
+        json={"content": "A项目根节点", "book_id": "book-a", "kind": "root"},
+    )
+    assert r.status_code == 200, r.text
+    client.post(
+        "/api/story/nodes",
+        json={
+            "content": "A项目子节点",
+            "book_id": "book-a",
+            "parent_id": r.json()["id"],
+        },
+    )
+    # 项目 B 建一个节点
+    client.post(
+        "/api/story/nodes",
+        json={"content": "B项目节点", "book_id": "book-b"},
+    )
+    # 各项目只见自己的树
+    a = client.get("/api/story/tree?book_id=book-a").json()
+    b = client.get("/api/story/tree?book_id=book-b").json()
+    assert {n["content"] for n in a["nodes"]} == {"A项目根节点", "A项目子节点"}
+    assert {n["content"] for n in b["nodes"]} == {"B项目节点"}
+
+
+def test_play_sessions_isolated_by_book() -> None:
+    """S152：推演会话按项目（book_id）隔离——列表不再跨项目混显。
+
+    此前前端 createPlaySession 硬编码 book_id=main、list_sessions 无过滤，
+    所有项目的推演记录混在一处。
+    """
+
+    # 经 API 创建需要模型 → 改用 store 层验证（路由只做透传，store 过滤是核心）
+    from anyspark.play.tree import PlayStore
+
+    store = PlayStore(_db())
+    store.create_session(role="侦探", seed="雨夜", book_id="book-a")
+    store.create_session(role="船长", seed="海港", book_id="book-b")
+    assert {s["book_id"] for s in store.list_sessions(book_id="book-a")} == {"book-a"}
+    assert {s["book_id"] for s in store.list_sessions(book_id="book-b")} == {"book-b"}
+    assert len(store.list_sessions(book_id="main")) == 0
+
+
+def test_explore_archive_isolated_by_book() -> None:
+    """S152：探索固化按项目隔离——归档列表过滤 + 落叙事树按当前项目。
+
+    此前后端 explore_archive 写叙事树硬编码 book_id=main，探索生长的节点
+    全进 main 项目（即使前端按项目传了其他树的 book_id 也白搭）。
+    """
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
+    # 项目 A 固化一个方向
+    r = client.post(
+        "/api/explore/archive",
+        json={
+            "card": {
+                "title": "怀表疑云",
+                "summary": "陈渡发现怀表刻字与父亲有关",
+                "dimension": "情节驱动",
+                "source": "user",
+                "term": "探案",
+            },
+            "book_id": "book-a",
+        },
+    )
+    assert r.status_code == 200, r.text
+    story_node_id = r.json()["story_node_id"]
+    # 归档列表按项目过滤
+    a = client.get("/api/explore/archive?book_id=book-a").json()
+    b = client.get("/api/explore/archive?book_id=book-b").json()
+    assert len(a) == 1 and a[0]["title"] == "怀表疑云"
+    assert b == []
+    # 落树节点在 book-a 的项目树里（此前硬编码 main 会落错项目）
+    tree_a = client.get("/api/story/tree?book_id=book-a").json()
+    assert any(n["id"] == story_node_id for n in tree_a["nodes"])
+    tree_main = client.get("/api/story/tree").json()
+    assert all(n["id"] != story_node_id for n in tree_main["nodes"])
+
+
 def test_path_api_errors() -> None:
     """错误路径：节点不存在 404 / archive 无起点 400 / 越界 400。"""
     from fastapi.testclient import TestClient

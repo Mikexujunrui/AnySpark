@@ -7,9 +7,10 @@ interface ImpactPanelProps {
   onClose: () => void;
   embedded?: boolean;
   initialOrder?: number;
+  bookId?: string; // S152：项目隔离（缺省 main 兼容旧调用）
 }
 
-export default function ImpactPanel({ open, onClose, embedded = false, initialOrder }: ImpactPanelProps) {
+export default function ImpactPanel({ open, onClose, embedded = false, initialOrder, bookId = "main" }: ImpactPanelProps) {
   const chapters = useImpactStore((s) => s.chapters);
   const impacted = useImpactStore((s) => s.impacted);
   const count = useImpactStore((s) => s.count);
@@ -25,7 +26,7 @@ export default function ImpactPanel({ open, onClose, embedded = false, initialOr
 
   useEffect(() => {
     if (open) {
-      fetchChapters();
+      fetchChapters(bookId);
       setEntitiesText("");
       // 预选当前编辑章节（写作时按需触发）
       if (initialOrder != null) {
@@ -49,7 +50,7 @@ export default function ImpactPanel({ open, onClose, embedded = false, initialOr
       .split(/[,，\s]+/)
       .map((s) => s.trim())
       .filter(Boolean);
-    await analyze(selectedOrder, entities.length ? entities : undefined);
+    await analyze(selectedOrder, entities.length ? entities : undefined, bookId);
   };
 
   return (

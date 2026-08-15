@@ -6,9 +6,9 @@ import type { Chapter } from "../types";
 // ── Chapters（章节）──
 export const getChapters = (bookId: string): Promise<unknown[]> =>
   get(`/api/chapters?book_id=${bookId}`);
-// 兼容旧 V4 调用（BatchPanel 等）：无参返回 main 书章节
-export const listChapters = (): Promise<Chapter[]> =>
-  get<Chapter[]>("/api/chapters?book_id=main");
+// S152：参数化 bookId（此前无参固定 main——BatchPanel/ChatPanel/影响分析全部跨项目读错书）
+export const listChapters = (bookId = "main"): Promise<Chapter[]> =>
+  get<Chapter[]>("/api/chapters?book_id=" + bookId);
 export const createChapter = (_bookId: string, data: unknown): Promise<unknown> =>
   post("/api/chapters", { ...(data as object), book_id: _bookId });
 export const updateChapter = (_bookId: string, chapterId: string, data: unknown): Promise<unknown> =>

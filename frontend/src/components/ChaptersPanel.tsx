@@ -813,6 +813,7 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
                     open
                     onClose={() => setShowImpact(false)}
                     embedded
+                    bookId={bookId}
                     initialOrder={chapters.find((c: any) => c.id === selectedId)?.order_index}
                   />
                 </div>

@@ -24,8 +24,8 @@ interface ExploreState {
   setSeed: (seed: string) => void;
   submitSeed: () => Promise<void>;
   confirmIntent: () => Promise<void>;
-  archiveCard: (card: DirectionCard) => Promise<void>;
-  fetchArchived: () => Promise<void>;
+  archiveCard: (card: DirectionCard, bookId: string) => Promise<void>;
+  fetchArchived: (bookId: string) => Promise<void>;
   reset: () => void;
 }
 
@@ -68,17 +68,17 @@ export const useExploreStore = create<ExploreState>((set, get) => ({
     }
   },
 
-  archiveCard: async (card: DirectionCard) => {
+  archiveCard: async (card: DirectionCard, bookId: string) => {
     set({ loading: true, error: null });
     try {
-      await archiveDirection(card);
+      await archiveDirection(card, bookId);
       // S146（第三方评审 2.3）：选卡固化 = 最高频的"操作即信号"场景——
       // 上报 accepted（此前 reportSignal 零调用方，5 种信号只剩 modified 活着）
       reportSignal("accepted", `${card.title}：${card.summary}`, {
         context: "探索方向选卡",
       });
       // 刷新已固化列表
-      const archived = await listArchived();
+      const archived = await listArchived(bookId);
       set({ archived, phase: "archived", loading: false, cards: [] });
     } catch (error) {
       console.error("Failed to archive direction:", error);
@@ -86,9 +86,9 @@ export const useExploreStore = create<ExploreState>((set, get) => ({
     }
   },
 
-  fetchArchived: async () => {
+  fetchArchived: async (bookId: string) => {
     try {
-      const archived = await listArchived();
+      const archived = await listArchived(bookId);
       set({ archived });
     } catch (error) {
       console.error("Failed to fetch archived:", error);

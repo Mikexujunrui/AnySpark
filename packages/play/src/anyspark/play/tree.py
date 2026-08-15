@@ -111,12 +111,14 @@ class PlayStore:
             ).fetchone()
         return dict(row) if row is not None else None
 
-    def list_sessions(self, limit: int = 50) -> list[dict[str, Any]]:
+    def list_sessions(self, book_id: str = "main", limit: int = 50) -> list[dict[str, Any]]:
+        """S152：按项目（book_id）过滤会话列表（此前全量跨项目混显）。"""
         with self._lock:
             rows = self._conn.execute(
                 "SELECT id, book_id, title, role, status, max_depth, current_node_id,"
-                " created_at, updated_at FROM play_sessions ORDER BY created_at DESC LIMIT ?",
-                (limit,),
+                " created_at, updated_at FROM play_sessions WHERE book_id = ?"
+                " ORDER BY created_at DESC LIMIT ?",
+                (book_id, limit),
             ).fetchall()
         return [dict(r) for r in rows]
 

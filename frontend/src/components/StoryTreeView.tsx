@@ -27,7 +27,8 @@ interface Pos {
   y: number;
 }
 
-export default function StoryTreeView() {
+// S152：接收 bookId（项目隔离）——挂载/切项目时按当前项目拉树、写节点、存布局
+export default function StoryTreeView({ bookId }: { bookId: string }) {
   const { nodes, threads, selectedNodeId, fetchTree, addNode, choose, anchor, removeNode, selectNode } =
     useStoryStore();
   const [showAddInput, setShowAddInput] = useState(false);
@@ -50,12 +51,16 @@ export default function StoryTreeView() {
   const layoutInitRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // S152：切项目时重置本地布局/选中态，再拉当前项目的树
   useEffect(() => {
-    fetchTree();
+    setManualPos({});
+    layoutInitRef.current = false;
+    selectNode(null);
+    fetchTree(bookId);
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [fetchTree]);
+  }, [bookId, fetchTree]);
 
   // S76：首次拿到节点后应用持久化坐标（只初始化一次，后续拖拽由用户接管）
   useEffect(() => {
@@ -80,14 +85,14 @@ export default function StoryTreeView() {
           y: Math.round(p.y * 100) / 100,
         }));
         if (positions.length) {
-          saveStoryLayout(positions).catch((e) =>
+          saveStoryLayout(positions, bookId).catch((e) =>
             console.error("保存叙事树布局失败:", e)
           );
         }
         return prev;
       });
     }, 1200);
-  }, []);
+  }, [bookId]);
 
   /* ── 分层布局：root=0，子节点右移一层；同层按创建序纵向排 ── */
   const layout = useMemo(() => {
@@ -191,7 +196,7 @@ export default function StoryTreeView() {
     const content = newContent.trim();
     if (!content) return;
     try {
-      await addNode(content, parentId || undefined);
+      await addNode(content, bookId, parentId || undefined);
       setNewContent("");
       setShowAddInput(false);
       setParentId(null);

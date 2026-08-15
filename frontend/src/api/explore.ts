@@ -53,9 +53,10 @@ export function exploreCards(
   });
 }
 
-// 固化方向到档案 + 叙事树
+// 固化方向到档案 + 叙事树（S152：bookId 项目隔离）
 export function archiveDirection(
   card: DirectionCard,
+  bookId = "main",
   parentNodeId?: string
 ): Promise<ArchivedDirection & { story_node_id: string }> {
   return apiPost<ArchivedDirection & { story_node_id: string }>("/api/explore/archive", {
@@ -66,13 +67,14 @@ export function archiveDirection(
       source: card.source,
       term: card.term,
     },
+    book_id: bookId,
     parent_node_id: parentNodeId ?? null,
   });
 }
 
-// 获取已固化方向列表
-export function listArchived(): Promise<ArchivedDirection[]> {
-  return apiGet<ArchivedDirection[]>("/api/explore/archive");
+// 获取已固化方向列表（S152：按项目隔离）
+export function listArchived(bookId = "main"): Promise<ArchivedDirection[]> {
+  return apiGet<ArchivedDirection[]>(`/api/explore/archive?book_id=${bookId}`);
 }
 
 // S67 路径探索：起点 A → 终点 B 的 N 条串联路径候选（叙事树节点之间）
@@ -94,6 +96,7 @@ export function explorePath(params: {
   constraints?: string[];
   n?: number;
   archive_index?: number;
+  book_id?: string; // S152：项目隔离（落树按当前项目）
 }): Promise<PathResult> {
   return apiPost<PathResult>("/api/explore/path", {
     from_desc: params.from_desc ?? "",
@@ -103,5 +106,6 @@ export function explorePath(params: {
     constraints: params.constraints ?? [],
     n: params.n ?? 4,
     archive_index: params.archive_index ?? null,
+    book_id: params.book_id ?? "main",
   });
 }

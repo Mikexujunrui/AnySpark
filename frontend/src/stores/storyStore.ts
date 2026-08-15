@@ -10,19 +10,21 @@ import {
   type StoryThread,
 } from "../api/story";
 
+// S152：叙事树按项目隔离——所有读写按 bookId 参数化（后端 story_nodes 已按 book_id 分库，
+// 前端此前硬编码 "main" 导致所有项目共用一棵树）。
 interface StoryState {
   nodes: StoryNode[];
   threads: StoryThread[];
   loading: boolean;
   selectedNodeId: string | null;
 
-  fetchTree: () => Promise<void>;
-  addNode: (content: string, parentId?: string) => Promise<void>;
+  fetchTree: (bookId: string) => Promise<void>;
+  addNode: (content: string, bookId: string, parentId?: string) => Promise<void>;
   choose: (nodeId: string) => Promise<void>;
   anchor: (nodeId: string) => Promise<void>;
   removeNode: (nodeId: string) => Promise<void>;
   selectNode: (nodeId: string | null) => void;
-  addNewThread: (name: string, content?: string, role?: StoryThread["role"]) => Promise<void>;
+  addNewThread: (name: string, bookId: string, content?: string, role?: StoryThread["role"]) => Promise<void>;
 }
 
 export const useStoryStore = create<StoryState>((set) => ({
@@ -31,20 +33,20 @@ export const useStoryStore = create<StoryState>((set) => ({
   loading: false,
   selectedNodeId: null,
 
-  fetchTree: async () => {
+  fetchTree: async (bookId) => {
     set({ loading: true });
     try {
-      const tree = await getStoryTree();
+      const tree = await getStoryTree(bookId);
       set({ nodes: tree.nodes, threads: tree.threads, loading: false });
     } catch (error) {
-      console.error("Failed to fetch story tree:", error);
+      console.error(`Failed to fetch story tree (${bookId}):`, error);
       set({ loading: false });
     }
   },
 
-  addNode: async (content: string, parentId?: string) => {
+  addNode: async (content, bookId, parentId?) => {
     try {
-      const node = await addStoryNode(content, "main", parentId);
+      const node = await addStoryNode(content, bookId, parentId);
       set((state) => ({ nodes: [...state.nodes, node] }));
     } catch (error) {
       console.error("Failed to add story node:", error);
@@ -112,9 +114,9 @@ export const useStoryStore = create<StoryState>((set) => ({
 
   selectNode: (nodeId: string | null) => set({ selectedNodeId: nodeId }),
 
-  addNewThread: async (name: string, content = "", role: StoryThread["role"] = "main") => {
+  addNewThread: async (name, bookId, content = "", role: StoryThread["role"] = "main") => {
     try {
-      const thread = await addThread(name, "main", content, "", role);
+      const thread = await addThread(name, bookId, content, "", role);
       set((state) => ({ threads: [...state.threads, thread] }));
     } catch (error) {
       console.error("Failed to add thread:", error);

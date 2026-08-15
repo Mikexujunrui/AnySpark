@@ -32,7 +32,7 @@ interface WorkflowState {
   aiGenerate: (goal: string) => Promise<void>;
   promote: (draftId: string) => Promise<void>;
   discardDraft: (draftId: string) => Promise<void>;
-  startRun: (id: string, params?: Record<string, string>) => Promise<string>;
+  startRun: (id: string, bookId: string, params?: Record<string, string>) => Promise<string>;
   refreshTask: (taskId: string) => Promise<WorkflowTask>;
   decide: (taskId: string, decision: "ok" | "reject") => Promise<void>;
   setError: (msg: string | null) => void;
@@ -77,7 +77,8 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     set({ loading: true, error: null });
     try {
       // S76：保存时携带画布坐标（layout 随模板 definition 持久化）
-      const saved = await createWorkflow(wf.name, wf.description, wf.nodes, wf.edges, wf.layout);
+      // S152：带原 id 原地更新（后端 upsert），不再每次保存产生新副本
+      const saved = await createWorkflow(wf.name, wf.description, wf.nodes, wf.edges, wf.layout, wf.id);
       const templates = [...get().templates.filter((t) => t.id !== saved.id), saved];
       set({ templates, current: saved, loading: false });
     } catch (e) {
@@ -132,9 +133,10 @@ export const useWorkflowStore = create<WorkflowState>((set, get) => ({
     }
   },
 
-  startRun: async (id, params) => {
+  // S152：运行时绑定当前项目 bookId（工作流模板全局复用，运行按项目隔离）
+  startRun: async (id, bookId, params) => {
     try {
-      const res = await runWorkflow(id, undefined, params);
+      const res = await runWorkflow(id, bookId, params);
       return res.task_id;
     } catch (e) {
       set({ error: e instanceof Error ? e.message : "启动失败" });

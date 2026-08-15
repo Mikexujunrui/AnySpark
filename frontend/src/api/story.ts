@@ -76,12 +76,14 @@ export function deleteNode(nodeId: string): Promise<{ ok: boolean; id: string }>
 }
 
 // S76：批量保存节点手动坐标（DESIGN §12.37）
+// S152：bookId 参数化——布局按项目隔离（不再硬编码 main）
 export function saveStoryLayout(
-  positions: Array<{ node_id: string; x: number; y: number }>
+  positions: Array<{ node_id: string; x: number; y: number }>,
+  bookId = "main"
 ): Promise<{ updated: number }> {
   return apiFetch<{ updated: number }>("/api/story/layout", {
     method: "PUT",
-    body: JSON.stringify({ book_id: "main", positions }),
+    body: JSON.stringify({ book_id: bookId, positions }),
   });
 }
 

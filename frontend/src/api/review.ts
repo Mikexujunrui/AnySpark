@@ -35,15 +35,17 @@ export function listReviewers(): Promise<ReviewerDef[]> {
 }
 
 // 运行评审团（chapter_ref 与 text 二选一，ref 优先）
+// S152：book_id 参数化（ReviewPanel 现直接用 fetch 传 book_id；本封装同步修正）
 export function runReviewPanel(body: {
   chapter_ref?: string;
   text?: string;
   reviewer_ids?: string[];
   with_check?: boolean;
   with_foreshadow?: boolean;
+  book_id?: string;
 }): Promise<ReviewReport> {
   return apiPost<ReviewReport>("/api/review/panel", {
-    book_id: "main",
+    book_id: body.book_id || "main",
     ...body,
   });
 }

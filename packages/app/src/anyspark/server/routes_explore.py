@@ -169,12 +169,13 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
             source=src,
             term=str(c.get("term", "")),
         )
-        archived = deps.archive.archive_direction(card)
+        archived = deps.archive.archive_direction(card, book_id=req.book_id)
         # S59：写入叙事树为主线节点（探索 = 树的生长）
+        # S152：按当前项目落树（此前硬编码 main，探索生长的节点全进 main 项目）
         parent_id = req.parent_node_id or None
         node = deps.story_tree.add_node(
             content=f"{card.title}：{card.summary[:60]}",
-            book_id="main",
+            book_id=req.book_id,
             parent_id=parent_id,
             kind="main",
             chosen=True,
@@ -183,7 +184,8 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
         return archived
 
     @router.get("/api/explore/archive", response_model=list[dict[str, object]])
-    def explore_archive_list() -> list[dict[str, object]]:
-        return deps.archive.directions()
+    def explore_archive_list(book_id: str = "main") -> list[dict[str, object]]:
+        # S152：按项目过滤（此前全量跨项目混显）
+        return deps.archive.directions(book_id=book_id)
 
     return router
