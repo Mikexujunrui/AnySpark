@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python deps
+        run: uv sync --locked
+
+      - name: Ruff check
+        run: uv run ruff check packages scripts
+
+      - name: Ruff format check
+        run: uv run ruff format --check packages scripts
+
+      - name: mypy
+        run: uv run mypy
+
+      - name: pytest (backend)
+        run: uv run pytest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend deps
+        working-directory: frontend
+        run: npm ci
+
+      - name: tsc typecheck
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: eslint
+        working-directory: frontend
+        run: npm run lint
+
+      - name: vite build
+        working-directory: frontend
+        run: npm run build
