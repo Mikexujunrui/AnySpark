@@ -49,7 +49,6 @@
 > [S145] 已提交完成（6 commits：311e94b/5fdfa93/624a515/fd5acbb/1b3e36f/edc0984，第三方评审修复）——声明行随 S145 提交后删除
 > [S146] 已提交完成（7 commits：5976551/77417f9/090dc45/09ffa40/a4ad7f4/795cc9c/588de6c，评审未修项批 E-I）——声明行随 S146 提交后删除
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
-> [S154] 正在改 `frontend/src/lib/entityTypes.ts`（新建：isPersonType 共享）+ `frontend/src/components/FullGraphView.tsx`（图谱角色子视图预设视角按钮）+ `frontend/src/components/CharactersPanel.tsx`（改用共享 isPersonType）：图谱内“只看角色”子视图，风格与 S153 FullGraphView 统一（不碰其他并行会话文件）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
 
 - **候选清单（下一步，按优先级）**：
@@ -4166,6 +4165,30 @@ GraphInsights/TimelineView/WorldMap/章节依赖图）。主人拍板：① 表�
 - d3 7.x 无内置类型 → 装 @types/d3（devDependency），触发 gate 敏感文件强制全量
 - 提交前 git status 发现并行会话 13 个文件（routes_mind/chapters/schemas/tasks/toolkit/BiasPanel/PanelHost 等）
   在改——本提交只显式 add 本阶段 8 文件，不裹挟
+
+## S154+S155 图谱角色子视图 + 人物面板关系网（主人需求驱动：角色是重要机制，需专门角色图谱）（已完成 ✅）
+
+**背景**：主人追问：角色重要性在全体之上，v4 是否应有专门的角色图谱面板？参考 v3 调研结论：
+v3 CharacterGallery 是独立角色面板 + 4 视图（卡片/关系网/戏份/弧光），其中“关系网”即角色图谱
+（d3-force 角色节点 + 角色间关系 + 多跳展开）。v4 现状：S152f 人物 tab 是纯列表档案管理，
+图谱在知识库 tab（全图过滤视角）——缺专门的角色图谱面板。主人拍板：做，风格与 S153 统一。
+
+**交付**：
+- S154（图谱内角色子视图）：`isPersonType` 提取共享（lib/entityTypes.ts，CharactersPanel 同规则）；
+  FullGraphView 工具条加“全部/角色”预设视角按钮（复用 typeFilter——实体过滤后关系自然只剩
+  两端都在的，零新增过滤逻辑）+ 角色子视图横幅/退出
+- S155（人物面板关系网）：CharactersPanel 加“列表/关系网”视图切换；“关系网”直接嵌
+  `<FullGraphView preset="person" title="角色关系网">`（复用同一组件 = 风格天然统一）；
+  FullGraphView 新增 `preset`/`title` prop——preset=person 初始即应用角色过滤、隐藏视角切换与横幅
+- 数据实测：main 书 10 个角色实体、3 条角色-角色关系（陈渡的父亲-雨衣女人委托送信 / 白手套人-关联 /
+  船夫-旧识）；角色网稀疏是数据现状，点角色聚焦可带出 2 度非角色实体
+
+**验证**：tsc + vite build + vitest 18 绿；dev server 5173 冒烟（图谱 API 代理 200）；
+纯前端改动（无后端/依赖变化），gate 前端层即可
+
+**踩坑**：
+- CharactersPanel 是并行会话 S152f 交付文件——改动前已写声明区，改后核对无裹挟
+- edit 调用原子性：一处 oldText 不匹配 = 全部 edits 不应用，需拆分多次调用
 
 ## S152h: book_id 硬编码根治——静态扫描门禁 + 项目隔离纪律（主人质询驱动）（已完成 ✅）
 

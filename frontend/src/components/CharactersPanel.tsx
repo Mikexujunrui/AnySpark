@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { getSummary, createEntity, updateEntity, deleteEntity } from "../api/knowledge";
 import { listWorkspace } from "../api/upload";
 import { getCard, saveRoleCard } from "../api/role";
+import { isPersonType } from "../lib/entityTypes";
+import FullGraphView from "./FullGraphView";
 
 interface V4Entity {
   id: string;
@@ -16,11 +18,6 @@ interface V4Entity {
   first_chapter?: string;
   last_chapter?: string;
   [k: string]: unknown;
-}
-
-// 人物类型判定：类型名含"角色"或"人物"（图谱类型动态，默认"角色"）
-function isPersonType(t: string): boolean {
-  return t.includes("角色") || t.includes("人物");
 }
 
 interface PersonItem {
@@ -37,6 +34,8 @@ export default function CharactersPanel({ bookId }: { bookId: string }) {
   const [selectedName, setSelectedName] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("全部");
+  // S155：视图模式——列表（档案管理）/ 关系网（角色图谱，复用 FullGraphView 角色预设）
+  const [viewMode, setViewMode] = useState<"list" | "graph">("list");
   const [showAdd, setShowAdd] = useState(false);
   const [addName, setAddName] = useState("");
   const [addType, setAddType] = useState("角色");
@@ -191,6 +190,21 @@ export default function CharactersPanel({ bookId }: { bookId: string }) {
       {/* 工具条 */}
       <div className="h-8 bg-zinc-900/50 border-b border-zinc-800/50 flex items-center px-3 gap-2 shrink-0">
         <span className="text-[11px] text-zinc-400 font-medium">人物</span>
+        {/* S155：列表 / 关系网视图切换 */}
+        <div className="flex gap-0.5 border border-zinc-800 rounded overflow-hidden shrink-0">
+          <button
+            onClick={() => setViewMode("list")}
+            className={`px-2 py-0.5 text-[10px] ${viewMode === "list" ? "bg-zinc-700 text-zinc-200" : "text-zinc-500 hover:text-zinc-300"}`}
+            title="人物列表档案"
+          >列表</button>
+          <button
+            onClick={() => setViewMode("graph")}
+            className={`px-2 py-0.5 text-[10px] flex items-center gap-1 ${viewMode === "graph" ? "bg-blue-600 text-white" : "text-zinc-500 hover:text-zinc-300"}`}
+            title="角色关系网（角色图谱）"
+          ><span className="inline-block">◈</span>关系网</button>
+        </div>
+        {viewMode === "list" && (
+          <>
         <span className="text-[11px] text-zinc-600">|</span>
         <select
           value={typeFilter}
@@ -215,6 +229,8 @@ export default function CharactersPanel({ bookId }: { bookId: string }) {
           + 新建人物
         </button>
         {error && <span className="text-[11px] text-red-400">{error}</span>}
+          </>
+        )}
       </div>
 
       {/* 新建输入条 */}
@@ -255,6 +271,10 @@ export default function CharactersPanel({ bookId }: { bookId: string }) {
         </div>
       )}
 
+      {viewMode === "graph" ? (
+        /* S155：角色关系网（角色图谱）——复用 FullGraphView 角色预设，风格与知识库图谱统一 */
+        <FullGraphView bookId={bookId} preset="person" title="角色关系网" />
+      ) : (
       <div className="flex-1 min-h-0 flex">
         {/* 左栏：人物列表 */}
         <div className="w-52 shrink-0 border-r border-zinc-800 overflow-auto bg-zinc-900/20">
@@ -377,6 +397,7 @@ export default function CharactersPanel({ bookId }: { bookId: string }) {
           )}
         </div>
       </div>
+      )}
     </div>
   );
 }

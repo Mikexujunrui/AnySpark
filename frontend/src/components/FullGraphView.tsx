@@ -15,6 +15,7 @@ import * as d3 from 'd3'
 import Icon from './ui/Icon'
 import { fetchGraphNetwork } from '../api/graph'
 import type { GraphEntity, GraphRelation } from '../api/graph'
+import { isPersonType } from '../lib/entityTypes'
 
 interface Pos { x: number; y: number }
 interface SimNode extends d3.SimulationNodeDatum {
@@ -56,7 +57,7 @@ interface FocusState {
 const NODE_W = 132
 const NODE_H = 38
 
-export default function FullGraphView({ bookId }: { bookId: string }) {
+export default function FullGraphView({ bookId, preset, title }: { bookId: string; preset?: 'person'; title?: string }) {
   const [entities, setEntities] = useState<GraphEntity[]>([])
   const [relations, setRelations] = useState<GraphRelation[]>([])
   const [loading, setLoading] = useState(true)
@@ -83,6 +84,10 @@ export default function FullGraphView({ bookId }: { bookId: string }) {
   const fixedRef = useRef<Map<string, Pos>>(new Map())
   const dragRef = useRef<{ id: string; moved: boolean } | null>(null)
   const posRef = useRef<Record<string, Pos>>({})
+
+  // 预设视角（S155：角色关系网面板复用——初始即角色子视图，隐藏视角切换）
+  const isPresetPerson = preset === 'person'
+  const [initialFilterApplied, setInitialFilterApplied] = useState(false)
 
   // ── 全图加载 ──
   useEffect(() => {
@@ -293,6 +298,22 @@ export default function FullGraphView({ bookId }: { bookId: string }) {
     return m
   }, [focus])
 
+  // ── 预设视角：角色子视图（S154，复用 typeFilter——实体过滤后关系自然只剩两端都在的）──
+  const personTypes = useMemo(() => {
+    const s = new Set<string>()
+    entities.forEach(e => { const t = e.entity_type || ''; if (isPersonType(t)) s.add(t) })
+    return s
+  }, [entities])
+  const isPersonView = typeFilter.size > 0 && [...typeFilter].every(t => personTypes.has(t))
+
+  // preset='person'：数据加载完成后自动应用角色过滤（仅一次）
+  useEffect(() => {
+    if (isPresetPerson && !initialFilterApplied && personTypes.size > 0) {
+      setTypeFilter(new Set(personTypes))
+      setInitialFilterApplied(true)
+    }
+  }, [isPresetPerson, initialFilterApplied, personTypes])
+
   // ── 图例（类型统计）──
   const typeCounts = useMemo(() => {
     const c: Record<string, number> = {}
@@ -335,11 +356,30 @@ export default function FullGraphView({ bookId }: { bookId: string }) {
     <div className="h-full w-full flex flex-col relative">
       {/* ── 工具条 ── */}
       <div className="h-9 bg-zinc-900/50 border-b border-zinc-800/50 flex items-center px-3 gap-1.5 shrink-0 flex-wrap">
-        <span className="text-[11px] text-zinc-500 mr-1">图谱视图</span>
+        <span className="text-[11px] text-zinc-500 mr-1">{title || '图谱视图'}</span>
         <span className="text-[11px] text-zinc-600">{view.entities.length} 实体 · {view.relations.length} 关系</span>
 
         {!focus && (
           <div className="flex items-center gap-1.5 ml-2">
+            {/* 预设视角：全部 / 角色子视图（preset 模式隐藏——面板本身即角色视角） */}
+            {!isPresetPerson && (
+              <div className="flex items-center gap-0.5 border border-zinc-800 rounded overflow-hidden shrink-0">
+                <button
+                  onClick={() => setTypeFilter(new Set())}
+                  className={`px-2 py-0.5 text-[10px] ${typeFilter.size === 0 ? 'bg-zinc-700 text-zinc-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+                  title="显示全部类型"
+                >全部</button>
+                {personTypes.size > 0 && (
+                  <button
+                    onClick={() => setTypeFilter(new Set(personTypes))}
+                    className={`px-2 py-0.5 text-[10px] ${isPersonView ? 'bg-blue-600 text-white' : 'text-zinc-500 hover:text-zinc-300'}`}
+                    title="只看角色/人物实体及其相互关系（角色子视图）"
+                  >
+                    <Icon name="user" size={9} className="inline mr-0.5" />角色
+                  </button>
+                )}
+              </div>
+            )}
             <div className="relative">
               <Icon name="search" size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-zinc-600" />
               <input
@@ -380,6 +420,18 @@ export default function FullGraphView({ bookId }: { bookId: string }) {
           >重置</button>
         </div>
       </div>
+
+      {/* ── 角色子视图横幅（S154；preset 模式本就只显示角色，不展示）── */}
+      {isPersonView && !focus && !isPresetPerson && (
+        <div className="h-6 bg-blue-950/30 border-b border-blue-900/30 flex items-center px-3 gap-1.5 shrink-0">
+          <Icon name="user" size={11} className="text-blue-400" />
+          <span className="text-[11px] text-zinc-400">角色子视图：仅显示角色/人物实体及其相互关系</span>
+          <button
+            onClick={() => setTypeFilter(new Set())}
+            className="ml-auto text-[10px] text-blue-400 hover:text-blue-300"
+          >退出</button>
+        </div>
+      )}
 
       {/* ── 聚焦模式横幅 ── */}
       {focus && (
