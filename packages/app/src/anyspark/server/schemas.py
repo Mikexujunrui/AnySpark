@@ -137,12 +137,12 @@ class PlayBranchIn(BaseModel):
     node_id: str
 
 
-class UncensorIn(BaseModel):
-    """S70：破限模式开关（书籍级，写作自由度：不设题材禁区）。"""
+class ImmersiveIn(BaseModel):
+    """S70→S153：沉浸模式开关（书籍级，原破限/未删减）。"""
 
     book_id: str = "main"
     enabled: bool = True
-    custom_prompt: str = ""  # S87：自定义破限提示词（空=用内置默认）
+    custom_prompt: str = ""  # S87：自定义沉浸提示词（空=用内置默认）
 
 
 class CodexIn(BaseModel):

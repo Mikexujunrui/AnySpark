@@ -1,7 +1,7 @@
 """
-anyspark.server.routes_settings — 设定档/破限模式路由（S80c 拆分）。
+anyspark.server.routes_settings — 设定档/沉浸模式路由（S80c 拆分）。
 
-从 app.py build_app 搬移（行为零变化）：设定档类别 CRUD + 条目 CRUD + 破限开关 +
+从 app.py build_app 搬移（行为零变化）：设定档类别 CRUD + 条目 CRUD + 沉浸开关 +
 图谱提炼设定草案。闭包引用 → deps.xxx。
 """
 
@@ -16,9 +16,9 @@ from anyspark.core import Message
 from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.schemas import (
+    ImmersiveIn,
     SettingCategoryIn,
     SettingCategoryPatch,
-    UncensorIn,
     WorldSettingExtractIn,
     WorldSettingIn,
     WorldSettingPatch,
@@ -26,7 +26,7 @@ from anyspark.server.schemas import (
 
 
 def make_settings_router(deps: AppDeps) -> APIRouter:
-    """设定档/破限路由（依赖：deps.settings/workspace/model/graph）。"""
+    """设定档/沉浸路由（依赖：deps.settings/workspace/model/graph）。"""
     router = APIRouter()
 
     # ------------------------------------------------------------------
@@ -85,22 +85,23 @@ def make_settings_router(deps: AppDeps) -> APIRouter:
             raise HTTPException(status_code=404, detail="设定条目不存在")
         return {"ok": True}
 
-    # S70：破限模式开关（书籍级）——GET 查 / POST 设；文件标志在每书工作区
-    @router.get("/api/uncensored", response_model=dict[str, object])
-    def get_uncensored(book_id: str = "main") -> dict[str, object]:
+    # S70→S153：沉浸模式开关（书籍级，原破限/未删减）——GET 查 / POST 设；
+    # 文件标志在每书工作区；文学创作姿态（写黑暗/暴力/敏感题材不受限）
+    @router.get("/api/immersive", response_model=dict[str, object])
+    def get_immersive(book_id: str = "main") -> dict[str, object]:
         return {
             "book_id": book_id,
-            "enabled": deps.workspace.is_uncensored(book_id),
-            "custom_prompt": deps.workspace.uncensored_prompt(book_id) or "",
+            "enabled": deps.workspace.is_immersive(book_id),
+            "custom_prompt": deps.workspace.immersive_prompt(book_id) or "",
         }
 
-    @router.post("/api/uncensored", response_model=dict[str, object])
-    def set_uncensored(req: UncensorIn) -> dict[str, object]:
-        enabled = deps.workspace.set_uncensored(req.book_id, req.enabled, req.custom_prompt or None)
+    @router.post("/api/immersive", response_model=dict[str, object])
+    def set_immersive(req: ImmersiveIn) -> dict[str, object]:
+        enabled = deps.workspace.set_immersive(req.book_id, req.enabled, req.custom_prompt or None)
         return {
             "book_id": req.book_id,
             "enabled": enabled,
-            "custom_prompt": deps.workspace.uncensored_prompt(req.book_id) or "",
+            "custom_prompt": deps.workspace.immersive_prompt(req.book_id) or "",
         }
 
     @router.post("/api/settings/extract", response_model=dict[str, object])

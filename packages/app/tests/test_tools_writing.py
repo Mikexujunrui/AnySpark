@@ -134,18 +134,18 @@ def _unc_registry(model: object, workspace: Workspace) -> ToolRegistry:
     return reg
 
 
-def test_clean_write_injects_uncensored_when_flag_on() -> None:
+def test_clean_write_injects_immersive_when_flag_on() -> None:
     """S70：破限开关开 → 写作调用注入破限提示词。"""
-    from anyspark.server.tools_writing import UNCENSORED_PROMPT
+    from anyspark.server.tools_writing import IMMERSIVE_PROMPT
     from anyspark.server.workspace import Workspace
 
     ws = Workspace(root=Path(tempfile.mkdtemp()) / "ws")
-    ws.set_uncensored("main", True)
+    ws.set_immersive("main", True)
     model = CleanWriteModel()
     reg = _unc_registry(model, ws)
     r = _invoke(reg, "write_chapter", {"title": "测试章", "intent": "写一段黑暗氛围的场景"})
     assert r.ok is True
-    assert UNCENSORED_PROMPT in model.clean_contexts[0]
+    assert IMMERSIVE_PROMPT in model.clean_contexts[0]
 
 
 def test_clean_write_no_inject_when_flag_off() -> None:

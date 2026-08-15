@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api'
+import { importTxtBook } from '../api/books'
 import CreateBookModal from './CreateBookModal'
 import MaterialsPanel from './MaterialsPanel'
 import LibraryShelfPanel from './LibraryShelfPanel'
@@ -24,17 +25,19 @@ export default function Bookshelf() {
   const [deleteBookId, setDeleteBookId] = useState(null)
   const [showSettings, setShowSettings] = useState(false)
   const [importingSpark, setImportingSpark] = useState(false)
+  const [importingTxt, setImportingTxt] = useState(false)
   const sparkInputRef = useRef<HTMLInputElement>(null)
+  const txtInputRef = useRef<HTMLInputElement>(null)
   const navigate = useNavigate()
-  // 破限模式状态（每书）：book_id → true/false
-  const [uncensoredMap, setUncensoredMap] = useState<Record<string, boolean>>({})
-  const [uncensoredBusy, setUncensoredBusy] = useState<string | null>(null)
+  // 沉浸模式状态（每书）：book_id → true/false
+  const [immersiveMap, setUncensoredMap] = useState<Record<string, boolean>>({})
+  const [immersiveBusy, setUncensoredBusy] = useState<string | null>(null)
 
   useEffect(() => {
     loadBooks()
   }, [])
 
-  // 批量加载全部项目的破限状态（S70：书籍级写作自由度开关）
+  // 批量加载全部项目的沉浸状态（S70：书籍级写作自由度开关）
   useEffect(() => {
     if (books.length === 0) return
     let cancelled = false
@@ -42,7 +45,7 @@ export default function Bookshelf() {
       const map: Record<string, boolean> = {}
       for (const b of books) {
         try {
-          const r = await fetch(`/api/uncensored?book_id=${encodeURIComponent(b.id)}`)
+          const r = await fetch(`/api/immersive?book_id=${encodeURIComponent(b.id)}`)
           const d = await r.json()
           if (!cancelled) map[b.id] = Boolean(d.enabled)
         } catch { /* 静默 */ }
@@ -55,9 +58,9 @@ export default function Bookshelf() {
   async function toggleUncensored(bookId: string, e: React.MouseEvent) {
     e.stopPropagation()
     setUncensoredBusy(bookId)
-    const next = !uncensoredMap[bookId]
+    const next = !immersiveMap[bookId]
     try {
-      await fetch('/api/uncensored', {
+      await fetch('/api/immersive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ book_id: bookId, enabled: next }),
@@ -110,6 +113,30 @@ export default function Bookshelf() {
     }
     setImportingSpark(false)
     if (sparkInputRef.current) sparkInputRef.current.value = ''
+  }
+
+  // S156：单个 txt 直接上传成书（建项目+拆章一步完成）
+  async function handleImportTxt(file?: File) {
+    if (!file) return
+    setImportingTxt(true)
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.onerror = reject
+        reader.readAsDataURL(file)
+      })
+      const dataB64 = dataUrl.split(',')[1] || ''
+      const title = file.name.replace(/\.[^.]+$/, '')
+      const result = await importTxtBook(title, file.name, dataB64)
+      await loadBooks()
+      showToast(`《${result.book.title}》导入成功（${result.count} 章）`, 'success')
+      navigate(`/book/${result.book.id}`)
+    } catch (e) {
+      showToast(e instanceof Error ? e.message : '导入失败', 'error')
+    }
+    setImportingTxt(false)
+    if (txtInputRef.current) txtInputRef.current.value = ''
   }
 
   async function handleDelete() {
@@ -256,6 +283,16 @@ export default function Bookshelf() {
             <div className="flex gap-2">
               <input ref={sparkInputRef} type="file" accept=".spark" className="hidden"
                 onChange={e => handleImportSpark(e.target.files?.[0])} />
+              <input ref={txtInputRef} type="file" accept=".txt,.md,.markdown" className="hidden"
+                onChange={e => handleImportTxt(e.target.files?.[0])} />
+              <button
+                onClick={() => txtInputRef.current?.click()}
+                disabled={importingTxt}
+                className="bg-violet-600/90 hover:bg-violet-500 disabled:opacity-50 active:scale-95 text-white px-3 py-2.5 rounded-lg transition-all text-sm flex items-center gap-2"
+                title="选择一个 txt/md 文件直接上传成书（自动拆章入库）"
+              >
+                <Icon name="file-text" size={16} /> {importingTxt ? '拆章中...' : '导入 txt 成书'}
+              </button>
               <button
                 onClick={() => sparkInputRef.current?.click()}
                 disabled={importingSpark}
@@ -314,14 +351,14 @@ export default function Bookshelf() {
                         {book.totalChars > 0 && <span>{formatWords(book.totalChars)} 字</span>}
                       </div>
                     </div>
-                    {/* 破限模式开关（S70：书籍级写作自由度） */}
+                    {/* 沉浸模式开关（S70：书籍级写作自由度） */}
                     <button
                       onClick={(e) => toggleUncensored(book.id, e)}
-                      className={`absolute bottom-2 left-2 z-20 flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded transition-all ${uncensoredMap[book.id] ? 'bg-red-500/80 text-white' : 'bg-white/10 text-white/50 hover:bg-white/20'}`}
-                      title={uncensoredMap[book.id] ? '破限模式已开启 — 点击关闭（不设题材禁区）' : '破限模式已关闭 — 点击开启（写作自由度：不设题材禁区）'}
+                      className={`absolute bottom-2 left-2 z-20 flex items-center gap-1 text-[9px] px-1.5 py-0.5 rounded transition-all ${immersiveMap[book.id] ? 'bg-red-500/80 text-white' : 'bg-white/10 text-white/50 hover:bg-white/20'}`}
+                      title={immersiveMap[book.id] ? '沉浸模式已开启 — 点击关闭（不设题材禁区）' : '沉浸模式已关闭 — 点击开启（写作自由度：不设题材禁区）'}
                     >
                       <Icon name="unlock" size={10} />
-                      {uncensoredBusy === book.id ? '…' : uncensoredMap[book.id] ? '破限' : '破限'}
+                      {immersiveBusy === book.id ? '…' : immersiveMap[book.id] ? '沉浸' : '沉浸'}
                     </button>
                   </div>
                   <button

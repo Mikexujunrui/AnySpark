@@ -17,7 +17,7 @@ from anyspark.models.deepseek import DeepSeekModel
 from anyspark.models.registry import ModelProvider
 from anyspark.server.deps import AppDeps
 from anyspark.server.toolkit import ToolContext, build_toolkit
-from anyspark.server.tools_writing import UNCENSORED_PROMPT
+from anyspark.server.tools_writing import IMMERSIVE_PROMPT
 
 _skill_cache: dict[str, str] = {}  # 签名 → 索引块（S60：只存索引，内容靠 skill_lookup 按需）
 
@@ -264,10 +264,10 @@ def make_agent(
         if plan_block:
             append_blocks.append(plan_block)
 
-    # S70：破限模式（书籍级开关）——写作自由度：黑暗/暴力/敏感题材不设禁区。
+    # S70→S153：沉浸模式（书籍级开关）——写作自由度：黑暗/暴力/敏感题材不设禁区。
     # 注入 agent 主循环（对话/写作全路径）+ write_chapter 干净调用（工具侧另注）。
-    if deps.workspace.is_uncensored(book_id):
-        append_blocks.append(UNCENSORED_PROMPT)
+    if deps.workspace.is_immersive(book_id):
+        append_blocks.append(IMMERSIVE_PROMPT)
 
     full_prompt = system_prompt
     if prepend_blocks:

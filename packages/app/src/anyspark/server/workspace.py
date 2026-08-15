@@ -113,19 +113,27 @@ class Workspace:
         return False
 
     # -- S70 分级开关：破限模式（每书一标志文件，存在=开） --
-    def uncensored_flag(self, book_id: str = "main") -> Path:
+    # S70→S153：沉浸模式开关（原破限/未删减）——写作自由度（不设题材禁区），
+    # 文学创作正当功能。标志文件 .immersive；旧 .uncensored 兼容迁移（已开启的书不丢）
+    def immersive_flag(self, book_id: str = "main") -> Path:
+        return self.project_dir(book_id) / ".immersive"
+
+    def _legacy_uncensored_flag(self, book_id: str = "main") -> Path:
         return self.project_dir(book_id) / ".uncensored"
 
-    def is_uncensored(self, book_id: str = "main") -> bool:
-        """该书是否开启破限模式（写作自由度：不设题材禁区）。"""
-        return self.uncensored_flag(book_id).exists()
+    def is_immersive(self, book_id: str = "main") -> bool:
+        """该书是否开启沉浸模式（写作自由度：不设题材禁区）。兼容旧破限标志。"""
+        return self.immersive_flag(book_id).exists() or self._legacy_uncensored_flag(
+            book_id
+        ).exists()
 
-    def set_uncensored(
+    def set_immersive(
         self, book_id: str = "main", enabled: bool = True, custom_prompt: str | None = None
     ) -> bool:
-        """设置破限开关（True=开）。custom_prompt 非空写入标志文件（自定义提示词）；
-        空且已存在则清空内容（回默认）；enabled=False 删标志。返回设置后的状态。"""
-        f = self.uncensored_flag(book_id)
+        """设置沉浸模式开关（True=开）。custom_prompt 非空写入标志文件（自定义提示词）；
+        空且已存在则清空内容（回默认）；enabled=False 删标志（新旧两个都删）。返回设置后的状态。"""
+        f = self.immersive_flag(book_id)
+        legacy = self._legacy_uncensored_flag(book_id)
         if enabled:
             if custom_prompt is not None and custom_prompt.strip():
                 f.write_text(custom_prompt.strip(), encoding="utf-8")
@@ -133,16 +141,18 @@ class Workspace:
                 f.write_text("", encoding="utf-8")  # 清空自定义 → 回默认
             else:
                 f.touch(exist_ok=True)
-        elif f.exists():
-            f.unlink()
+        else:
+            for p in (f, legacy):
+                if p.exists():
+                    p.unlink()
         return f.exists()
 
-    def uncensored_prompt(self, book_id: str = "main") -> str | None:
-        """自定义破限提示词（标志文件内容；空/无 = 用内置默认）。"""
-        f = self.uncensored_flag(book_id)
-        if f.exists():
-            text = f.read_text(encoding="utf-8").strip()
-            return text if text else None
+    def immersive_prompt(self, book_id: str = "main") -> str | None:
+        """自定义沉浸提示词（标志文件内容；空/无 = 用内置默认）。兼容旧标志文件内容。"""
+        for f in (self.immersive_flag(book_id), self._legacy_uncensored_flag(book_id)):
+            if f.exists():
+                text = f.read_text(encoding="utf-8").strip()
+                return text if text else None
         return None
 
     # -- 章节文件操作（权威存储） --
