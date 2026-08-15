@@ -1,0 +1,23 @@
+# ---------------------------------------------------------------------------
+# anyspark-check — 检测网包（三层协作生成 + 轻量规则编译器）
+# 依赖：core（单向）。设计规格：DESIGN.md 机制 8/9
+# marker: S4
+# ---------------------------------------------------------------------------
+[project]
+name = "anyspark-check"
+version = "0.0.1"
+description = "AnySpark v4 检测网：系统骨架/AI动态检测项/轻量规则编译器/多检测者并行/审读报告"
+requires-python = ">=3.11"
+dependencies = [
+    "anyspark-core==0.0.1",  # workspace 成员
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anyspark"]
+
+[tool.uv.sources]
+anyspark-core = { workspace = true }

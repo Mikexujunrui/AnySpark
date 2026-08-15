@@ -1,0 +1,330 @@
+"""
+anyspark.models.gemini — Google Generative AI API 适配器（Gemini 直连，S131）。
+
+实现 core 的 Model + StreamModel 协议，httpx2 手写 HTTP 调用（零新增依赖）。
+端点：{base}/v1beta/models/{model}:generateContent（非流式）/
+      {base}/v1beta/models/{model}:streamGenerateContent?alt=sse（流式）
+鉴权：x-goog-api-key 请求头（API key 直连，不用 OAuth Bearer——小说写作场景 key 足够）。
+
+思考强度映射（同款档位 off/low/medium/high/xhigh/max）：
+- None → 不传 thinkingConfig（交模型默认）
+- off → thinkingConfig: {thinkingBudget: 0}（显式关闭思考）
+- low/medium/high/xhigh/max → thinkingConfig: {thinkingBudget: N}
+  budget 映射（token）：low=1024 / medium=4096 / high=8192 / xhigh=16384 / max=32768
+
+工具调用：tools.functionDeclarations；响应 parts.functionCall；
+工具结果回填为 user 消息 parts.functionResponse（紧跟对应 functionCall 之后）。
+
+配置：base_url 默认 https://generativelanguage.googleapis.com；
+api_key 默认读 GEMINI_API_KEY（/login 同款环境变量名，与 pi 对齐）。
+"""
+
+from __future__ import annotations
+
+import json
+import os
+from collections.abc import Callable
+from typing import Any
+
+import httpx2 as httpx  # S66：httpx2（下一代 httpx；重命名迁移，API 兼容）
+
+from anyspark.core import Event, Message, ModelOutput, ToolCall
+from anyspark.core.protocol import ToolSpec
+
+DEFAULT_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
+
+# 思考档位 → thinkingBudget（token 计；0=关闭）
+THINKING_BUDGETS: dict[str, int] = {
+    "off": 0,
+    "low": 1024,
+    "medium": 4096,
+    "high": 8192,
+    "xhigh": 16384,
+    "max": 32768,
+}
+
+
+def thinking_to_gemini(thinking: str | None) -> dict[str, int] | None:
+    """思考强度档位 → generationConfig.thinkingConfig（None=不传交模型默认）。"""
+    if not thinking:
+        return None
+    budget = THINKING_BUDGETS.get(thinking)
+    if budget is None:
+        raise ValueError(f"非法思考强度 {thinking!r}：可选 off/low/medium/high/xhigh/max")
+    return {"thinkingBudget": budget}
+
+
+def to_gemini_tool(spec: ToolSpec) -> dict[str, Any]:
+    """core ToolSpec → Gemini functionDeclarations 定义。"""
+    properties: dict[str, Any] = {}
+    required: list[str] = []
+    for p in spec.params:
+        properties[p.name] = {"type": p.type, "description": p.description}
+        if p.required:
+            required.append(p.name)
+    return {
+        "name": spec.name,
+        "description": spec.description,
+        "parameters": {
+            "type": "object",
+            "properties": properties,
+            "required": required,
+        },
+    }
+
+
+def to_gemini_contents(
+    messages: list[Message],
+) -> tuple[str | None, list[dict[str, Any]]]:
+    """core Message 列表 → (systemInstruction, contents)。
+
+    Gemini 消息语义（role 只能 user/model）：
+    - system → 顶层 systemInstruction
+    - assistant 带 metadata.tool_calls → model 角色 + functionCall parts
+    - tool 消息 → user 角色 + functionResponse parts（Gemini 允许独立 user 消息，
+      无需像 Anthropic 那样合并；functionResponse 紧跟对应 functionCall）
+    """
+    system_parts: list[str] = []
+    contents: list[dict[str, Any]] = []
+
+    for m in messages:
+        if m.role == "system":
+            system_parts.append(m.content)
+            continue
+        if m.role == "tool":
+            tid = m.metadata.get("tool_call_id")
+            name = str(m.metadata.get("tool_name") or "") or str(tid or "")
+            contents.append(
+                {
+                    "role": "user",
+                    "parts": [
+                        {
+                            "functionResponse": {
+                                "name": name,
+                                "response": {"result": m.content},
+                            }
+                        }
+                    ],
+                }
+            )
+            continue
+        if m.role == "assistant":
+            parts: list[dict[str, Any]] = []
+            if m.content:
+                parts.append({"text": m.content})
+            calls = m.metadata.get("tool_calls")
+            if isinstance(calls, list):
+                for c in calls:
+                    if isinstance(c, dict) and c.get("id"):
+                        parts.append(
+                            {
+                                "functionCall": {
+                                    "name": str(c.get("name") or ""),
+                                    "args": c.get("arguments") or {},
+                                }
+                            }
+                        )
+            contents.append({"role": "model", "parts": parts})
+        else:
+            contents.append({"role": "user", "parts": [{"text": m.content}]})
+
+    system = "\n".join(system_parts) if system_parts else None
+    return system, contents
+
+
+def _parse_parts(parts: list[dict[str, Any]]) -> tuple[str, list[ToolCall]]:
+    """Gemini parts → (text, tool_calls)。"""
+    text_parts: list[str] = []
+    tool_calls: list[ToolCall] = []
+    for part in parts:
+        if "text" in part:
+            text_parts.append(part["text"] or "")
+        elif "functionCall" in part:
+            fc = part["functionCall"]
+            raw = fc.get("args")
+            args: dict[str, Any]
+            if isinstance(raw, dict):
+                args = raw
+            else:  # 截断防护（S21）：args 非对象 → 标记，不执行，让模型重发
+                args = {"_raw": json.dumps(raw, ensure_ascii=False), "_malformed": True}
+            tool_calls.append(
+                ToolCall(
+                    name=fc.get("name") or "",
+                    arguments=args,
+                    id=fc.get("name") or "",  # Gemini 无 call id——用函数名兼作 id
+                )
+            )
+    return "".join(text_parts), tool_calls
+
+
+class GeminiModel:
+    """Google Generative AI 真实调用器（实现 core.Model + StreamModel 协议）。"""
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        model: str | None = None,
+        temperature: float = 0.7,
+        max_tokens: int = 8192,
+        context_window: int | None = None,
+        thinking: str | None = None,
+    ) -> None:
+        self._base_url = (base_url or DEFAULT_BASE_URL).rstrip("/")
+        self._api_key = api_key or os.getenv("GEMINI_API_KEY", "") or ""
+        if not self._api_key:
+            raise ValueError("未配置 Gemini API key：请设置 GEMINI_API_KEY 或传 api_key 参数")
+        self._model = model or "gemini-2.5-flash"
+        self._temperature = temperature
+        self._max_tokens = max_tokens
+        self._thinking_cfg = thinking_to_gemini(thinking)
+        self._context_window = context_window or int(os.getenv("GEMINI_CONTEXT_WINDOW", "1000000"))
+        self._client = httpx.Client(trust_env=False, timeout=120.0)
+
+    @property
+    def model_name(self) -> str:
+        return self._model
+
+    @property
+    def context_window(self) -> int:
+        return self._context_window
+
+    def _headers(self) -> dict[str, str]:
+        return {"x-goog-api-key": self._api_key, "content-type": "application/json"}
+
+    def _payload(self, messages: list[Message], tools: list[ToolSpec]) -> dict[str, Any]:
+        system, contents = to_gemini_contents(messages)
+        payload: dict[str, Any] = {"contents": contents}
+        if system:
+            payload["systemInstruction"] = {"parts": [{"text": system}]}
+        if tools:
+            payload["tools"] = [{"functionDeclarations": [to_gemini_tool(t) for t in tools]}]
+        gen: dict[str, Any] = {
+            "temperature": self._temperature,
+            "maxOutputTokens": self._max_tokens,
+        }
+        if self._thinking_cfg is not None:
+            gen["thinkingConfig"] = self._thinking_cfg
+        payload["generationConfig"] = gen
+        return payload
+
+    def _url(self, stream: bool) -> str:
+        endpoint = ":streamGenerateContent?alt=sse" if stream else ":generateContent"
+        return f"{self._base_url}/v1beta/models/{self._model}{endpoint}"
+
+    def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
+        """真实调用 Gemini，返回模型无关的 ModelOutput（非流式）。"""
+        payload = self._payload(messages, tools)
+        resp = self._client.post(self._url(stream=False), json=payload, headers=self._headers())
+        if resp.status_code != 200:
+            raise RuntimeError(f"Gemini API {resp.status_code}: {resp.text[:300]}")
+        data = resp.json()
+        candidates = data.get("candidates") or []
+        if not candidates:
+            raise RuntimeError(f"Gemini 无候选输出: {json.dumps(data, ensure_ascii=False)[:300]}")
+        cand = candidates[0]
+        content = cand.get("content") or {}
+        text, tool_calls = _parse_parts(content.get("parts") or [])
+        truncated = cand.get("finishReason") == "MAX_TOKENS"
+        usage: dict[str, int] | None = None
+        u = data.get("usageMetadata")
+        if isinstance(u, dict):
+            usage = {
+                "prompt_tokens": int(u.get("promptTokenCount") or 0),
+                "completion_tokens": int(u.get("candidatesTokenCount") or 0),
+                "total_tokens": int(u.get("totalTokenCount") or 0),
+            }
+        return ModelOutput(
+            text=text,
+            tool_calls=tool_calls,
+            truncated=truncated,
+            reasoning="",  # Gemini 思考内容默认不进响应（需显式 includeThoughts，暂不启用）
+            usage=usage,
+        )
+
+    def respond_stream(
+        self,
+        messages: list[Message],
+        tools: list[ToolSpec],
+        on_event: Callable[[Any], None] | None = None,
+    ) -> ModelOutput:
+        """流式协议：SSE 增量 parts → text_delta / toolcall_delta 事件。"""
+        payload = self._payload(messages, tools)
+        text_parts: list[str] = []
+        tool_acc: dict[str, dict[str, Any]] = {}  # name -> {args 累积}
+        truncated = False
+        usage: dict[str, int] | None = None
+        current_data: list[str] = []
+
+        with self._client.stream(
+            "POST",
+            self._url(stream=True),
+            json=payload,
+            headers=self._headers(),
+        ) as resp:
+            if resp.status_code != 200:
+                raise RuntimeError(f"Gemini API {resp.status_code}: {resp.text[:300]}")
+            for line in resp.iter_lines():
+                if line == "":
+                    if current_data:
+                        try:
+                            chunk = json.loads("\n".join(current_data))
+                        except json.JSONDecodeError:
+                            chunk = None
+                        if chunk:
+                            cands = chunk.get("candidates") or []
+                            if cands:
+                                parts = (cands[0].get("content") or {}).get("parts") or []
+                                if cands[0].get("finishReason") == "MAX_TOKENS":
+                                    truncated = True
+                                for part in parts:
+                                    if "text" in part:
+                                        t = part["text"] or ""
+                                        text_parts.append(t)
+                                        if on_event is not None:
+                                            on_event(
+                                                Event(type="text_delta", payload={"content": t})
+                                            )
+                                    elif "functionCall" in part:
+                                        fc = part["functionCall"]
+                                        name = fc.get("name") or ""
+                                        acc = tool_acc.setdefault(name, {"name": name, "args": ""})
+                                        raw = fc.get("args")
+                                        if isinstance(raw, dict):
+                                            acc["args"] = json.dumps(raw, ensure_ascii=False)
+                                        else:
+                                            acc["args"] += str(raw or "")
+                                        if on_event is not None:
+                                            on_event(
+                                                Event(
+                                                    type="toolcall_delta",
+                                                    payload={"content": acc["args"]},
+                                                )
+                                            )
+                            u = chunk.get("usageMetadata")
+                            if isinstance(u, dict):
+                                usage = {
+                                    "prompt_tokens": int(u.get("promptTokenCount") or 0),
+                                    "completion_tokens": int(u.get("candidatesTokenCount") or 0),
+                                    "total_tokens": int(u.get("totalTokenCount") or 0),
+                                }
+                    current_data = []
+                elif line.startswith("data:"):
+                    current_data.append(line[len("data:") :].strip())
+
+        tool_calls: list[ToolCall] = []
+        for name, acc in tool_acc.items():
+            raw = acc["args"]
+            try:
+                args = json.loads(raw) if raw else {}
+            except json.JSONDecodeError:
+                # 截断防护（S21）：参数非法→标记，不执行，让模型重发
+                args = {"_raw": raw, "_malformed": True}
+            tool_calls.append(ToolCall(name=name, arguments=args, id=name))
+        return ModelOutput(
+            text="".join(text_parts),
+            tool_calls=tool_calls,
+            truncated=truncated,
+            reasoning="",
+            usage=usage,
+        )

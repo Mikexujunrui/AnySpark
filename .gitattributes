@@ -1,0 +1,30 @@
+# 行尾统一（S70 根治：多会话并行编辑防 LF/CRLF 污染——S65/S67 实测 3 连踩）
+# 机制：git 内部（blob）统一存 LF；checkout 时按本规则转 CRLF（Windows 工作区友好）；
+# commit 时自动转回 LF 存储——行尾差异从此不再算内容变化，并行会话各存各的不冲突。
+# 注意：本文件加入后需 `git add --renormalize .` 一次性规范化已有 blob（S70 提交已做）。
+* text=auto
+*.py text eol=crlf
+*.pyi text eol=crlf
+*.md text eol=crlf
+*.toml text eol=crlf
+*.json text eol=crlf
+*.yml text eol=crlf
+*.yaml text eol=crlf
+*.txt text eol=crlf
+*.cfg text eol=crlf
+*.ini text eol=crlf
+*.lock text eol=crlf
+*.csv text eol=crlf
+*.sh text eol=lf
+*.svg text eol=lf
+# 二进制（不转换）
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.db binary
+*.sqlite binary
+*.pdf binary
+*.exe binary
+*.zip binary
