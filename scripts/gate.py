@@ -168,6 +168,9 @@ def main() -> int:
         failed |= rc != 0
         rc, _ = _run(["uv", "run", "mypy"], ROOT)
         failed |= rc != 0
+        # S152h：book_id="main" 硬编码调用点扫描（跨项目 bug 防新增机制）
+        rc, _ = _run(["uv", "run", "python", "scripts/scan_main_hardcode.py"], ROOT)
+        failed |= rc != 0
         pytest_cmd = (
             ["uv", "run", "pytest", *args.pytest] if args.pytest else ["uv", "run", "pytest"]
         )

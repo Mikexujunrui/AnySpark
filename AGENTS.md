@@ -98,6 +98,13 @@
 ### 行尾纪律（S70 .gitattributes 根治）
 - 仓库已配 `.gitattributes`：git 内部存 LF、checkout 转 CRLF——**行尾差异不再算内容变化**
 - 发现工作区文件被编辑器改成纯 LF 属正常（checkout/commit 自动转换），**不要手动统一行尾**
+
+### 项目隔离纪律（S152h 固化——book_id 硬编码防新增）
+- 跨项目数据路径（章节/图谱/伏笔/计划/设定/心智 project 级/推演/工作流任务/叙事树…）的
+  book_id **必须来自请求参数或 ToolContext.book_id**，禁止字面量 `book_id="main"` 写死调用点
+- 合法例外仅：函数签名默认参数（`def f(book_id: str = "main")` 兼容单书/测试）、dataclass/schema 字段定义
+- 新建 `make_*_implementer` 必须接 `book_id` 参数并在 toolkit 装配处传 `ctx.book_id`
+- gate 已内置 `scripts/scan_main_hardcode.py`：检出调用点字面量即 fail——新增硬编码提交不过闸
 - 历史教训：S65 手动转 CRLF 引发误删类/复制中间代码事故——已被 .gitattributes 取代
 
 ### 同文件冲突救火（尽量避免：靠小步提交 + 声明区）
