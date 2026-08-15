@@ -46,6 +46,7 @@
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
 > ⚠️ S152 撞号裹挟留痕（归属说明，勿删）：并行会话 commit `ffc383a`（S152 预置模板保护）提交时裹挟了本会话对 `api/workflow.ts`/`WorkflowPanel.tsx`/`routes_workflow.py`/`test_workflow_api.py` 的**未提交**改动（工作流画布打开 setDraft/原地保存 id/运行绑 bookId）。代码无丢失、可编译；但该提交的 `req.id` 与 `startRun(bookId)` 依赖本会话的 `schemas.py`/`workflowStore.ts` 未提交改动——二者已随本会话提交 `b9xxxx` 补齐，HEAD 才完整。
+> [S162] 正在改 schemas.py / routes_play.py / routes_tools.py / codex.py / tests：修复三 bug——① /api/role/play 端点读角色卡固定 main（RolePlayIn 加 book_id）；② codex 沙箱 def run 不执行（main() 检测到 run 定义且无显式调用时自动调用）；③ /api/codex/run 数据环境固定 main（CodexIn 加 book_id）。
 > [S145] 已提交完成（6 commits：311e94b/5fdfa93/624a515/fd5acbb/1b3e36f/edc0984，第三方评审修复）——声明行随 S145 提交后删除
 > [S146] 已提交完成（7 commits：5976551/77417f9/090dc45/09ffa40/a4ad7f4/795cc9c/588de6c，评审未修项批 E-I）——声明行随 S146 提交后删除
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
@@ -4300,3 +4301,26 @@ workflow_list/run/status 工具，但 8-15 那轮 agent 全程没想起工作流
 
 **测试 +1**（test_workflow_api：workflow_run 透传 params 到任务变量 + 非法 params 报错）；
 ruff/format/mypy 全绿；test_workflow_api + test_tools_extras 15 全过。
+
+## S158b: 工作流真实链路实测修复（主循环入口端到端验证）（已完成 ✅）
+
+**实测**（主人要求"从主循环入口模拟真实使用"）：/api/chat/stream 发"提取前50章的图谱"
+（哈利波特项目 1282 章）→ agent 第一轮 list_chapters+workflow_list（优先原则提示生效）
+→ workflow_run 传 50 个正确章节 id（list_chapters 带 id 后精准传参，零试错）→
+workflow_status 轮询等待（S108 防死循环合理收尾）→ 任务后台跑完 50/50 全成功，
+图谱 0→实体 210/关系 191/事件 85，实体带 first_chapter 首现章节标记。
+
+**实测暴露 3 个 bug（S158b 提交修复）**：
+1. **list_chapters 不带 id**——agent 拿不到章节 id，只能猜标题/序号/缺省，重复建
+   4 个任务试错（修复：行尾带 `(id=...)`）
+2. **_wf_resolve str(list)**——模板变量 {{chapter_ids}} 用 str() 变 python repr
+   （单引号），batch_prepare json.loads 失败 → 全 unresolved → 误跑全部 1282 章
+   （修复：list/dict 变量 JSON 序列化）
+3. **batch_prepare 输出多行**——unresolved 报告拼在 JSON 后，loop collection_var
+   json.loads "Extra data" → collection 空 → iterations 0（修复：output 纯 JSON）
+
+**另加**：batch_prepare 宽容解析（id/标题/序号全接受）+ chapter_extract 查不到 id
+回退标题/序号——agent 传错格式不白跑。
+
+**验证**：ruff/mypy 绿；冒烟任务 3 章（loop iterations=3）→ 50 章任务（iterations=50，
+items 49 条无失败标记）；图谱实体 first_chapter 正确标记。
