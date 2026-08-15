@@ -31,7 +31,12 @@ export default function BackendStatus() {
     console.warn(`${DIAG_PREFIX} BackendStatus — check() called before init, ignoring`)
   })
 
-  // S164：后端 online 后查一次 GitHub 最新 Release——有新版本显示提示条（只查一次，静默失败）
+  // S166：同一版本忽略后不再提示（localStorage 记忆）；新版本出现重新提示
+  const IGNORE_KEY = 'anyspark_ignored_version'
+  const isIgnored = (v: string) => localStorage.getItem(IGNORE_KEY) === v
+  const ignoreVersion = (v: string) => localStorage.setItem(IGNORE_KEY, v)
+
+  // S164：后端 online 后查一次 GitHub 最新 Release——有新版本显示横幅（只查一次，静默失败）
   async function checkUpdate() {
     if (updateCheckedRef.current) return
     updateCheckedRef.current = true
@@ -39,7 +44,7 @@ export default function BackendStatus() {
       const res = await fetch('/api/update/check')
       if (!res.ok) return
       const d = await res.json()
-      if (d.has_update && d.latest_version && mountedRef.current) {
+      if (d.has_update && d.latest_version && mountedRef.current && !isIgnored(d.latest_version)) {
         setUpdateInfo({ latest_version: d.latest_version, release_url: d.release_url || '' })
       }
     } catch {
@@ -183,30 +188,44 @@ export default function BackendStatus() {
   }
 
   return (
-    <div
-      className="fixed top-3 right-3 z-50 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium bg-zinc-900/80 backdrop-blur border border-zinc-800 shadow-lg select-none"
-      title={titleLines.join('\n')}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${dotColor} ${dotPulse}`} />
-      <span className="text-zinc-400">{label}</span>
-      {status === 'online' && latencyMs !== null && (
-        <span className="text-zinc-500 text-[9px]">{latencyMs}ms</span>
-      )}
-      {status === 'degraded' && latencyMs !== null && (
-        <span className="text-yellow-500 text-[9px]">{latencyMs}ms</span>
-      )}
+    <>
       {updateInfo && (
-        <a
-          href={updateInfo.release_url || 'https://github.com/Mikexujunrui/AnySpark/releases'}
-          target="_blank"
-          rel="noreferrer"
-          className="ml-1.5 px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-400 hover:bg-amber-500/25 text-[9px] font-medium transition-colors"
-          title={`发现新版本 ${updateInfo.latest_version}——点击前往 Release 下载`}
-        >
-          ↑ 新版 {updateInfo.latest_version.replace(/^v/i, '')}
-        </a>
+        <div className="fixed top-0 inset-x-0 z-[60] flex justify-center pointer-events-none">
+          <div className="pointer-events-auto mt-2 flex items-center gap-2 px-4 py-2 rounded-xl bg-amber-500/15 border border-amber-500/40 backdrop-blur-md shadow-xl max-w-lg mx-4">
+            <span className="text-amber-400 text-sm" aria-hidden>⬆</span>
+            <a
+              href={updateInfo.release_url || 'https://github.com/Mikexujunrui/AnySpark/releases'}
+              target="_blank"
+              rel="noreferrer"
+              className="flex-1 text-xs text-amber-100 hover:text-white"
+            >
+              发现新版本 <b className="text-amber-300">{updateInfo.latest_version}</b>，点击前往 Release 下载更新
+            </a>
+            <button
+              onClick={() => { ignoreVersion(updateInfo.latest_version); setUpdateInfo(null) }}
+              className="p-1 rounded-md text-amber-400/70 hover:text-amber-200 hover:bg-amber-500/20 transition-colors"
+              title="不再提示此版本"
+              aria-label="关闭更新提示"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+        </div>
       )}
-    </div>
+      <div
+        className="fixed top-3 right-3 z-50 flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium bg-zinc-900/80 backdrop-blur border border-zinc-800 shadow-lg select-none"
+        title={titleLines.join('\n')}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full ${dotColor} ${dotPulse}`} />
+        <span className="text-zinc-400">{label}</span>
+        {status === 'online' && latencyMs !== null && (
+          <span className="text-zinc-500 text-[9px]">{latencyMs}ms</span>
+        )}
+        {status === 'degraded' && latencyMs !== null && (
+          <span className="text-yellow-500 text-[9px]">{latencyMs}ms</span>
+        )}
+      </div>
+    </>
   )
 }
 
