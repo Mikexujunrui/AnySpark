@@ -73,7 +73,7 @@ def main() -> int:
                 issues.append((str(py.relative_to(ROOT)), ln, text))
     if issues:
         print("=" * 60)
-        print('【S152h】book_id="main" 硬编码调用点扫描：检出 %d 处（人工复核）' % total)
+        print(f'【S152h】book_id="main" 硬编码调用点扫描：检出 {total} 处（人工复核）')
         for f, ln, text in issues:
             print(f"  {f}:{ln}: {text}")
         print("=" * 60)
