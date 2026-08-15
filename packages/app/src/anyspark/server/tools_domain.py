@@ -1532,6 +1532,7 @@ def _run_refine_template(
     template_name: str,
     params: dict[str, str],
     skills: Any,
+    book_id: str = "main",  # S152g：任务绑定当前项目（此前硬编码 main）
 ) -> list[dict[str, str]] | None:
     """S135：按模板名同步跑拆书 workflow → 返回候选摘要。
 
@@ -1552,7 +1553,7 @@ def _run_refine_template(
     if not params.get("library_book_id"):
         return None
     before = len(skills.list_drafts())
-    task_id = workflow_store.create_task(wf, book_id="main", template_id=wf.id, params=params)
+    task_id = workflow_store.create_task(wf, book_id=book_id, template_id=wf.id, params=params)
     try:
         workflow_engine.run_task(task_id)
     except Exception:
@@ -1574,6 +1575,7 @@ def make_skill_refine_implementer(
     skills: Any = None,
     workflow_store: Any = None,
     workflow_engine: Any = None,
+    book_id: str = "main",  # S152g：当前项目（此前装配不传，任务落 main）
 ) -> tuple[Any, Any]:
     """文风参考书 → skill 提炼工具（S72）：把原文/资料提炼成叙事技法候选。
 
@@ -1690,6 +1692,7 @@ def make_skill_refine_implementer(
                     "拆书提炼",
                     {"library_book_id": library_book_id or ""},
                     skills,
+                    book_id=book_id,  # S152g：任务绑定当前项目
                 )
                 if template_ok:
                     # 模板 finish 已落草稿；candidates 仅作展示摘要（不重复 add_draft）

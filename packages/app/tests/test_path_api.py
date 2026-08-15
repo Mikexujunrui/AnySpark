@@ -212,3 +212,60 @@ def test_path_api_errors() -> None:
         json={"from_desc": "A", "to_desc": "B", "archive_index": 9},
     )
     assert r.status_code == 400
+
+
+def test_patch_chapter_keeps_book() -> None:
+    """S152g：定点编辑按章节所属项目写回（此前硬编码 main——A 项目章节被 upsert 到 main）。
+
+    锁定：patch 后内容进原项目章节库，main 项目不出现该章节。
+    """
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
+    # 项目 book-a 建章（经 chapters store 直插，绕模型）
+    from anyspark.store.sqlite import ChapterStore
+
+    db = _db()
+    ChapterStore(str(db)).upsert("book-a", "第一章", "雨夜，陈渡抵达雾城。", 1)
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=db, workspace=_ws()))
+
+    # 端点按 chapter_id 定位，先查真实 id
+    chs = client.get("/api/chapters?book_id=book-a").json()
+    assert len(chs) == 1
+    cid = chs[0]["id"]
+    r = client.post(
+        f"/api/chapters/{cid}/patch",
+        json={
+            "operations": [{"type": "replace", "anchor": "抵达", "content": "雨夜，陈渡重返雾城。"}]
+        },
+    )
+    assert r.status_code == 200, r.text
+    # 内容进 book-a（不是 main）
+    a = client.get("/api/chapters?book_id=book-a").json()
+    assert a[0]["content"] == "雨夜，陈渡重返雾城。"
+    m = client.get("/api/chapters?book_id=main").json()
+    assert all(ch["title"] != "第一章" for ch in m)
+
+
+def test_manual_isolated_by_book() -> None:
+    """S152g：项目级说明书按项目隔离（此前硬编码 main——所有项目共享同一份心智）。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
+    client.post(
+        "/api/manual",
+        json={
+            "content": "主人偏好冷峻文风",
+            "category": "style",
+            "scope": "project",
+            "book_id": "book-a",
+        },
+    )
+    a = client.get("/api/manual?scope=project&book_id=book-a").json()
+    b = client.get("/api/manual?scope=project&book_id=book-b").json()
+    assert any(e["content"] == "主人偏好冷峻文风" for e in a)
+    assert b == []

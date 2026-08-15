@@ -26,7 +26,7 @@ const SOURCE_COLORS: Record<Source, string> = {
 };
 
 // AI 倾向档案面板（双向黑盒：用户应能看到 AI 的倾向）
-export default function BiasPanel({ open, onClose, embedded = false }: BiasPanelProps) {
+export default function BiasPanel({ open, onClose, embedded = false, bookId = "main" }: BiasPanelProps & { bookId?: string }) {
   const items = useBiasStore((s) => s.items);
   const loading = useBiasStore((s) => s.loading);
   const fetchBias = useBiasStore((s) => s.fetchBias);
@@ -62,7 +62,7 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
   const loadManual = async () => {
     setManualLoading(true)
     try {
-      const res = await fetch("/api/manual")
+      const res = await fetch(`/api/manual?scope=project&book_id=${encodeURIComponent(bookId)}`)
       const d = await res.json()
       setManual(Array.isArray(d) ? d : [])
     } catch { /* 静默 */ }
@@ -71,7 +71,7 @@ export default function BiasPanel({ open, onClose, embedded = false }: BiasPanel
 
   useEffect(() => {
     if (open && view === "memory") loadManual()
-  }, [open, view]);
+  }, [open, view, bookId]);
 
   const toggleLock = async (id: string, locked: boolean) => {
     try {

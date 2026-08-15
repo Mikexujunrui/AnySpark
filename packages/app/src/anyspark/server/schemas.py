@@ -216,6 +216,7 @@ class ManualEntryIn(BaseModel):
     confidence: float = 0.5
     scope: str = "project"
     category: str = "style"  # S50：collab(协作)/style(文风)/habit(习惯)
+    book_id: str = "main"  # S152g：project 级条目按当前项目（scope=global 时忽略）
 
 
 class ManualEntryPatch(BaseModel):

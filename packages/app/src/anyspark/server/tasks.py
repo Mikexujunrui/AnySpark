@@ -143,7 +143,10 @@ def summarize_conversation(deps: AppDeps, conv_id: str) -> None:
         user_chars = sum(len(m.content or "") for m in msgs if m.role == "user")
         if len(msgs) < 3 or user_chars < 40:  # 空会话/琐碎对话不归档
             return
-        deps.summarizer.summarize(msgs, book_id="main")
+        # S152g：摘要按会话所属项目（此前硬编码 main——所有项目会话的场景记忆落错库）
+        conv = deps.store.get(conv_id)
+        book_id = conv.book_id if conv is not None else "main"
+        deps.summarizer.summarize(msgs, book_id=book_id)
         logger.info("会话归档摘要: conv=%s 消息%d 条", conv_id, len(msgs))
     except Exception as exc:
         logger.warning("会话归档摘要失败(不影响主链路): %s", exc)

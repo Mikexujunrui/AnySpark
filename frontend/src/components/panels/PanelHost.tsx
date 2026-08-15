@@ -58,7 +58,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
 
       {/* V4 工具面板（open/onClose 签名 → 内嵌常显） */}
       {panelKey === 'brief' && <div className="h-full min-h-0 flex flex-col"><BriefPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
-      {panelKey === 'bias' && <div className="h-full min-h-0 flex flex-col"><BiasPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
+      {panelKey === 'bias' && <div className="h-full min-h-0 flex flex-col"><BiasPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
       {panelKey === 'batch' && <div className="h-full min-h-0 flex flex-col"><BatchPanel open embedded onClose={onPanelClose || (() => {})} bookId={bookId} /></div>}
       {panelKey === 'templates' && <div className="h-full min-h-0 flex flex-col"><TemplatePanel open embedded onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'tools' && <div className="h-full min-h-0 flex flex-col"><ToolsPanel open embedded onClose={onPanelClose || (() => {})} /></div>}

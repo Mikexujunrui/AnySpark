@@ -238,7 +238,9 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
             raise HTTPException(status_code=404, detail="章节不存在")
         new_content, results = apply_patch(ch.content, req.operations)
         ok_all = all(r.get("ok") for r in results)
-        deps.chapters.upsert("main", ch.title, new_content, ch.order_index, ch.narrative_line)
+        # S152g：按章节所属项目写回（此前硬编码 "main"——定点编辑 A 项目章节
+        # 会把内容 upsert 到 main 项目，原项目不更新）
+        deps.chapters.upsert(ch.book_id, ch.title, new_content, ch.order_index, ch.narrative_line)
         # S132b 信号入口：定点编辑（内容实际变化）→ modified 信号（含段落删除/替换）
         if ok_all and new_content != ch.content:
             deps.signal_collector.modified(ch.content, new_content, "定点编辑", book_id=ch.book_id)
@@ -251,7 +253,7 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
                     content=new_content,
                     order=ch.order_index,
                     line=ch.narrative_line,
-                    book_id="main",
+                    book_id=ch.book_id,  # S152g：抽取按章节所属项目（此前硬编码 main）
                 )
             )
         return {

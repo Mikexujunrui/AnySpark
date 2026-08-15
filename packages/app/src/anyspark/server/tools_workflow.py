@@ -24,6 +24,7 @@ def make_workflow_tools(
     workflow_store: Any,
     workflow_engine: Any,
     workflow_generator: Any,
+    book_id: str = "main",  # S152g：当前项目（agent 未显式传 book_id 时任务落当前项目）
 ) -> list[tuple[Any, Any]]:
     """装配工作流 agent 工具组（返回 [(spec, implementer), ...]）。"""
 
@@ -63,7 +64,7 @@ def make_workflow_tools(
         name="workflow_run",
         description=(
             "运行一个工作流模板（如章节质量把关：审读→发现硬伤→改写→作者确认）。"
-            "传 template_id（用 workflow_list 查）+ book_id（缺省 main）。"
+            "传 template_id（用 workflow_list 查）+ book_id（缺省当前项目，跨书操作时显式指定）。"
             "后台执行，返回 task_id；用 workflow_status 查进度。"
         ),
         params=[
@@ -85,14 +86,15 @@ def make_workflow_tools(
     def run_impl(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec_.name, arguments=arguments)
         template_id = str(arguments.get("template_id", "")).strip()
-        book_id = str(arguments.get("book_id") or "main")
+        # S152g：agent 显式传参优先，否则落当前项目（此前缺省 main 跨项目）
+        final_book = str(arguments.get("book_id") or book_id)
         if not template_id:
             return ToolResult(call=call, ok=False, content="缺少参数 template_id。")
         try:
             wf = workflow_store.get_template(template_id)
             if wf is None:
                 return ToolResult(call=call, ok=False, content=f"模板不存在: {template_id}")
-            task_id = workflow_store.create_task(wf, book_id=book_id, template_id=template_id)
+            task_id = workflow_store.create_task(wf, book_id=final_book, template_id=template_id)
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"启动失败: {exc}")
 
@@ -109,7 +111,7 @@ def make_workflow_tools(
             call=call,
             ok=True,
             content=(
-                f"已启动工作流「{wf.name}」→ task_id: {task_id}（book={book_id}）。"
+                f"已启动工作流「{wf.name}」→ task_id: {task_id}（book={final_book}）。"
                 "用 workflow_status 查进度。若含作者确认节点会停在 waiting_approval。"
             ),
         )

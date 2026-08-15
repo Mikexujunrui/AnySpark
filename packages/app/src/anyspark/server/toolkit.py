@@ -152,6 +152,7 @@ def build_toolkit(
                 skills=ctx.skills_store,
                 workflow_store=ctx.workflow_store,
                 workflow_engine=ctx.workflow_engine,
+                book_id=ctx.book_id,  # S152g：任务绑定当前项目（此前不传落 main）
             )
             registry.register(sr_spec, sr_impl)
         # S80：灵感登记（资料库 = 灵感冷藏库；AI 可写 inspiration，copy 仅人工/导入）
@@ -280,7 +281,7 @@ def build_toolkit(
         from anyspark.server.tools_workflow import make_workflow_tools
 
         for _spec, _impl in make_workflow_tools(
-            ctx.workflow_store, ctx.workflow_engine, ctx.workflow_generator
+            ctx.workflow_store, ctx.workflow_engine, ctx.workflow_generator, book_id=ctx.book_id
         ):
             registry.register(_spec, _impl)
 

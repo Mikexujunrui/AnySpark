@@ -38,19 +38,20 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/manual", response_model=list[dict[str, Any]])
-    def list_manual(scope: str = "project") -> list[dict[str, Any]]:
-        """说明书条目（scope=project|global）。"""
-        entries = deps.manual.list(scope, "main")  # type: ignore[arg-type]
+    def list_manual(scope: str = "project", book_id: str = "main") -> list[dict[str, Any]]:
+        """说明书条目（scope=project|global）。S152g：project 级按当前项目（此前硬编码 main）。"""
+        entries = deps.manual.list(scope, book_id)  # type: ignore[arg-type]
         return [e.to_dict() for e in entries]
 
     @router.get("/api/manual/notices", response_model=list[dict[str, Any]])
-    def list_manual_notices(limit: int = 20) -> list[dict[str, Any]]:
+    def list_manual_notices(limit: int = 20, book_id: str = "main") -> list[dict[str, Any]]:
         """心智变更通知（S74c：供前端展示——用户知情：谁在何时改了哪条偏好）。
 
+        S152g：按项目过滤（项目级条目的通知在该项目可见）。
         前端展示建议：通知列表（action=add/update/delete，old→new 变更内容、时间、
         已读态）；未读高亮；可跳转到对应条目操作（保留/改回）。
         """
-        return deps.manual.list_notices(book_id="main", limit=limit)
+        return deps.manual.list_notices(book_id=book_id, limit=limit)
 
     @router.post("/api/manual", response_model=dict[str, Any])
     def add_manual(req: ManualEntryIn) -> dict[str, Any]:
@@ -61,7 +62,8 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
             source="user",
             confidence=req.confidence,
             scope=scope,
-            book_id="main",
+            # S152g：project 级条目按当前项目（scope=global 时 store 忽略 book_id）
+            book_id=req.book_id,
             category=cast(
                 Literal["collab", "style", "habit"],
                 req.category if req.category in ("collab", "style", "habit") else "style",

@@ -11,19 +11,21 @@ export interface ManualEntry {
   updated_at: string;
 }
 
-export function listManual(scope = "project"): Promise<ManualEntry[]> {
-  return apiFetch<ManualEntry[]>(`/api/manual?scope=${scope}`);
+// S152g：bookId 贯通——项目级说明书/通知按当前项目（此前不传，后端默认 main 跨项目）
+export function listManual(scope = "project", bookId = "main"): Promise<ManualEntry[]> {
+  return apiFetch<ManualEntry[]>(`/api/manual?scope=${scope}&book_id=${encodeURIComponent(bookId)}`);
 }
 
 export function createManual(
   content: string,
   category: "collab" | "style" | "habit",
   confidence = 0.8,
-  scope = "project"
+  scope = "project",
+  bookId = "main"
 ): Promise<ManualEntry> {
   return apiFetch<ManualEntry>("/api/manual", {
     method: "POST",
-    body: JSON.stringify({ content, category, confidence, scope }),
+    body: JSON.stringify({ content, category, confidence, scope, book_id: bookId }),
   });
 }
 
@@ -57,6 +59,8 @@ export interface ManualNotice {
   read?: boolean;
 }
 
-export function listManualNotices(limit = 20): Promise<ManualNotice[]> {
-  return apiFetch<ManualNotice[]>(`/api/manual/notices?limit=${limit}`);
+export function listManualNotices(limit = 20, bookId = "main"): Promise<ManualNotice[]> {
+  return apiFetch<ManualNotice[]>(
+    `/api/manual/notices?limit=${limit}&book_id=${encodeURIComponent(bookId)}`
+  );
 }
