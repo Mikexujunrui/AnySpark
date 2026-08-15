@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS workflow_templates (
     name TEXT NOT NULL,
     description TEXT DEFAULT '',
     definition TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    builtin INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS workflow_drafts (
     id TEXT PRIMARY KEY,
@@ -90,6 +91,12 @@ class WorkflowStore:
         self._lock = threading.Lock()
         with self._lock:
             self._conn.executescript(SCHEMA)
+            # S152：旧库迁移 builtin 列（预置模板保护——系统模板不可删）
+            cols = {r[1] for r in self._conn.execute("PRAGMA table_info(workflow_templates)")}
+            if "builtin" not in cols:
+                self._conn.execute(
+                    "ALTER TABLE workflow_templates ADD COLUMN builtin INTEGER NOT NULL DEFAULT 0"
+                )
             self._conn.commit()
         self._seed_templates()
 
@@ -189,11 +196,11 @@ class WorkflowStore:
                 }
             )
             if not research.validate():
-                # 锁内直插（不调 add_template——同锁重入死锁）
+                # 锁内直插（不调 add_template——同锁重入死锁）；内置模板标 builtin=1
                 self._conn.execute(
                     "INSERT INTO workflow_templates"
-                    " (id, name, description, definition, created_at)"
-                    " VALUES (?, ?, ?, ?, ?)",
+                    " (id, name, description, definition, created_at, builtin)"
+                    " VALUES (?, ?, ?, ?, ?, 1)",
                     (
                         research.id,
                         research.name,
@@ -207,18 +214,20 @@ class WorkflowStore:
     # ------------------------------------------------------------------
     # 模板 CRUD
     # ------------------------------------------------------------------
-    def add_template(self, definition: WorkflowDef) -> WorkflowDef:
+    def add_template(self, definition: WorkflowDef, builtin: bool = False) -> WorkflowDef:
+        """添加模板。builtin=True 为系统预置（不可删，S152 保护）。"""
         with self._lock:
             self._conn.execute(
                 "INSERT OR REPLACE INTO workflow_templates"
-                " (id, name, description, definition, created_at)"
-                " VALUES (?, ?, ?, ?, ?)",
+                " (id, name, description, definition, created_at, builtin)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
                 (
                     definition.id,
                     definition.name,
                     definition.description,
                     json.dumps(definition.to_dict(), ensure_ascii=False),
                     definition.created_at,
+                    1 if builtin else 0,
                 ),
             )
             self._conn.commit()
@@ -227,10 +236,27 @@ class WorkflowStore:
     def list_templates(self) -> list[dict[str, Any]]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, name, description, created_at FROM workflow_templates"
+                "SELECT id, name, description, created_at, builtin FROM workflow_templates"
                 " ORDER BY created_at DESC"
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def is_builtin(self, template_id: str) -> bool:
+        """S152：预置模板判定（系统模板不可删）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT builtin FROM workflow_templates WHERE id = ?", (template_id,)
+            ).fetchone()
+        return bool(row and row["builtin"])
+
+    def mark_builtin_by_name(self, name: str) -> None:
+        """S152：按名补标 builtin（旧库迁移——已存在的预置模板种子不再执行）。"""
+        with self._lock:
+            self._conn.execute(
+                "UPDATE workflow_templates SET builtin = 1 WHERE name = ? AND builtin = 0",
+                (name,),
+            )
+            self._conn.commit()
 
     def get_template(self, template_id: str) -> WorkflowDef | None:
         with self._lock:

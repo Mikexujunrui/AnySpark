@@ -81,6 +81,7 @@ export interface WorkflowSummary {
   name: string;
   description: string;
   created_at?: string;
+  builtin?: boolean; // S152：系统预置模板（不可删）
 }
 
 /* ── API ── */
@@ -93,14 +94,24 @@ export function getWorkflow(id: string): Promise<WorkflowDef> {
   return apiGet<WorkflowDef>(`/api/workflows/${id}`);
 }
 
+// S152：id 存在 = 原地更新（后端 add_template upsert），缺省 = 新建
+// 注：函数名保留 createWorkflow（兼容历史调用），语义为“写入模板”
 export function createWorkflow(
   name: string,
   description: string,
   nodes: WorkflowNode[],
   edges: WorkflowEdge[],
-  layout?: Record<string, { x: number; y: number }>
+  layout?: Record<string, { x: number; y: number }>,
+  id?: string
 ): Promise<WorkflowDef> {
-  return apiPost<WorkflowDef>("/api/workflows", { name, description, nodes, edges, layout: layout ?? {} });
+  return apiPost<WorkflowDef>("/api/workflows", {
+    id: id ?? "",
+    name,
+    description,
+    nodes,
+    edges,
+    layout: layout ?? {},
+  });
 }
 
 export function deleteWorkflow(id: string): Promise<{ ok: boolean }> {

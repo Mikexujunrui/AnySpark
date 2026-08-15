@@ -35,8 +35,10 @@ def make_workflow_router(deps: AppDeps) -> APIRouter:
 
     @router.post("/api/workflows", response_model=dict[str, Any])
     def create_workflow(req: WorkflowIn) -> dict[str, Any]:
+        # S152：带 id = 原地更新（add_template upsert），缺省 = 新建（from_dict 生成新 id）
         wf = WorkflowDef.from_dict(
             {
+                "id": req.id,
                 "name": req.name,
                 "description": req.description,
                 "nodes": req.nodes,
@@ -168,6 +170,12 @@ def make_workflow_router(deps: AppDeps) -> APIRouter:
 
     @router.delete("/api/workflows/{workflow_id}", response_model=dict[str, bool])
     def delete_workflow(workflow_id: str) -> dict[str, bool]:
+        """S152：预置模板保护——系统模板（builtin）不可删（工具收编执行路径/安全网载体）。"""
+        if deps.workflow_store.is_builtin(workflow_id):
+            raise HTTPException(
+                status_code=403,
+                detail="系统预置模板不可删除（工具收编执行路径/安全网载体）；可复制后修改自定义版本",
+            )
         if not deps.workflow_store.delete_template(workflow_id):
             raise HTTPException(status_code=404, detail="工作流不存在")
         return {"ok": True}

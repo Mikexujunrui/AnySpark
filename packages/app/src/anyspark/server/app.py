@@ -191,6 +191,20 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
     from anyspark.workflow import WorkflowDef
 
     existing = {t["name"] for t in workflow_store.list_templates()}
+    # S152：预置模板保护——旧库已存在的同名模板补标 builtin（迁移），
+    # 使工具收编执行路径/安全网载体全部受保护
+    _preset_names = (
+        "拆书提炼",
+        "批量改写",
+        "批量审读",
+        "图谱抽取",
+        "信号提炼",
+        "会话摘要",
+        "章节加料",
+        "资料调研",
+    )
+    for name in _preset_names:
+        workflow_store.mark_builtin_by_name(name)
     if "拆书提炼" not in existing:
         _seed_refine_template(workflow_store, WorkflowDef)
     if "批量改写" not in existing:
@@ -261,7 +275,7 @@ def _seed_graph_extract_template(workflow_store: Any, wf_def_cls: Any) -> None:
     errors = wf.validate()
     if errors:
         raise ValueError(f"图谱抽取模板校验失败: {errors}")
-    workflow_store.add_template(wf)
+    workflow_store.add_template(wf, builtin=True)
 
 
 def _seed_signal_refine_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -287,7 +301,7 @@ def _seed_signal_refine_template(workflow_store: Any, wf_def_cls: Any) -> None:
     errors = wf.validate()
     if errors:
         raise ValueError(f"信号提炼模板校验失败: {errors}")
-    workflow_store.add_template(wf)
+    workflow_store.add_template(wf, builtin=True)
 
 
 def _seed_conversation_summarize_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -317,7 +331,7 @@ def _seed_conversation_summarize_template(workflow_store: Any, wf_def_cls: Any) 
     errors = wf.validate()
     if errors:
         raise ValueError(f"会话摘要模板校验失败: {errors}")
-    workflow_store.add_template(wf)
+    workflow_store.add_template(wf, builtin=True)
 
 
 def _seed_enrich_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -434,7 +448,7 @@ def _seed_enrich_template(workflow_store: Any, wf_def_cls: Any) -> None:
     errors = wf.validate()
     if errors:
         raise ValueError(f"章节加料模板校验失败: {errors}")
-    workflow_store.add_template(wf)
+    workflow_store.add_template(wf, builtin=True)
 
 
 def _seed_refine_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -585,7 +599,7 @@ def _seed_refine_template(workflow_store: Any, wf_def_cls: Any) -> None:
     errors = wf.validate()
     if errors:
         raise ValueError(f"拆书模板校验失败: {errors}")
-    workflow_store.add_template(wf)
+    workflow_store.add_template(wf, builtin=True)
 
 
 def _seed_batch_rewrite_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -687,7 +701,7 @@ def _seed_batch_rewrite_template(workflow_store: Any, wf_def_cls: Any) -> None:
     errors = wf.validate()
     if errors:
         raise ValueError(f"批量改写模板校验失败: {errors}")
-    workflow_store.add_template(wf)
+    workflow_store.add_template(wf, builtin=True)
 
 
 def _seed_batch_review_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -763,7 +777,7 @@ def _seed_batch_review_template(workflow_store: Any, wf_def_cls: Any) -> None:
     errors = wf.validate()
     if errors:
         raise ValueError(f"批量审读模板校验失败: {errors}")
-    workflow_store.add_template(wf)
+    workflow_store.add_template(wf, builtin=True)
 
 
 # S55 #3 注入块分层缓存：stable 块（跨请求不变）按签名缓存，volatile 块每次组装。

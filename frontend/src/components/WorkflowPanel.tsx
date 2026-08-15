@@ -88,7 +88,7 @@ interface State {
   error?: string;
 }
 
-export default function WorkflowPanel() {
+export default function WorkflowPanel({ bookId }: { bookId: string }) {
   const { templates, drafts, tasks, loading, fetchAll, openWorkflow, saveWorkflow, removeWorkflow, aiGenerate, promote, discardDraft, startRun, refreshTask, decide, setError } =
     useWorkflowStore();
 
@@ -352,7 +352,8 @@ export default function WorkflowPanel() {
       setError(null);
       const params = parseRunParams();
       if (params === null) return;
-      const taskId = await startRun(id, params);
+      // S152：运行时绑定当前项目（此前硬编码 main，跨项目写错书）
+      const taskId = await startRun(id, bookId, params);
       const task = await refreshTask(taskId);
       setRunningTask(task);
       if (pollRef.current) clearInterval(pollRef.current);
@@ -440,9 +441,11 @@ export default function WorkflowPanel() {
             onClick={async () => {
               try {
                 // S76：保存时把画布手动坐标序列化进模板 layout
+                // S152：保存后同步 draft.id（新建时后端生成），保证后续保存=原地更新
                 const wfToSave = { ...draft, layout: manualPos };
                 await saveWorkflow(wfToSave);
-                setDraft(wfToSave);
+                const saved = useWorkflowStore.getState().current;
+                if (saved) setDraft(saved);
                 setDirty(false);
                 fetchAll();
               } catch (e) {
@@ -542,6 +545,8 @@ export default function WorkflowPanel() {
                     onClick={() =>
                     openWorkflow(t.id).then((wf) => {
                       // S76：打开模板时应用持久化布局坐标
+                      // S152：关键修复——载入 draft 到画布（此前漏 setDraft，画布永远空白无法编辑）
+                      setDraft(wf);
                       setManualPos(wf.layout ?? {});
                       setDirty(false);
                       setRunningTask(null);
@@ -556,7 +561,14 @@ export default function WorkflowPanel() {
                   >
                     <div className="flex items-center justify-between">
                       <span className="truncate">{t.name}</span>
-                      <span className="text-[10px] text-zinc-600">模板</span>
+                      <span className="text-[10px] text-zinc-600 flex items-center gap-1">
+                        {t.builtin ? (
+                          <span className="text-sky-500/90 border border-sky-800/50 rounded px-1 py-px" title="系统预置模板：工具收编执行路径，不可删除（可复制改造）">
+                            系统
+                          </span>
+                        ) : null}
+                        <span>模板</span>
+                      </span>
                     </div>
                     {t.description && (
                       <p className="text-[10px] text-zinc-600 truncate mt-0.5">{t.description}</p>
@@ -574,9 +586,15 @@ export default function WorkflowPanel() {
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
+                          if (t.builtin) {
+                            setError("系统预置模板不可删除（可复制后修改自定义版本）");
+                            return;
+                          }
                           setPendingDeleteWf(t.id);
                         }}
-                        className="text-[10px] text-red-500 hover:text-red-400"
+                        className={`text-[10px] ${
+                          t.builtin ? "text-zinc-700 cursor-not-allowed" : "text-red-500 hover:text-red-400"
+                        }`}
                       >
                         删除
                       </button>
@@ -595,7 +613,18 @@ export default function WorkflowPanel() {
                     <p className="text-xs text-amber-200 truncate">{d.name}</p>
                     <div className="flex gap-2 mt-1">
                       <button
-                        onClick={() => promote(d.id)}
+                        onClick={() =>
+                          promote(d.id).then(() => {
+                            // S152：转正后直接载入画布（store 仅设 current，draft 需同步）
+                            const cur = useWorkflowStore.getState().current;
+                            if (cur) {
+                              setDraft(cur);
+                              setManualPos(cur.layout ?? {});
+                              setDirty(false);
+                              setSelectedNodeId(null);
+                            }
+                          })
+                        }
                         className="text-[10px] text-emerald-500 hover:text-emerald-400"
                       >
                         转正

@@ -78,6 +78,44 @@ def test_workflow_crud_and_validate() -> None:
     assert client.get(f"/api/workflows/{wf['id']}").status_code == 404
 
 
+def test_workflow_update_with_id() -> None:
+    """S152：POST 带 id = 原地更新（upsert），不产生新副本。
+
+    前端画布“保存模板”对已存在模板传回原 id——此前 WorkflowIn 无 id 字段，
+    每次保存都生成新模板（副本堆积）。add_template 为 INSERT OR REPLACE，
+    同 id 即覆盖。
+    """
+    client = _client()
+    r = client.post(
+        "/api/workflows",
+        json={
+            "name": "原始名",
+            "nodes": [{"id": "n1", "kind": "script", "params": {"function": "noop"}}],
+            "edges": [],
+        },
+    )
+    assert r.status_code == 200, r.text
+    wid = r.json()["id"]
+
+    # 带 id 重新提交（改名）→ 同 id 返回，不新建
+    r = client.post(
+        "/api/workflows",
+        json={
+            "id": wid,
+            "name": "改名后",
+            "nodes": [{"id": "n1", "kind": "script", "params": {"function": "noop"}}],
+            "edges": [],
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert r.json()["id"] == wid
+    assert r.json()["name"] == "改名后"
+
+    # 列表数量不变（更新而非复制）
+    ids = [t["id"] for t in client.get("/api/workflows").json()]
+    assert ids.count(wid) == 1
+
+
 def test_workflow_drafts_gate() -> None:
     client = _client()
     # 草稿闸门：列表为空 + 不存在草稿的操作返回 404
@@ -193,3 +231,40 @@ def test_workflow_agent_tools_registered() -> None:
     # 工具调用被记录（执行结果回填后模型再次响应）；name 是列表（整批工具名）
     tool_events = [e for e in data.get("events", []) if e["type"] == "tool_call"]
     assert any("workflow_list" in (e["payload"].get("name") or []) for e in tool_events)
+
+
+def test_builtin_template_protected_from_delete() -> None:
+    """S152：预置模板（builtin）不可删——工具收编执行路径/安全网载体受保护。
+
+    种子模板（拆书/批量/图谱等）delete → 403；用户模板可删。
+    """
+    import tempfile
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    class _M:
+        model_name = "fake"
+
+        def respond(self, messages, tools):  # type: ignore[no-untyped-def]
+            from anyspark.core.types import ModelOutput
+
+            return ModelOutput(text="好的。")
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    client = TestClient(build_app(model=_M(), db_path=db))
+    wfs = client.get("/api/workflows").json()
+    builtin = next(w for w in wfs if w.get("builtin"))
+    users = [w for w in wfs if not w.get("builtin")]
+    # 预置模板删除 → 403
+    r = client.delete(f"/api/workflows/{builtin['id']}")
+    assert r.status_code == 403, f"builtin 应禁删: {r.status_code} {r.text}"
+    assert "不可删除" in r.json()["detail"]
+    # 仍在列表（没被删）
+    assert any(w["id"] == builtin["id"] for w in client.get("/api/workflows").json())
+    # 用户模板删除 → 200（临时库若无用户模板则跳过该断言）
+    if users:
+        r2 = client.delete(f"/api/workflows/{users[0]['id']}")
+        assert r2.status_code == 200
