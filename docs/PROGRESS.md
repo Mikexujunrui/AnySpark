@@ -44,7 +44,6 @@
 >   3. WORKFLOW 收尾后续：/api/batch 内存实现可再收编（前端已工作流模式并存，按需）
 >   4. ~~质量债修复清单~~ ✅（S148 A 死代码 + S149 B 决策三删 + S150 C 测试装配 helper + S151 D1 _wf_run_script 拆分；D2 app.py 瘦身留待按需——见 docs/REPAIR-LIST.md）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
-> [S154] 正在改 `routes_conversations.py` + `ChatPanel.tsx`：会话级一键回滚本轮修改（章节完美回滚 + 图谱增量回滚，方案1）——已声明（完成提交后删本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
 > ⚠️ S152 撞号裹挟留痕（归属说明，勿删）：并行会话 commit `ffc383a`（S152 预置模板保护）提交时裹挟了本会话对 `api/workflow.ts`/`WorkflowPanel.tsx`/`routes_workflow.py`/`test_workflow_api.py` 的**未提交**改动（工作流画布打开 setDraft/原地保存 id/运行绑 bookId）。代码无丢失、可编译；但该提交的 `req.id` 与 `startRun(bookId)` 依赖本会话的 `schemas.py`/`workflowStore.ts` 未提交改动——二者已随本会话提交 `b9xxxx` 补齐，HEAD 才完整。
 > [S145] 已提交完成（6 commits：311e94b/5fdfa93/624a515/fd5acbb/1b3e36f/edc0984，第三方评审修复）——声明行随 S145 提交后删除
