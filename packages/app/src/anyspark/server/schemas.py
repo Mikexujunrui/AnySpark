@@ -232,6 +232,19 @@ class BriefIn(BaseModel):
     book_id: str = "main"
 
 
+class ImportTxtBookIn(BaseModel):
+    """S156 书架页"单个 txt 直接上传成书"：建项目 + 存上传区 + 消化原子完成。
+
+    mode 缺省 chapters：书籍文本直接拆章成书（不做摘要卡提取，之后可自行提取）。
+    title 缺省 = 文件名去扩展名。
+    """
+
+    filename: str
+    data_b64: str
+    title: str = ""
+    mode: str = "chapters"
+
+
 class BriefGenerateIn(BaseModel):
     """S58 从现有项目数据自动生成简介草案（人工确认后生效）。"""
 
@@ -733,6 +746,9 @@ DEFAULT_SYSTEM = (
     # S43：DEFAULT_SYSTEM 回归极简（只留行为底线）——写作技巧类规则已抽为内容载体
     # （WritingSkill：镜头感/对白机锋/节奏控制等叙事技巧，见【叙事技巧】注入块），不再堆行为守则
     "首要目标是把正文写出来并落盘，不要为了准备而反复调用与当前任务无关的工具。"
+    # S157：非标准化/大批量任务优先工作流（8-15 事故教训：agent 找不到'提取前50章图谱'入口）
+    "面对非标准化、大批量、重复性任务（批量改写/批量审读/逐章图谱抽取/拆书提炼/章节加料等），"
+    "优先 workflow_list 查看现成工作流模板再 workflow_run，不要逐个手动调用原子工具。"
     "仅当用户给的任务方向不明确（种子含糊、无明确脉络、不知往哪个方向写）时，"
     "先调用 explore_direction 生成方向建议并在回复中列出询问用户选择；方向明确时直接写。"
     # S62b：一致性护栏（只防与已写内容的冲突，不限制叙事手法）——

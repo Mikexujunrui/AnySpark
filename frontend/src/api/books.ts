@@ -9,6 +9,20 @@ export const getBook = (id: string): Promise<BookData> =>
   get<BookData[]>("/api/books").then((bs) => bs.find((b) => b.id === id) as BookData);
 export const createBook = (data: Partial<BookData>): Promise<BookData> =>
   post("/api/books", { content: data.title || data.id || "新项目", book_id: data.id || data.title || "" });
+
+// S156：书架页"单个 txt 直接上传成书"——后端原子完成（建项目+上传+拆章，失败回滚）
+export const importTxtBook = (title: string, filename: string, dataB64: string): Promise<{
+  book: BookData;
+  kind: string;
+  count: number;
+  chapters: { order: number; title: string; chars: number }[];
+}> =>
+  post("/api/books/import-txt", {
+    title,
+    filename,
+    data_b64: dataB64,
+    mode: "chapters",
+  });
 export const updateBook = (id: string, data: Partial<BookData>): Promise<BookData> =>
   put(`/api/brief`, { content: data.description || "", book_id: id }).then(() => ({ id, ...data } as BookData));
 export const deleteBook = (id: string): Promise<unknown> => del(`/api/books/${id}`);

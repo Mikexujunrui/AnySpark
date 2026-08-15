@@ -40,6 +40,18 @@ def test_extract_txt_and_docx() -> None:
     assert "第一章" in extract_text(d) and "正文。" in extract_text(d)
 
 
+def test_extract_txt_gb18030_fallback() -> None:
+    """S156：国内书籍 txt 常见 GBK/GB18030 编码——utf-8 硬读会丢中文，必须回退。"""
+    ws = _ws()
+    gb = "第一章 起点\n雨夜抵达雾城。\n\n第二章 灯塔\n钟声响起。".encode("gb18030")
+    f = ws.save_upload("main", "书.txt", gb)
+    text = extract_text(f)
+    assert "第一章" in text and "起点" in text
+    # 拆章应出 2 章而非乱码 1 章
+    chs = chapterize(text, fallback_title="全文")
+    assert len(chs) == 2 and chs[0]["title"] == "第一章 起点"
+
+
 def test_extract_pdf_lightweight() -> None:
     """轻量 PDF：FlateDecode 文本流可提取；无流/扫描件返回提示。"""
     import zlib
@@ -79,6 +91,14 @@ def test_chapterize_chinese_and_english() -> None:
     en = "Chapter 1\nStart.\n\nCHAPTER 2\nThe end."
     chs2 = chapterize(en)
     assert len(chs2) == 2 and chs2[0]["title"] == "Chapter 1"
+
+
+def test_chapterize_skips_empty_volume_title() -> None:
+    """S156："第X卷"卷标题无正文时不应成章（空章跳过）。"""
+    text = "第一卷 倒吊人\n\n第一章 起点\n正文一。\n\n第二章 奇异\n正文二。"
+    chs = chapterize(text)
+    assert len(chs) == 2
+    assert chs[0]["title"] == "第一章 起点" and chs[1]["title"] == "第二章 奇异"
 
 
 def test_chapterize_fallback_single() -> None:

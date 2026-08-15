@@ -259,7 +259,7 @@ def test_manual_isolated_by_book() -> None:
     client.post(
         "/api/manual",
         json={
-            "content": "主人偏好冷峻文风",
+            "content": "作者偏好冷峻文风",
             "category": "style",
             "scope": "project",
             "book_id": "book-a",
@@ -267,5 +267,60 @@ def test_manual_isolated_by_book() -> None:
     )
     a = client.get("/api/manual?scope=project&book_id=book-a").json()
     b = client.get("/api/manual?scope=project&book_id=book-b").json()
-    assert any(e["content"] == "主人偏好冷峻文风" for e in a)
+    assert any(e["content"] == "作者偏好冷峻文风" for e in a)
     assert b == []
+
+
+def test_import_txt_book_creates_and_chapterizes() -> None:
+    """S156：书架页"单个 txt 直接上传成书"——建项目+GBK 解码+拆章+卷标题跳过。"""
+    import base64
+
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
+    novel = (
+        "第一卷 序章\n\n第一章 起点\n雨夜抵达。\n\n第二章 灯塔\n钟声响起。"
+        "\n\n第三章 怀表\n找到旧怀表。"
+    )
+    r = client.post(
+        "/api/books/import-txt",
+        json={
+            "title": "新书",
+            "filename": "新书.txt",
+            "data_b64": base64.b64encode(novel.encode("gb18030")).decode(),
+            "mode": "chapters",
+        },
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["book"]["id"] == "新书" and d["kind"] == "chapters" and d["count"] == 3
+    # 卷标题被跳过（空章）；三章内容正确
+    chs = client.get("/api/chapters?book_id=新书").json()
+    assert [c["title"] for c in chs] == ["第一章 起点", "第二章 灯塔", "第三章 怀表"]
+    assert "雨夜抵达" in chs[0]["content"]
+
+
+def test_import_txt_book_rollback_on_failure() -> None:
+    """S156：消化失败回滚——不留半成品项目。"""
+    import base64
+
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
+    r = client.post(
+        "/api/books/import-txt",
+        json={
+            "title": "坏书",
+            "filename": "坏.txt",
+            "data_b64": base64.b64encode(b"   ").decode(),  # 空白 → 提取失败
+            "mode": "chapters",
+        },
+    )
+    assert r.status_code == 400
+    # 项目目录已回滚（书架无此项目）
+    books = client.get("/api/books").json()
+    assert all(b["id"] != "坏书" for b in books)

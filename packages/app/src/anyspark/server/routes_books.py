@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from anyspark.server.deps import AppDeps
-from anyspark.server.schemas import BriefIn
+from anyspark.server.schemas import BriefIn, ImportTxtBookIn
 
 
 def make_books_router(deps: AppDeps) -> APIRouter:
@@ -64,6 +64,70 @@ def make_books_router(deps: AppDeps) -> APIRouter:
             "totalChars": 0,
             "brief": f"# {book_id}",
             "updatedAt": "",
+        }
+
+    @router.post("/api/books/import-txt", response_model=dict[str, Any])
+    def import_txt_book(req: ImportTxtBookIn) -> dict[str, Any]:
+        """S156：书架页"单个 txt 直接上传成书"——建项目 + 存上传区 + 消化 原子完成。
+
+        mode 缺省 chapters（书籍文本直接拆章成书，不做摘要卡提取）；title 缺省取文件名。
+        任一步失败回滚整个项目目录，不留空项目/孤儿上传物。
+        """
+        import base64
+        import shutil
+        from pathlib import Path
+
+        from anyspark.server.agent_factory import model_for_task
+        from anyspark.server.ingest import INGEST_ALLOWED_EXT, ingest_pipeline
+        from anyspark.server.workspace import _safe_title
+
+        title = (req.title or Path(req.filename).stem).strip()[:40]
+        book_id = _safe_title(title)
+        if not book_id:
+            raise HTTPException(status_code=422, detail="书名不能为空")
+        workspace = deps.workspace
+        d = workspace.project_dir(book_id)
+        if list(d.iterdir()):
+            raise HTTPException(status_code=409, detail=f"项目已存在: {book_id}")
+        workspace.write_brief(book_id, f"# {book_id}\n\n（从 txt 导入创建）")
+        try:
+            workspace.save_upload(book_id, req.filename, base64.b64decode(req.data_b64))
+            result = ingest_pipeline(
+                workspace,
+                deps.chapters,
+                deps.materials,
+                model_for_task(deps, "extraction"),
+                book_id,
+                req.filename,
+                mode=req.mode or "chapters",
+                allowed_ext=INGEST_ALLOWED_EXT,
+                skills=deps.skills,
+            )
+        except Exception:
+            shutil.rmtree(d, ignore_errors=True)  # 回滚：不留半成品项目
+            raise
+        if not result.ok:
+            shutil.rmtree(d, ignore_errors=True)
+            if result.error_code == "bad_ext":
+                raise HTTPException(
+                    status_code=400, detail="仅支持 txt/md/docx/pdf 文本（图片放未来）"
+                )
+            if result.error_code == "empty":
+                raise HTTPException(status_code=400, detail="无法提取文本（扫描件 OCR 放未来计划）")
+            if result.error_code == "dup":
+                raise HTTPException(status_code=409, detail=result.error)
+            raise HTTPException(status_code=500, detail=result.error or "消化失败")
+        chs = deps.chapters.list_by_book(book_id)
+        return {
+            "book": {
+                "id": book_id,
+                "title": book_id,
+                "chapterCount": len(chs),
+                "totalChars": sum(len(c.content or "") for c in chs),
+            },
+            "kind": result.kind,
+            "count": len(result.chapters),
+            "chapters": result.chapters,
         }
 
     @router.delete("/api/books/{book_id}", response_model=dict[str, Any])

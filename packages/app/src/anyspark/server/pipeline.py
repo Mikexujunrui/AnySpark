@@ -30,6 +30,20 @@ _CHAPTER_RE = re.compile(
 _IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
 
 
+def _decode_text(data: bytes) -> str:
+    """txt/md 编码检测：utf-8 优先，回退 gb18030（国内书籍 txt 常见 GBK/GB2312）。
+
+    S156：实测国内书籍 txt 常见 GB18030——原 utf-8 硬读（errors=ignore）
+    导致中文全丢、"第X章"标题消失、整本拆成 1 章乱码（前端渲染卡死）。
+    """
+    for enc in ("utf-8", "gb18030"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def extract_text(path: Path) -> str:
     """零依赖文本提取（txt/md 直读；docx zipfile；pdf zlib 尽力而为）。
 
@@ -38,7 +52,7 @@ def extract_text(path: Path) -> str:
     """
     suffix = path.suffix.lower()
     if suffix in (".txt", ".md", ".markdown"):
-        return path.read_text(encoding="utf-8", errors="ignore")
+        return _decode_text(path.read_bytes())
     if suffix == ".docx":
         return _extract_docx(path)
     if suffix == ".pdf":
@@ -121,21 +135,28 @@ def chapterize(text: str, fallback_title: str = "全文") -> list[dict[str, str]
 
     标题行（第X章/Chapter N）开新章；其余行归当前章。
     无任何标题 → 整篇作为一章（title=fallback）。
+    S156：跳过空内容章（"第X卷"卷标题无正文时不应成章）。
     """
     lines = text.split("\n")
     chapters: list[dict[str, str]] = []
     cur_title: str | None = None
     cur_lines: list[str] = []
+
+    def flush() -> None:
+        nonlocal cur_title, cur_lines
+        if cur_title is not None:
+            body = "\n".join(cur_lines).strip()
+            if body:  # 空内容章（如卷标题）跳过
+                chapters.append({"title": cur_title, "content": body})
+        cur_lines = []
+
     for line in lines:
         if _CHAPTER_RE.match(line):
-            if cur_title is not None:
-                chapters.append({"title": cur_title, "content": "\n".join(cur_lines).strip()})
+            flush()
             cur_title = line.strip()
-            cur_lines = []
         else:
             cur_lines.append(line)
-    if cur_title is not None:
-        chapters.append({"title": cur_title, "content": "\n".join(cur_lines).strip()})
+    flush()
     if not chapters:
         body = "\n".join(lines).strip()
         if body:
