@@ -7,7 +7,7 @@ anyspark.desktop — 桌面壳（轻量自研）。
 S110 修复：必须加载 http://127.0.0.1:{port}/（后端同端口 serve 前端 dist，
 FastAPI mount StaticFiles）——**不能**用 file:// 加载 index.html：
 Vite 构建产物的 /assets/* 绝对路径在 file:// 协议下解析到磁盘根目录，
-找不到 JS/CSS → 白屏（用户实测：后端已起、窗口白屏）。
+找不到 JS/CSS → 后端已起但窗口仍白屏（/assets 绝对路径在 file:// 下解析到磁盘根目录）。
 """
 
 from __future__ import annotations
