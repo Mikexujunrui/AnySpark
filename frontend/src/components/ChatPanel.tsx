@@ -359,18 +359,42 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   }, [sessionId])
 
   // Auto-save debounce
+  // S157（8-15 事故修复）：① streaming 期间不保存——前端数组此刻可能缺 agent 已落库的
+  // 回复（SSE 中断场景），覆盖写会把它们抹掉；② 保存前合并后端已有消息——把后端有而
+  // 前端缺的非 user 消息（agent 落库的 assistant/tool）补进数组，中断后恢复不再丢回复。
   useEffect(() => {
-    if (!loaded || !sessionId) return
+    if (!loaded || !sessionId || streaming) return
     clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(() => {
-      fetch(`/api/conversations/${sessionId}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ messages: messages.map(m => ({ role: m.role === 'agent' ? 'assistant' : m.role, content: m.text || '' })) }),
-      }).catch(e => console.error(`${DIAG_PREFIX} ChatPanel — 消息保存失败: %s`, e.message))
+    saveTimerRef.current = setTimeout(async () => {
+      try {
+        // 合并后端已有消息（GET 失败则退化为仅前端数组）
+        let serverMsgs: { role: string; content: string }[] = []
+        try {
+          const r = await fetch(`/api/conversations/${sessionId}/messages`)
+          if (r.ok) serverMsgs = await r.json()
+        } catch { /* 合并失败不阻断保存 */ }
+        const local = messages.map(m => ({ role: m.role === 'agent' ? 'assistant' : m.role, content: m.text || '' }))
+        const localKeys = new Set(local.map(m => `${m.role}\u0000${m.content}`))
+        const merged = [...local]
+        for (const sm of serverMsgs) {
+          if (sm.role === 'user') continue  // user 消息以前端为准（用户编辑/发送）
+          const k = `${sm.role}\u0000${sm.content}`
+          if (!localKeys.has(k)) {
+            merged.push(sm)
+            localKeys.add(k)
+          }
+        }
+        await fetch(`/api/conversations/${sessionId}/messages`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ messages: merged }),
+        })
+      } catch (e) {
+        console.error(`${DIAG_PREFIX} ChatPanel — 消息保存失败: %s`, (e as Error).message)
+      }
     }, 500)
     return () => clearTimeout(saveTimerRef.current)
-  }, [messages, bookId, sessionId, loaded])
+  }, [messages, bookId, sessionId, loaded, streaming])
 
   // S80：context 用量统计后端无此端点，移除（ContextBar 已能处理 null）
 

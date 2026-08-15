@@ -4240,3 +4240,34 @@ V4 对应物已齐：ToolContext.book_id（S74）+ 前端显式传（S152 系）
 **未做（YAGNI/已知）**：stop Event 共享（无用户级取消入口）；跨进程锁
 （发布版单进程）；"版本→会话"归属追踪（需工具层会话上下文，改动大收益低——
 知情提示已覆盖风险）。
+
+## S157: SSE 流空闲超时兜底 + auto-save 防覆盖（8-15 中断事故修复，主人实测驱动）（已完成 ✅）
+
+**事故**（8-15 20:19，哈利波特项目）：用户发"你能只提取前50章的图谱吗"→ agent 跑完
+turn 1（list_chapters，项目 1282 章）+ turn 2（完整回答生成，record 已落盘）→ **turn 2
+回答的 SSE 传输中断**（后端无完成/异常日志，流挂起）→ 前端 `parseSSE` 的 `for await`
+永远等不到流结束 → `streaming` 永久 true → ChatPanel 输入锁死（"无法执行命令"）；
+且前端 auto-save（`replace_messages` 全量覆盖写）用不含 turn 2 回复的本地数组把
+**已生成的回答从数据库抹掉**。回答与思维链幸存于 S49 recorder
+（`data/records/<conv_id>/events.jsonl`，turn 2 reasoning 1056 字完整）。
+
+**根因**（两个设计缺陷）：
+1. 前端 SSE 无空闲超时兜底——后端 120s 超时的 error 帧可能因 send 阻塞送不出，
+   前端就永远挂死；后端 gen() 的 yield 也可能因客户端不读而阻塞（双端挂死）
+2. 消息持久化依赖前端全量覆盖写——SSE 中断时前端数组缺 agent 已落库的回复，
+   auto-save 覆盖即抹掉（agent 写库与前端覆盖竞争，前端"最终一致"语义破坏）
+
+**修复（S157）**：
+- `useSSE.ts`：SSE 空闲超时 90s（每个事件重置）——流挂起超时 → abort 连接 + onError
+  提示（AbortError 由 catch 静默消化；用户手动 cancel 同路径不报错）→ finally 解锁
+  streaming；超时后后端 send 失败自动清理 agent 线程
+- `ChatPanel.tsx` auto-save：① streaming 期间跳过（避免与 agent 写库竞争）；
+  ② 保存前 GET 后端已有消息，把后端有而前端缺的**非 user 消息**（agent 落库的
+  assistant/tool）合并进数组再 POST（user 以前端为准）——中断恢复后不再丢回复
+- 数据修复：把被 auto-save 覆盖抹掉的 turn 2 回复从 recorder 手动补回 messages 表
+  （会话历史完整，刷新即可见）
+
+**验证**：前端 typecheck/lint/build/vitest 18 全绿；纯前端改动（后端无变化）。
+**未做（YAGNI）**：会话列表跨会话消息合并（前端持有的会话级消息数组，编辑/整理语义
+不变，仅防丢）；后端主动断开挂起连接（依赖前端超时先行，send 失败自动清理）。
+

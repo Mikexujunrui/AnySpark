@@ -30,6 +30,11 @@ export interface SSEOptions {
   autoModeEnabled: boolean
 }
 
+// S157：SSE 空闲超时兜底（8-15 事故修复）——后端 120s 无事件才发 error 帧，且 error 帧的
+// send 可能因客户端不读而阻塞（turn2 回答生成后流中断，streaming 永久 true 锁死输入、
+// 无法再发命令）。前端 90s 无任何事件 → abort 连接 + 报错解锁；后端 send 失败自动清理线程。
+const IDLE_STREAM_TIMEOUT_MS = 90_000
+
 export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onMetrics, onQueueConsume, onBatchProposal, onSkillRefine, onError }: SSEOptions & SSECallbacks) {
   const [streaming, setStreaming] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
@@ -67,6 +72,21 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
     doneStepsRef.current = 0
     let streamingStarted = false
 
+    // S157：空闲计时器——每个事件重置；流挂起超时则 abort 连接（AbortError 由 catch 静默消化，
+    // 错误提示已在定时器回调里给出；用户手动 cancel 走同一 abort 路径但不报错）
+    let idleTimer: ReturnType<typeof setTimeout> | null = null
+    const resetIdle = () => {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = setTimeout(() => {
+        idleTimer = null
+        if (mountedRef.current) {
+          onError?.(new Error('流式响应空闲超时（90 秒无数据），连接已中断，请重试。'), msg)
+          controller.abort()
+        }
+      }, IDLE_STREAM_TIMEOUT_MS)
+    }
+    resetIdle()
+
     // S98：带轮次/步骤计数的进度（ProgressIndicator 用真实轮次进度 + 工具完成数）
     const progressNow = (stage: string, detail?: string) => onProgress?.({
       stage,
@@ -97,6 +117,7 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
 
       for await (const event of parseSSE(res)) {
         if (!mountedRef.current) break
+        resetIdle()  // 每个事件重置空闲计时（模型思考/工具执行期也可达数十秒）
         const data = event.parsed as Record<string, unknown> | null
 
         switch (event.type) {
@@ -224,6 +245,8 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
       if (e instanceof DOMException && e.name === 'AbortError') return
       onError?.(e instanceof Error ? e : new Error(String(e)), msg)
     } finally {
+      if (idleTimer) clearTimeout(idleTimer)
+      idleTimer = null
       if (abortRef.current === controller) abortRef.current = null
       if (mountedRef.current) setStreaming(false)
     }
