@@ -222,15 +222,18 @@ def make_agent(
         if mind_block:
             append_blocks.append(mind_block)
     # S74c 心智变更通知（未读）：agent 读到应告知用户（知情），用户可要求改回（指导权）
+    # S158c：扩展 action=system（后台事件如工作流完成）——同样注入，agent 汇报给用户
     if "manual" not in skip:
         notices = deps.manual.unread_notices(book_id)
         if notices:
-            nlines = ["# 心智变更通知（请在本轮回复中告知用户；用户可要求改回/纠正）"]
+            nlines = ["# 通知（请在本轮回复中告知用户；偏好变更可要求改回/纠正）"]
             for n in notices:
                 if n["action"] == "update":
                     nlines.append(f"- 修改了偏好：「{n['old_content']}」→「{n['new_content']}」")
                 elif n["action"] == "delete":
                     nlines.append(f"- 删除了偏好：「{n['old_content']}」")
+                elif n["action"] == "system":
+                    nlines.append(f"- 【系统】{n['new_content']}")
                 else:
                     nlines.append(f"- 新增偏好：「{n['new_content']}」")
             append_blocks.append("\n".join(nlines))

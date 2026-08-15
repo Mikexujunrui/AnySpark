@@ -277,7 +277,6 @@ def test_workflow_agent_run_passes_params() -> None:
     工具不透传 params（create_task 无 params），agent 只能跑模板缺省（全部章节）。
     HTTP 端点 run_workflow 早已支持 params（WorkflowRunIn.params），工具层补齐对齐。
     """
-    import json as _json
 
     from anyspark.core.protocol import ToolSpec
     from anyspark.server.tools_workflow import make_workflow_tools
@@ -321,6 +320,55 @@ def test_workflow_agent_run_passes_params() -> None:
     assert task["results"] == {"chapter_ids": ["c1", "c2"]}
 
     # 非法 params → 明确报错（不静默忽略）
-    res2 = run_impl(ToolSpec(name="workflow_run"), {"template_id": "wf-extract-test", "params": "不是json"})
+    res2 = run_impl(
+        ToolSpec(name="workflow_run"), {"template_id": "wf-extract-test", "params": "不是json"}
+    )
     assert not res2.ok
     assert "JSON" in res2.content or "不是合法" in res2.content
+
+
+def test_workflow_completion_notify_system_notice() -> None:
+    """S158c：任务终态 → 系统通知（manual_notices action=system）。
+
+    agent 下次会话装配时未读注入——"工作流完成后的汇报"闭环补齐。
+    """
+    import json as _json
+
+    from anyspark.core.protocol import ToolSpec
+    from anyspark.server.notify import notify_workflow_completion
+    from anyspark.server.tools_workflow import make_workflow_tools
+    from anyspark.workflow.definition import WorkflowDef, WorkflowNode
+    from anyspark.workflow.store import WorkflowStore
+
+    db = Path(tempfile.mkdtemp()) / "wf.db"
+    store = WorkflowStore(db)
+    wf = WorkflowDef(
+        id="wf-notify-test",
+        name="完成通知测试",
+        nodes=[WorkflowNode(id="n1", kind="script", label="noop", params={"function": "noop"})],
+    )
+    store.add_template(wf, builtin=True)
+
+    # 模拟任务完成：手动把任务置 done（不跑引擎，避免 LLM）
+    task_id = store.create_task(wf, book_id="main", template_id="wf-notify-test")
+    store.update_task_status(task_id, "done")
+
+    from anyspark.align import ManualStore
+
+    mdb = Path(tempfile.mkdtemp()) / "m.db"
+    manual = ManualStore(mdb)
+    try:
+        notify_workflow_completion(store, manual, task_id)
+        notices = manual.unread_notices("main")
+        assert len(notices) == 1
+        assert notices[0]["action"] == "system"
+        assert "完成通知测试" in notices[0]["new_content"]
+
+        # 失败任务 → 失败通知
+        tid2 = store.create_task(wf, book_id="main", template_id="wf-notify-test")
+        store.update_task_status(tid2, "failed", error="抽取失败: LLM 超时")
+        notify_workflow_completion(store, manual, tid2)
+        n2 = manual.unread_notices("main")
+        assert any("失败" in x["new_content"] and "抽取失败" in x["new_content"] for x in n2)
+    finally:
+        manual.close()

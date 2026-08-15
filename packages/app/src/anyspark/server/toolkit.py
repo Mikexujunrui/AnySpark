@@ -281,7 +281,11 @@ def build_toolkit(
         from anyspark.server.tools_workflow import make_workflow_tools
 
         for _spec, _impl in make_workflow_tools(
-            ctx.workflow_store, ctx.workflow_engine, ctx.workflow_generator, book_id=ctx.book_id
+            ctx.workflow_store,
+            ctx.workflow_engine,
+            ctx.workflow_generator,
+            book_id=ctx.book_id,
+            manual=ctx.manual,
         ):
             registry.register(_spec, _impl)
 

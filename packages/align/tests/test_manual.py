@@ -184,3 +184,22 @@ def test_notices_on_update_and_delete() -> None:
     store.mark_notices_read()
     all_n = store.list_notices()
     assert len(all_n) == 2  # update + delete
+
+
+def test_system_notice_roundtrip() -> None:
+    """S158c：系统通知（工作流完成等）——add_system_notice → unread → mark_read。"""
+    store = ManualStore(_db())
+    try:
+        store.add_system_notice("main", "工作流「图谱抽取」已完成")
+        notices = store.unread_notices("main")
+        assert len(notices) == 1
+        n = notices[0]
+        assert n["action"] == "system"
+        assert "图谱抽取" in n["new_content"]
+        assert n["read"] == 0
+        # 按项目隔离 + 已读流转
+        assert store.unread_notices("其他书") == []
+        assert store.mark_notices_read("main") == 1
+        assert store.unread_notices("main") == []
+    finally:
+        store.close()

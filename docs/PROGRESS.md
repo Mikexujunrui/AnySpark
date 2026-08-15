@@ -4324,3 +4324,25 @@ workflow_status 轮询等待（S108 防死循环合理收尾）→ 任务后台�
 
 **验证**：ruff/mypy 绿；冒烟任务 3 章（loop iterations=3）→ 50 章任务（iterations=50，
 items 49 条无失败标记）；图谱实体 first_chapter 正确标记。
+
+## S158c: 工作流完成通知闭环（agent 下次会话注入知晓）+ S108 轮询豁免（主人拍板 1+2）
+
+**主人决策**（8-15 讨论）：方案 A（S108 豁免 + 轮询上限）+ B（完成通知）都做；声音不新增（S155 已有）。
+
+**A 部分（agent 主循环行为）**：
+- S108 死循环检测排除 workflow_status——轮询等异步任务合法（幂等只读），
+  之前 agent 想等也等不了（6 次被掐）
+- workflow_status 工具描述加轮询纪律："未完成最多查 3-5 次；长任务告知用户
+  '后台运行中，完成后会提醒'并结束对话"——短任务等到 done 汇报，长任务快速收尾
+
+**B 部分（完成通知——补齐"完成后的汇报"缺口）**：
+- ManualStore.add_system_notice(book_id, content)：通用系统通知（manual_notices
+  action=system，与偏好变更通知同表）
+- 通知写入点：工作流任务终态（done/failed）→ routes_workflow（HTTP 启动 + 断点续跑）
+  与 tools_workflow（agent 启动）三个后台线程统一调 notify.notify_workflow_completion
+- agent_factory 注入渲染支持 action=system（【系统】前缀）；未读通知 mark_read 统一
+- 效果：任务完成后用户回来发任何消息，agent 上下文自动带"工作流「X」已完成"，直接汇报
+
+**测试 +3**（system notice 往返 / notify 完成+失败 / workflow_status 15 轮轮询不误伤）；
+ruff/mypy 全绿；端到端验证：3 章任务 done → system 通知落库 → 新会话注入
+（【系统】行在通知块，16 条未读全部渲染）。

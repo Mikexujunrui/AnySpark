@@ -288,20 +288,26 @@ class Agent:
             # S108：重复调用检测（智能停止，非硬限——对齐 pi shouldStopAfterTurn 钩子位）：
             # 连续 6 轮工具调用签名完全相同（name+参数）→ 判定死循环，停止报错。
             # 递进式真实任务（每轮不同参数）永不误伤；真死循环（同一调用反复）拦截。
+            # S158c：workflow_status 轮询合法（等异步任务完成，幂等只读），不参与死循环判定
             if output.tool_calls:
-                sig = json.dumps(
-                    sorted(
-                        (c.name, json.dumps(c.arguments, sort_keys=True)) for c in output.tool_calls
-                    ),
-                    ensure_ascii=False,
-                )
-                self._call_signatures.append(sig)
-                if len(self._call_signatures) >= 6 and len(set(self._call_signatures[-6:])) == 1:
-                    msg = "检测到连续重复的工具调用（可能死循环），已终止。"
-                    store.append(conversation_id, Message(role="assistant", content=msg))
-                    self.events.emit(Event(type="text", payload={"content": msg}))
-                    self.events.emit(Event(type="done", payload={}))
-                    return Turn(text=msg, tool_calls=executed, tool_results=results, error=msg)
+                sig_calls = [c for c in output.tool_calls if c.name != "workflow_status"]
+                if sig_calls:
+                    sig = json.dumps(
+                        sorted(
+                            (c.name, json.dumps(c.arguments, sort_keys=True)) for c in sig_calls
+                        ),
+                        ensure_ascii=False,
+                    )
+                    self._call_signatures.append(sig)
+                    if (
+                        len(self._call_signatures) >= 6
+                        and len(set(self._call_signatures[-6:])) == 1
+                    ):
+                        msg = "检测到连续重复的工具调用（可能死循环），已终止。"
+                        store.append(conversation_id, Message(role="assistant", content=msg))
+                        self.events.emit(Event(type="text", payload={"content": msg}))
+                        self.events.emit(Event(type="done", payload={}))
+                        return Turn(text=msg, tool_calls=executed, tool_results=results, error=msg)
 
             # 有工具调用：并行执行并把结果回填（S21 移植 pi 的 executeToolCallsParallel；
             # ThreadPoolExecutor 保持输入顺序，写工具内部有锁保证线程安全）

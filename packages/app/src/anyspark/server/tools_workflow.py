@@ -26,6 +26,7 @@ def make_workflow_tools(
     workflow_engine: Any,
     workflow_generator: Any,
     book_id: str = "main",  # S152g：当前项目（agent 未显式传 book_id 时任务落当前项目）
+    manual: Any = None,  # S158c：任务完成通知（agent 下次会话注入知晓）
 ) -> list[tuple[Any, Any]]:
     """装配工作流 agent 工具组（返回 [(spec, implementer), ...]）。"""
 
@@ -146,6 +147,14 @@ def make_workflow_tools(
             # 状态已在任务里，后台异常不抛给 Agent
             with contextlib.suppress(Exception):
                 workflow_engine.run_task(task_id)
+            # S158c：任务终态 → 系统通知（agent 下次会话注入知晓）
+            if manual is not None:
+                try:
+                    from anyspark.server.notify import notify_workflow_completion
+
+                    notify_workflow_completion(workflow_store, manual, task_id)
+                except Exception:
+                    pass
 
         threading.Thread(target=_run, daemon=True).start()
         return ToolResult(
@@ -165,6 +174,8 @@ def make_workflow_tools(
         description=(
             "查工作流任务进度/结果。传 task_id（workflow_run 返回）。"
             "返回当前状态（done/failed/waiting_approval/running）、各节点状态与输出摘要。"
+            "【轮询纪律】任务未完成时最多查询 3-5 次；长时间任务（如大批量逐章处理）"
+            "告知用户'任务已在后台运行，完成后会提醒'并结束对话，不要持续轮询。"
         ),
         params=[
             ParamSpec(

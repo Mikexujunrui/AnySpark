@@ -351,6 +351,22 @@ class ManualStore:
     # ------------------------------------------------------------------
     # S74c 变更通知（用户知情 + 指导权；会话注入提醒，API 供前端展示）
     # ------------------------------------------------------------------
+    def add_system_notice(self, book_id: str, content: str) -> None:
+        """S158c：系统通知（工作流任务完成/失败等后台事件）——
+
+        agent 下次会话装配时未读注入（agent_factory 渲染 action=system），
+        前端 /api/manual/notices 同表展示（已读态统一管理）。
+        """
+        with self._lock:
+            self._conn.execute(
+                "INSERT INTO manual_notices"
+                " (id, action, entry_id, old_content, new_content, category, scope,"
+                "  book_id, created_at, read)"
+                " VALUES (?, 'system', '', '', ?, 'habit', 'project', ?, ?, 0)",
+                (uuid.uuid4().hex, content, book_id, _now()),
+            )
+            self._conn.commit()
+
     def unread_notices(self, book_id: str = "main") -> _NoticeList[dict[str, Any]]:
         """未读变更通知（会话注入渲染用）。"""
         with self._lock:

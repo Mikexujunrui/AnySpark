@@ -141,6 +141,13 @@ def make_workflow_router(deps: AppDeps) -> APIRouter:
                 workflow_engine.run_task(task_id)
             except Exception as exc:
                 logger.warning("工作流续跑异常 %s: %s", task_id, exc)
+            # S158c：任务终态 → 系统通知（agent 下次会话注入知晓）
+            try:
+                from anyspark.server.notify import notify_workflow_completion
+
+                notify_workflow_completion(deps.workflow_store, deps.manual, task_id)
+            except Exception:
+                pass
 
         threading.Thread(target=_run, daemon=True).start()
         return deps.workflow_store.get_task(task_id) or {}
@@ -215,6 +222,13 @@ def make_workflow_router(deps: AppDeps) -> APIRouter:
                 workflow_engine.run_task(task_id)
             except Exception as exc:
                 logger.warning("工作流后台执行异常 %s: %s", task_id, exc)
+            # S158c：任务终态 → 系统通知（agent 下次会话注入知晓）
+            try:
+                from anyspark.server.notify import notify_workflow_completion
+
+                notify_workflow_completion(deps.workflow_store, deps.manual, task_id)
+            except Exception:
+                pass
 
         threading.Thread(target=_run, daemon=True).start()
         return {"task_id": task_id, "status": "queued"}

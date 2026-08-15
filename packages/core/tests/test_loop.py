@@ -534,3 +534,27 @@ def test_terminate_stops_loop() -> None:
     assert "任务完成" in turn.text or "停止" in turn.text
     assert turn.error is None  # 不是迭代上限错误
     assert len(turn.tool_calls) == 1  # 只跑了一轮
+
+
+def test_workflow_status_polling_not_deadloop() -> None:
+    """S158c：workflow_status 轮询合法（等异步任务，幂等只读）——不触发 S108 死循环拦截。
+
+    连续 N 轮只调 workflow_status（签名相同）不应被当作死循环终止；
+    之后正常终答。
+    """
+    from anyspark.core import ToolCall
+
+    polls = [
+        ModelOutput(
+            tool_calls=[
+                ToolCall(name="workflow_status", arguments={"task_id": "task-x"})
+            ]
+        )
+        for _ in range(15)
+    ]
+    polls.append(_no_tool("任务还在跑，我先结束，后台继续。"))
+    agent = _make_agent(ScriptedModel(polls))
+    turn = agent.run("查任务进度")
+    assert turn.error is None
+    assert "重复的工具调用" not in turn.text
+    assert turn.text.startswith("任务还在跑")
