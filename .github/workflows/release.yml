@@ -56,6 +56,7 @@ jobs:
         run: bash scripts/build_release.sh ${{ github.ref_name }}
 
       - name: Upload release asset
+        shell: bash  # Windows runner 默认 pwsh 不支持 \ 续行/||，必须显式 bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
