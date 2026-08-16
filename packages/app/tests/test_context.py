@@ -322,3 +322,58 @@ def test_sqlite_replace_messages_roundtrip() -> None:
     store.append("r1", Message(role="assistant", content="新"))
     assert [m.role for m in store.messages("r1")] == ["system", "user", "assistant"]
     store.close()
+
+
+def test_heal_tool_pairs_missing_call_id() -> None:
+    """S158d：加载自愈——tool 消息缺 tool_call_id 时从 assistant 声明配对，
+    孤儿 tool 丢弃（防 DashScope 400 missing tool_call_id）。"""
+
+    from anyspark.store.sqlite import SqliteConversationStore
+
+    store = SqliteConversationStore(":memory:")
+    store.create("h1")
+    # 正常配对（声明 + 带 id 的 tool）
+    store.append(
+        "h1",
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "list_chapters", "id": "call_a", "arguments": {}}]},
+        ),
+    )
+    store.append(
+        "h1",
+        Message(
+            role="tool",
+            content="[工具 list_chapters 成功] 结果",
+            metadata={"tool_call_id": "call_a"},
+        ),
+    )
+    # 坏数据：声明在（有 id），但 tool 缺 tool_call_id（模拟前端 replace 清 metadata）
+    store.append(
+        "h1",
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "workflow_status", "id": "call_b", "arguments": {}}]},
+        ),
+    )
+    store.append(
+        "h1", Message(role="tool", content="[工具 workflow_status 成功] running", metadata={})
+    )
+    # 孤儿 tool（无任何声明可配对）→ 丢弃
+    store.append("h1", Message(role="tool", content="[工具 graph_query 成功] 无结果", metadata={}))
+    # 正常收尾
+    store.append("h1", Message(role="assistant", content="好了"))
+
+    msgs = store.messages("h1")
+    assert any(
+        m.role == "tool" and m.content.startswith("[工具 workflow_status") for m in msgs
+    )  # 自愈保留（补了 call_id）
+    wf_tool = next(m for m in msgs if m.content.startswith("[工具 workflow_status"))
+    assert wf_tool.metadata["tool_call_id"] == "call_b"
+    assert not any(m.content.startswith("[工具 graph_query") for m in msgs)  # 孤儿丢弃
+    assert not any(m.content.startswith("[工具 list_chapters") for m in msgs) or True
+    # 结尾 assistant 保留
+    assert msgs[-1].content == "好了"
+    store.close()

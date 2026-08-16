@@ -184,7 +184,7 @@ class SqliteConversationStore(ConversationStore):
             "SELECT role, content, metadata FROM messages WHERE conversation_id = ? ORDER BY seq",
             (conversation_id,),
         ).fetchall()
-        return [
+        msgs = [
             Message(
                 role=row["role"],
                 content=row["content"],
@@ -192,6 +192,46 @@ class SqliteConversationStore(ConversationStore):
             )
             for row in rows
         ]
+        return self._heal_tool_pairs(msgs)
+
+    def _heal_tool_pairs(self, msgs: list[Message]) -> list[Message]:
+        """S158d：加载时自愈——tool 消息缺 tool_call_id 时从相邻 assistant 声明配对；
+
+        配对不上的孤儿 tool 消息丢弃（防 OpenAI 协议 400 missing tool_call_id）。
+        背景：前端 auto-save 的 replace_messages 曾用 metadata={} 重建消息 + S145b
+        过滤空 content 声明 → tool_call_id/声明配对丢失 → DashScope 400（8-15 实测）。
+        幂等无副作用（不改库，每次读取修复内存返回）。
+        """
+        from collections import deque
+
+        decl_ids: deque[str] = deque()
+        out: list[Message] = []
+        for m in msgs:
+            if m.role == "assistant" and m.metadata.get("tool_calls"):
+                for tc in m.metadata["tool_calls"]:
+                    tid = str(tc.get("id") or "") if isinstance(tc, dict) else ""
+                    if tid:
+                        decl_ids.append(tid)
+                out.append(m)
+            elif m.role == "tool":
+                tid = str(m.metadata.get("tool_call_id") or "")
+                if tid:
+                    # 已配对：从声明队列移除对应 id（队列保持=未配对声明）
+                    if tid in decl_ids:
+                        decl_ids.remove(tid)
+                    out.append(m)
+                    continue
+                # 缺 tool_call_id：从最近的未配对声明补（保持声明→tool 顺序）
+                if decl_ids:
+                    md = dict(m.metadata)
+                    md["tool_call_id"] = decl_ids.popleft()
+                    out.append(Message(role=m.role, content=m.content, metadata=md))
+                else:
+                    # 孤儿 tool（无配对声明）→ 丢弃（保留会触发 400；内容已在展示层）
+                    continue
+            else:
+                out.append(m)
+        return out
 
     def fork(
         self, conversation_id: str, fork_point: str = "", inherit_messages: bool = True

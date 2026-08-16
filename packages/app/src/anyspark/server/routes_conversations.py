@@ -125,17 +125,43 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
     def save_conversation_messages(conv_id: str, req: MessagesSaveIn) -> dict[str, int]:
         """S80：前端全量保存消息（编辑消息/手动整理后 auto-save 覆盖写）。
 
-        事务内清空该会话消息后重新写入（前端持有完整消息数组，覆盖语义一致）；
-        与 chat 过程中的自动落库不冲突（最终一致）。
+        S158d 修复（8-15 实测 400 missing tool_call_id）：覆盖写不再破坏工具配对——
+        ① 前端消息保留旧 metadata（tool_call_id/tool_calls）；② 补回前端 GET 过滤掉的
+        技术消息（空 content 的 assistant 声明 + tool 结果），按旧顺序插回。
+        否则 tool 消息缺 tool_call_id、声明缺失 → DashScope 拒绝整个请求。
         """
         conv = deps.store.get(conv_id)
         if conv is None:
             raise HTTPException(status_code=404, detail="会话不存在")
         from anyspark.core import Message
 
-        msgs = [Message(role=m.role, content=m.content, metadata={}) for m in req.messages]
-        deps.store.replace_messages(conv_id, msgs)
-        return {"saved": len(msgs)}
+        old = deps.store.messages(conv_id)
+        old_by_key: dict[tuple[str, str], Message] = {}
+        for m in old:
+            old_by_key.setdefault((m.role, m.content or ""), m)
+        old_seq = {(m.role, m.content or ""): i for i, m in enumerate(old)}
+        # ① 前端消息：保留旧 metadata（配对信息不在前端可见层）
+        new_msgs: list[Message] = []
+        for mp in req.messages:
+            om = old_by_key.get((mp.role, mp.content or ""))
+            metadata = dict(om.metadata) if om else {}
+            new_msgs.append(
+                Message(role=mp.role, content=mp.content, metadata=metadata)
+            )
+        # ② 补回技术消息（前端数组不含：空 content 声明被 S145b 过滤、tool 配对无展示价值）
+        new_keys = {(m.role, m.content or "") for m in new_msgs}
+        for om in old:
+            is_tech = om.role == "tool" or (
+                om.role == "assistant"
+                and not (om.content or "").strip()
+                and bool(om.metadata.get("tool_calls"))
+            )
+            if is_tech and (om.role, om.content or "") not in new_keys:
+                new_msgs.append(om)
+        # 按旧顺序重排（技术消息插回原位）
+        new_msgs.sort(key=lambda m: old_seq.get((m.role, m.content or ""), 9999))
+        deps.store.replace_messages(conv_id, new_msgs)
+        return {"saved": len(new_msgs)}
 
     @router.delete("/api/conversations/{conv_id}", response_model=dict[str, bool])
     def delete_conversation(conv_id: str) -> dict[str, bool]:

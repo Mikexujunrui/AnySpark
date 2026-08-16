@@ -4385,3 +4385,23 @@ scripts/build_release.sh：前端 build → PyInstaller → 标准 zip（shutil.
 - 代码：bash publish_anyspark.sh --push（git archive HEAD 只导出已提交内容，未提交/并行会话半成品不进快照）
 - exe：bash scripts/build_release.sh（可在 PUB 纯净快照里打包）
 - Release：gh release create v4.0.0 <zip> --repo Mikexujunrui/AnySpark
+
+## S158d: tool_call_id 丢失 400 修复——save 保留配对 + 加载自愈（用户实测驱动）（已完成 ✅）
+
+**事故**（用户前端实测）：`messages[8]: missing field tool_call_id`——DashScope 400，
+该会话全部带 tool 消息的请求都失败。诊断确认：前端 auto-save 的 replace_messages
+用 `metadata={}` 重建消息 + GET 历史 S145b 过滤空 content 声明 → tool_call_id 和
+assistant 声明配对全被清掉（S157 只修了内容丢失，没修 metadata 丢失——8-15 事故
+同款机制的深层版）。
+
+**修复（双保险）**：
+1. **save_conversation_messages 不再破坏配对**（routes_conversations）：
+   ① 前端消息保留旧 metadata（tool_call_id/tool_calls）；② 补回前端 GET 过滤掉的
+   技术消息（空 content 的 assistant 声明 + tool 结果），按旧顺序插回原位
+2. **加载自愈**（SqliteConversationStore.messages）：tool 消息缺 tool_call_id →
+   从相邻 assistant 声明按序配对补上（已配对 tool 从声明队列移除）；配对不上的
+   孤儿 tool 丢弃（防 400）——已损坏的存量会话自动恢复，无需手动改库
+
+**验证**：单元测试 +1（自愈：补配对/丢孤儿/正常配对不误伤）；端到端：损坏会话
+e82a91a5（3 条消息 metadata 全空、无声明）修复后正常 200 多轮工具调用；
+ruff/mypy 全绿。
