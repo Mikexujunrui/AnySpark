@@ -103,7 +103,8 @@ export default function LibraryShelfPanel() {
     setMsg(null);
     try {
       const r = await refineLibrarySkill(bookId);
-      flash("ok", `已从《${name}》提炼出技能「${r.draft?.name || ""}」——下方草稿区确认生效`);
+      const n = r.drafts?.length ?? (r.draft ? 1 : 0);
+      flash("ok", `已从《${name}》提炼出 ${n} 条技能草稿——下方草稿区逐一确认生效`);
       loadData();
     } catch (e: any) {
       const detail = String(e?.message || "");

@@ -4425,3 +4425,16 @@ ruff/mypy 全绿。
 - SkillPanel/SkillsShelfPanel 采纳/拒绝按钮包 catch + alert（失败可见）
 
 **验证**：前端 typecheck/lint/build/vitest 18 全绿；纯前端改动（后端无变化）。
+
+## S158f: 同类 bug 全扫描（S158e 延伸，主人质询"还有类似bug吗"）（已完成 ✅）
+
+**系统扫描**（前端 [0] 写死 / 分组漏渲染 / 静默 catch / 后端取第一个）：
+1. **LibraryPanel.tsx:273 同款 [0] bug**（S158e 漏网的兄弟面板）：项目内"参考书"
+   面板上传也用 `library[0]?.id`——第二本内容进第一本 → 修（同名覆盖/独立建库）
+2. **refine 提示误导**：拆书生成 N 条草稿但提示只显示第一条名 → 改"N 条草稿
+   逐一确认"（api 类型补 drafts 字段）
+3. **排查无问题的**：BookDetail/ChaptersPanel 的 [0] 是合理默认（首次选中）；
+   后端 tools_domain 三处 [0] 都有"唯一匹配"条件保护；其他面板无漏组；
+   skill_refine 失败路径全部有明确错误透出；静默 catch 均为后台加载类（合理）
+
+**验证**：前端 typecheck/build/vitest 18 全绿。

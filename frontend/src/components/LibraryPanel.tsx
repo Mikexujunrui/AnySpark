@@ -270,7 +270,12 @@ export default function LibraryPanel({ bookId }: { bookId: string }) {
               onChange={async (e) => {
                 const f = e.target.files?.[0];
                 if (!f) return;
-                const target = library[0]?.id || (await createLibraryBook(f.name.replace(/\.[^.]+$/, ""))).id;
+                // S158e：同名覆盖/独立建库（此前 library[0] 把新书内容塞进第一本）
+                const title = f.name.replace(/\.[^.]+$/, "");
+                let target = library.find((b) => b.name === title)?.id;
+                if (!target) {
+                  target = (await createLibraryBook(title)).id;
+                }
                 await onImportFile(target, f);
                 e.target.value = "";
               }}

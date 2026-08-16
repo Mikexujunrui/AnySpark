@@ -42,7 +42,11 @@ export async function deleteLibraryBook(bookId: string): Promise<{ ok: boolean }
 export async function refineLibrarySkill(
   bookId: string,
   hint = "",
-): Promise<{ ok: boolean; draft: { id: string; name: string } }> {
+): Promise<{
+  ok: boolean;
+  draft: { id: string; name: string };
+  drafts?: { id: string; name: string }[];
+}> {
   return apiPost(`/api/library/${bookId}/refine-skill`, { hint });
 }
 
