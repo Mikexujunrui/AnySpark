@@ -145,9 +145,7 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
         for mp in req.messages:
             om = old_by_key.get((mp.role, mp.content or ""))
             metadata = dict(om.metadata) if om else {}
-            new_msgs.append(
-                Message(role=mp.role, content=mp.content, metadata=metadata)
-            )
+            new_msgs.append(Message(role=mp.role, content=mp.content, metadata=metadata))
         # ② 补回技术消息（前端数组不含：空 content 声明被 S145b 过滤、tool 配对无展示价值）
         new_keys = {(m.role, m.content or "") for m in new_msgs}
         for om in old:

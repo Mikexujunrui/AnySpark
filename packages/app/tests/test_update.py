@@ -26,6 +26,8 @@ def test_is_newer() -> None:
 
 
 def test_local_version_reads_pyproject() -> None:
+    """本地版本应能读到（格式 X.Y.Z；不写死具体值——版本号随发布递增）。"""
+    import re
+
     v = get_local_version()
-    # 根 pyproject.toml version=4.0.0（S164 对齐 Release tag）
-    assert v == "4.0.0", f"本地版本应为 4.0.0，实际 {v}"
+    assert re.match(r"^\d+\.\d+\.\d+$", v), f"版本格式应为 X.Y.Z，实际 {v}"
