@@ -6,6 +6,10 @@ on:
   push:
     tags: ["v*"]
 
+# GITHUB_TOKEN 需要 contents: write 才能创建/上传 Release（缺了 403）
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:

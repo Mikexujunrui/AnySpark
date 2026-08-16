@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------
 [project]
 name = "anyspark"
-version = "4.0.1"  # S167：v4.0.1 发布（对齐 GitHub Release tag）
+version = "4.0.2"  # S168：v4.0.2 发布（含书库修复 + CI 三平台）
 description = "AnySpark v4 创作引擎（workspace 根项目）"
 requires-python = ">=3.11"
 dependencies = [

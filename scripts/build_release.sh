@@ -79,7 +79,7 @@ import shutil, sys
 stage, out = sys.argv[1], sys.argv[2]
 base = out[:-4]
 shutil.make_archive(base, "zip", root_dir=stage)
-print(f"zip 已生成: {out}")
+print(f"zip created: {out}")  # 保持 ASCII（Windows runner cp1252 编码打不了中文 stdout）
 EOF
 else
   tar -czf "$OUT" -C "$STAGE" .
