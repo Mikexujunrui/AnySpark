@@ -82,7 +82,9 @@ export default function LibraryShelfPanel() {
   const onImportFile = async (file: File) => {
     const text = await file.text();
     const title = file.name.replace(/\.[^.]+$/, "");
-    let target = books[0]?.id;
+    // S158e：每本上传的书独立建库（此前 target=books[0] 把新书内容塞进第一本，
+    // 界面永远只显示一本——“导入第二本看不到”）。同名书已存在则覆盖更新。
+    let target = books.find((b) => b.name === title)?.id;
     if (!target) {
       const b = await createLibraryBook(title);
       target = b.id;

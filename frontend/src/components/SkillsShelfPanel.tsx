@@ -218,8 +218,27 @@ export default function SkillsShelfPanel() {
                 <p className="text-sm text-zinc-200 font-medium truncate">{d.name}</p>
                 {d.description && <p className="text-[11px] text-zinc-500 mt-1 line-clamp-2">{d.description}</p>}
                 <div className="flex gap-2 mt-2.5">
-                  <button onClick={() => approveDraft(d.id)} className="text-[11px] px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg">采纳</button>
-                  <button onClick={() => rejectDraft(d.id)} className="text-[11px] px-2.5 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg">拒绝</button>
+                  <button
+                    onClick={() => {
+                      // S158e：确认失败给可见反馈（此前静默——“点确认没动静”）
+                      approveDraft(d.id).catch((e: unknown) =>
+                        window.alert(`确认失败：${(e as Error)?.message || String(e)}`)
+                      )
+                    }}
+                    className="text-[11px] px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg"
+                  >
+                    采纳
+                  </button>
+                  <button
+                    onClick={() => {
+                      rejectDraft(d.id).catch((e: unknown) =>
+                        window.alert(`拒绝失败：${(e as Error)?.message || String(e)}`)
+                      )
+                    }}
+                    className="text-[11px] px-2.5 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg"
+                  >
+                    拒绝
+                  </button>
                 </div>
               </div>
             ))}
@@ -237,7 +256,9 @@ export default function SkillsShelfPanel() {
         </div>
       ) : (
         <div className="space-y-8">
-          {(["writing", "main", "other"] as const).map((key) => {
+          {/* S158e：补 plot/both——拆书提炼（S114 三层）生成的书名方法论(both)/剧情模式(plot)
+              草稿确认后此前不显示（“确认了没动静”），漏组即隐形丢失 */}
+          {(["writing", "main", "plot", "both", "other"] as const).map((key) => {
             const items = groups[key];
             if (items.length === 0) return null;
             const t = groupTitle(key);

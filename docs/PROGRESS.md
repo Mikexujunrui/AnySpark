@@ -4405,3 +4405,23 @@ assistant 声明配对全被清掉（S157 只修了内容丢失，没修 metadat
 **验证**：单元测试 +1（自愈：补配对/丢孤儿/正常配对不误伤）；端到端：损坏会话
 e82a91a5（3 条消息 metadata 全空、无声明）修复后正常 200 多轮工具调用；
 ruff/mypy 全绿。
+
+## S158e: 书库技能确认不显示 + 多书导入（远程自部署用户反馈）（已完成 ✅）
+
+**用户反馈**（真实自部署）：① 导入书分析 → 确认技能 → 后续没动静；② 全局书库
+无法再导入新书（只显示一本）。
+
+**根因**（纯前端）：
+1. **SkillsShelfPanel 渲染漏 plot/both 组**：groups 分 5 组但渲染只画
+   `["writing","main","other"]`——拆书提炼（S114 三层）生成的书名方法论(type=both)
+   确认转正后进 groups["both"] 但界面不渲染 → "确认了没动静"（草稿消失、技能隐形）
+2. **LibraryShelfPanel.onImportFile 用 books[0].id 作目标**：上传第二本时内容塞进
+   第一本（不新建），界面永远只显示一本
+3. 附带：两个面板的"采纳/拒绝"按钮无错误反馈（promote 失败静默）→ 加 alert 兜底
+
+**修复**：
+- SkillsShelfPanel 渲染补 plot/both 组（groupTitle 本就有定义）
+- onImportFile：同名书覆盖更新，否则独立建库——多本上传各自成书
+- SkillPanel/SkillsShelfPanel 采纳/拒绝按钮包 catch + alert（失败可见）
+
+**验证**：前端 typecheck/lint/build/vitest 18 全绿；纯前端改动（后端无变化）。

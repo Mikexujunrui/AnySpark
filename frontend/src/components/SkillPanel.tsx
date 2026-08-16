@@ -21,8 +21,27 @@ function DraftSection({ drafts, onApprove, onReject }: { drafts: { id: string; n
           <p className="text-xs text-zinc-200 truncate">{d.name}</p>
           {d.description && <p className="text-[11px] text-zinc-500 line-clamp-2">{d.description}</p>}
           <div className="flex gap-2 pt-1">
-            <button onClick={() => onApprove(d.id)} className="text-[11px] px-2 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded">采纳</button>
-            <button onClick={() => onReject(d.id)} className="text-[11px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded">拒绝</button>
+            <button
+              onClick={() => {
+                // S158e：确认失败要给可见反馈（此前静默——用户“点确认没动静”的一部分）
+                Promise.resolve(onApprove(d.id)).catch((e: unknown) =>
+                  window.alert(`确认失败：${(e as Error)?.message || String(e)}`)
+                )
+              }}
+              className="text-[11px] px-2 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded"
+            >
+              采纳
+            </button>
+            <button
+              onClick={() => {
+                Promise.resolve(onReject(d.id)).catch((e: unknown) =>
+                  window.alert(`拒绝失败：${(e as Error)?.message || String(e)}`)
+                )
+              }}
+              className="text-[11px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded"
+            >
+              拒绝
+            </button>
           </div>
         </div>
       ))}
