@@ -377,3 +377,39 @@ def test_heal_tool_pairs_missing_call_id() -> None:
     # 结尾 assistant 保留
     assert msgs[-1].content == "好了"
     store.close()
+
+
+def test_heal_tool_drops_orphan_with_id_no_declaration() -> None:
+    """S158g：tool 有 tool_call_id 但前导声明缺失（S145b 前端过滤声明后覆盖写）
+    → 视为孤儿丢弃——保留会触发 400（OpenAI 协议要求 tool 前有 assistant 声明）。"""
+
+    from anyspark.store.sqlite import SqliteConversationStore
+
+    store = SqliteConversationStore(":memory:")
+    store.create("h2")
+    store.append("h2", Message(role="user", content="你好"))
+    store.append(
+        "h2",
+        Message(
+            role="tool",
+            content="[工具 list_chapters 成功] ...",
+            metadata={"tool_call_id": "call_abc"},
+        ),
+    )
+    store.append("h2", Message(role="assistant", content="回复"))
+    msgs = store.messages("h2")
+    assert [m.role for m in msgs] == ["user", "assistant"]  # 孤儿 tool 丢弃
+    # 正常配对（声明+带 id tool）不受影响
+    store2 = SqliteConversationStore(":memory:")
+    store2.create("h3")
+    store2.append(
+        "h3",
+        Message(
+            role="assistant", content="", metadata={"tool_calls": [{"name": "x", "id": "call_ok"}]}
+        ),
+    )
+    store2.append("h3", Message(role="tool", content="结果", metadata={"tool_call_id": "call_ok"}))
+    msgs2 = store2.messages("h3")
+    assert [m.role for m in msgs2] == ["assistant", "tool"]
+    store.close()
+    store2.close()

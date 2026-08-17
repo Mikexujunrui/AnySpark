@@ -216,10 +216,13 @@ class SqliteConversationStore(ConversationStore):
             elif m.role == "tool":
                 tid = str(m.metadata.get("tool_call_id") or "")
                 if tid:
-                    # 已配对：从声明队列移除对应 id（队列保持=未配对声明）
+                    # 有 tool_call_id 且对应声明在 → 正常配对，从队列移除
                     if tid in decl_ids:
                         decl_ids.remove(tid)
-                    out.append(m)
+                        out.append(m)
+                        continue
+                    # 有 id 但无对应声明（S145b 前端过滤空 content 声明后覆盖写）→
+                    # 孤儿 tool：保留会触发 400（OpenAI 协议要求 tool 前有 assistant 声明）
                     continue
                 # 缺 tool_call_id：从最近的未配对声明补（保持声明→tool 顺序）
                 if decl_ids:
