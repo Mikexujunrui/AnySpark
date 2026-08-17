@@ -413,3 +413,57 @@ def test_heal_tool_drops_orphan_with_id_no_declaration() -> None:
     assert [m.role for m in msgs2] == ["assistant", "tool"]
     store.close()
     store2.close()
+
+
+def test_heal_recovers_from_recorder() -> None:
+    """S158h：自愈优先从 S49 recorder 恢复配对——tool 缺 tool_call_id / 声明缺失
+    时从 events.jsonl 快照找回，而不是丢弃（旧轮工具细节不丢）。"""
+
+    import json as _json
+    import tempfile
+    from pathlib import Path
+
+    from anyspark.store.sqlite import SqliteConversationStore
+
+    tmp = Path(tempfile.mkdtemp())
+    db = tmp / "t.db"
+    store = SqliteConversationStore(db)
+    conv = store.create(book_id="main")
+    # 库里坏数据：user + tool(缺 tool_call_id) + assistant（模拟前端覆盖写）
+    store.append(conv.id, Message(role="user", content="你好"))
+    store.append(
+        conv.id, Message(role="tool", content="[工具 list_chapters 成功] 结果", metadata={})
+    )
+    store.append(conv.id, Message(role="assistant", content="回复"))
+    # recorder 快照：完整配对（声明 + tool 带 tool_call_id）
+    rec_dir = tmp / "records" / conv.id
+    rec_dir.mkdir(parents=True)
+    prompt = [
+        {"role": "user", "content": "你好", "metadata": {}},
+        {
+            "role": "assistant",
+            "content": "",
+            "metadata": {
+                "tool_calls": [{"name": "list_chapters", "arguments": {}, "id": "call_rec1"}]
+            },
+        },
+        {
+            "role": "tool",
+            "content": "[工具 list_chapters 成功] 结果",
+            "metadata": {"tool_call_id": "call_rec1"},
+        },
+    ]
+    (rec_dir / "events.jsonl").write_text(
+        _json.dumps({"event": "record", "prompt": prompt}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    msgs = store.messages(conv.id)
+    assert [m.role for m in msgs] == [
+        "user",
+        "assistant",
+        "tool",
+        "assistant",
+    ]  # 声明补回 + tool 保留
+    tool = next(m for m in msgs if m.role == "tool")
+    assert tool.metadata["tool_call_id"] == "call_rec1"
+    store.close()

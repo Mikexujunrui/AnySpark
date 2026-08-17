@@ -192,18 +192,66 @@ class SqliteConversationStore(ConversationStore):
             )
             for row in rows
         ]
-        return self._heal_tool_pairs(msgs)
+        return self._heal_tool_pairs(msgs, conversation_id)
 
-    def _heal_tool_pairs(self, msgs: list[Message]) -> list[Message]:
-        """S158d：加载时自愈——tool 消息缺 tool_call_id 时从相邻 assistant 声明配对；
+    def _load_recorder_tool_index(self, conversation_id: str) -> dict[str, Any] | None:
+        """S158h：从 S49 recorder（data/records/<conv>/events.jsonl）建立工具配对索引。
 
-        配对不上的孤儿 tool 消息丢弃（防 OpenAI 协议 400 missing tool_call_id）。
-        背景：前端 auto-save 的 replace_messages 曾用 metadata={} 重建消息 + S145b
-        过滤空 content 声明 → tool_call_id/声明配对丢失 → DashScope 400（8-15 实测）。
+        recorder 每轮 record 事件含完整 prompt 快照（assistant 声明 + tool 消息的
+        metadata）——前端覆盖写损坏的配对信息可从此恢复，而不是直接丢弃。
+        返回 {"tool_by_content": {content: tool_call_id}, "decl_by_id": {id: Message}}。
+        """
+        from anyspark.core import Message as CoreMessage
+
+        rec = Path(self._db).parent / "records" / conversation_id / "events.jsonl"
+        if not rec.exists():
+            return None
+        tool_by_content: dict[str, str] = {}
+        decl_by_id: dict[str, CoreMessage] = {}
+        try:
+            with rec.open(encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        e = json.loads(line)
+                    except Exception:
+                        continue
+                    if e.get("event") != "record":
+                        continue
+                    for m in e.get("prompt") or []:
+                        role = m.get("role")
+                        md = m.get("metadata") or {}
+                        content = m.get("content") or ""
+                        if role == "tool" and md.get("tool_call_id"):
+                            tool_by_content.setdefault(content, str(md["tool_call_id"]))
+                        elif role == "assistant" and md.get("tool_calls"):
+                            for tc in md["tool_calls"]:
+                                if isinstance(tc, dict) and tc.get("id"):
+                                    decl_by_id.setdefault(
+                                        str(tc["id"]),
+                                        CoreMessage(
+                                            role="assistant",
+                                            content="",
+                                            metadata={"tool_calls": [tc]},
+                                        ),
+                                    )
+        except Exception:
+            return None
+        return {"tool_by_content": tool_by_content, "decl_by_id": decl_by_id}
+
+    def _heal_tool_pairs(self, msgs: list[Message], conversation_id: str = "") -> list[Message]:
+        """S158d：加载时自愈——tool 消息缺 tool_call_id / 声明缺失时：
+
+        ① 优先从 S49 recorder（每轮完整快照）恢复配对信息（S158h）——
+        前端覆盖写损坏的 metadata/声明可找回，旧轮工具细节不丢；
+        ② 恢复不了才从相邻声明补配/丢弃（防 OpenAI 协议 400）。
         幂等无副作用（不改库，每次读取修复内存返回）。
         """
         from collections import deque
 
+        rec_index: dict[str, Any] | None = None
         decl_ids: deque[str] = deque()
         out: list[Message] = []
         for m in msgs:
@@ -221,14 +269,38 @@ class SqliteConversationStore(ConversationStore):
                         decl_ids.remove(tid)
                         out.append(m)
                         continue
-                    # 有 id 但无对应声明（S145b 前端过滤空 content 声明后覆盖写）→
-                    # 孤儿 tool：保留会触发 400（OpenAI 协议要求 tool 前有 assistant 声明）
+                    # 有 id 但无对应声明 → 尝试从 recorder 找回声明（S158h）
+                    if rec_index is None:
+                        rec_index = self._load_recorder_tool_index(conversation_id)
+                    decl = (rec_index or {}).get("decl_by_id", {}).get(tid)
+                    if decl is not None and tid not in decl_ids:
+                        decl_ids.append(tid)
+                        out.append(decl)
+                        decl_ids.remove(tid)
+                        out.append(m)
+                        continue
+                    # 声明彻底丢失 → 孤儿 tool 丢弃（保留会 400）
                     continue
-                # 缺 tool_call_id：从最近的未配对声明补（保持声明→tool 顺序）
-                if decl_ids:
+                # 缺 tool_call_id：优先从 recorder 恢复 id + 声明（S158h）
+                if rec_index is None:
+                    rec_index = self._load_recorder_tool_index(conversation_id)
+                rid = (rec_index or {}).get("tool_by_content", {}).get(m.content or "")
+                if rid:
+                    decl = (rec_index or {}).get("decl_by_id", {}).get(rid)
                     md = dict(m.metadata)
-                    md["tool_call_id"] = decl_ids.popleft()
-                    out.append(Message(role=m.role, content=m.content, metadata=md))
+                    md["tool_call_id"] = rid
+                    recovered = Message(role=m.role, content=m.content, metadata=md)
+                    if decl is not None and rid not in decl_ids:
+                        decl_ids.append(rid)
+                        out.append(decl)
+                        decl_ids.remove(rid)
+                    out.append(recovered)
+                    continue
+                # 从相邻未配对声明补（保持声明→tool 顺序）
+                if decl_ids:
+                    md2 = dict(m.metadata)
+                    md2["tool_call_id"] = decl_ids.popleft()
+                    out.append(Message(role=m.role, content=m.content, metadata=md2))
                 else:
                     # 孤儿 tool（无配对声明）→ 丢弃（保留会触发 400；内容已在展示层）
                     continue

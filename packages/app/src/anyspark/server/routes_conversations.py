@@ -133,6 +133,13 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
         conv = deps.store.get(conv_id)
         if conv is None:
             raise HTTPException(status_code=404, detail="会话不存在")
+        # S158h：会话正在处理中禁止覆盖写——agent 运行时前端 auto-save 的
+        # 全量覆盖会与 agent 逐条写入竞争（可能丢正在生成的消息/坏配对）
+        if conv_id in deps.active_tokens:
+            raise HTTPException(
+                status_code=409,
+                detail="该会话正在处理中，消息暂不可保存（等 agent 结束后自动同步）",
+            )
         from anyspark.core import Message
 
         old = deps.store.messages(conv_id)
