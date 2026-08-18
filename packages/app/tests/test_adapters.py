@@ -250,6 +250,62 @@ def test_anthropic_adjacent_same_role_merged() -> None:
     assert conv[0]["content"] == "a\nb"
 
 
+def test_anthropic_dangling_tool_use_removed() -> None:
+    """S174：悬挂 tool_use 防御——assistant 声明了 tool_use 但后续无 tool_result
+    → 移除未配对的 tool_use 块（否则 Anthropic 400 tool_use without tool_result）。"""
+
+    msgs = [
+        Message(role="user", content="提炼技能"),
+        Message(
+            role="assistant",
+            content="",
+            metadata={
+                "tool_calls": [{"name": "skill_refine", "arguments": {}, "id": "call_00_xxx"}]
+            },
+        ),
+        # 无 tool 消息——悬挂；直接接终答 assistant
+        Message(role="assistant", content="完成"),
+    ]
+    _, conv = to_anthropic_messages(msgs)
+    # 所有 assistant 的 tool_use 块应被移除（未配对）
+    for c in conv:
+        if c["role"] == "assistant" and isinstance(c["content"], list):
+            assert not any(
+                isinstance(b, dict) and b.get("type") == "tool_use" for b in c["content"]
+            ), f"悬挂 tool_use 未移除: {c['content']}"
+
+
+def test_anthropic_paired_tool_use_kept() -> None:
+    """S174：正常配对的 tool_use 保留（防御不误伤）。"""
+    msgs = [
+        Message(role="user", content="写"),
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "write_chapter", "arguments": {}, "id": "c1"}]},
+        ),
+        Message(role="tool", content="已保存", metadata={"tool_call_id": "c1"}),
+        Message(role="assistant", content="写好了"),
+    ]
+    _, conv = to_anthropic_messages(msgs)
+    asst = next(c for c in conv if c["role"] == "assistant" and isinstance(c["content"], list))
+    assert any(
+        isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id") == "c1"
+        for b in asst["content"]
+    )
+
+
+def test_anthropic_system_only_falls_back_to_user() -> None:
+    """S174：system-only 兜底——内部管道（资料消化/技能提炼）只传 [system]，
+    system 上提后 messages 空 → Anthropic 400。降为 user 消息保调用可用。"""
+    msgs = [Message(role="system", content="把以下材料消化成摘要卡：原文...")]
+    system, conv = to_anthropic_messages(msgs)
+    assert system is None  # system 降为 user
+    assert len(conv) == 1
+    assert conv[0]["role"] == "user"
+    assert "消化成摘要卡" in conv[0]["content"]
+
+
 def test_anthropic_thinking_forces_temperature_one() -> None:
     """thinking enabled 时 temperature 强制 1（Anthropic 硬性限制）。"""
     model = AnthropicModel(api_key="sk-test", thinking="high")

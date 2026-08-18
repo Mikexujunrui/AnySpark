@@ -128,6 +128,28 @@ def to_anthropic_messages(
     if pending_results:
         converted.append({"role": "user", "content": pending_results})
 
+    # S174：悬挂 tool_use 防御——assistant 声明了 tool_use 但后续无对应 tool_result
+    # （取消/异常/前端坏数据/内部管道历史遗留）→ 移除未配对的 tool_use 块，
+    # 否则 Anthropic 400（tool_use ids found without tool_result blocks immediately
+    # after）。store 自愈已裁剪 metadata.tool_calls，这里做转换层兜底覆盖所有来源。
+    paired_ids: set[str] = set()
+    for c in converted:
+        if c["role"] == "user" and isinstance(c["content"], list):
+            for b in c["content"]:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    paired_ids.add(str(b.get("tool_use_id") or ""))
+    for c in converted:
+        if c["role"] == "assistant" and isinstance(c["content"], list):
+            c["content"] = [
+                b
+                for b in c["content"]
+                if not (isinstance(b, dict) and b.get("type") == "tool_use")
+                or str(b.get("id") or "") in paired_ids
+            ]
+            # 移除后 content 空 → 补空 text 块（Anthropic 要求 assistant content 非空）
+            if not c["content"]:
+                c["content"] = [{"type": "text", "text": ""}]
+
     # 相邻同角色合并（Anthropic 严格交替；字符串 content 拼接，块列表 extend）
     merged: list[dict[str, Any]] = []
     for c in converted:
@@ -143,6 +165,12 @@ def to_anthropic_messages(
         else:
             merged.append(c)
     system = "\n".join(system_parts) if system_parts else None
+    # S174：system-only 兜底——内部管道（资料消化/技能提炼）只传 [system]，
+    # system 提到顶层后 messages 空 → Anthropic 400。降为 user 消息保调用可用
+    # （指令+原文作为 user 输入语义无误）。
+    if not merged and system:
+        merged = [{"role": "user", "content": system}]
+        system = None
     return system, merged
 
 

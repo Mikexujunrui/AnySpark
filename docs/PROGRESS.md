@@ -4555,3 +4555,30 @@ mypy/ruff 全绿。
 **用户配置正确路径**：① 界面添加模型配置（base_url=https://api.deepseek.com、
 model=deepseek-chat、openai 协议）并激活——保存即生效；② 或改 data/.env 的
 DEEPSEEK_BASE_URL/MODEL 后**重启**——本版起同步生效。
+
+## S174: Anthropic 适配器悬挂 tool_use + system-only 400 修复（远程自部署用户反馈）（已完成 ✅）
+
+**用户反馈**（远程自部署，Anthropic 协议）：
+1. 对话里让 AI 提炼技能 → `Anthropic API 400: tool_use ids were found without tool_result
+   blocks immediately after: call_00_...`（assistant 声明 tool_use 后无 tool_result）
+2. 全局资料池无法添加资料（无论文本大小）
+3. 提炼技能失败（"成功获取 0 条技能"）
+4. 日常对话/生成章节正常
+
+**根因**（to_anthropic_messages 转换层缺防御）：
+1. **悬挂 tool_use**：assistant 带 tool_calls → 生成 tool_use 块，但后续无对应 tool 消息
+   （取消/异常/前端坏数据/历史遗留）→ Anthropic 严格要求 tool_use 后紧跟 tool_result → 400。
+   S170 自愈在 store.messages 裁剪 metadata，但转换层无兜底（内部管道/实时路径绕过自愈）
+2. **system-only 消息**：内部 LLM 管道（MaterialDigestor.digest / skill_generator）只传
+   `[Message(role="system", content=prompt)]` → to_anthropic_messages 把 system 提到顶层 →
+   messages 数组空 → Anthropic 400（messages 不能为空）。日常对话有 user 消息故不受影响
+
+**修复**（to_anthropic_messages 转换层防御，覆盖所有来源）：
+1. **悬挂 tool_use 防御**：收集所有 tool_result 的 tool_use_id（配对集），遍历 assistant content
+   移除未配对的 tool_use 块（移除后 content 空 → 补空 text 块保 assistant content 非空）
+2. **system-only 兜底**：messages 为空但 system 有内容 → 降为 user 消息（指令+原文作为 user
+   输入语义无误），保内部管道可用
+
+**验证**：复现脚本三场景（悬挂移除/正常保留/system-only 降 user）全通过；
+回归测试 +3（test_adapters：悬挂移除、正常配对保留、system-only 兜底）；
+test_adapters 21 全绿；mypy/ruff 全绿。
