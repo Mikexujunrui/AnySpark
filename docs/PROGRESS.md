@@ -4582,3 +4582,11 @@ DEEPSEEK_BASE_URL/MODEL 后**重启**——本版起同步生效。
 **验证**：复现脚本三场景（悬挂移除/正常保留/system-only 降 user）全通过；
 回归测试 +3（test_adapters：悬挂移除、正常配对保留、system-only 兜底）；
 test_adapters 21 全绿；mypy/ruff 全绿。
+
+## S175: v4.0.4 发布——版本号提升（S173 .env 同步 + S174 Anthropic 修复）（已完成 ✅）
+
+**版本**：4.0.3 → 4.0.4（含 S173 模型配置 .env 同步 + S174 Anthropic 悬挂 tool_use/system-only 修复）
+
+**改动**：pyproject.toml/uv.lock 4.0.3 → 4.0.4；build_release.sh 默认 VERSION 对齐 v4.0.4。
+
+**发布**：push 代码 + tag v4.0.4 → release.yml 三平台自动构建挂公开 Release。
