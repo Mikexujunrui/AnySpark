@@ -4492,3 +4492,28 @@ assistant 声明了 tool_calls 但后续 tool 消息不足，OpenAI 严格模式
 - 回归测试 +4：test_loop.py（取消任意时机无悬挂×20 迭代、钩子异常配对完整）、
   test_context.py（悬挂裁剪、全悬挂移除边界）
 - test_loop/test_context/test_models/test_sqlite 93 全绿；ruff/mypy 全绿
+
+## S171: 最新版本也提示更新横幅修复——frozen 版本读取 + 未知不提示（远程自部署用户反馈）（已完成 ✅）
+
+**用户反馈**（远程自部署）：即使当前已是最新版本，启动后仍显示"发现新版本"更新横幅。
+
+**根因**（frozen 打包读不到本地版本 → 永远 0.0.0 < latest）：
+- `get_local_version()` 候选路径只有两个：`__file__.parents[5]/pyproject.toml`（源码模式仓库根）
+  和 `__file__.parent/pyproject.toml`（server 目录）——PyInstaller frozen 下 `__file__` 指向
+  `_MEIPASS` 解包目录，parents[5] 指向解包目录外（不存在）、server 目录下也无 pyproject
+- anyspark.spec datas 把 pyproject.toml 打进**解包根**（`_MEIPASS/pyproject.toml`），但代码
+  没读这个位置 → 读不到 → 回退 "0.0.0" → 任何 release tag 都更大 → `has_update` 永远 True
+- 前端 BackendStatus 收到 has_update=True 就显示横幅（S166 忽略记忆只挡同版本，挡不住 0.0.0）
+
+**修复（治本 + 防御）**：
+1. **frozen 路径**：`_PYPROJECT_CANDIDATES` 首项加 `sys._MEIPASS/pyproject.toml`（anyspark.spec
+   datas 实际落位）；源码模式候选保留
+2. **未知不提示**：`get_local_version()` 读不到返回 None（不再回退 0.0.0）；
+   `check_for_update()` 本地版本未知 → `has_update=False`（unknown 不参与比较，资源缺失/
+   路径异常时也不误导用户）；`/api/update/status` 返回 "unknown"
+3. 版本读取抽 `_read_version_from(candidates)` 便于测试
+
+**验证**：
+- frozen 模拟（sys.frozen + _MEIPASS 临时目录放 pyproject）→ 读到 4.0.2、相等不提示
+- 测试重构 +5：候选路径读取/无候选返回 None/未知不提示/相等不提示/更新正常提示
+- test_update/test_models/test_context 46 全绿；mypy/ruff 全绿

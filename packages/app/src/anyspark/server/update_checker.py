@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import sys
 import time
 from pathlib import Path
 from typing import Any, cast
@@ -21,31 +22,47 @@ RELEASES_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 RELEASES_PAGE = f"https://github.com/{GITHUB_REPO}/releases"
 
 # 本地版本来源：根 pyproject.toml（源码模式）或 frozen 资源根（PyInstaller datas 已打入）
-_PROJECT_ROOT = Path(__file__).resolve().parents[5]  # packages/app/src/anyspark/server → 仓库根
+# S171：frozen 模式 __file__ 指向 _MEIPASS 解包目录，parents[5] 失效（指向解包目录外）；
+# anyspark.spec datas 把 pyproject.toml 打进解包根（_MEIPASS/pyproject.toml）。
+_frozen_root = (
+    Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    if getattr(sys, "frozen", False) and getattr(sys, "_MEIPASS", "")
+    else None
+)
 _PYPROJECT_CANDIDATES = [
-    _PROJECT_ROOT / "pyproject.toml",
-    Path(__file__).resolve().parent / "pyproject.toml",
+    p
+    for p in (
+        _frozen_root / "pyproject.toml" if _frozen_root is not None else None,
+        Path(__file__).resolve().parents[5] / "pyproject.toml",  # 源码模式：仓库根
+        Path(__file__).resolve().parent / "pyproject.toml",
+    )
+    if p is not None
 ]
 
 _cache: dict[str, Any] = {}
 _CACHE_TTL = 300  # 秒
 
 
-def get_local_version() -> str:
-    """读本地版本（根 pyproject.toml [project].version）。读不到回退 0.0.0。"""
+def _read_version_from(candidates: list[Path]) -> str | None:
+    """从候选 pyproject 路径读 [project].version；全部读不到返回 None。"""
     import tomllib
 
-    for p in _PYPROJECT_CANDIDATES:
+    for p in candidates:
         if not p.exists():
             continue
         try:
             with open(p, "rb") as fh:
                 data = tomllib.load(fh)
-            v = cast(str, data.get("project", {}).get("version", "0.0.0"))
-            return v
+            v = cast(str, data.get("project", {}).get("version", ""))
+            return v or None
         except Exception:
             continue
-    return "0.0.0"
+    return None
+
+
+def get_local_version() -> str | None:
+    """读本地版本（根 pyproject.toml [project].version）。读不到返回 None。"""
+    return _read_version_from(_PYPROJECT_CANDIDATES)
 
 
 def _parse_version(v: str) -> tuple[int, int, int]:
@@ -95,12 +112,14 @@ def check_for_update() -> dict[str, Any]:
     """完整检查：{current_version, latest_version, has_update, release_url, ...}。
 
     只读操作，应用更新交给用户（跳转 Release 页自行下载）。
+    S171：本地版本读不到（None）时不提示更新——unknown 不参与比较，
+    避免打包资源缺失/路径异常时永远显示"发现新版本"横幅误导用户。
     """
     current = get_local_version()
     release = fetch_latest_release()
     if release is None:
         return {
-            "current_version": current,
+            "current_version": current or "unknown",
             "latest_version": None,
             "has_update": False,
             "release_url": RELEASES_PAGE,
@@ -109,9 +128,10 @@ def check_for_update() -> dict[str, Any]:
         }
     tag = str(release.get("tag_name", ""))
     return {
-        "current_version": current,
+        "current_version": current or "unknown",
         "latest_version": tag,
-        "has_update": _is_newer(tag, current),
+        # 本地版本未知 → 不提示（unknown 不参与比较，避免永远显示横幅）
+        "has_update": _is_newer(tag, current) if current is not None else False,
         "release_url": str(release.get("html_url") or RELEASES_PAGE),
         "release_notes": str(release.get("body") or "")[:500],
         "published_at": release.get("published_at"),

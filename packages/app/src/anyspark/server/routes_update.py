@@ -25,6 +25,6 @@ def make_update_router(deps: Any) -> APIRouter:
     @router.get("/api/update/status", response_model=dict[str, Any])
     def update_status() -> dict[str, Any]:
         """本地版本号（前端展示用，不触发网络）。"""
-        return {"current_version": get_local_version()}
+        return {"current_version": get_local_version() or "unknown"}
 
     return router
