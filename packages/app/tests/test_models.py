@@ -33,6 +33,39 @@ def test_registry_seeds_env_default() -> None:
     assert cfgs[0].model == "deepseek-v4-flash"
 
 
+def test_registry_syncs_default_from_env(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """S173：启动同步 .env → default 配置——用户改 .env 的 base_url/model 重启后生效
+    （种子只在空库播种一次；否则官方 key 打到旧端点 DashScope → 401）。
+    只同步 id=default；界面添加的其他模型不受影响。"""
+    import anyspark.models.registry as reg_mod
+
+    db = _db()
+    # 播种：默认 DashScope
+    reg = reg_mod.ModelRegistry(db)
+    assert reg.get("default").base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"  # type: ignore[union-attr]
+
+    # 界面添加一个自定义模型（id != default）
+    reg.upsert(
+        reg_mod.ModelConfig(
+            id="custom",
+            name="自定义",
+            base_url="http://127.0.0.1:11434/v1",
+            model="m",
+        )
+    )
+
+    # 用户改 .env → 官方 ds（monkeypatch registry 模块命名空间的常量）
+    monkeypatch.setattr(reg_mod, "DEFAULT_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setattr(reg_mod, "DEFAULT_MODEL", "deepseek-chat")
+
+    # 重启（重新实例化）→ default 同步为官方，其他模型保留
+    reg2 = reg_mod.ModelRegistry(db)
+    d = reg2.get("default")
+    assert d.base_url == "https://api.deepseek.com"  # type: ignore[union-attr]
+    assert d.model == "deepseek-chat"  # type: ignore[union-attr]
+    assert reg2.get("custom").base_url == "http://127.0.0.1:11434/v1"  # type: ignore[union-attr]
+
+
 def test_registry_upsert_crud_and_activate() -> None:
     reg = ModelRegistry(_db())
     # 新增第二条（不自动激活）

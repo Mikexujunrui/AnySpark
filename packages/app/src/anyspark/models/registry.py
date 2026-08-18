@@ -167,6 +167,31 @@ class ModelRegistry:
             if row[0] == 0:
                 self._insert(self._conn, default_env_config())
             self._conn.commit()
+        # S173：启动同步 .env → default 配置（播种只发生在空库；库已存在时用户改
+        # .env 的 base_url/model 不生效——官方 key 打到旧端点 DashScope → 401）
+        self._sync_default_from_env()
+
+    def _sync_default_from_env(self) -> None:
+        """S173：.env 的 DEEPSEEK_BASE_URL/DEEPSEEK_MODEL 变更同步到库 default 配置。
+
+        种子只在空库播种一次——库已存在时改 .env 重启，库里 default 的 base_url 仍是
+        旧值（DashScope），官方 key 打到旧端点报 401/端点错。只同步 id=default 的
+        base_url/model（.env 是启动权威）；api_key 走 resolved（库优先 .env 兜底，
+        无需同步）；界面添加的其他模型（id != default）不受影响。
+        """
+        env_cfg = default_env_config()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT base_url, model FROM model_configs WHERE id='default'"
+            ).fetchone()
+            if row is None:
+                return
+            if (row[0], row[1]) != (env_cfg.base_url, env_cfg.model):
+                self._conn.execute(
+                    "UPDATE model_configs SET base_url=?, model=? WHERE id='default'",
+                    (env_cfg.base_url, env_cfg.model),
+                )
+                self._conn.commit()
 
     @staticmethod
     def _insert(conn: sqlite3.Connection, cfg: ModelConfig) -> None:

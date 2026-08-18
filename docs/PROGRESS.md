@@ -4528,3 +4528,30 @@ assistant 声明了 tool_calls 但后续 tool 消息不足，OpenAI 严格模式
 - build_release.sh 默认 VERSION v4.0.0 → v4.0.3（手动打包路径对齐；CI 由 git tag 覆盖）
 
 **发布**：push 代码 + tag v4.0.3 → release.yml 三平台自动构建挂 Release
+
+## S173: 模型配置 .env 同步修复——改 base_url/model 重启后生效（远程自部署用户反馈）（已完成 ✅）
+
+**用户反馈**（远程自部署）：配置官方 ds api（openai 协议 + api.deepseek.com），
+报错却显示阿里云（DashScope）地址；切 Anthropic 协议正常。诊断确认：**用户改 .env
+的 DEEPSEEK_BASE_URL 不生效**——请求仍打到 DashScope + 官方 key → 401。
+
+**根因**（种子配置只在空库播种一次）：
+- `ModelRegistry.__init__` 空库时从 .env 播种 default 配置（`if COUNT==0`）；
+  库已存在（哪怕只一条）时改 .env 重启**不重播** → 库里 default 的 base_url/model
+  永久停留旧值（DashScope）
+- `resolved_api_key()` 是双源的（库优先 .env 兜底）→ key 改了生效；**base_url/model
+  是死的** → 官方 key 打到旧端点 → 401 + "报错显示阿里云地址"
+- 用户以为改了配置，实际请求端点没变——配置一致性盲区
+
+**修复**：`ModelRegistry` 播种后加 `_sync_default_from_env()`——启动时 .env 的
+DEEPSEEK_BASE_URL/DEEPSEEK_MODEL 与库 default 不一致则同步（.env 是启动权威）；
+只同步 id=default 的 base_url/model；api_key 走 resolved 无需同步；界面添加的
+其他模型（id != default）不受影响。
+
+**验证**：脚本验证（播种 dashscope → 改 .env 官方 → 重启同步官方 ✅、其他模型保留 ✅）；
+回归测试 +1（test_models：.env 同步 + 其他模型隔离）；test_models/test_update 26 全绿；
+mypy/ruff 全绿。
+
+**用户配置正确路径**：① 界面添加模型配置（base_url=https://api.deepseek.com、
+model=deepseek-chat、openai 协议）并激活——保存即生效；② 或改 data/.env 的
+DEEPSEEK_BASE_URL/MODEL 后**重启**——本版起同步生效。
