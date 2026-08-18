@@ -24,11 +24,11 @@ def make_check_router(deps: AppDeps) -> APIRouter:
         """多检测者审读正文（骨架检测项，并行）+ 图谱事实证据 + 时序校验（确定性规则）。"""
         report = run_review(model_for_task(deps, "editing"), req.target, req.text)
         # S7：图谱事实证据——文本涉及的已知实体/关系（检测网/用户比对设定冲突）
-        evidence = deps.graph_verifier.render_evidence("main", req.text)
+        evidence = deps.graph_verifier.render_evidence(req.book_id, req.text)
         # S13：时序校验——截止当前章节时空点，提及未来才首现的实体=时空倒置
         # S29：按叙事线比较（跨线首现不误报，多线并行时间差正常）
         temporal = (
-            deps.graph_verifier.check_temporal("main", req.text, req.chapter_order, req.line)
+            deps.graph_verifier.check_temporal(req.book_id, req.text, req.chapter_order, req.line)
             if req.chapter_order is not None
             else []
         )

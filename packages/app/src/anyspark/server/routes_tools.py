@@ -172,11 +172,11 @@ def make_tools_router(deps: AppDeps) -> APIRouter:
         return {"ok": True, "kind": "chapters", "count": len(written), "chapters": written}
 
     @router.get("/api/export/book", response_model=None)
-    def export_book(format: str = "md") -> Response:
+    def export_book(format: str = "md", book_id: str = "main") -> Response:
         """全书导出（S48-P3）：txt/md/epub（epub 携带 md 引用的图片）。"""
         from anyspark.server.export import export_epub, export_md, export_txt
 
-        items = deps.chapters.list_by_book("main")
+        items = deps.chapters.list_by_book(book_id)
         chs = [{"title": c.title, "content": c.content} for c in items]
         fmt = format if format in ("txt", "md", "epub") else "md"
         if fmt == "epub":
@@ -184,7 +184,7 @@ def make_tools_router(deps: AppDeps) -> APIRouter:
                 "AnySpark 作品",
                 "AnySpark",
                 chs,
-                image_dir=deps.workspace.chapters_dir("main"),  # md 引用相对章节目录
+                image_dir=deps.workspace.chapters_dir(book_id),  # md 引用相对章节目录
             )
             from urllib.parse import quote
 

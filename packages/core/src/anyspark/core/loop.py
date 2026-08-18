@@ -534,13 +534,16 @@ class Agent:
         只发事件不落盘——存储由 app 层订阅（写 data/records/*.jsonl）；
         思维链 reasoning **不注入上下文**（只进记录，训练/复盘用）。
         """
-        # S104：tool_results 附执行耗时（与 _tool_ms 缓冲顺序对应；不足则 0）
-        tool_results = []
-        for r in results:
-            ms = 0
-            if self._tool_ms:
-                ms = self._tool_ms.pop(0)[1]
-            tool_results.append({"name": r.call.name, "ok": r.ok, "content": r.content, "ms": ms})
+        # S180：tool_results 记录本轮工具结果——但 _emit_record 在模型输出后、
+        # 工具执行前调用，本轮工具结果尚未产生；旧代码遍历累积 results + pop
+        # _tool_ms 会错位消耗历史耗时（第 N 轮 pop 第 N-1 轮的 ms）。改为：
+        # 本轮工具结果在下轮 record 体现（本轮为空），_tool_ms 在工具执行后
+        # 由下一轮 _emit_record 消费——但为避免跨轮错位，这里不 pop，ms 统一 0
+        # （耗时数据可在 data/records 的工具执行事件里查）。
+        tool_results = [
+            {"name": r.call.name, "ok": r.ok, "content": r.content, "ms": 0}
+            for r in results
+        ]
         self.events.emit(
             Event(
                 type="record",

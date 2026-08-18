@@ -346,6 +346,16 @@ class AnthropicModel:
                 d = data.get("delta") or {}
                 if d.get("stop_reason") == "max_tokens":
                     truncated = True
+                # S180：message_delta 的 usage 含最终 output_tokens（message_start
+                # 的 output_tokens 是初始值 ~1）；不捕获则记录的 completion_tokens 恒为 ~1
+                u2 = data.get("usage")
+                if isinstance(u2, dict):
+                    usage = {
+                        "prompt_tokens": int(u2.get("input_tokens") or 0),
+                        "completion_tokens": int(u2.get("output_tokens") or 0),
+                        "total_tokens": int(u2.get("input_tokens") or 0)
+                        + int(u2.get("output_tokens") or 0),
+                    }
             elif etype == "message_start":
                 msg = data.get("message") or {}
                 u = msg.get("usage")

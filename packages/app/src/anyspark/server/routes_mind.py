@@ -272,9 +272,9 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
             }
 
     @router.get("/api/mind/agency-suggest", response_model=dict[str, object])
-    def mind_agency_heuristic() -> dict[str, object]:
+    def mind_agency_heuristic(book_id: str = "main") -> dict[str, object]:
         """S61 L2 只读通道：当前规则推断（不调 LLM，前端打开面板即可展示）。"""
-        plan = deps.mind_planner.plan("main", base_agency=deps.agency.get_current("main").order)
+        plan = deps.mind_planner.plan(book_id, base_agency=deps.agency.get_current(book_id).order)
         return {
             "heuristic_agency": plan.agency_level,
             "heuristic_reason": plan.reason,

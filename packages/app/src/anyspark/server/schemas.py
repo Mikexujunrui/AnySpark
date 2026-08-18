@@ -302,6 +302,7 @@ class ExploreIntentIn(BaseModel):
 class ExploreCardsIn(BaseModel):
     seed: str
     intent_confirmed: dict[str, object]
+    book_id: str = "main"
 
 
 class PathExploreIn(BaseModel):
@@ -338,6 +339,7 @@ class CheckRequest(BaseModel):
     target: str = "当前章节"
     chapter_order: int | None = None  # 时序校验：当前章节序号（校验时空倒置）
     line: str = "main"  # S29 多线叙事：当前写作的叙事线（时序校验按线比较）
+    book_id: str = "main"
 
 
 class RuleRequest(BaseModel):
@@ -466,6 +468,7 @@ class ReviewPanelRequest(BaseModel):
 class AgencyIn(BaseModel):
     level: int | None = None  # 兼容旧调用：排序位数字（0 起）
     level_id: str | None = None  # S35：档位记录 id（优先）
+    book_id: str = "main"
 
 
 class AgencyLevelIn(BaseModel):

@@ -4645,3 +4645,26 @@ mypy/ruff/tsc/eslint 全绿。
 **未修（低优/设计性）**：Anthropic 流式 usage 不准、_emit_record _tool_ms 错位（记录数据）、
 useSSE 7 回调丢弃（V4 迁移废弃）、release notes 双 v 前缀（cosmetic）、多处 book_id 硬编码
 main（非主项目隔离，scan_main_hardcode 漏网——位置参数形式，待后续专项修）。
+
+## S180: 剩余问题修复——release notes/Anthropic usage/_tool_ms/book_id 硬编码（已完成 ✅）
+
+**修复 S178 排查记录的剩余低优/设计性问题**：
+
+1. **release notes 双 v 前缀**（release.yml）：`${{ github.ref_name }}` 已含 v（v4.0.6），
+   模板又加 v → "vv4.0.6"。修复：去掉模板的 v。
+2. **Anthropic 流式 usage 不准**（anthropic.py respond_stream）：message_start 的
+   output_tokens 是初始值（~1），message_delta 的 usage 含最终值但未捕获。修复：
+   message_delta 里捕获 usage（completion_tokens 准确）。
+3. **_emit_record _tool_ms 错位**（loop.py）：_emit_record 在模型输出后、工具执行前调用，
+   遍历累积 results + pop _tool_ms 会错位消耗历史耗时（第 N 轮 pop 第 N-1 轮 ms）。
+   修复：不再 pop _tool_ms（ms 统一 0，耗时数据可在工具执行事件查；避免错位消耗）。
+4. **book_id 硬编码 "main"**（6 路由 8 处）：非主项目（book_id != main）用户操作 explore/
+   check/mind-agency/export/workspace-import/agency 端点时数据全打到 main 项目。修复：
+   各 schema 加 book_id 字段（默认 "main" 兼容）+ 调用点用请求参数（scan_main_hardcode
+   漏网的位置参数形式）。routes_chapters chapter_wrapup 用 ch.book_id；routes_chat 图谱
+   抽取用 req.book_id + BgTask 传 book_id。
+
+**未修（保留）**：useSSE 7 回调丢弃（onWriting/onTaskList 等）——后端不发这些事件，
+state 恒 null 组件不渲染，属 V4 迁移死代码（清理是 UI 重构，非 bug，风险 > 收益）。
+
+**验证**：ruff/mypy 全绿；test_app 仅 test_chat_stream_sse_frames 既有竞态失败（与改动无关）。

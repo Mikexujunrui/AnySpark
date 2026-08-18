@@ -24,10 +24,10 @@ def make_agency_router(deps: AppDeps) -> APIRouter:
     router = APIRouter()
 
     @router.get("/api/agency", response_model=dict[str, object])
-    def get_agency() -> dict[str, object]:
+    def get_agency(book_id: str = "main") -> dict[str, object]:
         """能动档位（机制 2 + S35 记录集）：当前档位 + 全部档位（含自定义）。"""
         return {
-            "current": deps.agency.get_current().to_dict(),
+            "current": deps.agency.get_current(book_id).to_dict(),
             "levels": [lv.to_dict() for lv in deps.agency.list_levels()],
         }
 
@@ -35,11 +35,11 @@ def make_agency_router(deps: AppDeps) -> APIRouter:
     def set_agency(req: AgencyIn) -> dict[str, object]:
         """用户点选档位（level_id 优先；兼容旧 level 数字=排序位）。"""
         if req.level_id:
-            lv = deps.agency.set_current(req.level_id)
+            lv = deps.agency.set_current(req.level_id, req.book_id)
         elif req.level is not None:
             levels = deps.agency.list_levels()
             target = next((x for x in levels if x.order == req.level), None)
-            lv = deps.agency.set_current(target.id) if target else None
+            lv = deps.agency.set_current(target.id, req.book_id) if target else None
         else:
             lv = None
         if lv is None:

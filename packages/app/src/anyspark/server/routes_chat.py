@@ -300,7 +300,7 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                     title = str(wc.arguments.get("title", "")).strip()
                     content = str(wc.arguments.get("content", ""))
                     if title and content:
-                        chs = deps.chapters.list_by_book("main")
+                        chs = deps.chapters.list_by_book(req.book_id)
                         order = next((c.order_index for c in chs if c.title == title), len(chs))
                         logger.info("后台图谱抽取挂载: 《%s》", title)
                         line = str(wc.arguments.get("line", "main")).strip() or "main"
@@ -311,6 +311,7 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                                 content=content,
                                 order=order,
                                 line=line,
+                                book_id=req.book_id,
                             )
                         )
         turns_payload = [{"text": turn.text, "tool_calls": [c.name for c in turn.tool_calls]}]
@@ -373,7 +374,7 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                                     title = str(wc.arguments.get("title", "")).strip()
                                     content = str(wc.arguments.get("content", ""))
                                     if title and content:
-                                        chs = deps.chapters.list_by_book("main")
+                                        chs = deps.chapters.list_by_book(req.book_id)
                                         order = next(
                                             (c.order_index for c in chs if c.title == title),
                                             len(chs),
@@ -389,6 +390,7 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                                                 content=content,
                                                 order=order,
                                                 line=line,
+                                                book_id=req.book_id,
                                             )
                                         )
                         # 取消只停当前轮：不消费队列（队列保留，前端队列条仍可见）

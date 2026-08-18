@@ -42,7 +42,7 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
         # 约束 = 设定档"世界观规则"类别（全书固定规则，直接注入不匹配——模型自己判断）
         constraints = [
             e.content
-            for e in deps.settings.list("main")
+            for e in deps.settings.list(req.book_id)
             if e.category == "世界观规则" and (e.content or "").strip()
         ]
         # S68→S128：探索注入真实模板库（skill 表 type=plot 类，L2 默认+L3 外部

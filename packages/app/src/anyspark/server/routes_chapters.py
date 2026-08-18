@@ -65,11 +65,11 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
                     hint = str(data.get("next_hint", ""))
             except json.JSONDecodeError:
                 pass
-        # 图谱统计（本章涉及的实体）——S109：阈值 2000→8000 覆盖长章
-        involved = deps.graph_verifier.facts_for("main", (ch.content or "")[:8000])
+        # S180：book_id 用章节归属（非硬编码 main——非主项目图谱/伏笔错乱）
+        involved = deps.graph_verifier.facts_for(ch.book_id, (ch.content or "")[:8000])
         # S31：主线钩子检查——作者承诺的剧情钩子仍未回收的（轻量提示，建议非门禁）
         # 老龄化：带开放时长（中性事实，不设阈值不评判）
-        open_hooks = deps.plots.open_must("main", current_order=ch.order_index) or []
+        open_hooks = deps.plots.open_must(ch.book_id, current_order=ch.order_index) or []
         hook_check = (
             [
                 {

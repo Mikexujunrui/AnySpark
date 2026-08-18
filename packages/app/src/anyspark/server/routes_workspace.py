@@ -36,25 +36,25 @@ def make_workspace_router(deps: AppDeps) -> APIRouter:
         }
 
     @router.post("/api/workspace/import", response_model=dict[str, Any])
-    def workspace_import_chapters() -> dict[str, Any]:
+    def workspace_import_chapters(book_id: str = "main") -> dict[str, Any]:
         """S48：扫描章节 md 文件 → 同步入库（人工直接编辑 md 后调用）。
 
         仅内容变化才 upsert（版本历史只在变化时记录）。
         权威始终在文件——import 是"文件 → 库镜像"的单向同步。
         """
         imported: list[dict[str, Any]] = []
-        for item in deps.workspace.list_chapter_files("main"):
-            content = deps.workspace.read_chapter("main", item["order"], item["title"])
+        for item in deps.workspace.list_chapter_files(book_id):
+            content = deps.workspace.read_chapter(book_id, item["order"], item["title"])
             if content is None:
                 continue
             existing = next(
-                (c for c in deps.chapters.list_by_book("main") if c.title == item["title"]),
+                (c for c in deps.chapters.list_by_book(book_id) if c.title == item["title"]),
                 None,
             )
             changed = existing is None or existing.content != content
             if changed:
                 line = existing.narrative_line if existing else "main"
-                deps.chapters.upsert("main", item["title"], content, item["order"], line)
+                deps.chapters.upsert(book_id, item["title"], content, item["order"], line)
             imported.append({"title": item["title"], "order": item["order"], "changed": changed})
         return {
             "ok": True,

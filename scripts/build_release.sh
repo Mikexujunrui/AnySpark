@@ -16,7 +16,7 @@
 # ============================================================
 set -e
 
-VERSION="${1:-v4.0.6}"
+VERSION="${1:-v4.0.7}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 # 输出目录：可用 BUILD_OUT_DIR 环境变量覆盖（CI 用），缺省仓库上级
 OUT_BASE="${BUILD_OUT_DIR:-$(dirname "$ROOT")/AnySparkV4-发布-exe}"

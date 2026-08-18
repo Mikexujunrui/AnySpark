@@ -62,7 +62,7 @@ jobs:
         run: |
           gh release create ${{ github.ref_name }} dist_upload/* \
             --title "${{ github.ref_name }}" \
-            --notes "AnySpark v${{ github.ref_name }} 自动构建（三平台）" \
+            --notes "AnySpark ${{ github.ref_name }} 自动构建（三平台）" \
             --repo ${{ github.repository }} || \
           gh release upload ${{ github.ref_name }} dist_upload/* --clobber \
             --repo ${{ github.repository }}
