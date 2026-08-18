@@ -345,9 +345,9 @@ def test_gemini_message_conversion() -> None:
     assert model_msg["parts"][0]["text"] == "好的"
     assert model_msg["parts"][1]["functionCall"]["name"] == "write_chapter"
     assert model_msg["parts"][1]["functionCall"]["args"] == {"title": "第一章"}
-    # tool → functionResponse
+    # tool → functionResponse（S176：name 从 assistant 声明补全为工具名，非 tool_call_id）
     tool_user = contents[2]
-    assert tool_user["parts"][0]["functionResponse"]["name"] == "c1"
+    assert tool_user["parts"][0]["functionResponse"]["name"] == "write_chapter"
 
 
 # ---------------------------------------------------------------------------
@@ -413,3 +413,68 @@ def test_all_tool_schemas_valid_for_strict_apis(make_toolkit: Any) -> None:
                 f"工具 {spec.name} 参数 {pname} 非法类型 {p['type']!r}——"
                 "JSON Schema 合法类型仅 string/integer/number/boolean（官方 API 严格校验会 400）"
             )
+
+
+def test_gemini_tool_name_backfilled_from_declaration() -> None:
+    """S176：tool 消息缺 tool_name → 从 assistant 声明的 tool_calls 按 id 补工具名
+    （loop 的 _append_tool_result 只设 tool_call_id 不设 tool_name）。"""
+    msgs = [
+        Message(role="user", content="写"),
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "write_chapter", "arguments": {}, "id": "c1"}]},
+        ),
+        Message(role="tool", content="已保存", metadata={"tool_call_id": "c1"}),  # 无 tool_name
+        Message(role="assistant", content="完成"),
+    ]
+    _, contents = to_gemini_contents(msgs)
+    fr = next(
+        p["functionResponse"]
+        for c in contents
+        if c["role"] == "user"
+        for p in c["parts"]
+        if "functionResponse" in p
+    )
+    assert fr["name"] == "write_chapter"  # 补全为工具名，非 c1
+
+
+def test_gemini_dangling_function_call_removed() -> None:
+    """S176：悬挂 functionCall 防御——model 声明 functionCall 但无 functionResponse → 移除。"""
+    msgs = [
+        Message(role="user", content="写"),
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "x", "arguments": {}, "id": "c1"}]},
+        ),
+        Message(role="assistant", content="完成"),  # 无 tool 消息
+    ]
+    _, contents = to_gemini_contents(msgs)
+    fcs = [p for c in contents if c["role"] == "model" for p in c["parts"] if "functionCall" in p]
+    assert fcs == []
+
+
+def test_gemini_system_only_falls_back_to_user() -> None:
+    """S176：system-only → contents 空 → 降为 user（保内部管道可用）。"""
+    _, contents = to_gemini_contents([Message(role="system", content="消化材料")])
+    assert len(contents) == 1
+    assert contents[0]["role"] == "user"
+
+
+def test_responses_dangling_function_call_removed() -> None:
+    """S176：Responses 悬挂 function_call 防御——无对应 function_call_output → 移除。"""
+    from anyspark.models.responses import to_responses_input
+
+    msgs = [
+        Message(role="user", content="写"),
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "x", "arguments": {}, "id": "c1"}]},
+        ),
+        Message(role="assistant", content="完成"),  # 无 tool 消息
+    ]
+    result = to_responses_input(msgs)
+    fcs = [i for i in result if isinstance(i, dict) and i.get("type") == "function_call"]
+    assert fcs == []

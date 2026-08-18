@@ -109,6 +109,19 @@ def to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
                     "output": m.content,
                 }
             )
+    # S176：悬挂 function_call 防御——assistant 声明了 function_call 但无对应
+    # function_call_output（取消/异常/坏数据遗留）→ 移除未配对的 function_call，
+    # 否则 Responses API 配对失败。
+    responded_ids: set[str] = set()
+    for item in result:
+        if isinstance(item, dict) and item.get("type") == "function_call_output":
+            responded_ids.add(str(item.get("call_id") or ""))
+    result = [
+        item
+        for item in result
+        if not (isinstance(item, dict) and item.get("type") == "function_call")
+        or str(item.get("call_id") or "") in responded_ids
+    ]
     return result
 
 

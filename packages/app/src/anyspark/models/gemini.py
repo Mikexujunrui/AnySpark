@@ -86,6 +86,17 @@ def to_gemini_contents(
     """
     system_parts: list[str] = []
     contents: list[dict[str, Any]] = []
+    # S176：id→name 映射——loop 的 tool 消息只设 tool_call_id 不设 tool_name，
+    # Gemini 的 functionResponse.name 需匹配 functionCall.name（工具名），否则配对失败。
+    # 从 assistant 声明的 tool_calls 按 id 补 name（转换层修复，不改 loop）。
+    id_to_name: dict[str, str] = {}
+    for m in messages:
+        if m.role == "assistant":
+            calls = m.metadata.get("tool_calls")
+            if isinstance(calls, list):
+                for c in calls:
+                    if isinstance(c, dict) and c.get("id") and c.get("name"):
+                        id_to_name[str(c["id"])] = str(c["name"])
 
     for m in messages:
         if m.role == "system":
@@ -93,7 +104,12 @@ def to_gemini_contents(
             continue
         if m.role == "tool":
             tid = m.metadata.get("tool_call_id")
-            name = str(m.metadata.get("tool_name") or "") or str(tid or "")
+            # S176：优先用 id→name 映射补工具名（loop 不设 tool_name）
+            name = (
+                id_to_name.get(str(tid or ""))
+                or str(m.metadata.get("tool_name") or "")
+                or str(tid or "")
+            )
             contents.append(
                 {
                     "role": "user",
@@ -128,7 +144,31 @@ def to_gemini_contents(
         else:
             contents.append({"role": "user", "parts": [{"text": m.content}]})
 
+    # S176：悬挂 functionCall 防御——model 声明了 functionCall 但后续无对应
+    # functionResponse（取消/异常/坏数据遗留）→ 移除未配对的 functionCall，
+    # 否则 Gemini 配对失败。收集所有 functionResponse.name（按映射后的 name）。
+    responded_names: set[str] = set()
+    for c in contents:
+        if c["role"] == "user":
+            for p in c["parts"]:
+                if "functionResponse" in p:
+                    responded_names.add(str(p["functionResponse"].get("name") or ""))
+    for c in contents:
+        if c["role"] == "model":
+            c["parts"] = [
+                p
+                for p in c["parts"]
+                if "functionCall" not in p
+                or str(p["functionCall"].get("name") or "") in responded_names
+            ]
+            if not c["parts"]:
+                c["parts"] = [{"text": ""}]  # model parts 非空
+
     system = "\n".join(system_parts) if system_parts else None
+    # S176：system-only 兜底——内部管道只传 [system] → contents 空 → Gemini 400。
+    if not contents and system:
+        contents = [{"role": "user", "parts": [{"text": system}]}]
+        system = None
     return system, contents
 
 

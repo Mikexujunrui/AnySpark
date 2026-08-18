@@ -4590,3 +4590,25 @@ test_adapters 21 全绿；mypy/ruff 全绿。
 **改动**：pyproject.toml/uv.lock 4.0.3 → 4.0.4；build_release.sh 默认 VERSION 对齐 v4.0.4。
 
 **发布**：push 代码 + tag v4.0.4 → release.yml 三平台自动构建挂公开 Release。
+
+## S176: Gemini/Responses 适配器同类修复——悬挂 function + system-only + tool_name（已完成 ✅）
+
+S174 修了 Anthropic，系统排查发现 Gemini/Responses 适配器有同类问题（用户用 Anthropic 未触发，但 Gemini/Responses 协议用户会遇到）：
+
+**Gemini（to_gemini_contents）三 bug**：
+1. **tool_result name 错误**：loop 的 _append_tool_result 只设 tool_call_id 不设 tool_name；
+   旧代码 `name = tool_name or tool_call_id` → functionResponse.name="c1"（id）而非"write_chapter"
+   （工具名）→ 与 functionCall.name 不匹配 → Gemini 配对失败。
+   修复：转换层从 assistant 声明的 tool_calls 建 id→name 映射，按 tool_call_id 补工具名。
+2. **悬挂 functionCall**：model 声明 functionCall 但无 functionResponse → 移除（同 Anthropic）。
+3. **system-only**：内部管道只传 [system] → contents 空 → 降为 user（同 Anthropic）。
+
+**Responses（to_responses_input）**：悬挂 function_call 防御——无对应 function_call_output → 移除。
+
+**验证**：四场景脚本全通过（tool_name 补全/悬挂移除/system-only/正常保留）；
+回归测试 +4（Gemini tool_name/悬挂/system-only + Responses 悬挂）；test_adapters 25 全绿；
+mypy/ruff 全绿。OpenAI/DeepSeek 路径 system-only 不报错（OpenAI 宽容），无需修。
+
+## S177: v4.0.5 发布——版本号提升（S176 Gemini/Responses 适配器同类修复）（已完成 ✅）
+
+**版本**：4.0.4 → 4.0.5。push 代码 + tag v4.0.5 → release.yml 三平台自动构建挂公开 Release。
