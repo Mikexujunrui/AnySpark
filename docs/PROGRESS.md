@@ -4438,3 +4438,28 @@ ruff/mypy 全绿。
    skill_refine 失败路径全部有明确错误透出；静默 catch 均为后台加载类（合理）
 
 **验证**：前端 typecheck/build/vitest 18 全绿。
+
+## S169: 流式错误路径 ResponseNotRead 修复——错误详情可读（远程自部署用户反馈）（已完成 ✅）
+
+**用户反馈**（远程自部署）：生成报错 `Attempted to access streaming response content, without having called read()`，
+前端只见"请求失败，请检查后端"，真实原因被掩盖。用户实际配置：**Anthropic 协议 + DeepSeek 官方 base_url**。
+
+**根因**（httpx2 流式响应未 read 就访问 .text）：
+- `AnthropicModel.respond_stream`（anthropic.py）/ `GeminiModel.respond_stream`（gemini.py）用
+  `httpx2 client.stream()` 调 API，`resp` 是**流式响应**（未消费）；API 返回非 200（如 DeepSeek
+  官方没有 `/v1/messages` 端点 → 404）时，错误处理访问 `resp.text` → httpx2 `ResponseNotRead`
+  （httpx2 流式响应必须 read() 后才能读 .content/.text）
+- 异常上抛 → run_agent 捕获 → SSE error 帧 "执行失败: ResponseNotRead" → 前端显示，
+  **真实错误（404/限流/key 无效）被 ResponseNotRead 掩盖**，用户无法诊断配置问题
+
+**修复**（两处同款）：流式错误路径先 `resp.read()` 再取 `resp.text[:300]`（read 失败兜底
+"(无法读取错误详情)"，不掩盖原始状态码）。修复后用户看到 `Anthropic API 404: {"error":{...}}`，
+可立即判断协议/端点配置错。
+
+**验证**：
+- 复现脚本：httpx2 stream + 非 200 → 修复前抛 `ResponseNotRead`，修复后抛可读 `RuntimeError(状态码+错误体)`
+- 回归测试 +2（test_models.py：anthropic/gemini 流式错误路径不再抛 ResponseNotRead）——httpx2 mock
+  transport（stream= 分块流式 body，非 content=）模拟真实流式错误响应
+- test_models.py 17 全绿；ruff/mypy 全绿
+- 排查确认无同类遗漏：cli_chat.py（错误路径只 print 状态码不读 body）、update_checker.py
+  （httpx2 get 默认 read）、deepseek/responses（openai SDK 内部 200/400/官方格式流式全部实测正常）

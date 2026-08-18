@@ -263,7 +263,13 @@ class GeminiModel:
             headers=self._headers(),
         ) as resp:
             if resp.status_code != 200:
-                raise RuntimeError(f"Gemini API {resp.status_code}: {resp.text[:300]}")
+                # httpx2 流式响应未消费：直接访问 .text 抛 ResponseNotRead——先 read 再取错误详情
+                try:
+                    resp.read()
+                    detail = resp.text[:300]
+                except Exception:
+                    detail = "(无法读取错误详情)"
+                raise RuntimeError(f"Gemini API {resp.status_code}: {detail}")
             for line in resp.iter_lines():
                 if line == "":
                     if current_data:

@@ -6,6 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, ClassVar
 
+import httpx2
 import pytest
 from fastapi.testclient import TestClient
 
@@ -165,6 +166,84 @@ class _FakeMessage:
 
 class _FakeResponse:
     choices: ClassVar[list[_FakeChoice]] = [_FakeChoice()]
+
+
+# ---------------------------------------------------------------------------
+# httpx2 流式错误路径（回归：ResponseNotRead 防护）
+# ---------------------------------------------------------------------------
+
+
+class _ChunkedBytes(httpx2.SyncByteStream):
+    """模拟分块到达的流式响应体（client.stream 场景）。"""
+
+    def __init__(self, body: bytes) -> None:
+        self._chunks = [body[i : i + 15] for i in range(0, len(body), 15)]
+        self._i = 0
+
+    def __iter__(self) -> _ChunkedBytes:
+        return self
+
+    def __next__(self) -> bytes:
+        if self._i >= len(self._chunks):
+            raise StopIteration
+        c = self._chunks[self._i]
+        self._i += 1
+        return c
+
+    def close(self) -> None:
+        pass
+
+
+class _StreamErrTransport(httpx2.BaseTransport):
+    """模拟 API 返回非 200 的流式响应（错误 body 未 read 场景）。"""
+
+    def __init__(self, status: int = 429, body: str = '{"error":"rate limited"}') -> None:
+        self._status = status
+        self._body = body.encode()
+
+    def handle_request(self, request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            self._status,
+            headers={"Content-Type": "application/json"},
+            stream=_ChunkedBytes(self._body),
+            request=request,
+        )
+
+
+def test_anthropic_stream_error_no_response_not_read() -> None:
+    """回归：httpx2 流式响应非 200 时错误详情可读（不再抛 ResponseNotRead）。"""
+    from anyspark.models.anthropic import AnthropicModel
+
+    model = AnthropicModel(api_key="sk-test", base_url="http://mock.test")
+    model._client = httpx2.Client(
+        transport=_StreamErrTransport(
+            429, '{"error":{"type":"rate_limit_error","message":"slow down"}}'
+        ),
+        timeout=10,
+    )
+    with pytest.raises(RuntimeError) as ei:
+        model.respond_stream([Message(role="user", content="hi")], [])
+    msg = str(ei.value)
+    assert "429" in msg
+    assert "rate_limit_error" in msg
+    assert "ResponseNotRead" not in msg and "streaming response content" not in msg
+
+
+def test_gemini_stream_error_no_response_not_read() -> None:
+    """回归：Gemini 流式非 200 错误路径同样防护。"""
+    from anyspark.models.gemini import GeminiModel
+
+    model = GeminiModel(api_key="sk-test", base_url="http://mock.test")
+    model._client = httpx2.Client(
+        transport=_StreamErrTransport(400, '{"error":{"code":400,"message":"bad"}}'),
+        timeout=10,
+    )
+    with pytest.raises(RuntimeError) as ei:
+        model.respond_stream([Message(role="user", content="hi")], [])
+    msg = str(ei.value)
+    assert "400" in msg
+    assert '"message":"bad"' in msg
+    assert "ResponseNotRead" not in msg and "streaming response content" not in msg
 
 
 # ---------------------------------------------------------------------------
