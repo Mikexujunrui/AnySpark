@@ -4517,3 +4517,14 @@ assistant 声明了 tool_calls 但后续 tool 消息不足，OpenAI 严格模式
 - frozen 模拟（sys.frozen + _MEIPASS 临时目录放 pyproject）→ 读到 4.0.2、相等不提示
 - 测试重构 +5：候选路径读取/无候选返回 None/未知不提示/相等不提示/更新正常提示
 - test_update/test_models/test_context 46 全绿；mypy/ruff 全绿
+
+## S172: v4.0.3 发布——版本号提升（S169-S171 远程部署用户反馈三修复）（已完成 ✅）
+
+**版本**：4.0.2 → 4.0.3（含 S169 ResponseNotRead / S170 tool_calls 悬挂 / S171 更新横幅三修复）
+
+**改动**：
+- pyproject.toml version 4.0.2 → 4.0.3（update_checker 读此版本，前端横幅比较基准）
+- uv.lock anyspark version 同步 4.0.3
+- build_release.sh 默认 VERSION v4.0.0 → v4.0.3（手动打包路径对齐；CI 由 git tag 覆盖）
+
+**发布**：push 代码 + tag v4.0.3 → release.yml 三平台自动构建挂 Release
