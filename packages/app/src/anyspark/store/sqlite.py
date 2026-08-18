@@ -306,7 +306,34 @@ class SqliteConversationStore(ConversationStore):
                     continue
             else:
                 out.append(m)
+        # S169：裁剪悬挂声明——assistant 声明了 tool_calls 但后续无对应 tool 消息
+        # （运行中取消/钩子异常/前端覆盖写中断遗留）。保留会让 OpenAI 协议报 400
+        # （insufficient tool messages following tool_calls）；把未配对 id 从声明中
+        # 移除（内存级修复，不改库；tool 侧已在前述逻辑配对/丢弃）。
+        if decl_ids:
+            dangling = set(decl_ids)
+            out = [
+                self._strip_dangling_decls(m, dangling) if m.role == "assistant" else m for m in out
+            ]
         return out
+
+    @staticmethod
+    def _strip_dangling_decls(m: Message, dangling: set[str]) -> Message:
+        """S169：从 assistant 声明的 tool_calls 中移除未配对 id（返回新 Message）。"""
+        calls = m.metadata.get("tool_calls")
+        if not isinstance(calls, list) or not calls:
+            return m
+        kept = [
+            tc for tc in calls if isinstance(tc, dict) and str(tc.get("id") or "") not in dangling
+        ]
+        if len(kept) == len(calls):
+            return m
+        md = dict(m.metadata)
+        if kept:
+            md["tool_calls"] = kept
+        else:
+            md.pop("tool_calls", None)
+        return Message(role=m.role, content=m.content, metadata=md)
 
     def fork(
         self, conversation_id: str, fork_point: str = "", inherit_messages: bool = True

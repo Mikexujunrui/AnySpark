@@ -554,3 +554,79 @@ def test_workflow_status_polling_not_deadloop() -> None:
     assert turn.error is None
     assert "重复的工具调用" not in turn.text
     assert turn.text.startswith("任务还在跑")
+
+
+def _dangling_decl_ids(msgs: list[Message]) -> set[str]:
+    """提取悬挂声明：assistant 声明的 tool_call id 减去已配对 tool 的 id。"""
+    decl: set[str] = set()
+    for m in msgs:
+        if m.role == "assistant" and m.metadata.get("tool_calls"):
+            for tc in m.metadata["tool_calls"]:
+                if isinstance(tc, dict) and tc.get("id"):
+                    decl.add(str(tc["id"]))
+        elif m.role == "tool":
+            decl.discard(str(m.metadata.get("tool_call_id") or ""))
+    return decl
+
+
+def test_cancel_any_time_leaves_no_dangling_declaration() -> None:
+    """S169：运行中取消（任意时机）不得留下无配对的 assistant 声明——
+    声明已落 store 后取消（执行前窗口）会触发 OpenAI 协议 400
+    （insufficient tool messages following tool_calls）；补 ToolResult 回填防悬挂。"""
+    import threading
+    import time
+
+    from anyspark.core import CancellationToken, ToolCall
+
+    for i in range(20):
+        model = ScriptedModel(
+            [
+                ModelOutput(
+                    tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2}, id=f"call_{i}")]
+                ),
+                _no_tool("done"),
+            ]
+        )
+        agent = _make_agent(model)
+        token = CancellationToken()
+        # 子线程随机延迟取消（模拟 API 层 cancel 端点，覆盖不同执行时机）
+        delay = (i % 7) * 0.0005
+
+        def _cancel_later(d: float, tk: CancellationToken) -> None:
+            time.sleep(d)
+            tk.cancel()
+
+        threading.Thread(target=lambda d=delay, tk=token: _cancel_later(d, tk)).start()
+        agent.run("问题", token=token)
+        msgs = agent.store.messages(agent.store.list_conversations()[0].id)
+        dangling = _dangling_decl_ids(msgs)
+        assert not dangling, f"迭代{i} 存在悬挂声明: {dangling}"
+
+
+def test_before_tool_call_hook_exception_keeps_pairs() -> None:
+    """S169：before_tool_call 钩子抛异常不冒泡——冒泡会让已落 store 的
+    assistant 声明悬挂无配对（400）；转拦截错误回填保持配对完整。"""
+
+    from anyspark.core import ToolCall
+
+    def bad_hook(call: ToolCall) -> str:
+        raise RuntimeError("钩子炸了")
+
+    model = ScriptedModel(
+        [
+            ModelOutput(tool_calls=[ToolCall(name="add", arguments={"a": 1, "b": 2}, id="call_h")]),
+            _no_tool("恢复"),
+        ]
+    )
+    reg = ToolRegistry()
+    register_builtins(reg)
+    agent = Agent(model=model, registry=reg, before_tool_call=bad_hook)
+    turn = agent.run("问题")
+    assert turn.text == "恢复"  # 异常未冒泡，循环继续到终答
+    msgs = agent.store.messages(agent.store.list_conversations()[0].id)
+    assert not _dangling_decl_ids(msgs)
+    # 配对序列完整：user → assistant(声明) → tool(拦截结果) → assistant(终答)
+    assert [m.role for m in msgs] == ["user", "assistant", "tool", "assistant"]
+    tool = next(m for m in msgs if m.role == "tool")
+    assert tool.metadata.get("tool_call_id") == "call_h"
+    assert "钩子异常" in tool.content

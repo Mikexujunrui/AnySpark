@@ -4463,3 +4463,32 @@ ruff/mypy 全绿。
 - test_models.py 17 全绿；ruff/mypy 全绿
 - 排查确认无同类遗漏：cli_chat.py（错误路径只 print 状态码不读 body）、update_checker.py
   （httpx2 get 默认 read）、deepseek/responses（openai SDK 内部 200/400/官方格式流式全部实测正常）
+
+## S170: tool_calls 悬挂声明 400 修复——取消/异常/历史悬挂全链路（远程自部署用户反馈）（已完成 ✅）
+
+**用户反馈**（远程自部署，DeepSeek 官方 API + openai 协议）：生成报
+`An assistant message with 'tool_calls' must be followed by tool messages responding
+to each 'tool_call_id'. (insufficient tool messages following tool_calls message)`——
+assistant 声明了 tool_calls 但后续 tool 消息不足，OpenAI 严格模式 400。
+
+**根因**（声明悬挂三种来源，当前版本 S158d/S158g 只修了 tool 侧未修声明侧）：
+1. **工具执行前取消**（loop.py S21 窗口）：assistant 声明已落 store（S23）后、工具执行前
+   取消 → `_finish_aborted` 只 append 纯文本 assistant，声明悬挂无配对 → 后续请求 400
+2. **before_tool_call 钩子异常**（loop.py _run_one）：无 try/except → 冒泡中断 → 声明悬挂
+3. **历史/前端覆盖写遗留**：`_heal_tool_pairs` 自愈只处理 tool 消息侧（缺 id 补/孤儿丢/
+   声明缺失找回），**不裁剪"声明存在、tool 缺失"**——decl_ids 剩余未配对 id 永不清理
+
+**修复（三层，治本 + 双保险）**：
+1. **loop.py 取消窗口**：工具执行前取消 → 给未执行调用补 ToolResult（ok=False "未执行：已取消"）
+   回填，配对完整后再收尾（user → assistant 声明 → tool 未执行 → assistant 中断）
+2. **loop.py 钩子异常**：before_tool_call 包 try/except → 异常转拦截错误回填（不冒泡，
+   配对完整；execute 层本有兜底，after 钩子本有兜底）
+3. **store 自愈**：`_heal_tool_pairs` 结尾裁剪悬挂声明——未配对 id 从 assistant 声明的
+   tool_calls 中移除（部分悬挂保留其余，全悬挂移除 key；内存级不改库），覆盖历史会话
+   与前端覆盖写产生的存量悬挂，老库数据加载即自动修复
+
+**验证**：
+- 复现脚本：子线程随机延迟取消×30（模拟用户点停止）修复后零悬挂；钩子异常不冒泡配对完整
+- 回归测试 +4：test_loop.py（取消任意时机无悬挂×20 迭代、钩子异常配对完整）、
+  test_context.py（悬挂裁剪、全悬挂移除边界）
+- test_loop/test_context/test_models/test_sqlite 93 全绿；ruff/mypy 全绿

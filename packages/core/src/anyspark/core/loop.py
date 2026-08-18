@@ -370,6 +370,21 @@ class Agent:
 
             # 工具执行前再检查取消（S21）：取消则不再执行剩余工具
             if token is not None and token.is_cancelled():
+                # S169：声明已落 store（S23）——取消前给未执行调用补 ToolResult 回填：
+                # 否则 assistant tool_calls 声明悬挂无配对，后续请求触发 OpenAI 协议 400
+                # （insufficient tool messages following tool_calls message）。
+                for call in calls:
+                    result = ToolResult(
+                        call=call,
+                        ok=False,
+                        content=f"工具 {call.name} 未执行：已取消。",
+                    )
+                    executed.append(call)
+                    results.append(result)
+                    self._append_tool_result(store, conversation_id, call, result)
+                    self.events.emit(
+                        Event(type="tool_result", payload={"name": call.name, "ok": False})
+                    )
                 self._finish_aborted(conversation_id, store, executed, results)
                 return Turn(
                     text="已中断（用户取消）。",
@@ -389,7 +404,12 @@ class Agent:
             def _run_one(call: ToolCall) -> ToolResult:
                 """S27：单工具执行——before 拦截（不执行）→ execute → after 改写。"""
                 if self.before_tool_call is not None:
-                    reason = self.before_tool_call(call)
+                    try:
+                        reason = self.before_tool_call(call)
+                    except Exception as exc:
+                        # S169：钩子异常不冒泡——冒泡会让已落 store 的 assistant 声明
+                        # 悬挂无配对（OpenAI 协议 400），转拦截错误回填保持配对完整。
+                        reason = f"before_tool_call 钩子异常: {exc}"
                     if reason is not None:
                         return ToolResult(
                             call=call,

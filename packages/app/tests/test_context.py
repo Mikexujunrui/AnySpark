@@ -467,3 +467,71 @@ def test_heal_recovers_from_recorder() -> None:
     tool = next(m for m in msgs if m.role == "tool")
     assert tool.metadata["tool_call_id"] == "call_rec1"
     store.close()
+
+
+def test_heal_strips_dangling_declarations() -> None:
+    """S169：悬挂声明裁剪——assistant 声明了 tool_calls 但后续 tool 消息缺失
+    （运行中取消/钩子异常/前端覆盖写中断遗留）→ 未配对 id 从声明移除，
+    否则 OpenAI 协议 400（insufficient tool messages following tool_calls）。"""
+
+    from anyspark.store.sqlite import SqliteConversationStore
+
+    store = SqliteConversationStore(":memory:")
+    store.create("h3")
+    store.append("h3", Message(role="user", content="写"))
+    # 声明 3 个调用，但只有 2 个 tool 消息（c3 悬挂）
+    store.append(
+        "h3",
+        Message(
+            role="assistant",
+            content="",
+            metadata={
+                "tool_calls": [
+                    {"name": "a", "arguments": {}, "id": "c1"},
+                    {"name": "b", "arguments": {}, "id": "c2"},
+                    {"name": "c", "arguments": {}, "id": "c3"},
+                ]
+            },
+        ),
+    )
+    store.append("h3", Message(role="tool", content="A结果", metadata={"tool_call_id": "c1"}))
+    store.append("h3", Message(role="tool", content="B结果", metadata={"tool_call_id": "c2"}))
+    store.append("h3", Message(role="assistant", content="写好了"))
+
+    msgs = store.messages("h3")
+    decl = next(m for m in msgs if m.role == "assistant" and m.metadata.get("tool_calls"))
+    ids = [tc["id"] for tc in decl.metadata["tool_calls"]]
+    assert ids == ["c1", "c2"], f"悬挂 id c3 未从声明移除: {ids}"
+    # 无悬挂声明残留（每个声明 id 都有对应 tool 消息）
+    dangling: set[str] = set()
+    for m in msgs:
+        if m.role == "assistant" and m.metadata.get("tool_calls"):
+            dangling.update(tc["id"] for tc in m.metadata["tool_calls"])
+        elif m.role == "tool":
+            dangling.discard(str(m.metadata.get("tool_call_id") or ""))
+    assert not dangling
+    store.close()
+
+
+def test_heal_removes_fully_dangling_declaration() -> None:
+    """S169：全悬挂边界——声明全部无 tool 消息 → tool_calls 元数据整体移除
+    （空声明列表发送时按无声明处理，不触发 400）。"""
+
+    from anyspark.store.sqlite import SqliteConversationStore
+
+    store = SqliteConversationStore(":memory:")
+    store.create("h4")
+    store.append("h4", Message(role="user", content="x"))
+    store.append(
+        "h4",
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "a", "arguments": {}, "id": "d1"}]},
+        ),
+    )
+    store.append("h4", Message(role="assistant", content="收尾"))
+    msgs = store.messages("h4")
+    decl_msg = next(m for m in msgs if m.role == "assistant" and m.content == "")
+    assert "tool_calls" not in decl_msg.metadata
+    store.close()
