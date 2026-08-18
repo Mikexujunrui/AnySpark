@@ -291,7 +291,9 @@ class GeminiModel:
         """流式协议：SSE 增量 parts → text_delta / toolcall_delta 事件。"""
         payload = self._payload(messages, tools)
         text_parts: list[str] = []
-        tool_acc: dict[str, dict[str, Any]] = {}  # name -> {args 累积}
+        # S178：用列表而非以 name 为键的 dict——同名工具调用并行（如两次 read_chapter）
+        # 在 dict 下会覆盖丢失；列表保留每个 functionCall。
+        tool_acc: list[dict[str, Any]] = []
         truncated = False
         usage: dict[str, int] | None = None
         current_data: list[str] = []
@@ -334,17 +336,18 @@ class GeminiModel:
                                     elif "functionCall" in part:
                                         fc = part["functionCall"]
                                         name = fc.get("name") or ""
-                                        acc = tool_acc.setdefault(name, {"name": name, "args": ""})
                                         raw = fc.get("args")
-                                        if isinstance(raw, dict):
-                                            acc["args"] = json.dumps(raw, ensure_ascii=False)
-                                        else:
-                                            acc["args"] += str(raw or "")
+                                        args_str = (
+                                            json.dumps(raw, ensure_ascii=False)
+                                            if isinstance(raw, dict)
+                                            else str(raw or "")
+                                        )
+                                        tool_acc.append({"name": name, "args": args_str})
                                         if on_event is not None:
                                             on_event(
                                                 Event(
                                                     type="toolcall_delta",
-                                                    payload={"content": acc["args"]},
+                                                    payload={"content": args_str},
                                                 )
                                             )
                             u = chunk.get("usageMetadata")
@@ -359,14 +362,16 @@ class GeminiModel:
                     current_data.append(line[len("data:") :].strip())
 
         tool_calls: list[ToolCall] = []
-        for name, acc in tool_acc.items():
+        for acc in tool_acc:
             raw = acc["args"]
             try:
                 args = json.loads(raw) if raw else {}
             except json.JSONDecodeError:
                 # 截断防护（S21）：参数非法→标记，不执行，让模型重发
                 args = {"_raw": raw, "_malformed": True}
-            tool_calls.append(ToolCall(name=name, arguments=args, id=name))
+            # S178：id 用 name + 序号（Gemini functionCall 无 id 字段，同名需区分）
+            tid = f"{acc['name']}_{len(tool_calls)}"
+            tool_calls.append(ToolCall(name=acc["name"], arguments=args, id=tid))
         return ModelOutput(
             text="".join(text_parts),
             tool_calls=tool_calls,

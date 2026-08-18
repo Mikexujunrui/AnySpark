@@ -127,7 +127,8 @@ export default function BatchPanel({ open, onClose, embedded = false, bookId = "
     pollRef.current = setInterval(poll, 1500);
   };
 
-  // 关闭时停止轮询
+  // 关闭时停止轮询 + 卸载时清理（S178：embedded 模式 open 恒 true，
+  // 切 tab 是 unmount 而非 open=false，需 return 清理防 setInterval 泄漏持续请求）
   useEffect(() => {
     if (!open) {
       stopWfPoll();
@@ -135,6 +136,7 @@ export default function BatchPanel({ open, onClose, embedded = false, bookId = "
       setWfPendingApprove(false);
       setWfBusy(false);
     }
+    return () => stopWfPoll();
   }, [open]);
 
   const toggleChapter = (id: string) => {

@@ -19,12 +19,22 @@ anyspark.server.workspace — 项目工作区（S48 工作区化：每项目一�
 from __future__ import annotations
 
 import re
+import sys
 import threading
 from pathlib import Path
 from typing import Any
 
+
+def _data_root() -> Path:
+    """数据根：frozen（PyInstaller）→ exe 同目录 /data（可写、可拷贝）；
+    开发模式 → 项目 data/。与 app.py._data_root 一致（S109/S178）。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "data"
+    return Path(__file__).resolve().parents[5] / "data"
+
+
 # 工作区根：data/workspace（与 sandbox 同级；.gitignore 已含 data/）
-WORKSPACE_ROOT = Path(__file__).resolve().parents[5] / "data" / "workspace"
+WORKSPACE_ROOT = _data_root() / "workspace"
 
 # 子目录名（固定结构，机制硬编码）
 UPLOAD_DIR = "上传"
@@ -33,8 +43,9 @@ CARDS_DIR = "卡片"
 
 
 def _safe_title(title: str) -> str:
-    """标题消毒：去掉 Windows/路径非法字符，防目录穿越。"""
-    cleaned = re.sub(r'[\\/:*?"<>|\r\n]', "", title).strip()
+    """标题消毒：去掉 Windows/路径非法字符 + 点号前缀（防 `..` 目录穿越），
+    空结果回退默认名。S178：补 `.` 过滤（旧正则漏点，`..` 可上溯目录）。"""
+    cleaned = re.sub(r'[\\/:*?"<>|\r\n.]', "", title).strip()
     return cleaned or "未命名"
 
 

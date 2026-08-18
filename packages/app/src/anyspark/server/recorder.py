@@ -21,11 +21,20 @@ data/records/<conversation_id>/
 from __future__ import annotations
 
 import json
+import sys
 import threading
 from pathlib import Path
 from typing import Any
 
-RECORDS_ROOT = Path(__file__).resolve().parents[5] / "data" / "records"
+
+def _data_root() -> Path:
+    """frozen → exe 同目录 /data；开发 → 项目 data/（与 app.py 一致，S178）。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "data"
+    return Path(__file__).resolve().parents[5] / "data"
+
+
+RECORDS_ROOT = _data_root() / "records"
 
 
 class RunRecorder:

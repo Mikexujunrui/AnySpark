@@ -139,6 +139,11 @@ class Agent:
         store.append(conversation_id, Message(role="user", content=user_prompt))
         self.events.emit(Event(type="user_text", payload={"content": user_prompt}))
 
+        # S178：死循环检测签名每轮 run 重置——Agent 实例跨多轮对话复用，
+        # 签名跨 run 累积会导致用户多次问同类问题（如反复 list_chapters）
+        # 在第 6 次误判死循环终止。签名只在单次 run（一轮 agent 循环）内有效。
+        self._call_signatures.clear()
+
         executed: list[ToolCall] = []
         results: list[ToolResult] = []
 

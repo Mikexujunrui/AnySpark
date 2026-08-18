@@ -9,25 +9,37 @@ ChapterStore 真实落盘。
 from __future__ import annotations
 
 import re
+import sys
 import zipfile
 from pathlib import Path
 from typing import Any
 
 from anyspark.core import ToolCall
 from anyspark.core.protocol import ParamSpec, ToolRegistry, ToolResult, ToolSpec
-from anyspark.server.workspace import Workspace
+from anyspark.server.workspace import Workspace, _safe_title
 from anyspark.store import ChapterStore
 
 # 默认当前写作书籍（阶段1 单本书；多书/切换在后续阶段引入）
 DEFAULT_BOOK_ID = "main"
+
+
+def _data_root() -> Path:
+    """frozen → exe 同目录 /data；开发 → 项目 data/（S178）。"""
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent / "data"
+    return Path(__file__).resolve().parents[5] / "data"
+
+
 # S152i：AI 文件沙箱按项目隔离——data/sandbox/{book_id}/（此前全局共享，
 # 所有项目的 AI 笔记混在一起；现每项目独立目录 + 独立人工修改标记）
-_SANDBOX_ROOT = Path(__file__).resolve().parents[5] / "data" / "sandbox"
+_SANDBOX_ROOT = _data_root() / "sandbox"
 
 
 def _sandbox_dir(book_id: str = DEFAULT_BOOK_ID) -> Path:
-    """当前项目的沙箱目录（data/sandbox/{book_id}/）。"""
-    return _SANDBOX_ROOT / (book_id or DEFAULT_BOOK_ID)
+    """当前项目的沙箱目录（data/sandbox/{book_id}/）。
+
+    S178：book_id 走 _safe_title 清洗（防 `..`/分隔符路径穿越）。"""
+    return _SANDBOX_ROOT / _safe_title(book_id or DEFAULT_BOOK_ID)
 
 
 # S143（AI 文件编辑闭环）：人工修改标记——人在前端保存过（PUT /api/sandbox/file）
@@ -51,13 +63,16 @@ IMMERSIVE_PROMPT = (
 
 
 def _resolve_sandbox_path(raw: str, book_id: str = DEFAULT_BOOK_ID) -> Path | None:
-    """把相对路径解析到当前项目沙箱内；越界（绝对路径/..）返回 None。"""
+    """把相对路径解析到当前项目沙箱内；越界（绝对路径/..）返回 None。
+
+    S178：用 is_relative_to 替代 startswith——后者无法区分 `main` 与
+    `main_secret`（兄弟目录穿越，可读其他项目沙箱/越界 data/）。"""
     p = Path(raw)
     if p.is_absolute():
         return None
-    root = _sandbox_dir(book_id)
+    root = _sandbox_dir(book_id).resolve()
     resolved = (root / p).resolve()
-    if not str(resolved).startswith(str(root.resolve())):
+    if not resolved.is_relative_to(root):
         return None
     return resolved
 

@@ -4612,3 +4612,36 @@ mypy/ruff 全绿。OpenAI/DeepSeek 路径 system-only 不报错（OpenAI 宽容�
 ## S177: v4.0.5 发布——版本号提升（S176 Gemini/Responses 适配器同类修复）（已完成 ✅）
 
 **版本**：4.0.4 → 4.0.5。push 代码 + tag v4.0.5 → release.yml 三平台自动构建挂公开 Release。
+
+## S178: 全项目排查修复——frozen 路径/路径穿越/缓存失效/Context Window/Gemini 工具覆盖/死循环误判（已完成 ✅）
+
+**4 路并行子代理审查**（模型适配器/路由工具/前端/配置部署）发现并修复：
+
+**高优（打包版用户直接受影响）**：
+1. **frozen 路径错位**（workspace.py/recorder.py/tools_writing.py）：`__file__.parents[5]`
+   在 PyInstaller 下指向 AppData → 章节 md/运行记录/AI 沙箱写错位置（DB 在 exe/data，
+   文件在 AppData/data，数据分裂）。修复：三处加 frozen 分支用 `sys.executable` 同目录
+   （对齐 app.py._data_root）
+2. **路径穿越**（tools_writing `_resolve_sandbox_path`）：用 `startswith` 而非
+   `is_relative_to` → `book_id=".."` 可穿越读 anyspark.db（含 API key）。修复：换
+   is_relative_to + _sandbox_dir 走 _safe_title 清洗（补 `.` 过滤防 `..`）
+3. **ModelProvider 缓存不失效**（registry _build_cfg）：upsert 改配置后缓存命中旧实例
+   → 改 base_url/key 不生效（需重启）。修复：缓存 key 加 cfg.updated_at
+4. **DEEPSEEK_CONTEXT_WINDOW 读不到**（registry）：模块级 `os.getenv` 在 load_dotenv 前
+   求值 → .env 的长上下文设置失效。修复：default_env_config 实时读 env +
+   _sync_default_from_env 同步 context_window
+
+**中优**：
+5. **Gemini 重复同名工具覆盖**（gemini respond_stream）：tool_acc 以 name 为键 → 同名
+   工具（如两次 read_chapter）第二次覆盖第一次。修复：改用列表累积
+6. **_call_signatures 跨 run 累积**（loop.py）：Agent 实例复用，签名跨对话累积 → 用户
+   多次问同类问题第 6 次误判死循环。修复：每轮 _loop 开头 clear
+7. **BatchPanel 轮询泄漏**（前端）：setInterval 无 unmount 清理 → 切 tab 后持续请求。
+   修复：useEffect return 清理
+
+**验证**：frozen 路径/穿越/缓存/Context Window/Gemini 工具脚本全通过；127 测试全绿；
+mypy/ruff/tsc/eslint 全绿。
+
+**未修（低优/设计性）**：Anthropic 流式 usage 不准、_emit_record _tool_ms 错位（记录数据）、
+useSSE 7 回调丢弃（V4 迁移废弃）、release notes 双 v 前缀（cosmetic）、多处 book_id 硬编码
+main（非主项目隔离，scan_main_hardcode 漏网——位置参数形式，待后续专项修）。

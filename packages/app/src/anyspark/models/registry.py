@@ -129,12 +129,19 @@ class ModelConfig:
 
 
 def default_env_config() -> ModelConfig:
-    """从 .env 的 DEEPSEEK_* 播种的默认配置（升级即用、旧行为不变）。"""
+    """从 .env 的 DEEPSEEK_* 播种的默认配置（升级即用、旧行为不变）。
+
+    S178：实时 os.getenv（非模块级常量）——load_dotenv 在 build_app 里（import 后），
+    模块级 DEFAULT_BASE_URL/MODEL/CONTEXT_WINDOW 在 import 时已求值为旧 env，
+    .env 改后不同步。实时读保证 .env 生效。"""
+    import os
+
     return ModelConfig(
         id="default",
-        name=f"DeepSeek（{DEFAULT_MODEL}）",
-        base_url=DEFAULT_BASE_URL,
-        model=DEFAULT_MODEL,
+        name=f"DeepSeek（{os.getenv('DEEPSEEK_MODEL', DEFAULT_MODEL)}）",
+        base_url=os.getenv("DEEPSEEK_BASE_URL", DEFAULT_BASE_URL),
+        model=os.getenv("DEEPSEEK_MODEL", DEFAULT_MODEL),
+        context_window=int(os.getenv("DEEPSEEK_CONTEXT_WINDOW", str(DEFAULT_CONTEXT_WINDOW))),
         is_active=True,
     )
 
@@ -172,24 +179,29 @@ class ModelRegistry:
         self._sync_default_from_env()
 
     def _sync_default_from_env(self) -> None:
-        """S173：.env 的 DEEPSEEK_BASE_URL/DEEPSEEK_MODEL 变更同步到库 default 配置。
+        """S173/S178：.env 的 DEEPSEEK_* 变更同步到库 default 配置。
 
-        种子只在空库播种一次——库已存在时改 .env 重启，库里 default 的 base_url 仍是
-        旧值（DashScope），官方 key 打到旧端点报 401/端点错。只同步 id=default 的
-        base_url/model（.env 是启动权威）；api_key 走 resolved（库优先 .env 兜底，
-        无需同步）；界面添加的其他模型（id != default）不受影响。
+        种子只在空库播种一次——库已存在时改 .env 重启，库里 default 的 base_url/
+        model/context_window 仍是旧值。实时读 env（default_env_config）同步到
+        id=default；api_key 走 resolved（库优先 .env 兜底）；界面添加的其他模型不受影响。
         """
         env_cfg = default_env_config()
         with self._lock:
             row = self._conn.execute(
-                "SELECT base_url, model FROM model_configs WHERE id='default'"
+                "SELECT base_url, model, context_window FROM model_configs WHERE id='default'"
             ).fetchone()
             if row is None:
                 return
-            if (row[0], row[1]) != (env_cfg.base_url, env_cfg.model):
+            # S178：补 context_window 同步（旧版只同步 base_url/model，长上下文设置丢失）
+            if (row[0], row[1], row[2]) != (
+                env_cfg.base_url,
+                env_cfg.model,
+                env_cfg.context_window,
+            ):
                 self._conn.execute(
-                    "UPDATE model_configs SET base_url=?, model=? WHERE id='default'",
-                    (env_cfg.base_url, env_cfg.model),
+                    "UPDATE model_configs SET base_url=?, model=?, context_window=?"
+                    " WHERE id='default'",
+                    (env_cfg.base_url, env_cfg.model, env_cfg.context_window),
                 )
                 self._conn.commit()
 
@@ -341,7 +353,7 @@ class ModelProvider:
         self._factory = client_factory
         self._mode = mode
         self._lock = threading.Lock()
-        self._cache: dict[tuple[str, str, float, str | None], Any] = {}
+        self._cache: dict[tuple[str, str, float, str | None, str], Any] = {}
 
     def build(self, temperature: float | None = None, thinking: str | None = None) -> Any:
         """按当前激活配置构造适配器（可覆盖温度/思考强度；None=用配置值）。"""
@@ -377,7 +389,9 @@ class ModelProvider:
         """
         eff_temp = cfg.temperature if temperature is None else temperature
         eff_thinking = cfg.thinking if thinking is None else thinking
-        key = (cfg.id, cfg.protocol, eff_temp, eff_thinking)
+        # S178：缓存 key 含 updated_at——配置变更（upsert 改 base_url/api_key/model/
+        # context_window 等）后 updated_at 变 → cache miss 重建，不返回旧实例。
+        key = (cfg.id, cfg.protocol, eff_temp, eff_thinking, cfg.updated_at)
         with self._lock:
             inst = self._cache.get(key)
             if inst is None:

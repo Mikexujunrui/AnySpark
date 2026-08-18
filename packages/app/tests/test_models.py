@@ -54,15 +54,17 @@ def test_registry_syncs_default_from_env(monkeypatch) -> None:  # type: ignore[n
         )
     )
 
-    # 用户改 .env → 官方 ds（monkeypatch registry 模块命名空间的常量）
-    monkeypatch.setattr(reg_mod, "DEFAULT_BASE_URL", "https://api.deepseek.com")
-    monkeypatch.setattr(reg_mod, "DEFAULT_MODEL", "deepseek-chat")
+    # 用户改 .env → 官方 ds（S178：default_env_config 实时读 os.getenv）
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-chat")
+    monkeypatch.setenv("DEEPSEEK_CONTEXT_WINDOW", "200000")
 
     # 重启（重新实例化）→ default 同步为官方，其他模型保留
     reg2 = reg_mod.ModelRegistry(db)
     d = reg2.get("default")
     assert d.base_url == "https://api.deepseek.com"  # type: ignore[union-attr]
     assert d.model == "deepseek-chat"  # type: ignore[union-attr]
+    assert d.context_window == 200000  # S178：context_window 同步
     assert reg2.get("custom").base_url == "http://127.0.0.1:11434/v1"  # type: ignore[union-attr]
 
 
