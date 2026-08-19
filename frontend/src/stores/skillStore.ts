@@ -24,6 +24,9 @@ interface SkillState {
   // S104：草稿确认闸门（AI 生成候选 → 人工采纳/拒绝）
   approveDraft: (draftId: string) => Promise<void>;
   rejectDraft: (draftId: string) => Promise<void>;
+  // S186：批量采纳/拒绝（串行调单条 API，逐条推进 + 失败汇总）
+  approveDrafts: (draftIds: string[]) => Promise<{ ok: number; failed: number }>;
+  rejectDrafts: (draftIds: string[]) => Promise<{ ok: number; failed: number }>;
 }
 
 export const useSkillStore = create<SkillState>((set, get) => ({
@@ -107,5 +110,42 @@ export const useSkillStore = create<SkillState>((set, get) => ({
       console.error("Failed to reject skill draft:", error);
       throw error;
     }
+  },
+
+  // S186：批量采纳——串行调单条 promote（避免并发冲击后端），每条成功即移出 drafts
+  approveDrafts: async (draftIds) => {
+    let ok = 0;
+    let failed = 0;
+    for (const id of draftIds) {
+      try {
+        const skill = await promoteSkillDraft(id);
+        set((state) => ({
+          drafts: state.drafts.filter((d) => d.id !== id),
+          skills: [...state.skills, skill],
+        }));
+        ok += 1;
+      } catch (error) {
+        console.error("Failed to approve skill draft:", id, error);
+        failed += 1;
+      }
+    }
+    return { ok, failed };
+  },
+
+  // S186：批量拒绝——串行调单条 delete
+  rejectDrafts: async (draftIds) => {
+    let ok = 0;
+    let failed = 0;
+    for (const id of draftIds) {
+      try {
+        await deleteSkillDraft(id);
+        set((state) => ({ drafts: state.drafts.filter((d) => d.id !== id) }));
+        ok += 1;
+      } catch (error) {
+        console.error("Failed to reject skill draft:", id, error);
+        failed += 1;
+      }
+    }
+    return { ok, failed };
   },
 }));

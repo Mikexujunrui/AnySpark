@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useSkillStore } from "../stores/skillStore";
 import { exportSkillFile, importSkillFile } from "../api/skills";
+import Icon from "./ui/Icon";
 import ConfirmModal from "./ui/ConfirmModal";
 import PanelHeader from "./ui/PanelHeader";
 
@@ -11,40 +12,102 @@ interface SkillPanelProps {
 }
 
 // S104：AI 生成候选草稿区（agent skill_refine 产出 → 人工确认转正）
+// S186：加批量采纳/拒绝 + 全选
 function DraftSection({ drafts, onApprove, onReject }: { drafts: { id: string; name: string; description?: string; target?: string }[]; onApprove: (id: string) => void; onReject: (id: string) => void }) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
   if (drafts.length === 0) return null;
+  const allSelected = selected.size === drafts.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(drafts.map(d => d.id)));
+  const toggle = (id: string) => setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+  const bulk = async (kind: "approve" | "reject") => {
+    if (selected.size === 0) return;
+    setBusy(kind);
+    const ids = [...selected];
+    try {
+      for (const id of ids) {
+        await (kind === "approve" ? onApprove(id) : onReject(id));
+      }
+    } catch (e: unknown) {
+      window.alert(`${kind === "approve" ? "采纳" : "拒绝"}失败：${(e as Error)?.message || String(e)}`);
+    } finally {
+      setBusy(null);
+      setSelected(new Set());
+    }
+  };
   return (
     <div className="p-3 bg-amber-900/20 border border-amber-700/40 rounded-lg space-y-2">
-      <p className="text-[11px] text-amber-400 font-medium">AI 生成的技能草稿（{drafts.length} 条待确认）</p>
-      {drafts.map((d) => (
-        <div key={d.id} className="bg-zinc-900/70 rounded px-2.5 py-2 space-y-1">
-          <p className="text-xs text-zinc-200 truncate">{d.name}</p>
-          {d.description && <p className="text-[11px] text-zinc-500 line-clamp-2">{d.description}</p>}
-          <div className="flex gap-2 pt-1">
+      <div className="flex items-center gap-2">
+        <label className="flex items-center gap-1.5 text-[11px] text-amber-400 font-medium cursor-pointer select-none">
+          <input type="checkbox" checked={allSelected} onChange={toggleAll} className="accent-amber-500" />
+          AI 生成的技能草稿（{drafts.length} 条待确认）
+        </label>
+        {selected.size > 0 && (
+          <>
+            <span className="text-[10px] text-zinc-500">已选 {selected.size}</span>
             <button
-              onClick={() => {
-                // S158e：确认失败要给可见反馈（此前静默——用户“点确认没动静”的一部分）
-                Promise.resolve(onApprove(d.id)).catch((e: unknown) =>
-                  window.alert(`确认失败：${(e as Error)?.message || String(e)}`)
-                )
-              }}
-              className="text-[11px] px-2 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded"
+              onClick={() => bulk("approve")}
+              disabled={busy !== null}
+              className="text-[11px] px-2 py-0.5 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded transition-colors flex items-center gap-1"
             >
-              采纳
+              {busy === "approve" ? <Icon name="loader" size={10} className="animate-spin" /> : <Icon name="check" size={10} />}
+              批量采纳 {selected.size > 0 ? `(${selected.size})` : ""}
             </button>
             <button
-              onClick={() => {
-                Promise.resolve(onReject(d.id)).catch((e: unknown) =>
-                  window.alert(`拒绝失败：${(e as Error)?.message || String(e)}`)
-                )
-              }}
-              className="text-[11px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded"
+              onClick={() => bulk("reject")}
+              disabled={busy !== null}
+              className="text-[11px] px-2 py-0.5 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-300 rounded transition-colors flex items-center gap-1"
             >
-              拒绝
+              {busy === "reject" ? <Icon name="loader" size={10} className="animate-spin" /> : <Icon name="x" size={10} />}
+              批量拒绝 {selected.size > 0 ? `(${selected.size})` : ""}
             </button>
+          </>
+        )}
+      </div>
+      {drafts.map((d) => {
+        const checked = selected.has(d.id);
+        return (
+        <div key={d.id} className={`bg-zinc-900/70 rounded px-2.5 py-2 space-y-1 flex items-start gap-2 ${checked ? "ring-1 ring-amber-500/50" : ""}`}>
+          <input
+            type="checkbox"
+            checked={checked}
+            onChange={() => toggle(d.id)}
+            className="accent-amber-500 mt-1 shrink-0"
+          />
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-zinc-200 truncate">{d.name}</p>
+            {d.description && <p className="text-[11px] text-zinc-500 line-clamp-2">{d.description}</p>}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={() => {
+                  // S158e：确认失败要给可见反馈（此前静默——用户“点确认没动静”的一部分）
+                  Promise.resolve(onApprove(d.id)).catch((e: unknown) =>
+                    window.alert(`确认失败：${(e as Error)?.message || String(e)}`)
+                  )
+                }}
+                className="text-[11px] px-2 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded"
+              >
+                采纳
+              </button>
+              <button
+                onClick={() => {
+                  Promise.resolve(onReject(d.id)).catch((e: unknown) =>
+                    window.alert(`拒绝失败：${(e as Error)?.message || String(e)}`)
+                  )
+                }}
+                className="text-[11px] px-2 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded"
+              >
+                拒绝
+              </button>
+            </div>
           </div>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

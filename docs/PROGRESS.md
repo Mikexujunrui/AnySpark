@@ -4738,3 +4738,25 @@ chunk 更新下动画反复被打断；且 `isAtBottomRef` 一旦被任意滚动
   + 文案「思考中…」，与 ProgressIndicator 风格一致，不再 2018 风。
 
 **验证**：前端门禁全绿（tsc + eslint + build + 18 vitest 测试）。
+
+## S186: 草稿批量批准/拒绝——三处草稿区加全选+批量按钮（已完成 ✅）
+
+**用户反馈**：书架技能草稿几十条时逐条「确认生效」痛苦，缺全选/批量批准。
+
+**改动**（4 文件，三处草稿 UI 统一加批量能力）：
+- `skillStore.ts`：加 `approveDrafts`/`rejectDrafts` 批量方法（串行调单条 API，
+  逐条推进 + 失败汇总返回 {ok, failed}）——store 层抽象，UI 可选调用。
+- `SkillPanel.tsx` `DraftSection`（对话侧抽屉草稿区）：加 checkbox + 全选 +
+  「批量采纳 (N)」/「批量拒绝 (N)」按钮，串行循环调 onApprove/onReject，
+  loading 态用 spinner，完成清空选择。
+- `SkillsShelfPanel.tsx`（技能书架页草稿区）：抽 `DraftBulkSection` 组件，
+  同款全选+批量按钮+每条 checkbox（amber 强调色，选中 ring 高亮）。
+- `LibraryShelfPanel.tsx`（书库页草稿区）：标题栏加全选+批量按钮，
+  每张草稿卡片加 checkbox（violet 强调色，与书库页配色一致），批量拒绝前 confirm。
+- 修复：SkillPanel 补 Icon 导入（DraftSection 用了 Icon 但原文件未 import）。
+
+**设计**：批量操作串行调单条 API（不并发冲击后端），每条成功即更新 store，
+失败汇总 toast。保留单条按钮（不强制批量）。三处配色各跟所属页面主题
+（amber/violet/zinc），不强行统一。
+
+**验证**：前端门禁全绿（tsc + eslint + build + 18 vitest）。

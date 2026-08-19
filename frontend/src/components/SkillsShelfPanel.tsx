@@ -13,6 +13,112 @@ const TARGET_LABELS: Record<string, string> = {
   both: "通用",
 };
 
+// S186：草稿批量采纳/拒绝区（全选 + 批量按钮 + 每条 checkbox）
+function DraftBulkSection({
+  drafts,
+  onApprove,
+  onReject,
+}: {
+  drafts: { id: string; name: string; description?: string; target?: string }[];
+  onApprove: (id: string) => Promise<void>;
+  onReject: (id: string) => Promise<void>;
+}) {
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState<"approve" | "reject" | null>(null);
+  const allSelected = selected.size === drafts.length;
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(drafts.map((d) => d.id)));
+  const toggle = (id: string) =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const bulk = async (kind: "approve" | "reject") => {
+    if (selected.size === 0) return;
+    setBusy(kind);
+    const ids = [...selected];
+    try {
+      for (const id of ids) {
+        await (kind === "approve" ? onApprove(id) : onReject(id));
+      }
+    } catch (e: unknown) {
+      window.alert(`${kind === "approve" ? "采纳" : "拒绝"}失败：${(e as Error)?.message || String(e)}`);
+    } finally {
+      setBusy(null);
+      setSelected(new Set());
+    }
+  };
+  return (
+    <div className="rounded-2xl border border-amber-700/40 bg-gradient-to-br from-amber-950/30 to-zinc-900/40 p-4 mb-6">
+      <div className="flex items-center gap-2 mb-3 flex-wrap">
+        <label className="flex items-center gap-1.5 text-xs font-medium text-amber-400 cursor-pointer select-none">
+          <input type="checkbox" checked={allSelected} onChange={toggleAll} className="accent-amber-500" />
+          <Icon name="lightbulb" size={13} /> AI 生成的技能草稿（{drafts.length} 条）
+        </label>
+        {selected.size > 0 && (
+          <>
+            <span className="text-[10px] text-zinc-500">已选 {selected.size}</span>
+            <button
+              onClick={() => bulk("approve")}
+              disabled={busy !== null}
+              className="text-[11px] px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg flex items-center gap-1"
+            >
+              {busy === "approve" ? <Icon name="loader" size={11} className="animate-spin" /> : <Icon name="check" size={11} />}
+              批量采纳 ({selected.size})
+            </button>
+            <button
+              onClick={() => bulk("reject")}
+              disabled={busy !== null}
+              className="text-[11px] px-2.5 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-300 rounded-lg flex items-center gap-1"
+            >
+              {busy === "reject" ? <Icon name="loader" size={11} className="animate-spin" /> : <Icon name="x" size={11} />}
+              批量拒绝 ({selected.size})
+            </button>
+          </>
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-2.5">
+        {drafts.map((d) => {
+          const checked = selected.has(d.id);
+          return (
+            <div key={d.id} className={`bg-zinc-900/70 rounded-xl px-3.5 py-3 border ${checked ? "border-amber-500/50 ring-1 ring-amber-500/30" : "border-zinc-800/70"}`}>
+              <div className="flex items-start gap-2">
+                <input type="checkbox" checked={checked} onChange={() => toggle(d.id)} className="accent-amber-500 mt-0.5 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm text-zinc-200 font-medium truncate">{d.name}</p>
+                  {d.description && <p className="text-[11px] text-zinc-500 mt-1 line-clamp-2">{d.description}</p>}
+                  <div className="flex gap-2 mt-2.5">
+                    <button
+                      onClick={() => {
+                        onApprove(d.id).catch((e: unknown) =>
+                          window.alert(`确认失败：${(e as Error)?.message || String(e)}`)
+                        )
+                      }}
+                      className="text-[11px] px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg"
+                    >
+                      采纳
+                    </button>
+                    <button
+                      onClick={() => {
+                        onReject(d.id).catch((e: unknown) =>
+                          window.alert(`拒绝失败：${(e as Error)?.message || String(e)}`)
+                        )
+                      }}
+                      className="text-[11px] px-2.5 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg"
+                    >
+                      拒绝
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 function SkillCard({
   skill,
   onEdit,
@@ -208,42 +314,7 @@ export default function SkillsShelfPanel() {
 
       {/* 草稿待确认区 */}
       {drafts.length > 0 && (
-        <div className="rounded-2xl border border-amber-700/40 bg-gradient-to-br from-amber-950/30 to-zinc-900/40 p-4 mb-6">
-          <p className="text-xs font-medium text-amber-400 flex items-center gap-1.5 mb-3">
-            <Icon name="lightbulb" size={13} /> AI 生成的技能草稿（{drafts.length} 条）——采纳后转正为可用技能
-          </p>
-          <div className="grid grid-cols-2 gap-2.5">
-            {drafts.map((d) => (
-              <div key={d.id} className="bg-zinc-900/70 rounded-xl px-3.5 py-3 border border-zinc-800/70">
-                <p className="text-sm text-zinc-200 font-medium truncate">{d.name}</p>
-                {d.description && <p className="text-[11px] text-zinc-500 mt-1 line-clamp-2">{d.description}</p>}
-                <div className="flex gap-2 mt-2.5">
-                  <button
-                    onClick={() => {
-                      // S158e：确认失败给可见反馈（此前静默——“点确认没动静”）
-                      approveDraft(d.id).catch((e: unknown) =>
-                        window.alert(`确认失败：${(e as Error)?.message || String(e)}`)
-                      )
-                    }}
-                    className="text-[11px] px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 text-white rounded-lg"
-                  >
-                    采纳
-                  </button>
-                  <button
-                    onClick={() => {
-                      rejectDraft(d.id).catch((e: unknown) =>
-                        window.alert(`拒绝失败：${(e as Error)?.message || String(e)}`)
-                      )
-                    }}
-                    className="text-[11px] px-2.5 py-1 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 rounded-lg"
-                  >
-                    拒绝
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+        <DraftBulkSection drafts={drafts} onApprove={approveDraft} onReject={rejectDraft} />
       )}
 
       {/* 分组技能列表 */}

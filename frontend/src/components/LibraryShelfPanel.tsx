@@ -137,6 +137,55 @@ export default function LibraryShelfPanel() {
     }
   };
 
+  // S186：批量采纳/拒绝
+  const [bulkBusy, setBulkBusy] = useState<"approve" | "reject" | null>(null);
+  const [bulkSelected, setBulkSelected] = useState<Set<string>>(new Set());
+  const bulkToggle = (id: string) =>
+    setBulkSelected((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  const bulkAll = (on: boolean) =>
+    setBulkSelected(on ? new Set(drafts.map((d) => d.id)) : new Set());
+  const bulkApprove = async () => {
+    if (bulkSelected.size === 0) return;
+    setBulkBusy("approve");
+    let ok = 0;
+    let fail = 0;
+    for (const id of bulkSelected) {
+      try {
+        await promoteSkillDraft(id);
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setBulkBusy(null);
+    setBulkSelected(new Set());
+    flash(ok > 0 ? "ok" : "err", `批量采纳：成功 ${ok} 条${fail ? `，失败 ${fail} 条` : ""}`);
+    loadData();
+  };
+  const bulkReject = async () => {
+    if (bulkSelected.size === 0) return;
+    if (!window.confirm(`批量拒绝 ${bulkSelected.size} 条草稿？`)) return;
+    setBulkBusy("reject");
+    let ok = 0;
+    let fail = 0;
+    for (const id of bulkSelected) {
+      try {
+        await deleteSkillDraft(id);
+        ok += 1;
+      } catch {
+        fail += 1;
+      }
+    }
+    setBulkBusy(null);
+    setBulkSelected(new Set());
+    flash(ok > 0 ? "ok" : "err", `批量拒绝：成功 ${ok} 条${fail ? `，失败 ${fail} 条` : ""}`);
+    loadData();
+  };
+
   const onDeleteBook = async (b: LibraryBook) => {
     if (!window.confirm(`删除书库《${b.name}》？引用关系一并清理。`)) return;
     try {
@@ -238,16 +287,50 @@ export default function LibraryShelfPanel() {
 
         {/* 技能草稿区 */}
         <section className="mb-12">
-          <div className="flex items-center gap-2 mb-4">
+          <div className="flex items-center gap-2 mb-4 flex-wrap">
             <h2 className="text-lg font-semibold flex items-center gap-2">
               <span className="text-violet-400"><Icon name="clipboard-list" size={18} /></span>
               技能草稿
             </h2>
             <span className="text-xs text-zinc-500">（提炼后在此确认生效；AI 写作时按需调用）</span>
             {drafts.length > 0 && (
-              <span className="ml-auto text-xs bg-violet-900/40 text-violet-300 px-2 py-0.5 rounded-full">
+              <span className="text-xs bg-violet-900/40 text-violet-300 px-2 py-0.5 rounded-full">
                 {drafts.length} 条待确认
               </span>
+            )}
+            {drafts.length > 0 && (
+              <div className="ml-auto flex items-center gap-2 flex-wrap">
+                <label className="flex items-center gap-1.5 text-xs text-zinc-400 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={bulkSelected.size === drafts.length}
+                    onChange={(e) => bulkAll(e.target.checked)}
+                    className="accent-violet-500"
+                  />
+                  全选
+                </label>
+                {bulkSelected.size > 0 && (
+                  <>
+                    <span className="text-[10px] text-zinc-500">已选 {bulkSelected.size}</span>
+                    <button
+                      onClick={bulkApprove}
+                      disabled={bulkBusy !== null}
+                      className="text-[11px] px-2.5 py-1 bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white rounded-lg flex items-center gap-1"
+                    >
+                      {bulkBusy === "approve" ? <Icon name="loader" size={11} className="animate-spin" /> : <Icon name="check" size={11} />}
+                      批量采纳 ({bulkSelected.size})
+                    </button>
+                    <button
+                      onClick={bulkReject}
+                      disabled={bulkBusy !== null}
+                      className="text-[11px] px-2.5 py-1 bg-zinc-700 hover:bg-zinc-600 disabled:opacity-50 text-zinc-300 rounded-lg flex items-center gap-1"
+                    >
+                      {bulkBusy === "reject" ? <Icon name="loader" size={11} className="animate-spin" /> : <Icon name="x" size={11} />}
+                      批量拒绝 ({bulkSelected.size})
+                    </button>
+                  </>
+                )}
+              </div>
             )}
           </div>
           {drafts.length === 0 ? (
@@ -260,32 +343,44 @@ export default function LibraryShelfPanel() {
             </div>
           ) : (
             <div className="grid gap-3 md:grid-cols-2">
-              {drafts.map((d) => (
-                <div key={d.id} className="bg-zinc-900 border border-zinc-800 rounded-xl overflow-hidden hover:border-zinc-700 transition-colors">
+              {drafts.map((d) => {
+                const checked = bulkSelected.has(d.id);
+                return (
+                <div key={d.id} className={`bg-zinc-900 border rounded-xl overflow-hidden transition-colors ${checked ? "border-violet-500/60 ring-1 ring-violet-500/30" : "border-zinc-800 hover:border-zinc-700"}`}>
                   <div className={`h-1 bg-gradient-to-r ${hashColor(d.name)}`} />
                   <div className="p-4">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <span className="font-medium text-sm text-zinc-200">{d.name}</span>
-                      {d.source && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
-                          {d.source === "library" ? "书库提炼" : d.source}
-                        </span>
-                      )}
-                      {d.target && (
-                        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
-                          d.target === "main" ? "bg-amber-900/40 text-amber-300"
-                          : d.target === "both" ? "bg-violet-900/40 text-violet-300"
-                          : "bg-sky-900/40 text-sky-300"
-                        }`}>
-                          {d.target === "main" ? "主循环" : d.target === "both" ? "双端" : "写作"}
-                        </span>
-                      )}
+                    <div className="flex items-start gap-2 mb-1.5">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => bulkToggle(d.id)}
+                        className="accent-violet-500 mt-0.5 shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-sm text-zinc-200">{d.name}</span>
+                          {d.source && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-zinc-800 text-zinc-400">
+                              {d.source === "library" ? "书库提炼" : d.source}
+                            </span>
+                          )}
+                          {d.target && (
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${
+                              d.target === "main" ? "bg-amber-900/40 text-amber-300"
+                              : d.target === "both" ? "bg-violet-900/40 text-violet-300"
+                              : "bg-sky-900/40 text-sky-300"
+                            }`}>
+                              {d.target === "main" ? "主循环" : d.target === "both" ? "双端" : "写作"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                     {d.description && (
-                      <p className="text-xs text-zinc-400 mb-2 line-clamp-2">{d.description}</p>
+                      <p className="text-xs text-zinc-400 mb-2 line-clamp-2 pl-6">{d.description}</p>
                     )}
-                    <p className="text-xs text-zinc-500 mb-3 line-clamp-3 whitespace-pre-wrap">{d.content}</p>
-                    <div className="flex gap-2">
+                    <p className="text-xs text-zinc-500 mb-3 line-clamp-3 whitespace-pre-wrap pl-6">{d.content}</p>
+                    <div className="flex gap-2 pl-6">
                       <button
                         onClick={() => onPromote(d)}
                         className="bg-emerald-800/60 text-emerald-300 border border-emerald-800 rounded-lg px-3 py-1.5 text-xs font-medium hover:bg-emerald-800/80 active:scale-95 transition-all flex items-center gap-1"
@@ -301,7 +396,8 @@ export default function LibraryShelfPanel() {
                     </div>
                   </div>
                 </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
