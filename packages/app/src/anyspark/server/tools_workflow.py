@@ -19,6 +19,7 @@ from typing import Any
 
 from anyspark.core import ToolCall
 from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
+from anyspark.server.logging import logger
 
 
 def make_workflow_tools(
@@ -153,8 +154,8 @@ def make_workflow_tools(
                     from anyspark.server.notify import notify_workflow_completion
 
                     notify_workflow_completion(workflow_store, manual, task_id)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning("工作流完成通知失败 %s: %s", task_id, exc)
 
         threading.Thread(target=_run, daemon=True).start()
         return ToolResult(

@@ -273,7 +273,7 @@ def _decode_bing_target(raw: str) -> str:
         if s.startswith(("http://", "https://")):
             return s
     except Exception:
-        pass
+        pass  # best-effort: 二进制中提取 URL，失败返回空
     return ""
 
 

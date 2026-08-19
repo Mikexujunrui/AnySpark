@@ -42,7 +42,7 @@ def _wait_backend(port: int, timeout: float = 30.0) -> bool:
                 if r.status == 200:
                     return True
         except Exception:
-            pass
+            pass  # best-effort: 轮询健康检查，失败时继续重试
         time.sleep(0.5)
     return False
 

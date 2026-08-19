@@ -41,7 +41,7 @@ def load_state() -> dict[str, object]:
             data = json.loads(STATE_FILE.read_text(encoding="utf-8"))
             return data if isinstance(data, dict) else {}
         except Exception:
-            pass
+            pass  # best-effort: 状态文件可选，损坏时返回空字典
     return {}
 
 
@@ -129,7 +129,7 @@ def stream_chat(base: str, message: str, conv_id: str | None) -> tuple[str, str 
                     json={"conversation_id": conv_id},
                 )
         except Exception:
-            pass
+            pass  # best-effort: cancel 是 fire-and-forget，失败不阻断用户操作
         print("\n[已取消] 输入'继续'可续写", file=sys.stderr)
         return ("", conv_id)
     return None

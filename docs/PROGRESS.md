@@ -4760,3 +4760,18 @@ chunk 更新下动画反复被打断；且 `isAtBottomRef` 一旦被任意滚动
 （amber/violet/zinc），不强行统一。
 
 **验证**：前端门禁全绿（tsc + eslint + build + 18 vitest）。
+
+## S187: app.py 瘦身——种子函数提取到 seeds.py + 工作流脚本提取到 wf_scripts.py + 吞异常清理（已完成 ✅）
+
+**背景**：S186 后项目审查发现 app.py 膨胀至 1889 行（"上帝函数"问题），`except Exception: pass` 吞异常 9 处。
+
+**改动**：
+1. **seeds.py（654 行）**：提取 8 个 `_seed_*_template` 函数 + `_migrate_templates_to_skills`——纯函数（不引用 build_app 闭包），提取无行为变化。
+2. **wf_scripts.py（888 行）**：提取 ~20 个 `_wf_script_*` 函数 + `_wf_run_agent`/`_wf_run_subagent`/`_wf_run_script`/`_wf_runner`/`_wf_judge`/`_wf_resolve`——从闭包提取为模块级函数，依赖通过 `WfScriptDeps` dataclass 传入（build_app 创建 wfd → 赋值 model/chapters/graph/settings/library/workspace/skills → deps 创建后回填 wfd.deps）。内部调用加 wfd 参数透传。
+3. **吞异常清理**：
+   - **加 logger.warning（4 处）**：routes_workflow.py 通知失败 ×2、tools_workflow.py 通知失败、tools_domain.py 设定查证失败、wf_scripts.py 参考书知识层渲染失败——排障需要这些信息。
+   - **保留 pass + 注释（5 处）**：cli_chat.py 状态文件读取/cancel fire-and-forget、tools_web.py URL 提取、desktop 健康检查轮询、wf_scripts.py 双写落盘——真正 best-effort，加注释说明。
+
+**结果**：app.py 从 1889 行 → **465 行**（-75%），组合根回归纯粹（FastAPI 实例 + router 挂载 + 生命周期 + WfScriptDeps 装配）。
+
+**验证**：ruff + mypy 全绿（57 文件）；pytest 61 passed（test_app + workflow + workflow_api，排除既有竞态 test_chat_stream_sse_frames）。

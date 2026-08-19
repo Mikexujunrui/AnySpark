@@ -146,8 +146,8 @@ def make_workflow_router(deps: AppDeps) -> APIRouter:
                 from anyspark.server.notify import notify_workflow_completion
 
                 notify_workflow_completion(deps.workflow_store, deps.manual, task_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("工作流完成通知失败 %s: %s", task_id, exc)
 
         threading.Thread(target=_run, daemon=True).start()
         return deps.workflow_store.get_task(task_id) or {}
@@ -227,8 +227,8 @@ def make_workflow_router(deps: AppDeps) -> APIRouter:
                 from anyspark.server.notify import notify_workflow_completion
 
                 notify_workflow_completion(deps.workflow_store, deps.manual, task_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("工作流完成通知失败 %s: %s", task_id, exc)
 
         threading.Thread(target=_run, daemon=True).start()
         return {"task_id": task_id, "status": "queued"}

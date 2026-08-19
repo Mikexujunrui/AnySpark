@@ -22,6 +22,7 @@ from typing import Any
 from anyspark.align import ManualEntry, render_plan
 from anyspark.core import ToolCall
 from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
+from anyspark.server.logging import logger
 
 # 查询返回上限（防 token 爆炸：Agent 是裁剪消费者，需要细节再查）
 _QUERY_LIMIT = 10
@@ -1995,8 +1996,8 @@ def render_reference_knowledge(
                 if keyword.lower() in blob.lower():
                     # S157：设定查证全量注入（按需精查场景，截断会丢关键设定）
                     lines.append(f"设定[{s.category}] {s.name}：{s.content}")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning("设定档查证失败: %s", exc)
     return lines
 
 
