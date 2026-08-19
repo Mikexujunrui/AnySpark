@@ -4720,3 +4720,21 @@ chunk 更新下动画反复被打断；且 `isAtBottomRef` 一旦被任意滚动
 **验证**：前端门禁（tsc + eslint + build + vitest 18 测试）全绿；手工回归——
 批量任务 tool 消息收敛为 1 条聚合徽章、parts 折叠卡片；流式输出/历史加载自动跟底，
 上滚后出现回底按钮且点击回底。
+
+## S185: 前端聊天界面美术优化——消息层次/头像/间距/处理动画（已完成 ✅）
+
+**目标**：S184 修完功能 bug 后，对聊天界面做中高性价比美术打磨（用户拍板范围）。
+
+**改动**（`frontend/src/components/chat/MessageList.tsx`）：
+- **agent 去气泡全宽**：agent 长正文不再套 zinc-800 框（框压扁 markdown 标题/代码块），
+  改全宽无背景展示，max-w 46rem 保可读性；autopilot 消息改左侧紫色色条区分（去框后
+  不丢视觉标记）。user 气泡加重：sky-900/20 → sky-800/40 实色 + shadow + 圆角不对称
+  （rounded-2xl rounded-tr-sm，指向头像）。
+- **头像对称化**：agent 头像方块 → 圆形渐变（sky-800/900 渐变 + sky-300 图标）；
+  user 补圆形头像（zinc-700/800 渐变 + user 图标），左右对称。
+- **间距透气**：消息列表 space-y-5 → space-y-6，轮次间留白增加。
+- **工具聚合徽章呼吸感**：居中容器加 my-1 独立间距，与上下气泡分离。
+- **处理中动画统一**：三个 bounce 圆点 → 单个 spinner（loader 图标 animate-spin）
+  + 文案「思考中…」，与 ProgressIndicator 风格一致，不再 2018 风。
+
+**验证**：前端门禁全绿（tsc + eslint + build + 18 vitest 测试）。

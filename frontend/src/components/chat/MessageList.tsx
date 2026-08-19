@@ -197,7 +197,7 @@ function ToolTraceGroup({ texts }: { texts: string[] }) {
     .map(([n, c]) => `${n}×${c}`)
     .join(', ')
   return (
-    <div className="w-full text-center">
+    <div className="w-full flex justify-center my-1">
       <button
         onClick={() => setOpen(!open)}
         className="inline-flex items-center gap-1.5 text-[10px] text-zinc-500 bg-zinc-800/50 hover:bg-zinc-700/60 border border-zinc-700/60 px-2 py-0.5 rounded-full transition-colors max-w-full"
@@ -314,7 +314,7 @@ export default function MessageList({
   return (
     <div className="flex-1 min-h-0 relative">
       <div
-        className="h-full overflow-y-auto px-6 py-5 space-y-5"
+        className="h-full overflow-y-auto px-6 py-5 space-y-6"
         ref={scrollContainerRef}
         onScroll={handleScroll}
       >
@@ -333,20 +333,22 @@ export default function MessageList({
               ) : (
               <>
               {msg.role === 'agent' && (
-                <div className="w-7 h-7 rounded-lg bg-sky-900/40 border border-sky-800/60 flex items-center justify-center shrink-0 mt-0.5">
-                  <Icon name="lightbulb" size={13} className="text-sky-400" />
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-800/60 to-sky-900/80 border border-sky-700/50 flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                  <Icon name="lightbulb" size={14} className="text-sky-300" />
                 </div>
               )}
-              <div className={`flex min-w-0 flex-col max-w-[min(640px,90%)] ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                {msg.role === 'user' && (
-                  <span className="text-[10px] text-zinc-500 mb-1 mr-1">你</span>
-                )}
-                <div className={`min-w-0 max-w-full rounded-xl px-4 py-3 text-sm leading-normal break-words [overflow-wrap:anywhere] ${
+              {msg.role === 'user' && (
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-zinc-700/80 to-zinc-800/90 border border-zinc-600/60 flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+                  <Icon name="user" size={14} className="text-zinc-300" />
+                </div>
+              )}
+              <div className={`flex min-w-0 flex-col ${msg.role === 'user' ? 'items-end max-w-[min(640px,88%)]' : 'items-start max-w-[min(46rem,92%)]'}`}>
+                <div className={`min-w-0 max-w-full text-sm leading-normal break-words [overflow-wrap:anywhere] ${
                   msg.autopilot
-                    ? 'bg-purple-900/20 border border-purple-700/40 text-zinc-200'
+                    ? 'border-l-2 border-purple-500/60 pl-3 py-0.5 text-zinc-300'
                     : msg.role === 'user'
-                      ? 'bg-sky-900/20 border border-sky-800/40 text-zinc-100'
-                      : 'bg-zinc-800/80 border border-zinc-700 text-zinc-200'
+                      ? 'rounded-2xl rounded-tr-sm bg-sky-800/40 border border-sky-700/50 px-4 py-2.5 text-zinc-100 shadow-sm'
+                      : 'text-zinc-200'
                 }`}>
                   {editingIdx === i ? (
                     <InlineEditor
@@ -408,18 +410,12 @@ export default function MessageList({
         })}
         {(streaming || uploading) && (
           <div className="flex gap-3">
-            <div className="w-7 h-7 rounded-lg bg-sky-900/40 border border-sky-800/60 flex items-center justify-center shrink-0 mt-0.5">
-              <Icon name="lightbulb" size={13} className="text-sky-400" />
+            <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-800/60 to-sky-900/80 border border-sky-700/50 flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
+              <Icon name="lightbulb" size={14} className="text-sky-300" />
             </div>
-            <div className="bg-zinc-800/80 border border-zinc-700 rounded-xl px-4 py-3">
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  <span className="w-2 h-2 rounded-full bg-sky-400/70 animate-bounce" style={{ animationDelay: '0ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-sky-400/70 animate-bounce" style={{ animationDelay: '150ms' }} />
-                  <span className="w-2 h-2 rounded-full bg-sky-400/70 animate-bounce" style={{ animationDelay: '300ms' }} />
-                </div>
-                <span className="text-[11px] text-zinc-500">{uploading ? '上传中...' : '处理中...'}</span>
-              </div>
+            <div className="flex items-center gap-2.5 mt-1.5">
+              <Icon name="loader" size={14} className="text-sky-400/80 animate-spin" />
+              <span className="text-[11px] text-zinc-500">{uploading ? '上传中…' : '思考中…'}</span>
             </div>
           </div>
         )}
