@@ -4691,3 +4691,32 @@ tool_use id 必须在其紧邻下一条 user 的 tool_result 里；不满足的 
 **验证**：TXT 拆章全链路（书架 import-txt / 上传区 upload→ingest）200 拆章正常；
 Anthropic 场景（steer 隔开 / 多 tool_use 部分配对 / 正常配对）全过；回归 +2；
 129 测试全绿；mypy/ruff/tsc 全绿。
+
+## S184: 前端聊天界面工具调用显示聚合折叠 + 自动滚动跟底修复（用户反馈驱动）（已完成 ✅）
+
+**用户反馈**：① 聊天界面工具调用显示丑陋——批量任务一轮几十上百次工具调用，
+界面刷出上百条；② 无操作（不滚轮）时不会自动滚动到最底端，必须手动滚。
+
+**根因1（工具调用双重复显）**：
+- 流式阶段：useSSE 对每个 `tool_call`/`tool_execution_start` 事件各追加一条
+  `role:'tool'` 消息（几百次调用 = 几百行居中灰字）；
+- 结束阶段：`done` 帧的 `parts` 又把每条 `tool_call` 逐张渲染成 `ToolCallCard`。
+修复（`frontend/src/components/chat/MessageList.tsx`）：
+- **连续 tool 消息聚合**：渲染前把相邻 `role:'tool'` 消息合并为一个逻辑条目，
+  显示紧凑聚合徽章「工具调用 ×N + 各工具名×次数（最多 6 种）」，点击展开逐条明细。
+  保持原消息数组索引语义不变（编辑/回退/重试仍按原下标操作，聚合只在渲染层发生）。
+- **TurnParts 折叠**：`tool_call` 超过 6 张卡片时默认只显示前 6 张 + 虚线
+  「…还有 N 条工具调用，点击展开全部」按钮，展开后显示全部（保留每轮
+  「思考→调用→结果」顺序）。
+
+**根因2（自动滚动失效）**：原实现 `scrollIntoView({behavior:'smooth'})` 在流式高频
+chunk 更新下动画反复被打断；且 `isAtBottomRef` 一旦被任意滚动事件置 false——
+含浏览器加载历史会话时恢复滚动位置触发的事件——就**永不自动跟底**。
+修复：内容变化（messages/streaming/progress/workflowData/plotCards/question 等）
+且停留在底部（或从未主动上滚）时改**同步 scrollTop 直达最新**（无动画即无打断）；
+首次挂载后 rAF 兜底一次防历史位置恢复；用户明确上滚离开底部后显示
+「回到底部」悬浮按钮，点击才用平滑滚动。
+
+**验证**：前端门禁（tsc + eslint + build + vitest 18 测试）全绿；手工回归——
+批量任务 tool 消息收敛为 1 条聚合徽章、parts 折叠卡片；流式输出/历史加载自动跟底，
+上滚后出现回底按钮且点击回底。
