@@ -4792,3 +4792,14 @@ chunk 更新下动画反复被打断；且 `isAtBottomRef` 一旦被任意滚动
 **结果**：tools_domain.py 从 2266 行 → 82 行（-96%）；6 个功能域文件各 165-613 行。
 
 **验证**：ruff + mypy 全绿（16 文件）；pytest 67 passed（test_app + test_models + test_codex，排除既有竞态）。
+
+## S188b: workflow store 补测试——14 个未测方法覆盖（已完成 ✅）
+
+**背景**：审查发现 WorkflowStore 有 14 个方法未被测试覆盖（draft 生命周期/builtin 保护/节点状态管理）。
+
+**改动**：新建 `packages/workflow/tests/test_store.py`（26 个测试，3 个测试类）：
+- TestBuiltinProtection（6 个）：is_builtin/mark_builtin_by_name/delete_template——预置模板保护逻辑
+- TestDraftLifecycle（10 个）：add/list/get/promote/reject/delete draft——草稿→人工确认→转正闸门
+- TestNodeState（10 个）：update_node_state/increment_attempts/append_result/node_status/node_output——断点恢复基础
+
+**验证**：ruff + mypy 全绿；pytest 26 passed（1.28s）。
