@@ -478,3 +478,58 @@ def test_responses_dangling_function_call_removed() -> None:
     result = to_responses_input(msgs)
     fcs = [i for i in result if isinstance(i, dict) and i.get("type") == "function_call"]
     assert fcs == []
+
+
+def test_anthropic_tool_result_separated_by_user_removed() -> None:
+    """S182：tool_result 被 user 消息隔开（steer 插话在 tool_result 前）→
+    Anthropic 要求 tool_use 后**立即**跟 tool_result（仅存在配对不够）——
+    移除该 tool_use + 孤儿 tool_result，否则 400（messages.N.M tool_use
+    without tool_result blocks immediately after）。"""
+    msgs = [
+        Message(role="user", content="写"),
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "wc", "arguments": {}, "id": "c1"}]},
+        ),
+        Message(role="user", content="别写太血腥"),  # steer 插话在 tool_result 前
+        Message(role="tool", content="已保存", metadata={"tool_call_id": "c1"}),
+        Message(role="assistant", content="完成"),
+    ]
+    _, conv = to_anthropic_messages(msgs)
+    for m in conv:
+        if m["role"] == "assistant":
+            assert not any(
+                isinstance(b, dict) and b.get("type") == "tool_use" for b in m["content"]
+            ), f"tool_use 应被移除: {m['content']}"
+    for m in conv:
+        if m["role"] == "user" and isinstance(m["content"], list):
+            assert not any(
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in m["content"]
+            ), "孤儿 tool_result 应被移除"
+
+
+def test_anthropic_partial_tool_use_pairing() -> None:
+    """S182：同批多 tool_use 部分配对（c1 紧跟、c2 隔开）→ 保留 c1、移除 c2。"""
+    msgs = [
+        Message(role="user", content="写"),
+        Message(
+            role="assistant",
+            content="",
+            metadata={
+                "tool_calls": [
+                    {"name": "a", "arguments": {}, "id": "c1"},
+                    {"name": "b", "arguments": {}, "id": "c2"},
+                ]
+            },
+        ),
+        Message(role="tool", content="A", metadata={"tool_call_id": "c1"}),
+        Message(role="assistant", content="继续"),
+        Message(role="tool", content="B", metadata={"tool_call_id": "c2"}),  # c2 隔开
+        Message(role="assistant", content="完成"),
+    ]
+    _, conv = to_anthropic_messages(msgs)
+    # c1 保留（紧跟配对），c2 移除
+    asst = next(m for m in conv if m["role"] == "assistant" and isinstance(m["content"], list))
+    ids = [b["id"] for b in asst["content"] if isinstance(b, dict) and b.get("type") == "tool_use"]
+    assert ids == ["c1"], f"应只保留 c1: {ids}"

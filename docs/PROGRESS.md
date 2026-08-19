@@ -4668,3 +4668,26 @@ main（非主项目隔离，scan_main_hardcode 漏网——位置参数形式，
 state 恒 null 组件不渲染，属 V4 迁移死代码（清理是 UI 重构，非 bug，风险 > 收益）。
 
 **验证**：ruff/mypy 全绿；test_app 仅 test_chat_stream_sse_frames 既有竞态失败（与改动无关）。
+
+## S181+S182: TXT 上传拆章回归 + Anthropic tool_use 紧跟盲区（用户实测驱动）（已完成 ✅）
+
+**用户反馈**：① 书架 TXT 上传/项目内上传区/对话栏上传按钮 → "仅支持 txt/md/docx/pdf"
+报错无法拆章；② Anthropic 协议再报 400 `messages.N.M: tool_use without tool_result
+immediately after`。
+
+**根因1（S178 回归毁扩展名）**：S178 给 `_safe_title` 加 `.` 过滤防 `..` 穿越，但
+`save_upload`/`read_upload` 用 `_safe_title` 消毒**整个文件名** → `测试书.txt` 变
+`测试书txt` → `path.suffix` 空 → ingest bad_ext。修复：新增 `_safe_filename`
+（stem 去非法字符 + 白名单后缀保留，`..`/`.` 特例回退；幂等），save/read/delete
+三处共用。
+**根因1b（ChatPanel 404）**：对话栏上传按钮调 `/api/books/{bookId}/upload`（FormData）
+——后端无此路由必 404。改走 `/api/upload`（base64，与 UploadPanel 同路径）。
+**根因2（S174 盲区）**：S174 只检查"tool_result 存在配对"，不检查"立即跟随"——
+tool_result 被 steer 插话隔开、或同批多 tool_use 部分配对时，Anthropic 仍 400
+（严格要求 tool_use 的**下一条**就是 tool_result）。修复：逐条 assistant 检查
+tool_use id 必须在其紧邻下一条 user 的 tool_result 里；不满足的 tool_use 移除 +
+孤儿 tool_result 一并移除。
+
+**验证**：TXT 拆章全链路（书架 import-txt / 上传区 upload→ingest）200 拆章正常；
+Anthropic 场景（steer 隔开 / 多 tool_use 部分配对 / 正常配对）全过；回归 +2；
+129 测试全绿；mypy/ruff/tsc 全绿。

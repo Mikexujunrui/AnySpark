@@ -409,19 +409,30 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     ])
 
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      formData.append('session_id', sessionId)
-
-      const res = await fetch(`/api/books/${bookId}/upload`, {
+      // S181：此前调 /api/books/{bookId}/upload（FormData）——后端无此路由，必 404。
+      // 改走 /api/upload（base64 JSON，与 UploadPanel 同路径），只存档不拆章
+      // （拆章/消化由用户后续指令或左侧上传面板触发）。
+      const dataB64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const result = String(reader.result || '')
+          const comma = result.indexOf(',')
+          resolve(comma >= 0 ? result.slice(comma + 1) : result)
+        }
+        reader.onerror = () => reject(reader.error)
+        reader.readAsDataURL(file)
+      })
+      const res = await fetch(`/api/upload`, {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ filename: file.name, data_b64: dataB64, book_id: bookId }),
       })
       const data = await res.json()
+      if (!res.ok) throw new Error(data?.detail || data?.error || `上传失败 (${res.status})`)
       console.log(`${DIAG_PREFIX} ChatPanel — 上传完成 | status=%d`, res.status)
       setMessages(prev => [...prev, {
         role: 'agent',
-        text: `[完成] ${data.message}\n\n现在可以给我指令处理这个文件，例如：\n• "帮我把第1章拆解并复写"\n• "提取这个文件的全部设定"\n• "分析这个小说的文风特征"`,
+        text: `[完成] 已上传「${file.name}」到上传区。\n\n现在可以给我指令处理这个文件，例如：\n• "把《${file.name}》按章节拆解并写入"\n• "提取这个文件的全部设定"\n• "分析这个小说的文风特征"`,
       }])
     } catch (e) {
       console.error(`${DIAG_PREFIX} ChatPanel — 上传失败: %s`, e.message)

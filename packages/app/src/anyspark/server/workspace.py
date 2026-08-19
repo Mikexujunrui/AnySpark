@@ -49,6 +49,29 @@ def _safe_title(title: str) -> str:
     return cleaned or "未命名"
 
 
+# 文件名消毒保留的扩展名白名单（文本/图片；防伪装后缀 + 保留可 digest 的扩展名）
+_KEEP_SUFFIXES = frozenset(
+    {".txt", ".md", ".markdown", ".docx", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp"}
+)
+
+
+def _safe_filename(name: str) -> str:
+    """文件名消毒：stem 去非法字符 + 保留扩展名（S181：_safe_title 删点会
+    毁掉 `.txt` 等扩展名导致 digest 判别 bad_ext——stem 消毒 + suffix 保留）。
+    扩展名白名单：仅保留常见文本/图片后缀，其余视为无扩展名（防伪装）。
+    `..`/`.` 特例直接回退默认名（Path.stem 保留点，正则不去——防上溯）。"""
+    p = Path(name)
+    stem = p.stem.strip()
+    if stem in ("", ".", ".."):
+        stem = "未命名"
+    else:
+        stem = re.sub(r'[\\/:*?"<>|\r\n.]', "", stem).strip() or "未命名"
+    suffix = p.suffix.lower()
+    if suffix in _KEEP_SUFFIXES:
+        return f"{stem}{suffix}"
+    return stem
+
+
 def chapter_filename(order: int, title: str) -> str:
     """章节文件名规范：{order:03d}-{title}.md（文件名承载序号与标题）。"""
     return f"{int(order):03d}-{_safe_title(title)}.md"
@@ -213,8 +236,8 @@ class Workspace:
 
     # -- 上传区 --
     def save_upload(self, book_id: str, filename: str, data: bytes) -> Path:
-        """保存原始上传物到上传区（只读存档；文件名消毒防穿越）。"""
-        safe = _safe_title(Path(filename).name)
+        """保存原始上传物到上传区（只读存档；文件名消毒防穿越，保留扩展名）。"""
+        safe = _safe_filename(Path(filename).name)
         # 防覆盖重名：加时间戳后缀
         dest = self.upload_dir(book_id) / safe
         n = 1
@@ -234,8 +257,8 @@ class Workspace:
         return out
 
     def read_upload(self, book_id: str, filename: str) -> Path | None:
-        """上传区文件路径（文件名消毒防穿越）；不存在返回 None。"""
-        safe = _safe_title(Path(filename).name)
+        """上传区文件路径（文件名消毒防穿越，保留扩展名）；不存在返回 None。"""
+        safe = _safe_filename(Path(filename).name)
         p = self.upload_dir(book_id) / safe
         return p if p.exists() and p.is_file() else None
 
