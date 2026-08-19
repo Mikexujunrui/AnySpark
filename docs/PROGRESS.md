@@ -4775,3 +4775,20 @@ chunk 更新下动画反复被打断；且 `isAtBottomRef` 一旦被任意滚动
 **结果**：app.py 从 1889 行 → **465 行**（-75%），组合根回归纯粹（FastAPI 实例 + router 挂载 + 生命周期 + WfScriptDeps 装配）。
 
 **验证**：ruff + mypy 全绿（57 文件）；pytest 61 passed（test_app + workflow + workflow_api，排除既有竞态 test_chat_stream_sse_frames）。
+
+## S188: tools_domain.py 拆分——2266 行按功能域拆到 6 个模块（已完成 ✅）
+
+**背景**：S187 审查发现 tools_domain.py 2266 行是最大单文件（25 个 make_* 工厂函数）。
+
+**改动**：按功能域拆分到 6 个模块（全部是独立工厂函数，接收 store 参数，不引用闭包——提取无行为变化）：
+- tools_graph.py（165 行）：图谱查证/登记（graph_query/graph_register + _QUERY_LIMIT/_RELATION_LIMIT）
+- tools_plot.py（358 行）：伏笔/计划/设定查证（plot_*/plan_*/setting_query）
+- tools_search.py（309 行）：正文检索/锚点阅读（search_chapters/read_context + _sentence_at/_sent_has）
+- tools_align.py（559 行）：心智登记/管理 + 技巧提炼（mind_*/skill_* + _run_refine_template/_locate）
+- tools_reference.py（323 行）：参考书检索/批量任务（reference_lookup/batch_* + render_reference_knowledge + helpers）
+- tools_explore.py（613 行）：角色推演/路径探索/推演/沙箱/资料/扩展注册（roleplay/path_explore/play/codex/ingest/material/register_tool）
+- tools_domain.py（82 行）：兼容性 re-export 层（保留所有 make_* 导出，兼容 toolkit.py 等现有 import）
+
+**结果**：tools_domain.py 从 2266 行 → 82 行（-96%）；6 个功能域文件各 165-613 行。
+
+**验证**：ruff + mypy 全绿（16 文件）；pytest 67 passed（test_app + test_models + test_codex，排除既有竞态）。
