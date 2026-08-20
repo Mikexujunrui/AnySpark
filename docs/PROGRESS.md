@@ -4919,3 +4919,22 @@ test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
 - 后端：ruff + mypy 全绿（6 文件）；pytest 34 passed（test_app）+ 14 passed（test_review）
 - 前端：tsc + eslint + build 全绿
 - 测试：新增 4 个动态检测项生成器测试（空上下文/正常解析/垃圾返回/缺字段跳过）
+
+## S195: 用户可增删骨架检测项落地——持久化+API+测试（已完成 ✅）
+
+**背景**：DESIGN 机制 9 第③层"用户可增删骨架"此前只有注释（skeleton.py:53），无持久化/API。审查报告标注为 🟢 轻微缺口。
+
+**改动**：
+1. **UserSkeletonStore**（`check_store.py`，133 行）：SQLite 持久化用户自定义检测项
+   - additions 表：用户添加的检测项（id/category/description）
+   - deletions 表：用户删除的默认检测项 category 标记（可恢复）
+   - `merged_checks(defaults)`：合并默认骨架 + 用户添加项 - 用户删除项
+2. **装配**：app.py 创建 `UserSkeletonStore` → 注入 AppDeps.user_skeleton
+3. **API 端点**（`routes_check.py`）：
+   - `GET /api/check/skeleton`：列出全部检测项（标记 builtin/user/deleted）
+   - `POST /api/check/skeleton`：添加用户检测项
+   - `DELETE /api/check/skeleton/{category}`：删除（默认项标记隐藏可恢复，用户项直接删）
+   - `POST /api/check/skeleton/{category}/restore`：恢复被删除的默认项
+4. **`/api/check` 集成**：审读时使用 `merged_checks` 合并后的检测项列表
+
+**验证**：ruff + mypy 全绿；pytest 34（test_app）+ 7（test_check_store）passed。

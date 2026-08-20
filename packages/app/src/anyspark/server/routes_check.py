@@ -8,8 +8,9 @@ check / check-rule：多检测者审读 + 图谱证据 + 时序校验；用户�
 from __future__ import annotations
 
 from fastapi import APIRouter
+from pydantic import BaseModel
 
-from anyspark.check import compile_rule, compile_with_model, run_review
+from anyspark.check import SKELETON_CHECKS, compile_rule, compile_with_model, run_review
 from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.schemas import CheckRequest, RuleRequest
@@ -55,10 +56,13 @@ def make_check_router(deps: AppDeps) -> APIRouter:
         """多检测者审读正文（骨架+AI动态检测项，并行）+ 图谱事实证据 + 时序校验。"""
         # S194：AI 动态生成检测项——从图谱/伏笔提取作品专属检测重点
         book_ctx = _build_book_context(deps, req.book_id)
+        # S195：合并默认骨架 + 用户添加项 - 用户删除项
+        all_checks = deps.user_skeleton.merged_checks(SKELETON_CHECKS)
         report = run_review(
             model_for_task(deps, "editing"),
             req.target,
             req.text,
+            checks=all_checks,
             book_context=book_ctx,
         )
         # S7：图谱事实证据——文本涉及的已知实体/关系（检测网/用户比对设定冲突）
@@ -109,5 +113,63 @@ def make_check_router(deps: AppDeps) -> APIRouter:
             }
         hits = compiled.checker(req.text)
         return {"ok": True, "description": compiled.description, "hits": hits}
+
+    # S195：用户自定义骨架检测项 CRUD（DESIGN 机制 9 第③层持久化）
+    class SkeletonAddIn(BaseModel):
+        category: str
+        description: str
+
+    @router.get("/api/check/skeleton", response_model=list[dict[str, object]])
+    def list_skeleton() -> list[dict[str, object]]:
+        """列出全部检测项：默认骨架（标记 builtin）+ 用户添加项（标记 user）。"""
+        deletions = set(deps.user_skeleton.list_deletions())
+        items: list[dict[str, object]] = []
+        for c in SKELETON_CHECKS:
+            items.append(
+                {
+                    "category": c.category,
+                    "description": c.description,
+                    "source": "builtin",
+                    "deleted": c.category in deletions,
+                }
+            )
+        for c in deps.user_skeleton.list_additions():
+            items.append(
+                {
+                    "category": c.category,
+                    "description": c.description,
+                    "source": "user",
+                    "deleted": False,
+                }
+            )
+        return items
+
+    @router.post("/api/check/skeleton", response_model=dict[str, object])
+    def add_skeleton(req: SkeletonAddIn) -> dict[str, object]:
+        """添加用户自定义检测项。"""
+        item_id = deps.user_skeleton.add(req.category.strip(), req.description.strip())
+        return {"ok": True, "id": item_id}
+
+    @router.delete("/api/check/skeleton/{category}", response_model=dict[str, object])
+    def delete_skeleton(category: str) -> dict[str, object]:
+        """删除检测项：默认骨架标记为删除（可恢复），用户添加项直接删除。"""
+        # 先查是否是用户添加项
+        additions = deps.user_skeleton.list_additions()
+        user_item = next((a for a in additions if a.category == category), None)
+        if user_item is not None:
+            # 用户添加项：直接删除记录
+            # 注意：list_additions 返回 SkeletonCheckItem 无 id，需额外查
+            # 这里用 category 匹配删除（简单可靠）
+            deps.user_skeleton.delete_addition_by_category(category)
+            return {"ok": True, "action": "deleted"}
+        # 默认骨架：标记删除
+        deps.user_skeleton.add_deletion(category)
+        return {"ok": True, "action": "hidden"}
+
+    @router.post("/api/check/skeleton/{category}/restore", response_model=dict[str, object])
+    def restore_skeleton(category: str) -> dict[str, object]:
+        """恢复被删除的默认检测项。"""
+        deps.user_skeleton.remove_deletion(category)
+        return {"ok": True}
 
     return router

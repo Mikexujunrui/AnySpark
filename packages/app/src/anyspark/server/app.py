@@ -283,6 +283,10 @@ def build_app(
     play_store = PlayStore(real_db)
     # S86 参考书库（全局文件区 data/library/ + 关联表）
     library = LibraryStore(real_db)
+    # S195：用户自定义骨架检测项存储（DESIGN 机制 9 第③层持久化）
+    from anyspark.server.check_store import UserSkeletonStore
+
+    user_skeleton = UserSkeletonStore(real_db)
 
     # S187：工作流脚本函数提取到 wf_scripts.py（闭包→模块级，依赖通过 WfScriptDeps 传入）
     from anyspark.server.wf_scripts import WfScriptDeps, wf_judge, wf_runner
@@ -381,6 +385,7 @@ def build_app(
         workflow_store=workflow_store,
         play_store=play_store,
         library=library,
+        user_skeleton=user_skeleton,
         mind_planner=mind_planner,
         signal_collector=signal_collector,
         provider=provider,

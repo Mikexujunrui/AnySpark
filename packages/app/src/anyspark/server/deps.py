@@ -42,6 +42,7 @@ from anyspark.models.mode import ModeResolver, ModeStore
 from anyspark.models.registry import ModelProvider, ModelRegistry
 from anyspark.play import PlayEngine, PlayStore
 from anyspark.review import ReviewPanel
+from anyspark.server.check_store import UserSkeletonStore
 from anyspark.server.context import TokenBudget
 from anyspark.server.recorder import RunRecorder
 from anyspark.server.workspace import Workspace
@@ -100,6 +101,7 @@ class AppDeps:
     workflow_store: WorkflowStore
     play_store: PlayStore
     library: LibraryStore
+    user_skeleton: UserSkeletonStore
 
     # --- engines / generators ---
     mind_planner: MindPlanner
