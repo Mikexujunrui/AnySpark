@@ -4870,3 +4870,23 @@ test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
   （S178 专门加的 context_window 同步字段，同路径同样验证接管豁免）。
 
 **验证**：test_models 19 全绿；ruff/mypy/format 绿。
+
+## S193: 前端编辑历史能力落地——save 排序 bug 修复 + 端到端契约测试（讨论落地 C，已完成 ✅）
+
+**背景（讨论落地 C）**：前端 InlineEditor（S80）本就能编辑 AI 输出文本，S190 写入守卫
+已让"改文本不 400"安全。但**端到端回归测试暴露一个真实排序 bug**：`save_conversation_messages`
+用 `(role, content)` 当 key 做 `old_seq` 重排——**编辑过内容的消息 content 变后查不到旧
+序号（9999 落到末尾），被挤到对话最后、打乱顺序**。这正是 v4 扁平 Message 相对 v3
+结构化 Part 的坑：改文本与配对结构耦合。
+
+**改动**：
+- `routes_conversations.py save_conversation_messages`：
+  - **去掉基于 content 的 old_seq 整体重排**——前端数组相对顺序就是用户看到的顺序，直接
+    作为序列主体（编辑的消息保持原位，不再被挤走）。
+  - **工具轮声明按配对 id 精确插回**其 tool 结果之前（空 content 声明 S145b 前端过滤不可见，
+    从旧序列按 tool_call_id 定位补回），而非靠内容关联——保证"声明→tool 结果"顺序与配对完整。
+- 测试：新增端到端 `test_edit_agent_text_keeps_tool_pairing_e2e`——写自然配对历史 → 前端
+  编辑终结回复文本 → 保存 200 → store 验证 [user,声明,tool,编辑回复] 顺序与 c1 配对完整、
+  GET 验证编辑生效。钉死"C 编辑输出历史（不含工具）安全可用"契约。
+
+**验证**：app 全量测试绿（排除既有竞态）；ruff/mypy/format 绿。

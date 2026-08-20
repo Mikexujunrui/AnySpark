@@ -146,27 +146,44 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
         old_by_key: dict[tuple[str, str], Message] = {}
         for m in old:
             old_by_key.setdefault((m.role, m.content or ""), m)
-        old_seq = {(m.role, m.content or ""): i for i, m in enumerate(old)}
         # ① 前端消息：保留旧 metadata（配对信息不在前端可见层）
+ # S193：**不再按 (role, content) 的 old_seq 重排**——编辑过内容的消息 content 变后
+        # 在 old_seq 里查不到（9999 落到末尾），会把用户编辑的消息挤到对话最后、打乱顺序；
+        # 前端数组本身的相对顺序就是用户当前看到的顺序，直接作为序列主体。
         new_msgs: list[Message] = []
         for mp in req.messages:
             om = old_by_key.get((mp.role, mp.content or ""))
             metadata = dict(om.metadata) if om else {}
             new_msgs.append(Message(role=mp.role, content=mp.content, metadata=metadata))
-        # ② 补回技术消息（前端数组不含：空 content 声明被 S145b 过滤、tool 配对无展示价值）
-        new_keys = {(m.role, m.content or "") for m in new_msgs}
+        # ② 补回缺失的工具轮声明（空 content assistant + tool_calls，S145b 前端过滤不可见）
+        #    按 tool_call_id 精确插回对应 tool 结果之前——前端数组里有 tool 结果（带
+        #    tool_call_id），把其声明补到它紧前面，保证“声明→tool 结果”顺序与配对完整。
+        #    insight：不能靠内容关联，要用配对 id；编辑的 assistant 文本不受影响。
+        decl_by: dict[str, Message] = {}
         for om in old:
-            is_tech = om.role == "tool" or (
+            if (
                 om.role == "assistant"
                 and not (om.content or "").strip()
-                and bool(om.metadata.get("tool_calls"))
-            )
-            if is_tech and (om.role, om.content or "") not in new_keys:
-                new_msgs.append(om)
-        # 按旧顺序重排（技术消息插回原位）
-        new_msgs.sort(key=lambda m: old_seq.get((m.role, m.content or ""), 9999))
-        deps.store.replace_messages(conv_id, new_msgs)
-        return {"saved": len(new_msgs)}
+                and isinstance(om.metadata.get("tool_calls"), list)
+            ):
+                for tc in om.metadata["tool_calls"]:
+                    tid = str(tc.get("id") or "")
+                    if tid:
+                        decl_by.setdefault(
+                            tid,
+                            Message(role="assistant", content="", metadata={"tool_calls": [tc]}),
+                        )
+        inserted: set[str] = set()
+        final: list[Message] = []
+        for m in new_msgs:
+            if m.role == "tool":
+                tid = str(m.metadata.get("tool_call_id") or "")
+                if tid and tid in decl_by and tid not in inserted:
+                    final.append(decl_by[tid])
+                    inserted.add(tid)
+            final.append(m)
+        deps.store.replace_messages(conv_id, final)  # S190 写入守卫最终兜底
+        return {"saved": len(final)}
 
     @router.delete("/api/conversations/{conv_id}", response_model=dict[str, bool])
     def delete_conversation(conv_id: str) -> dict[str, bool]:

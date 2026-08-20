@@ -787,3 +787,71 @@ def test_chapter_patch_api() -> None:
     assert r.json()["ok"] is False
     # 404
     assert client.post("/api/chapters/nonexist/patch", json={"operations": []}).status_code == 404
+
+
+class NoopModel:
+    """极简 fake：不实际调用（消息编辑/保存不走模型）。"""
+
+    model_name = "noop"
+
+    def respond(self, messages, tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+        return ModelOutput(text="")
+
+
+def test_edit_agent_text_keeps_tool_pairing_e2e() -> None:
+    """S193/C 契约：用户在界面编辑 AI 输出文本后保存——消息不因 content 变更被重排、
+    工具配对不残留残缺（S190 守卫兜底，绝不 400）。纯工具轮声明（空 content）按配对 id
+    精确插回其 tool 结果之前，编辑文本只改该条消息本身。"""
+    from anyspark.store import SqliteConversationStore
+
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    app = build_app(model=NoopModel(), db_path=db)
+    client = TestClient(app)
+
+    # 自然配对历史：工具轮声明（空 content，GET 过滤）+ tool 结果 + 终结回复（可编辑）
+    store = SqliteConversationStore(db)
+    conv = store.create()
+    store.append(conv.id, Message(role="user", content="写第一章"))
+    store.append(
+        conv.id,
+        Message(
+            role="assistant",
+            content="",  # 纯工具轮声明（S145b 前端过滤）
+            metadata={"tool_calls": [{"name": "write_chapter", "arguments": {}, "id": "c1"}]},
+        ),
+    )
+    store.append(conv.id, Message(role="tool", content="已保存", metadata={"tool_call_id": "c1"}))
+    store.append(conv.id, Message(role="assistant", content="第一章写好了。"))
+    store.close()
+
+    # 前端拉取历史（纯工具轮声明被过滤 → 前端看不到、不可编辑、不可改）
+    got = client.get(f"/api/conversations/{conv.id}/messages")
+    assert got.status_code == 200
+    history = got.json()
+    assert all(m["role"] != "assistant" or m["content"] for m in history)  # 无空声明泄漏
+    assert any("第一章写好了" in (m["content"] or "") for m in history)
+
+    # 编辑终结回复文本后整体保存（只发 role+content）
+    edited = [dict(m) for m in history]
+    for m in edited:
+        if m["role"] == "assistant" and m["content"] and "第一章写好了" in m["content"]:
+            m["content"] = "（用户改写：第一章已完成）"
+    resp = client.post(f"/api/conversations/{conv.id}/messages", json={"messages": edited})
+    assert resp.status_code == 200, f"保存应 200: {resp.text}"
+
+    # GET 读回：编辑文本生效（空 content 的伴侣声明被 S145b 过滤，不在此展示）
+    after = client.get(f"/api/conversations/{conv.id}/messages").json()
+    assert any("用户改写" in (m["content"] or "") for m in after), "编辑文本应生效"
+    assert not any("第一章写好了" in (m["content"] or "") for m in after)  # 旧文本被替换
+
+    # store 层验证配对完整：工具轮声明（空 content）在 tool 结果之前，顺序正确
+    store2 = SqliteConversationStore(db)
+    stored = store2.messages(conv.id)
+    store2.close()
+    roles = [m.role for m in stored]
+    assert roles == ["user", "assistant", "tool", "assistant"], f"顺序应保持: {roles}"
+    # 声明与 tool 结果配对（c1），且 tool 紧跟其声明
+    assert stored[1].metadata["tool_calls"][0]["id"] == "c1"
+    assert stored[2].metadata["tool_call_id"] == "c1"
+    # 编辑的终结回复保留
+    assert "用户改写" in stored[3].content
