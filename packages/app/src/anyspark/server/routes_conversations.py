@@ -147,7 +147,7 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
         for m in old:
             old_by_key.setdefault((m.role, m.content or ""), m)
         # ① 前端消息：保留旧 metadata（配对信息不在前端可见层）
- # S193：**不再按 (role, content) 的 old_seq 重排**——编辑过内容的消息 content 变后
+        # S193：**不再按 (role, content) 的 old_seq 重排**——编辑过内容的消息 content 变后
         # 在 old_seq 里查不到（9999 落到末尾），会把用户编辑的消息挤到对话最后、打乱顺序；
         # 前端数组本身的相对顺序就是用户当前看到的顺序，直接作为序列主体。
         new_msgs: list[Message] = []

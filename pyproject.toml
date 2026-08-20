@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------
 [project]
 name = "anyspark"
-version = "4.0.8"  # S183：v4.0.8 发布（含 S181/S182 上传拆章+Anthropic 盲区修复）
+version = "4.0.9"  # S194：v4.0.9 发布（S189-S193 远程部署双 bug + 配对守卫/转换纯映射/配置单源/编辑历史）
 description = "AnySpark v4 创作引擎（workspace 根项目）"
 requires-python = ">=3.11"
 dependencies = [
