@@ -360,8 +360,15 @@ class SqliteConversationStore(ConversationStore):
 
     def replace_messages(self, conversation_id: str, messages: list[Message]) -> None:
         """S26：整体替换该会话消息（压缩回写，事务内删旧插新，seq 从 0 重排）。
-        会话不存在则先创建。"""
+        会话不存在则先创建。
+
+        S190：写入前跑配对自愈（幂等无副作用）——replace 是“整体替换历史”的公共
+        通道（压缩回写 loop / 前端覆盖保存 save_conversation_messages），任何路径
+        落库都必须是配对完整的序列：孤儿 tool、悬挂 assistant 声明在写入前修剪，
+        带 tool_calls 的 assistant 改文本后丢失的声明从 recorder 找回。否则残留到
+        协议转换时 400（前端编辑 AI 输出历史是主要触发源）。"""
         self.get(conversation_id) or self.create(conversation_id)
+        messages = self._heal_tool_pairs(messages, conversation_id)  # S190 写入守卫
         with self._conn:
             self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
             for seq, m in enumerate(messages):

@@ -51,6 +51,7 @@
 > [S146] 已提交完成（7 commits：5976551/77417f9/090dc45/09ffa40/a4ad7f4/795cc9c/588de6c，评审未修项批 E-I）——声明行随 S146 提交后删除
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
+> [S190] 正在改 packages/app/src/anyspark/store/sqlite.py + packages/app/tests/test_sqlite.py：replace_messages 写入前配对自愈守卫（历史写入配对完整性，前端编辑文本不破坏配对）
 
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）
