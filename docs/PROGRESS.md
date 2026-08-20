@@ -4963,3 +4963,17 @@ test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
 3. **REVIEW-PROJECT.md 更新**：差距分析表标注 S145/S146/S194/S195 修复项；功能深度评分 ⭐⭐⭐→⭐⭐⭐⭐
 
 **归档原因**：审查报告建议"深度收敛"——冻结新功能、修设计-实现差距。S194/S195 已修复所有 P0 差距，历史审计文档完成使命归档。
+
+## S197: 日志完善 + graph_query 属性名 bug 修复（已完成 ✅）
+
+**背景**：端到端写作测试发现日志只记 `工具结果: graph_query ok=False`，无返回内容，无法排查原因。完善日志后发现 `graph_query` 报 `'Relation' object has no attribute 'type'`。
+
+**改动**：
+1. **日志完善**（`loop.py` 三处 emit + `routes_chat.py` 日志格式）：
+   - tool_result 事件 payload 增加 `content`（截断 200 字）
+   - 日志格式从 `工具结果: graph_query ok=False` → `工具结果: graph_query ok=False content=图谱查询失败：'Relation' object has no attribute 'type'`
+2. **graph_query bug 修复**（`tools_graph.py`）：
+   - `r.type` → `r.rel_type`（Relation schema 属性名是 `rel_type` 不是 `type`）
+   - 此前所有 graph_query 调用全部失败，agent 无法查证图谱（写作有 fallback 不崩，但信息不完整）
+
+**验证**：ruff + mypy 全绿；graph_query 工具调用从 ok=False → ok=True（返回完整图谱信息）

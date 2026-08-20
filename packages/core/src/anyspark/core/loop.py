@@ -369,7 +369,14 @@ class Agent:
                     results.append(result)
                     self._append_tool_result(store, conversation_id, call, result)
                     self.events.emit(
-                        Event(type="tool_result", payload={"name": call.name, "ok": False})
+                        Event(
+                            type="tool_result",
+                            payload={
+                                "name": call.name,
+                                "ok": False,
+                                "content": result.content[:200] if result.content else "",
+                            },
+                        )
                     )
                 continue  # 下一轮：模型看到错误回填后重发完整调用
 
@@ -388,7 +395,14 @@ class Agent:
                     results.append(result)
                     self._append_tool_result(store, conversation_id, call, result)
                     self.events.emit(
-                        Event(type="tool_result", payload={"name": call.name, "ok": False})
+                        Event(
+                            type="tool_result",
+                            payload={
+                                "name": call.name,
+                                "ok": False,
+                                "content": result.content[:200] if result.content else "",
+                            },
+                        )
                     )
                 self._finish_aborted(conversation_id, store, executed, results)
                 return Turn(
@@ -494,7 +508,14 @@ class Agent:
                 results.append(result)
                 self._append_tool_result(store, conversation_id, call, result)
                 self.events.emit(
-                    Event(type="tool_result", payload={"name": call.name, "ok": result.ok})
+                    Event(
+                        type="tool_result",
+                        payload={
+                            "name": call.name,
+                            "ok": result.ok,
+                            "content": result.content[:200] if result.content else "",
+                        },
+                    )
                 )
             # S27 智能停止（对齐 pi shouldTerminateToolBatch）：批内**全部**工具
             # terminate=True → 不再进入下一轮，直接结束（避免无意义死磕迭代上限）。
@@ -541,8 +562,7 @@ class Agent:
         # 由下一轮 _emit_record 消费——但为避免跨轮错位，这里不 pop，ms 统一 0
         # （耗时数据可在 data/records 的工具执行事件里查）。
         tool_results = [
-            {"name": r.call.name, "ok": r.ok, "content": r.content, "ms": 0}
-            for r in results
+            {"name": r.call.name, "ok": r.ok, "content": r.content, "ms": 0} for r in results
         ]
         self.events.emit(
             Event(

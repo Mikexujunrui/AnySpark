@@ -67,7 +67,7 @@ def make_graph_query_implementer(graph: Any, book_id: str = "main") -> tuple[Any
             ]
             if rels:
                 lines.append(f"相关关系（{len(rels)} 条）：")
-                lines.extend(f"- {r.from_name} —{r.type}→ {r.to_name}" for r in rels)
+                lines.extend(f"- {r.from_name} —{r.rel_type}→ {r.to_name}" for r in rels)
             return ToolResult(
                 call=call,
                 ok=True,

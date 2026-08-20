@@ -237,7 +237,12 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
         agent.events.on("tool_call", lambda e: logger.info("工具调用: %s", e.payload.get("name")))
         agent.events.on(
             "tool_result",
-            lambda e: logger.info("工具结果: %s ok=%s", e.payload.get("name"), e.payload.get("ok")),
+            lambda e: logger.info(
+                "工具结果: %s ok=%s content=%s",
+                e.payload.get("name"),
+                e.payload.get("ok"),
+                (e.payload.get("content") or "")[:200],
+            ),
         )
 
         # 无会话时显式创建，保证 conversation_id 可回传（多轮续写）
