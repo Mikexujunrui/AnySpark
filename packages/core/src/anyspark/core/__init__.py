@@ -8,6 +8,7 @@ __version__ = "0.0.1"
 
 from .events import GENERIC_EVENT_TYPES, Event, EventEmitter, EventListener
 from .loop import Agent, CancellationToken
+from .messages import sanitize_tool_pairing
 from .protocol import (
     Cancellable,
     ContextCompressor,
@@ -49,4 +50,5 @@ __all__ = [
     "backfill_content_tool_result",
     "execute",
     "retry_with_backoff",
+    "sanitize_tool_pairing",
 ]

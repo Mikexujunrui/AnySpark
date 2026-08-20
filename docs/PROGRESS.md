@@ -51,7 +51,7 @@
 > [S146] 已提交完成（7 commits：5976551/77417f9/090dc45/09ffa40/a4ad7f4/795cc9c/588de6c，评审未修项批 E-I）——声明行随 S146 提交后删除
 > 📢 [S99] 已提交完成（commit `515294a`，SSE 接力第二步）——通知 S100：useSSE.ts 的 session_tokens/nearLimit 与 routes_chat.py 的 done 帧 model 字段随本提交带走（交织无法 hunk 分离），归属见提交说明；ChatPanel.tsx 的 UsageStrip 接入已 add -p 分离留在工作区，待 S100 补交（补交前先 git diff 确认归属）
 > 声明格式：`> [S6x] 正在改 <文件>：<改动内容>`（多个文件逐行写）
-> [S190] 正在改 packages/app/src/anyspark/store/sqlite.py + packages/app/tests/test_sqlite.py：replace_messages 写入前配对自愈守卫（历史写入配对完整性，前端编辑文本不破坏配对）
+
 
 - **候选清单（下一步，按优先级）**：
   1. **心智模型系统**（设计内降权，核心候选）：包罗万象（文风/喜好/毒点/边界）+ **渐进式披露**（索引常驻/正文按需，对齐 pi skills）——manual 是雏形，需设计分类与注入时机；含档位 L2（AI 看心智后建议档位）/L3（自然语言生成档位）
@@ -4836,3 +4836,22 @@ tool_use）；② 界面设置的模型接口重启后回退成阿里云 DashSco
 
 **验证**：ruff/mypy 全绿（213 文件）；app 全量测试 177 passed（排除既有竞态
 test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
+
+## S191: 转换层"纯映射"收敛——core 共享配对守卫（讨论落地 A，已完成 ✅）
+
+**背景（讨论落地第 A 步，向 pi 对齐）**：输入侧不变量（S189 转换/压缩 + S190 存储写入守卫）
+已经保证任何路径产生的消息配对完整，转换层本应只剩"忠实映射"。但现状：anthropic 有完整
+严格防御（S174/S182/S189），gemini/responses 只有"悬挂声明"半防御，OpenAI 兼容（deepseek.py）
+**完全没有防御**——每个协议各自为政，未来加新协议要重写一套。
+
+**改动**：
+- 新建 `packages/core/src/anyspark/core/messages.py`：`sanitize_tool_pairing(messages)`——
+  模型无关的通用配对守卫（纯函数、幂等、不改输入）。处理孤儿 tool / 悬挂声明 / 缺 id
+  补配三类残缺配对。这是"宽松层"（允许被 user 插话隔开）；协议特有的"严格紧邻"
+  （Anthropic）由各适配器转换防御保留。
+- **四协议转换入口统一接入**（转换第一行）：anthropic/gemini/responses/deepseek——
+  OpenAI 协议首次获得此前缺失的防御；gemini/responses 补上"孤儿结果"这一端。
+  新增协议只需调一次 `sanitize_tool_pairing`，不再重写补丁。
+- core `__init__` 导出该函数。
+
+**验证**：core 7 个新测试 + adapters/models 全绿；ruff/mypy/format 全绿（9 源文件）。

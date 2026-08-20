@@ -26,7 +26,13 @@ from typing import Any
 import httpx2 as httpx  # S66：httpx2（下一代 httpx；重命名迁移，API 兼容）
 from openai import OpenAI
 
-from anyspark.core import Event, Message, ModelOutput, ToolCall
+from anyspark.core import (
+    Event,
+    Message,
+    ModelOutput,
+    ToolCall,
+    sanitize_tool_pairing,
+)
 from anyspark.core.protocol import ToolSpec
 
 DEFAULT_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
@@ -79,6 +85,7 @@ def to_responses_input(messages: list[Message]) -> list[dict[str, Any]]:
       （Responses 的 function_call 是顶层 item；call_id 配对 function_call_output）
     - tool 消息 → function_call_output item（紧跟对应 function_call）
     """
+    messages = sanitize_tool_pairing(messages)  # core 通用守卫（S190）
     result: list[dict[str, Any]] = []
     for m in messages:
         if m.role == "system":

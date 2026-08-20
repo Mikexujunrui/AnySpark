@@ -28,7 +28,13 @@ from typing import Any
 
 import httpx2 as httpx  # S66：httpx2（下一代 httpx；重命名迁移，API 兼容）
 
-from anyspark.core import Event, Message, ModelOutput, ToolCall
+from anyspark.core import (
+    Event,
+    Message,
+    ModelOutput,
+    ToolCall,
+    sanitize_tool_pairing,
+)
 from anyspark.core.protocol import ToolSpec
 
 DEFAULT_BASE_URL = os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
@@ -84,7 +90,11 @@ def to_anthropic_messages(
     - tool 消息 → 并入 user 消息 content [{type: tool_result, tool_use_id, content}]
       （连续 tool 消息合并为一条 user；Anthropic 要求 user/assistant 严格交替）
     - 相邻同角色消息合并（防 agent 链路产生连续同角色消息）
+
+    S190：转换前先跑 core 通用配对守卫（无孤儿 tool / 无悬挂声明），
+    本层再补 Anthropic 特有的“严格紧邻”约束（下方 S174/S182/S189 防御）。
     """
+    messages = sanitize_tool_pairing(messages)  # core 通用守卫（S190）
     system_parts: list[str] = []
     converted: list[dict[str, Any]] = []
     pending_results: list[dict[str, Any]] = []  # 连续 tool 消息累积的 tool_result 块

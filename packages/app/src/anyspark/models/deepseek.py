@@ -30,7 +30,13 @@ from typing import Any
 import httpx2 as httpx  # S66：httpx2（下一代 httpx；重命名迁移，API 兼容）
 from openai import OpenAI
 
-from anyspark.core import Event, Message, ModelOutput, ToolCall
+from anyspark.core import (
+    Event,
+    Message,
+    ModelOutput,
+    ToolCall,
+    sanitize_tool_pairing,
+)
 from anyspark.core.protocol import ToolSpec
 
 # 与 pi 同款默认：DashScope 兼容端点 + deepseek-v4-flash
@@ -210,6 +216,7 @@ class DeepSeekModel:
 
     def respond(self, messages: list[Message], tools: list[ToolSpec]) -> ModelOutput:
         """真实调用 DeepSeek，返回模型无关的 ModelOutput（非流式路径）。"""
+        messages = sanitize_tool_pairing(messages)  # core 通用守卫（S190）
         openai_messages = [to_openai_message(m) for m in messages]
         kwargs: dict[str, Any] = {
             "model": self._model,
@@ -260,6 +267,7 @@ class DeepSeekModel:
         """流式协议（S21 移植 pi 模式）：边生成边 on_event 回调流式事件，
         返回完整 ModelOutput。事件名对齐 pi：text_delta / toolcall_delta / done。
         """
+        messages = sanitize_tool_pairing(messages)  # core 通用守卫（S190）
         openai_messages = [to_openai_message(m) for m in messages]
         kwargs: dict[str, Any] = {
             "model": self._model,

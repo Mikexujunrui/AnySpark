@@ -28,7 +28,13 @@ from typing import Any
 
 import httpx2 as httpx  # S66：httpx2（下一代 httpx；重命名迁移，API 兼容）
 
-from anyspark.core import Event, Message, ModelOutput, ToolCall
+from anyspark.core import (
+    Event,
+    Message,
+    ModelOutput,
+    ToolCall,
+    sanitize_tool_pairing,
+)
 from anyspark.core.protocol import ToolSpec
 
 DEFAULT_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
@@ -84,6 +90,7 @@ def to_gemini_contents(
     - tool 消息 → user 角色 + functionResponse parts（Gemini 允许独立 user 消息，
       无需像 Anthropic 那样合并；functionResponse 紧跟对应 functionCall）
     """
+    messages = sanitize_tool_pairing(messages)  # core 通用守卫（S190）
     system_parts: list[str] = []
     contents: list[dict[str, Any]] = []
     # S176：id→name 映射——loop 的 tool 消息只设 tool_call_id 不设 tool_name，
