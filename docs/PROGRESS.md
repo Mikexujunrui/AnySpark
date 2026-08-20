@@ -4977,3 +4977,20 @@ test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
    - 此前所有 graph_query 调用全部失败，agent 无法查证图谱（写作有 fallback 不崩，但信息不完整）
 
 **验证**：ruff + mypy 全绿；graph_query 工具调用从 ok=False → ok=True（返回完整图谱信息）
+
+### S198 测试结果：高级工具全面激活（已完成 ✅）
+
+**第 13-14 章工具调用对比**：
+
+| 工具 | S196 前(3章) | S198 后(2章) | 说明 |
+|------|-------------|-------------|------|
+| explore_direction | 0 | 2 | 关键转折章主动探索方向 |
+| skill_lookup | 0 | 8 | 写前查叙事技巧 |
+| role_play | 0 | 1 | 推演角色反应 |
+| plot_resolve | 0(失败) | 4(成功) | 伏笔回收闭环 |
+| plot_register | 0 | 4 | 新伏笔登记 |
+| graph_register | 0 | 3 | 真相登记到图谱 |
+| graph_query | 0(失败) | 2(成功) | S197 修复后可用 |
+
+**数据增长**：章节 33→38，图谱 33→50 实体，伏笔回收 0→11，说明书 6→7
+**质量**：最新 2 章零破折号、无"正如"开头
