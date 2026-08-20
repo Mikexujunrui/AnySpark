@@ -210,14 +210,29 @@ class PlotStore:
             params.append(chapter_ref)
         if not sets:
             return self.get(plot_id)
-        params.append(plot_id)
+        # 前缀匹配：plot_list 返回截断 id，需要解析为完整 id
+        full_id = plot_id
+        row = self._conn.execute("SELECT id FROM plot_points WHERE id=?", (plot_id,)).fetchone()
+        if not row:
+            row = self._conn.execute(
+                "SELECT id FROM plot_points WHERE id LIKE ?", (plot_id + "%",)
+            ).fetchone()
+        if row:
+            full_id = row["id"]
+        params.append(full_id)
         with self._lock:
             self._conn.execute(f"UPDATE plot_points SET {','.join(sets)} WHERE id=?", params)
             self._conn.commit()
-        return self.get(plot_id)
+        return self.get(full_id)
 
     def get(self, plot_id: str) -> PlotPoint | None:
+        # 支持前缀匹配（agent 从 plot_list 拿到截断 id，完整 UUID 太长不实用）
         row = self._conn.execute("SELECT * FROM plot_points WHERE id=?", (plot_id,)).fetchone()
+        if not row:
+            # 前缀匹配：传入的 id 是完整 id 的前缀
+            row = self._conn.execute(
+                "SELECT * FROM plot_points WHERE id LIKE ?", (plot_id + "%",)
+            ).fetchone()
         if not row:
             return None
         return PlotPoint(
@@ -236,7 +251,11 @@ class PlotStore:
 
     def delete(self, plot_id: str) -> None:
         with self._lock:
-            self._conn.execute("DELETE FROM plot_points WHERE id=?", (plot_id,))
+            # 前缀匹配（对齐 get/update 的前缀支持）
+            self._conn.execute(
+                "DELETE FROM plot_points WHERE id=? OR id LIKE ?",
+                (plot_id, plot_id + "%"),
+            )
             self._conn.commit()
 
     def render(self, book_id: str = "main", max_resolved: int = 3, current_order: int = 0) -> str:

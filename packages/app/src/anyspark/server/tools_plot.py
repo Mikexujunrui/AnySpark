@@ -77,12 +77,23 @@ def make_plot_implementer(plots: Any, book_id: str = "main") -> tuple[list[Any],
     def list_points(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
         call = ToolCall(name=spec_.name, arguments=arguments)
         try:
-            render = plots.render(book_id)
-            return ToolResult(
-                call=call,
-                ok=True,
-                content=render if render.strip() else "关键点图谱为空（没有进行中的伏笔）。",
-            )
+            # 返回带 id 的列表（agent 回收需要 plot_id 调 plot_resolve）
+            points = plots.list_points(book_id)
+            if not points:
+                return ToolResult(
+                    call=call,
+                    ok=True,
+                    content="关键点图谱为空（没有进行中的伏笔）。",
+                )
+            lines = ["# 伏笔列表（plot_id 用于 plot_resolve 回收）"]
+            for p in points:
+                if p.attention == "ignore":
+                    continue
+                mark = "★" if p.priority == "must" else "·"
+                status = "✓" if p.status == "resolved" else "○"
+                ref = f"（{p.chapter_ref}）" if p.chapter_ref else ""
+                lines.append(f"{status} {mark} [{p.category}] {p.content}{ref}  →id={p.id[:12]}")
+            return ToolResult(call=call, ok=True, content="\n".join(lines))
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"查询失败：{exc}")
 
