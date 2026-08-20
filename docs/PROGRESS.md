@@ -4938,3 +4938,19 @@ test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
 4. **`/api/check` 集成**：审读时使用 `merged_checks` 合并后的检测项列表
 
 **验证**：ruff + mypy 全绿；pytest 34（test_app）+ 7（test_check_store）passed。
+
+## S195b: 跨层升级落地——发现跨书重复偏好+升级全局+死锁修复（已完成 ✅）
+
+**背景**：DESIGN §6 要求"系统发现多本书重复偏好→建议升级全局→用户确认→锁定"。此前完全未实现。审查报告标注为 🟡 中优先级。
+
+**改动**：
+1. **ManualStore 新增 2 方法**（`manual.py`）：
+   - `find_cross_book_candidates(min_books=3)`：跨书相似条目检测（双字窗口关键词交集≥3）
+   - `promote_to_global(entry_id)`：项目级→全局级升级（默认锁定+通知原项目）
+2. **API 端点**（`routes_check.py`）：
+   - `GET /api/manual/cross-book-candidates`：发现候选
+   - `POST /api/manual/{entry_id}/promote-global`：确认升级
+3. **死锁修复**：`ManualStore._lock` 从 `Lock` 改为 `RLock`——`promote_to_global` 内部调 `self.get()` 需可重入
+4. **测试**：4 个新测试覆盖发现候选+升级+边界
+
+**验证**：ruff+mypy 全绿；pytest 15（test_manual）+ 34（test_app）+ 7（test_check_store）+ 14（test_review）= 70 passed。

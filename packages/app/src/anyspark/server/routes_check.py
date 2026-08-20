@@ -172,4 +172,18 @@ def make_check_router(deps: AppDeps) -> APIRouter:
         deps.user_skeleton.remove_deletion(category)
         return {"ok": True}
 
+    # S195：跨层升级——发现跨书重复偏好 → 建议升级全局 → 用户确认
+    @router.get("/api/manual/cross-book-candidates")
+    def list_cross_book_candidates() -> list[dict[str, object]]:
+        """发现多本书中出现的相似偏好条目（建议升级为全局）。"""
+        return list(deps.manual.find_cross_book_candidates())
+
+    @router.post("/api/manual/{entry_id}/promote-global", response_model=dict[str, object])
+    def promote_entry_global(entry_id: str) -> dict[str, object]:
+        """把项目级条目升级为全局级（跨层升级→默认锁定）。"""
+        result = deps.manual.promote_to_global(entry_id)
+        if result is None:
+            return {"ok": False, "error": "条目不存在"}
+        return {"ok": True, "entry": result.to_dict()}
+
     return router

@@ -203,3 +203,62 @@ def test_system_notice_roundtrip() -> None:
         assert store.unread_notices("main") == []
     finally:
         store.close()
+
+
+# S195：跨层升级测试
+def test_find_cross_book_candidates() -> None:
+    """三本书有相似条目 → 发现候选。"""
+    from anyspark.align.manual import ManualEntry
+
+    store = ManualStore(_db())
+    try:
+        for book in ["bookA", "bookB", "bookC"]:
+            store.add(ManualEntry(content="不要破折号", category="style", book_id=book))
+        candidates = store.find_cross_book_candidates(min_books=3)
+        assert len(candidates) >= 1
+        assert "破折号" in candidates[0]["content"]
+        assert len(candidates[0]["books"]) >= 3
+    finally:
+        store.close()
+
+
+def test_find_cross_book_no_match() -> None:
+    """只有两本书有相似条目 → 不够 min_books=3 → 无候选。"""
+    from anyspark.align.manual import ManualEntry
+
+    store = ManualStore(_db())
+    try:
+        store.add(ManualEntry(content="不要破折号", category="style", book_id="bookA"))
+        store.add(ManualEntry(content="不要破折号", category="style", book_id="bookB"))
+        candidates = store.find_cross_book_candidates(min_books=3)
+        assert len(candidates) == 0
+    finally:
+        store.close()
+
+
+def test_promote_to_global() -> None:
+    """项目级条目 → 升级为全局级（默认锁定）。"""
+    from anyspark.align.manual import ManualEntry
+
+    store = ManualStore(_db())
+    try:
+        entry = store.add(ManualEntry(content="不要血腥", category="habit", book_id="bookA"))
+        promoted = store.promote_to_global(entry.id)
+        assert promoted is not None
+        assert promoted.scope == "global"
+        assert promoted.locked is True
+        assert "血腥" in promoted.content
+        original = store.get(entry.id)
+        assert original is not None
+        assert original.scope == "project"
+    finally:
+        store.close()
+
+
+def test_promote_nonexistent_returns_none() -> None:
+    store = ManualStore(_db())
+    try:
+        result = store.promote_to_global("nonexistent-id")
+        assert result is None
+    finally:
+        store.close()

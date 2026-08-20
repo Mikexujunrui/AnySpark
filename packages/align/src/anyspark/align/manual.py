@@ -11,6 +11,7 @@ from __future__ import annotations
 import sqlite3
 import threading
 import uuid
+from collections.abc import Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -49,6 +50,20 @@ def _merge_contents(old: str, new: str) -> str:
     if old in new:
         return new
     return f"{old}；{new}"
+
+
+def _keyword_overlap(a: str, b: str, min_overlap: int = 3) -> bool:
+    """S195：跨书条目相似判定——双字窗口关键词交集 ≥ min_overlap。
+
+    复用 merge_add 的关键词逻辑（内容自然语言，机制硬编码）。
+    """
+    import re as _re
+
+    def _bigrams(text: str) -> set[str]:
+        chars = _re.sub(r"[^\u4e00-\u9fff\w]", "", text)
+        return {chars[i : i + 2] for i in range(len(chars) - 1)} if len(chars) > 1 else {chars}
+
+    return len(_bigrams(a) & _bigrams(b)) >= min_overlap
 
 
 @dataclass
@@ -97,7 +112,7 @@ class ManualStore:
         self._db = str(db_path)
         # S79：连接配置收敛到 anyspark.core.db.connect
         self._conn = sqlite_connect(self._db)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # S195：promote_to_global 内部调 get，需可重入
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -393,6 +408,97 @@ class ManualStore:
                 (book_id, limit),
             ).fetchall()
         return [dict(r) for r in rows]
+
+    def find_cross_book_candidates(self, min_books: int = 3) -> Sequence[dict[str, Any]]:
+        """S195：跨书重复偏好检测——找出在 ≥min_books 本书中出现的相似条目。
+
+        DESIGN §6 跨层升级：系统发现多本书重复偏好→建议升级全局→用户确认→锁定。
+        此方法只负责发现候选；升级由用户确认（前端/API）。
+        """
+        with self._lock:
+            # 找项目级条目中内容相似的（双字窗口关键词交集≥3）跨书重复
+            rows = self._conn.execute(
+                "SELECT id, content, category, book_id FROM manual_entries"
+                " WHERE scope='project' AND locked=0"
+                " ORDER BY book_id, category"
+            ).fetchall()
+        # 按内容相似度分组（简化：同 category + 关键词交集≥3）
+        groups: dict[str, list[Any]] = {}
+        for r in rows:
+            key = r["category"]  # 先按 category 粗分组
+            groups.setdefault(key, []).append(dict(r))
+        candidates: list[Any] = []
+        for _cat, items in groups.items():
+            # 在同 category 内找跨书相似条目
+            for i, a in enumerate(items):
+                similar: list[Any] = [a]
+                for b in items[i + 1 :]:
+                    if b["book_id"] == a["book_id"]:
+                        continue  # 跳过同书
+                    if _keyword_overlap(a["content"], b["content"]):
+                        similar.append(b)
+                # 去重 by book_id
+                books = {item["book_id"] for item in similar}
+                if len(books) >= min_books:
+                    candidates.append(
+                        {
+                            "content": a["content"],
+                            "category": _cat,
+                            "books": list(books),
+                            "entry_ids": [item["id"] for item in similar],
+                        }
+                    )
+        return candidates
+
+    def promote_to_global(self, entry_id: str) -> ManualEntry | None:
+        """S195：把项目级条目升级为全局级（跨层升级）。"""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM manual_entries WHERE id=?", (entry_id,)
+            ).fetchone()
+            if row is None:
+                return None
+            # 创建全局级副本（原项目级保留）
+            import uuid as _uuid
+
+            new_id = _uuid.uuid4().hex
+            self._conn.execute(
+                "INSERT INTO manual_entries"
+                " (id, content, source, confidence, activity, locked, scope, book_id,"
+                "  category, created_at, updated_at)"
+                " VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    new_id,
+                    row["content"],
+                    row["source"],
+                    row["confidence"],
+                    row["activity"],
+                    1,  # 升级后默认锁定（DESIGN：跨层升级需确认→锁定）
+                    "global",
+                    "",  # global scope 忽略 book_id
+                    row["category"],
+                    _now(),
+                    _now(),
+                ),
+            )
+            # 通知原项目
+            self._conn.execute(
+                "INSERT INTO manual_notices"
+                " (id, action, entry_id, old_content, new_content, category, scope,"
+                "  book_id, created_at, read)"
+                " VALUES (?, 'promoted', ?, ?, ?, ?, 'project', ?, ?, 0)",
+                (
+                    _uuid.uuid4().hex,
+                    entry_id,
+                    row["content"],
+                    f"已升级为全局条目：{row['content'][:50]}",
+                    row["category"],
+                    row["book_id"],
+                    _now(),
+                ),
+            )
+            self._conn.commit()
+            return self.get(new_id)
 
     def close(self) -> None:
         self._conn.close()
