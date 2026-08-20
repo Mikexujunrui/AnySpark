@@ -4855,3 +4855,18 @@ test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
 - core `__init__` 导出该函数。
 
 **验证**：core 7 个新测试 + adapters/models 全绿；ruff/mypy/format 全绿（9 源文件）。
+
+## S192: 配置单一事实源钉死（讨论落地 B，已完成 ✅）
+
+**背景（讨论落地 B，学 v3/pi）**：v3 用单个 `data/settings.json` 作唯一权威，`.env`
+仅首启播种。v4 的等价语义在 S189 已落地（界面保存过 default → .env 不再覆盖），
+本步把契约钉死、防回归，并文档化。
+
+**改动**：
+- 文档：DESIGN §12.9 明确"SQLite 是运行时模型配置唯一权威，.env 仅种子——
+  界面接管后 .env 无任何覆盖权"（含 api_key 语义：resolved 库优先 env 兜底）。
+- 测试：`test_registry_ui_edit_default_survives_restart` 补 context_window——
+  界面接管 default 后，.env 改 base_url/model/**context_window** 重启都不覆盖
+  （S178 专门加的 context_window 同步字段，同路径同样验证接管豁免）。
+
+**验证**：test_models 19 全绿；ruff/mypy/format 绿。

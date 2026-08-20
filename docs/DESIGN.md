@@ -532,6 +532,7 @@ v4 从空库起步，数据在 v4 内自然生长
 ### 12.9 运行时模型配置与思考强度（S47）
 - **背景**：此前模型固定 DeepSeek（`.env` 启动时静态配置），无运行时切换、无思考强度选择
 - **模型注册表**（`anyspark.models.registry`）：SQLite 持久化多模型配置（供应商端点/模型名/api_key/窗口/温度/思考强度），空库从 `.env` 播种默认——升级即用、旧行为不变；CRUD + 激活切换（`GET/POST /api/models`、`DELETE /api/models/{id}`、`POST /api/models/{id}/activate`）
+- **单一事实源（S189 定案，讨论落地 B）**：SQLite 是运行时模型配置的**唯一权威**；`.env` 仅作种子——空库/未被界面接管时才作为来源。**一旦界面保存过 default（upsert 刷新 updated_at），.env 不再有任何覆盖权**，防止打包版 `.env` 固定初始供应商把界面配置重启打回（用户报的“重启回退阿里云”）。api_key 走 `resolved()`（库优先 .env 兜底，便于换 key 不需改库）。
 - **ModelProvider**：实现 core Model 协议，委托给**当前激活配置**——切换后所有持有它的组件（Agent/图谱抽取/检测/探索/后台任务）即时跟随，无需重启、无需改组件（组件只认识 Model 协议）
 - **请求级覆盖**：ChatRequest 加 `model_id`（指定模型，缺省用激活）+ `thinking`（思考强度覆盖）——显式指定 > 当前激活
 - **思考强度**：DeepSeek v4 系列默认开思考；`reasoning_effort`（OpenAI 标准参数，顶层直传，low/medium/high/xhigh/max）控制强度；`off` 用 `extra_body={"enable_thinking": False}` 显式关闭（非标准参数）。思考内容经 `reasoning_content` 返回（当前不展示，仅用于生成）

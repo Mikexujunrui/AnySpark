@@ -92,6 +92,7 @@ def test_registry_ui_edit_default_survives_restart(monkeypatch) -> None:  # type
             name="DeepSeek（Claude 中转）",
             base_url="https://claude-transit.example.com",
             model="claude-sonnet-4-5",
+            context_window=400000,  # 非常规值，验证接管后不被 .env 覆盖
             protocol="anthropic",
         )
     )
@@ -100,11 +101,13 @@ def test_registry_ui_edit_default_survives_restart(monkeypatch) -> None:  # type
     # .env 仍是阿里云（打包版场景：用户没改 .env）→ 重启后 default 应保持界面配置
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
     monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    monkeypatch.setenv("DEEPSEEK_CONTEXT_WINDOW", "120000")  # S178 同步字段同样豁免
     reg2 = reg_mod.ModelRegistry(db)
     d = reg2.get("default")
     assert d.base_url == "https://claude-transit.example.com"  # type: ignore[union-attr]
     assert d.model == "claude-sonnet-4-5"  # type: ignore[union-attr]
     assert d.protocol == "anthropic"  # type: ignore[union-attr]
+    assert d.context_window == 400000  # type: ignore[union-attr]  # 界面值保留，未被 .env 覆盖
     assert reg2.active().id == "default"
 
 
