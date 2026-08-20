@@ -4954,3 +4954,12 @@ test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
 4. **测试**：4 个新测试覆盖发现候选+升级+边界
 
 **验证**：ruff+mypy 全绿；pytest 15（test_manual）+ 34（test_app）+ 7（test_check_store）+ 14（test_review）= 70 passed。
+
+## S196: 文档收敛——DESIGN.md 更新+历史归档+评审报告同步（已完成 ✅）
+
+**改动**：
+1. **DESIGN.md 更新**：§61/§211 标注氛围滑块组 S63 删除、场景拼图板（未来）
+2. **历史文档归档**：BACKEND-ISSUES / FRONTEND-GAPS / REVIEW-THIRD-PARTY / REVIEW-THIRD-PARTY-PHILOSOPHY → `docs/archive/`
+3. **REVIEW-PROJECT.md 更新**：差距分析表标注 S145/S146/S194/S195 修复项；功能深度评分 ⭐⭐⭐→⭐⭐⭐⭐
+
+**归档原因**：审查报告建议"深度收敛"——冻结新功能、修设计-实现差距。S194/S195 已修复所有 P0 差距，历史审计文档完成使命归档。
