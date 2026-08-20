@@ -6,7 +6,7 @@ anyspark.check — 检测网包。
 """
 
 from .report import Finding, ReviewReport
-from .reviewers import ReviewEngine, run_review
+from .reviewers import ReviewEngine, generate_dynamic_checks, run_review
 from .rules import CompiledRule, check_text, compile_rule, compile_with_model
 from .skeleton import SKELETON_CHECKS, SkeletonCheckItem
 
@@ -20,5 +20,6 @@ __all__ = [
     "check_text",
     "compile_rule",
     "compile_with_model",
+    "generate_dynamic_checks",
     "run_review",
 ]

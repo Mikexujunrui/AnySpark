@@ -18,6 +18,7 @@ import { api } from "../api"
 import { triggerRefresh } from "../store"
 import { enqueueChat, dequeueChat, steerQueuedChat, steerChat, fetchQueues, type QueueItem } from '../api/chat'
 import { listWorkflows, runWorkflow, getWorkflowTask } from '../api/workflow'
+import { reportSignal } from '../api/signals'
 import { listChapters } from '../api/chapters'
 import { normalizeHistoryMessages, correctStaleBatchMessages } from '../lib/workflowParse'
 import { runCheck } from '../api/check'
@@ -481,6 +482,11 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     if (!question) return
     const qid = question.id
     setProgress({ stage: "处理中...", detail: "已收到你的选择" })
+    // S194：问题回复=接受方向，上报对齐信号（此前对话写作模块信号采集断裂）
+    const questions = question.questions || []
+    reportSignal('accepted', questions.map(q => q.question).join('; '), {
+      context: '对话歧义点回复',
+    })
     try {
       await fetch(`/api/books/${bookId}/questions/${qid}/reply`, {
         method: 'POST',
@@ -498,6 +504,11 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   async function handleQuestionReject() {
     if (!question) return
     const qid = question.id
+    // S194：拒绝问题=拒绝方向，上报对齐信号
+    const questions = question.questions || []
+    reportSignal('rejected', questions.map(q => q.question).join('; '), {
+      context: '对话歧义点拒绝',
+    })
     try {
       await fetch(`/api/books/${bookId}/questions/${qid}/reject`, { method: 'POST' })
       setQuestion(null)
@@ -513,6 +524,8 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     const qid = plotCards.id
     setProgress({ stage: "处理中...", detail: "已收到你的选择" })
     setMessages(prev => [...prev, { role: 'user', text: `选择方向: ${text.slice(0, 100)}${text.length > 100 ? '...' : ''}` }])
+    // S194：选方向卡=接受候选，上报对齐信号（此前对话写作模块信号采集断裂）
+    reportSignal('accepted', text.slice(0, 200), { context: '对话方向卡选择' })
     try {
       await fetch(`/api/books/${bookId}/questions/${qid}/reply`, {
         method: 'POST',
@@ -530,6 +543,11 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   async function handlePlotCardReject() {
     if (!plotCards) return
     const qid = plotCards.id
+    // S194：拒绝方向卡=拒绝候选，上报对齐信号
+    const cards = plotCards.cards || []
+    reportSignal('rejected', cards.map(c => c.title).join('; '), {
+      context: '对话方向卡拒绝',
+    })
     try {
       await fetch(`/api/books/${bookId}/questions/${qid}/reject`, { method: 'POST' })
       setPlotCards(null)

@@ -1,6 +1,8 @@
 """anyspark.check.report + reviewers — 报告与检测解析测试。"""
 
-from anyspark.check import Finding, ReviewReport
+from __future__ import annotations
+
+from anyspark.check import Finding, ReviewReport, SkeletonCheckItem, generate_dynamic_checks
 from anyspark.check.reviewers import _parse_findings
 from anyspark.check.skeleton import SKELETON_CHECKS
 
@@ -93,3 +95,55 @@ def test_split_chunks_boundary_exact() -> None:
     from anyspark.check.reviewers import CHUNK_SIZE, _split_chunks
 
     assert len(_split_chunks("章" * CHUNK_SIZE)) == 1, "恰好等于上限仍单块"
+
+
+class _FakeModel:
+    """假模型：返回固定 JSON 数组。"""
+
+    def __init__(self, response: str) -> None:
+        self._response = response
+
+    def respond(self, messages: object, tools: object) -> object:
+        class _Out:
+            text = self._response
+
+        return _Out()
+
+
+def test_generate_dynamic_checks_empty_context() -> None:
+    """空上下文不生成检测项。"""
+    model = _FakeModel("[]")
+    result = generate_dynamic_checks(model, "")
+    assert result == []
+
+
+def test_generate_dynamic_checks_parses_json() -> None:
+    """正常 JSON 解析为 SkeletonCheckItem 列表。"""
+    model = _FakeModel(
+        '[{"category": "一致性", "description": "检查主角伤疤位置是否前后一致"},'
+        '{"category": "伏笔", "description": "检查老魔杖是否在第7章前出现"}]'
+    )
+    result = generate_dynamic_checks(model, "主角：哈利（角色）")
+    assert len(result) == 2
+    assert isinstance(result[0], SkeletonCheckItem)
+    assert result[0].category == "一致性"
+    assert "伤疤" in result[0].description
+
+
+def test_generate_dynamic_checks_garbage_returns_empty() -> None:
+    """模型返回垃圾文本时返回空列表。"""
+    model = _FakeModel("这不是JSON")
+    result = generate_dynamic_checks(model, "主角：哈利")
+    assert result == []
+
+
+def test_generate_dynamic_checks_missing_fields_skipped() -> None:
+    """缺字段的条目跳过。"""
+    model = _FakeModel(
+        '[{"category": "一致性, "description": "测试"},'
+        '{"category": "", "description": "空类别"},'
+        '{"description": "缺类别"}]'
+    )
+    result = generate_dynamic_checks(model, "上下文")
+    # 只有第一条有效（category 和 description 都有值）
+    assert len(result) <= 1

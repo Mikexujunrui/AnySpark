@@ -13,7 +13,7 @@ from typing import Any
 from anyspark.core import Message
 
 from .report import Finding, ReviewReport
-from .skeleton import SkeletonCheckItem
+from .skeleton import SKELETON_CHECKS, SkeletonCheckItem
 
 REVIEW_PROMPT = (
     """你是小说审读专家，负责检测：「%(category)s」。
@@ -144,8 +144,66 @@ def run_review(
     target: str,
     text: str,
     checks: list[SkeletonCheckItem] | None = None,
+    *,
+    book_context: str = "",
 ) -> ReviewReport:
-    """便捷入口：默认跑全部骨架检测项。"""
-    from .skeleton import SKELETON_CHECKS
+    """便捷入口：默认跑全部骨架检测项。
 
-    return ReviewEngine(model).review(target, text, checks or SKELETON_CHECKS)
+    S194：传 book_context 时自动生成作品专属检测项，与静态骨架合并执行
+    （DESIGN 机制 9 第②层落地）。
+    """
+    all_checks = list(checks or SKELETON_CHECKS)
+    if book_context.strip():
+        all_checks.extend(generate_dynamic_checks(model, book_context))
+    return ReviewEngine(model).review(target, text, all_checks)
+
+
+# 动态检测项生成提示词（DESIGN 机制 9 第②层：AI 针对当前作品具体化检测项）
+_DYNAMIC_CHECKS_PROMPT = (
+    "你是小说审读专家。根据以下作品信息，生成 2-4 条**作品专属**检测项。\n"
+    "每条针对这个作品的具体设定/角色/伏笔——不要泛泛的通用检测项。\n"
+    "\n"
+    "输出格式（严格 JSON 数组，不要其它文字）：\n"
+    '[{"category": "一致性", "description": "检查XX是否与第N章设定一致"}]\n'
+    "\n"
+    "示例（针对哈利波特）：\n"
+    '[{"category": "一致性", "description": "检查哈利的伤疤位置描述是否前后一致（额头闪电形）"},\n'
+    ' {"category": "伏笔", "description": "检查奇洛触碰哈利时是否与伏地魔寄生设定一致"}]\n'
+)
+
+
+def generate_dynamic_checks(
+    model: object,
+    book_context: str,
+) -> list[SkeletonCheckItem]:
+    """DESIGN 机制 9 第②层：AI 动态生成检测项。
+
+    根据当前作品的图谱实体/设定档/伏笔状态，让 LLM 生成作品专属的检测项
+    （如"检查陈渡的灯塔看守人身份是否前后一致"），与静态骨架合并执行。
+
+    book_context = 作品上下文摘要（图谱实体 + 设定档 + 伏笔状态的文本块）。
+    """
+    if not book_context.strip():
+        return []
+    from anyspark.core.jsonutil import parse_json_array
+
+    messages = [
+        Message(role="system", content=_DYNAMIC_CHECKS_PROMPT),
+        Message(role="user", content=f"作品上下文：\n{book_context[:4000]}"),
+    ]
+    out = model.respond(messages, [])  # type: ignore[attr-defined]
+    text = (out.text or "").strip()
+    if not text:
+        return []
+    items = parse_json_array(text)
+    if not items:
+        return []
+    checks: list[SkeletonCheckItem] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        category = str(item.get("category", "")).strip()
+        description = str(item.get("description", "")).strip()
+        if category and description:
+            checks.append(SkeletonCheckItem(category=category, description=description))
+    return checks

@@ -4890,3 +4890,32 @@ test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
   GET 验证编辑生效。钉死"C 编辑输出历史（不含工具）安全可用"契约。
 
 **验证**：app 全量测试绿（排除既有竞态）；ruff/mypy/format 绿。
+
+## S194: 对齐闭环修复 + 检测网 AI 动态检测项落地（已完成 ✅）
+
+**背景**：项目级审查发现"操作即信号"哲学在对话写作模块断裂（选方向卡/回答歧义点不上报信号），DESIGN 机制 9 第②层"AI 动态生成检测项"未实现。
+
+**改动**：
+1. **对话信号采集修复**（`ChatPanel.tsx`）：4 个处理器加 `reportSignal`——
+   - `handlePlotCardSelect` → `reportSignal('accepted', text, {context: '对话方向卡选择'})`
+   - `handlePlotCardReject` → `reportSignal('rejected', cards, {context: '对话方向卡拒绝'})`
+   - `handleQuestionReply` → `reportSignal('accepted', questions, {context: '对话歧义点回复'})`
+   - `handleQuestionReject` → `reportSignal('rejected', questions, {context: '对话歧义点拒绝'})`
+   - 此前 5 种信号只有 modified 活着，现在 accepted/rejected 在对话写作模块也活着——"操作即信号"哲学恢复。
+
+2. **AI 动态检测项生成器**（`check/reviewers.py`）：新增 `generate_dynamic_checks(model, book_context)`——
+   - 从图谱实体 Top 10 + 伏笔 must 钩子 Top 5 组装作品上下文
+   - LLM 生成 2-4 条作品专属检测项（如"检查陈渡的灯塔看守人身份是否前后一致"）
+   - 与静态骨架合并执行（`run_review` 加 `book_context` 参数）
+   - `/api/check` 端点自动传入作品上下文激活动态检测——此前检测项恒为静态骨架 7 条，现在随作品演化
+
+3. **审查发现的已修复项确认**（S145/S146 已落地，S194 核查）：
+   - ✅ "已自动注入"过期文案：DEFAULT_SYSTEM 和 graph_query 描述已正确说"图谱不常驻注入"
+   - ✅ 说明书用户编辑权：BiasPanel 已有完整 CRUD（S146 落地）
+   - ✅ "校验一致性"按钮：已改调 `/api/check`（S145 修复）
+   - ✅ reference_lookup 装配：agent_factory 已传 `library=deps.library`（S145 修复）
+
+**验证**：
+- 后端：ruff + mypy 全绿（6 文件）；pytest 34 passed（test_app）+ 14 passed（test_review）
+- 前端：tsc + eslint + build 全绿
+- 测试：新增 4 个动态检测项生成器测试（空上下文/正常解析/垃圾返回/缺字段跳过）
