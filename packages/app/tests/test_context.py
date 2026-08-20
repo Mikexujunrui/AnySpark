@@ -192,6 +192,72 @@ def test_cut_never_lands_on_tool_result() -> None:
         assert tail[0].role != "tool"
 
 
+def test_cut_never_lands_on_assistant_declaration() -> None:
+    """S189：保留段第一个非 system 不能是 assistant——Anthropic 要求 messages[0]
+    为 user，且 assistant 的 tool_use 必须与其后 tool 结果同单元保留（切点落在
+    assistant 上会把配对拦腰截断）。旧实现保留段可能以 assistant 开头 → 400。"""
+    b = TokenBudget(budget=800)
+    messages = [Message(role="system", content="s")]
+    for i in range(1, 12):
+        if i == 8:
+            messages.append(
+                Message(
+                    role="assistant",
+                    content="",
+                    metadata={"tool_calls": [{"name": "wc", "id": "c1", "arguments": {}}]},
+                )
+            )
+        elif i == 9:
+            messages.append(Message(role="tool", content="已保存", metadata={"tool_call_id": "c1"}))
+        elif i % 2 == 0:
+            messages.append(Message(role="assistant", content="a" * 100))
+        else:
+            messages.append(Message(role="user", content="u" * 100))
+    kept = b.compress(messages)
+    tail = kept[1:] if kept and kept[0].role == "system" else kept
+    if tail:
+        tail_roles = [m.role for m in tail[:3]]
+        assert tail[0].role != "assistant", f"保留段不能以 assistant 开头: {tail_roles}"
+        assert tail[0].role != "tool", f"保留段不能以孤立 tool 开头: {tail_roles}"
+
+
+def test_truncate_tail_keeps_tool_pairs() -> None:
+    """S189：_truncate_tail 按配对单元删（assistant + 其后连续 tool 同删）——旧实现
+    逐条 pop 会留下孤儿 tool（assistant 已删）或悬挂 assistant（tool 被删）→ 400。"""
+    b = TokenBudget(budget=60)  # 极小预算强制触发逐条删除
+    # system + user + assistant(声明 c1) + tool(c1) + tool 孤儿(c2 无声明) + assistant 收尾
+    messages = [
+        Message(role="system", content="S" * 30),
+        Message(role="user", content="开始写作" * 6),
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "wc", "id": "c1", "arguments": {}}]},
+        ),
+        Message(role="tool", content="已保存" * 4, metadata={"tool_call_id": "c1"}),
+        Message(role="tool", content="孤儿" * 4, metadata={}),  # 无声明 → 应被清除
+        Message(role="assistant", content="收尾" * 8),
+    ]
+    kept = b.compress(messages)
+    # 规则校验：任何 assistant 带 tool_calls 声明 → 其后必须紧跟同批 tool 结果；
+    # 任何 tool 消息 → 其前必须有声明（要么整单元删除，要么成对保留）
+    for i, m in enumerate(kept):
+        if m.role == "assistant" and m.metadata.get("tool_calls"):
+            # 若声明保留，其后必须紧跟对应 tool 结果
+            j = i + 1
+            paired_ids = {c["id"] for c in m.metadata["tool_calls"] if c.get("id")}
+            while j < len(kept) and kept[j].role == "tool":
+                tid = kept[j].metadata.get("tool_call_id")
+                assert tid in paired_ids, f"tool 结果 {tid} 不在声明 {paired_ids} 中"
+                paired_ids.discard(tid)
+                j += 1
+            assert not paired_ids, f"声明 {paired_ids} 无紧随 tool 结果（悬挂）"
+    # 无孤儿 tool：tool 前一条必须是带对应声明的 assistant
+    for i, m in enumerate(kept):
+        if m.role == "tool":
+            assert i > 0 and kept[i - 1].role == "assistant", f"孤儿 tool: {m.content[:20]}"
+
+
 def test_rough_count_skips_tiktoken_when_small() -> None:
     """S24（E1）：远低于预算时字符粗算直接返回，不调用 tiktoken 精算（省每轮全量编码）。"""
     b = TokenBudget(budget=100000)

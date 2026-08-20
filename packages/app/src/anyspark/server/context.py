@@ -182,6 +182,9 @@ class TokenBudget:
         - 从后往前累计字符粗算 token，达到 KEEP_RECENT_TOKENS 即停（至少保底 KEEP_RECENT_MIN 条）
         - 切割点**永不落在 tool 消息上**：保留段第一条若是 tool，说明它的 assistant
           声明在可压缩段内（已被切掉）——把孤立的 tool 结果一起切掉，避免畸形上下文。
+        - S189 补充：保留段第一个非 system 必须是 user——Anthropic 要求 messages[0]
+          为 user；若切点落在 assistant（含其紧跟的 tool）上则整单元切进压缩段，
+          避免保留段以 assistant 开头 + tool_use/tool_result 配对被拦腰截断。
         """
         n = len(messages)
         cut = n
@@ -197,13 +200,41 @@ class TokenBudget:
         # 切割合法性：保留段第一条不能是 tool（孤立 tool 结果无声明）
         while cut < n and messages[cut].role == "tool":
             cut += 1
+        # 保留段第一个非 system 不能是 assistant：把它连同其后 tool 整单元切进压缩段
+        # （assistant 的 tool_use 配对在套内，单独留下会让 Anthropic 报 tool_use
+        # 无紧随 tool_result；且首条 assistant 违反 messages[0] 必须为 user）
+        if cut < n and messages[cut].role == "assistant":
+            cut += 1
+            while cut < n and messages[cut].role == "tool":
+                cut += 1
         return cut
 
     def _truncate_tail(self, messages: list[Message], head_len: int) -> list[Message]:
-        """消息太少时的兜底：从尾部逐条保留直到预算内（最近优先）。"""
+        """消息太少时的兜底：从尾部逐条保留直到预算内（最近优先）。
+
+        S189：按“配对单元”删除——assistant 与其后连续 tool 消息同生共死，
+        且开头孤儿的 tool 直接清除。旧实现逐条 pop 可能留下两种畸形：
+        ① system → tool（assistant 已删，tool 悬挂）② assistant(tool_use) 的
+        tool 结果被单独删掉（tool_use 无紧随 tool_result）——OpenAI 严格模式与
+        Anthropic Messages API 均 400。
+        """
         kept = list(messages)
         while len(kept) > head_len + 1 and self.count_messages(kept) > self._budget:
-            kept.pop(head_len)  # 从最旧的非 system 消息开始丢
+            idx = head_len
+            # 开头孤儿 tool（其 assistant 已被切掉/丢失）——直接清除
+            while idx < len(kept) and kept[idx].role == "tool":
+                kept.pop(idx)
+                if len(kept) <= head_len + 1:
+                    break
+            if len(kept) <= head_len + 1:
+                break
+            # 删一条非 tool（user 或 assistant）；assistant 连带其后的 tool 结果
+            # 整单元删（tool_use 必须有紧随的 tool_result 配对）
+            role = kept[idx].role
+            kept.pop(idx)
+            if role == "assistant":
+                while idx < len(kept) and kept[idx].role == "tool":
+                    kept.pop(idx)
         return kept
 
 

@@ -172,25 +172,42 @@ class ModelRegistry:
             # 空库播种：从 .env 建默认 DeepSeek（旧版本升上来直接可用）
             row = self._conn.execute("SELECT COUNT(*) FROM model_configs").fetchone()
             if row[0] == 0:
-                self._insert(self._conn, default_env_config())
+                seed = default_env_config()
+                now = _now()
+                # created == updated = “从未被界面修改”标记（S189：_sync_default_from_env
+                # 据此决定 .env 是否仍有权覆盖；两次独立 _now() 调用有微秒差，必须统一）
+                seed.created_at = now
+                seed.updated_at = now
+                self._insert(self._conn, seed)
             self._conn.commit()
         # S173：启动同步 .env → default 配置（播种只发生在空库；库已存在时用户改
         # .env 的 base_url/model 不生效——官方 key 打到旧端点 DashScope → 401）
         self._sync_default_from_env()
 
     def _sync_default_from_env(self) -> None:
-        """S173/S178：.env 的 DEEPSEEK_* 变更同步到库 default 配置。
+        """S173/S178/S189：.env 的 DEEPSEEK_* 变更同步到库 default 配置。
 
         种子只在空库播种一次——库已存在时改 .env 重启，库里 default 的 base_url/
         model/context_window 仍是旧值。实时读 env（default_env_config）同步到
         id=default；api_key 走 resolved（库优先 .env 兜底）；界面添加的其他模型不受影响。
+
+        S189 守卫：**界面已在运行时改过 default（updated_at != created_at）时不再同步**
+        ——打包版 exe 目录 data/.env 固定了初始值（如阿里云 DashScope），若每次重启
+        都强制覆盖，用户在界面配置的模型（如 Anthropic 中转）会被无声打回。
+        .env 只是启动种子；界面接管后 .env 不再有优先权（.env.example 已声明
+        “之后可在前端运行时增删改，无需改 .env 重启”）。只有 default 从未被界面
+        改动过时，.env 才是唯一事实来源。
         """
         env_cfg = default_env_config()
         with self._lock:
             row = self._conn.execute(
-                "SELECT base_url, model, context_window FROM model_configs WHERE id='default'"
+                "SELECT base_url, model, context_window, created_at, updated_at"
+                " FROM model_configs WHERE id='default'"
             ).fetchone()
             if row is None:
+                return
+            # 界面改过 default（upsert 刷新 updated_at 而保留 created_at）→ 不覆盖
+            if row[4] != row[3]:
                 return
             # S178：补 context_window 同步（旧版只同步 base_url/model，长上下文设置丢失）
             if (row[0], row[1], row[2]) != (
@@ -287,6 +304,9 @@ class ModelRegistry:
                 cfg.is_active = count == 0  # 首条自动激活
             else:
                 cfg.is_active = existing.is_active  # 激活只由 activate 切换
+                # 编辑保留创建时间（S189：界面改 default 后 created_at 保持播种值、
+                # updated_at 更新 → “界面已接管”标记可靠；且语义上编辑不改创建时间）
+                cfg.created_at = existing.created_at
                 # api_key 不回传给列表接口（to_dict 剔除）——编辑表单留空表示“不改 key”，
                 # 此时保留原 key，避免前端编辑其他参数把已有自定义 key 冲掉。
                 if cfg.api_key is None:

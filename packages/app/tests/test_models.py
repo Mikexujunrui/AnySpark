@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, ClassVar
 
@@ -64,8 +65,47 @@ def test_registry_syncs_default_from_env(monkeypatch) -> None:  # type: ignore[n
     d = reg2.get("default")
     assert d.base_url == "https://api.deepseek.com"  # type: ignore[union-attr]
     assert d.model == "deepseek-chat"  # type: ignore[union-attr]
-    assert d.context_window == 200000  # S178：context_window 同步
+    assert d.context_window == 200000  # type: ignore[union-attr]  # S178：context_window 同步
     assert reg2.get("custom").base_url == "http://127.0.0.1:11434/v1"  # type: ignore[union-attr]
+
+
+def test_registry_ui_edit_default_survives_restart(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """S189：界面改过 default 后重启不被 .env（打包版固定阿里云）覆盖。
+
+    旧实现每次启动无条件把 .env 的 DEEPSEEK_* 同步进 default——打包版
+    exe 目录 data/.env 固定初始供应商，用户在界面配置的模型（如 Anthropic
+    中转）重启后被无声打回。
+    """
+    import anyspark.models.registry as reg_mod
+
+    db = _db()
+    reg = reg_mod.ModelRegistry(db)
+    assert reg.get("default").updated_at == reg.get("default").created_at  # type: ignore[union-attr]  # 未改过标记
+
+    # 模拟真实时间流逝（播种发生在过去、界面保存发生在现在；测试同一微秒内瞬发
+    # 无法区分两次 _now()，必须让时钟前进）
+    time.sleep(0.01)
+    # 界面把 default 改成其他供应商（模拟前端 POST /api/models upsert id=default）
+    reg.upsert(
+        reg_mod.ModelConfig(
+            id="default",
+            name="DeepSeek（Claude 中转）",
+            base_url="https://claude-transit.example.com",
+            model="claude-sonnet-4-5",
+            protocol="anthropic",
+        )
+    )
+    assert reg.get("default").updated_at != reg.get("default").created_at  # type: ignore[union-attr]
+
+    # .env 仍是阿里云（打包版场景：用户没改 .env）→ 重启后 default 应保持界面配置
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+    reg2 = reg_mod.ModelRegistry(db)
+    d = reg2.get("default")
+    assert d.base_url == "https://claude-transit.example.com"  # type: ignore[union-attr]
+    assert d.model == "claude-sonnet-4-5"  # type: ignore[union-attr]
+    assert d.protocol == "anthropic"  # type: ignore[union-attr]
+    assert reg2.active().id == "default"
 
 
 def test_registry_upsert_crud_and_activate() -> None:

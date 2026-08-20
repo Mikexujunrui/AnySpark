@@ -533,3 +533,73 @@ def test_anthropic_partial_tool_use_pairing() -> None:
     asst = next(m for m in conv if m["role"] == "assistant" and isinstance(m["content"], list))
     ids = [b["id"] for b in asst["content"] if isinstance(b, dict) and b.get("type") == "tool_use"]
     assert ids == ["c1"], f"应只保留 c1: {ids}"
+
+
+def test_anthropic_orphan_result_id_from_earlier_pair_not_leaked() -> None:
+    """S189：孤儿 tool_result 穿透漏洞——旧防御把“任何一条 user 里的 tool_result id”
+    全局累积放行，即使其 tool_use 早已被移除/截断（如跨协议切换后 id 错位、或历史
+    压缩切断了配对）。此场景正是远端报错 messages.N.content.0: tool_use_id found in
+    tool_result blocks 的根因之一：tool_result 的 id 在更早 assistant 声明过（理应
+    合法），但其所在 user 的紧邻前一条 assistant 没有声明——必须整块移除。"""
+    msgs = [
+        Message(role="user", content="写"),
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "a", "arguments": {}, "id": "c1"}]},
+        ),
+        Message(role="tool", content="A", metadata={"tool_call_id": "c1"}),
+        Message(role="assistant", content="继续"),  # 下一轮无工具声明
+        # c2 的结果在非紧邻位置出现（c2 的声明被截断/跨协议重写丢失）——
+        # 紧邻前一条 assistant 无声明 → c2 必须移除
+        Message(
+            role="tool",
+            content="B",
+            metadata={"tool_call_id": "call_00_AMViPwzwBTeTo78umhQ87951"},
+        ),
+        Message(role="assistant", content="完成"),
+    ]
+    _, conv = to_anthropic_messages(msgs)
+    # 无该孤儿 id 的 tool_use 或 tool_result 残留
+    for c in conv:
+        blocks = c["content"] if isinstance(c["content"], list) else []
+        for b in blocks:
+            if isinstance(b, dict) and b.get("type") == "tool_use":
+                assert b.get("id") != "call_00_AMViPwzwBTeTo78umhQ87951"
+            if isinstance(b, dict) and b.get("type") == "tool_result":
+                assert b.get("tool_use_id") != "call_00_AMViPwzwBTeTo78umhQ87951", (
+                    f"孤儿 tool_result 应被移除: {b}"
+                )
+    # 正常配对的 c1 保留
+    all_results = [
+        b
+        for c in conv
+        if c["role"] == "user"
+        for b in (c["content"] if isinstance(c["content"], list) else [])
+        if isinstance(b, dict) and b.get("type") == "tool_result"
+    ]
+    assert [b["tool_use_id"] for b in all_results] == ["c1"]
+
+
+def test_anthropic_empty_result_id_removed() -> None:
+    """S189：tool 消息缺 tool_call_id（历史/前端覆盖丢失）→ 空串 tool_use_id，
+    无 assistant 声明可配对 → 整块移除（旧实现空串 id 会因“任意合法 id 集合”
+    全局累积被误留 → 400）。"""
+    msgs = [
+        Message(role="user", content="写"),
+        Message(
+            role="assistant",
+            content="",
+            metadata={"tool_calls": [{"name": "a", "arguments": {}, "id": "c1"}]},
+        ),
+        Message(role="tool", content="A", metadata={"tool_call_id": "c1"}),
+        Message(role="assistant", content="继续"),
+        Message(role="tool", content="B", metadata={}),  # 缺 tool_call_id
+        Message(role="assistant", content="完成"),
+    ]
+    _, conv = to_anthropic_messages(msgs)
+    for c in conv:
+        if c["role"] == "user" and isinstance(c["content"], list):
+            for b in c["content"]:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    assert b.get("tool_use_id") != "", f"空 id tool_result 应移除: {b}"

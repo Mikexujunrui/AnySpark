@@ -128,45 +128,58 @@ def to_anthropic_messages(
     if pending_results:
         converted.append({"role": "user", "content": pending_results})
 
-    # S174/S182：tool_use/tool_result 立即跟随防御——Anthropic 严格要求 tool_use 的
-    # **下一条消息**就是含对应 tool_result 的 user（仅存在配对不够：tool_result 被
-    # steer 插话/其他消息隔开，或同批多 tool_use 部分配对时同样 400）。
-    # 逐条检查：assistant 的每个 tool_use id 必须在该 assistant 紧邻下一条 user 的
-    # tool_result 里；不满足的 tool_use 移除，对应的孤儿 tool_result（前一条 assistant
-    # 未声明该 id）一并从 user 移除。
-    valid_tool_results: set[str] = set()  # 保留的 tool_result id（有紧跟配对）
+    # S174/S182/S189：tool_use/tool_result 严格双向配对防御。
+    # Anthropic 硬性要求：每个 tool_use 块在 messages[k]，对应 tool_result 必须出现在
+    # **紧邻下一条** messages[k+1] 的 user 里（仅存在配对不够：被 steer 插话/其他消息
+    # 隔开、同批部分配对、历史截断/跨协议切换后 id 错位时均 400）。
+    # 两遍修剪（方向相反，交集收敛）：
+    #   ① user 的 tool_result id 必须声明于其**紧邻前一条** assistant 的 tool_use 中，
+    #     否则该 tool_result 移除（空 id / 无声明 / 前一条不是 assistant 的孤儿全灭）；
+    #   ② assistant 的 tool_use id 必须出现在其**紧邻下一条** user 的 tool_result 中，
+    #     否则该 tool_use 移除。第二遍读的是第一遍修剪后的 user，双向取交集——
+    # 不会再把“任意历史出现过的 id”当合法放行（旧实现在全局集合累积，孤儿 tool_result
+    # 可能被误留 → messages.N.content.0: tool_use_id found in tool_result blocks）。
     for i, c in enumerate(converted):
-        if c["role"] == "assistant" and isinstance(c["content"], list):
-            next_ids: set[str] = set()
-            if i + 1 < len(converted):
-                nxt = converted[i + 1]
-                if nxt["role"] == "user" and isinstance(nxt["content"], list):
-                    for b in nxt["content"]:
-                        if isinstance(b, dict) and b.get("type") == "tool_result":
-                            next_ids.add(str(b.get("tool_use_id") or ""))
-            c["content"] = [
-                b
-                for b in c["content"]
-                if not (isinstance(b, dict) and b.get("type") == "tool_use")
-                or str(b.get("id") or "") in next_ids
-            ]
-            # 保留的 tool_result id（紧邻配对成立）
-            valid_tool_results.update(next_ids)
-            # 移除后 content 空 → 补空 text 块（Anthropic 要求 assistant content 非空）
-            if not c["content"]:
-                c["content"] = [{"type": "text", "text": ""}]
-    # 孤儿 tool_result（不在紧邻配对集）从 user 移除——保留会让 Anthropic
-    # 报 tool_result without tool_use
-    for c in converted:
-        if c["role"] == "user" and isinstance(c["content"], list):
-            c["content"] = [
-                b
-                for b in c["content"]
-                if not (isinstance(b, dict) and b.get("type") == "tool_result")
-                or str(b.get("tool_use_id") or "") in valid_tool_results
-            ]
-            if not c["content"]:
-                c["content"] = ""  # 空 user 消息降为字符串（合并阶段处理）
+        if c["role"] != "user" or not isinstance(c["content"], list):
+            continue
+        prev_ids: set[str] = set()
+        if i > 0 and converted[i - 1]["role"] == "assistant":
+            prev = converted[i - 1]["content"]
+            if isinstance(prev, list):
+                prev_ids = {
+                    str(b.get("id") or "")
+                    for b in prev
+                    if isinstance(b, dict) and b.get("type") == "tool_use"
+                }
+        c["content"] = [
+            b
+            for b in c["content"]
+            if not (isinstance(b, dict) and b.get("type") == "tool_result")
+            or str(b.get("tool_use_id") or "") in prev_ids
+        ]
+        if not c["content"]:
+            c["content"] = ""  # 空 user 消息降为字符串（合并阶段处理）
+    for i, c in enumerate(converted):
+        if c["role"] != "assistant" or not isinstance(c["content"], list):
+            continue
+        next_ids: set[str] = set()
+        if i + 1 < len(converted) and converted[i + 1]["role"] == "user":
+            nxt_content = converted[i + 1]["content"]
+            if isinstance(nxt_content, list):
+                next_ids = {
+                    str(b.get("tool_use_id") or "")
+                    for b in nxt_content
+                    if isinstance(b, dict) and b.get("type") == "tool_result"
+                }
+        c["content"] = [
+            b
+            for b in c["content"]
+            if not (isinstance(b, dict) and b.get("type") == "tool_use")
+            or str(b.get("id") or "") in next_ids
+        ]
+        # 移除后 content 空 → 补空 text 块（Anthropic 要求 assistant content 非空）
+        if not c["content"]:
+            c["content"] = [{"type": "text", "text": ""}]
 
     # 相邻同角色合并（Anthropic 严格交替；字符串 content 拼接，块列表 extend）
     merged: list[dict[str, Any]] = []

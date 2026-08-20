@@ -4803,3 +4803,35 @@ chunk 更新下动画反复被打断；且 `isAtBottomRef` 一旦被任意滚动
 - TestNodeState（10 个）：update_node_state/increment_attempts/append_result/node_status/node_output——断点恢复基础
 
 **验证**：ruff + mypy 全绿；pytest 26 passed（1.28s）。
+
+## S189: 远程部署双 bug 修复——Anthropic tool 配对 400 + 打包版配置重启回退（已完成 ✅）
+
+**背景**：远程打包版（PyInstaller exe）用户反馈两处问题：① Anthropic 协议调用偶发 400
+`messages.N.content.0: tool_use_id found in tool_result blocks`（tool_result 无对应
+tool_use）；② 界面设置的模型接口重启后回退成阿里云 DashScope。
+
+**根因**：
+1. `to_anthropic_messages` 的 S182 防御用**全局累积**合法 id 集合——一条 user 里的
+   tool_result id 只要在"任意历史 assistant 的下一条"出现过就被永久放行，
+   即使其 tool_use 已被压缩截断/跨协议切换重写丢失 → 孤儿 tool_result 残留在
+   发送给 Anthropic 的 messages 里 400。另外 `_truncate_tail` 从头部逐条丢消息
+   可能留下孤儿 tool 或悬挂 assistant(tool_use)（配对被拦腰截断）。
+2. `ModelRegistry._sync_default_from_env` 每次启动**无条件**把 .env 的 DEEPSEEK_*
+   覆盖进库中 `id=default` 配置——打包版 exe 目录 data/.env 固定阿里云，界面配置
+   重启后被无声打回。
+
+**改动**：
+- `anthropic.py`：防御重写为**严格双向配对**——① user 的 tool_result id 必须在其
+  紧邻前一条 assistant 的 tool_use 声明中（否则移除，含空 id）；② assistant 的
+  tool_use id 必须出现在紧邻下一条 user 的 tool_result 中（否则移除）。两遍交集
+  收敛，杜绝"任何历史 id 合法"误放行。
+- `context.py`：`_truncate_tail` 按**配对单元**删（assistant + 其后连续 tool 同删；
+  开头孤儿 tool 直接清）；`_find_cut_point` 保证保留段第一个非 system 必须是
+  user（assistant 连同其后 tool 整单元切进压缩段，防配对截断 + messages[0] 非法）。
+- `registry.py`：default 被界面保存过（updated_at != created_at）→ .env 不再覆盖；
+  upsert 编辑保留 created_at（编辑不改创建时间，标记才可靠）；播种统一时间戳。
+- 测试新增 5 个（orphan tool_result 穿透/空 id/截断配对/界面接管）+ 修复存量
+  mypy union-attr 错误 1 处。
+
+**验证**：ruff/mypy 全绿（213 文件）；app 全量测试 177 passed（排除既有竞态
+test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
