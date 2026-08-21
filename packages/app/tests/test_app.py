@@ -181,8 +181,17 @@ def test_chat_stream_sse_frames() -> None:
     assert "event: text" in body
     assert "event: done" in body
     assert "conversation_id" in body
-    # 图谱抽取也照常触发（后台任务）
-    entities = client.get("/api/graph/entities").json()
+    # 图谱抽取为后台任务（daemon 线程异步）：轮询等待实体入库，避免竞态断言
+    import time
+
+    names: set[str] = set()
+    deadline = time.time() + 8
+    while time.time() < deadline:
+        entities = client.get("/api/graph/entities").json()
+        names = {e["name"] for e in entities}
+        if "陈渡" in names:
+            break
+        time.sleep(0.5)
     assert any(e["name"] == "陈渡" for e in entities)
 
 
