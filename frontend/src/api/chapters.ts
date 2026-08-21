@@ -23,8 +23,8 @@ interface PlanItem {
 }
 
 // ── Chapters（章节）──
-export const getChapters = (bookId: string): Promise<unknown[]> =>
-  get(`/api/chapters?book_id=${bookId}`);
+export const getChapters = (bookId: string): Promise<Chapter[]> =>
+  get<Chapter[]>(`/api/chapters?book_id=${bookId}`);
 // S152：参数化 bookId（此前无参固定 main——BatchPanel/ChatPanel/影响分析全部跨项目读错书）
 export const listChapters = (bookId = "main"): Promise<Chapter[]> =>
   get<Chapter[]>("/api/chapters?book_id=" + bookId);

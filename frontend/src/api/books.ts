@@ -1,7 +1,7 @@
 // Books / Sessions / Materials — V4 适配层（壳调用 → V4 端点）
 // 壳的多项目结构映射到 V4 的 book_id 参数化端点；会话≈对话会话。
 import { del, get, patch, post, put } from "./http";
-import type { BookData } from "./types";
+import type { BookData, SessionData } from "./types";
 
 // 资料摘要卡（后端 /api/materials 返回项）
 interface MaterialSummary {
@@ -41,10 +41,10 @@ export const importSparkProject = async (..._args: unknown[]): Promise<{ ok: boo
 
 // ── Sessions（对话会话）──
 // S80：会话绑定项目——列表按书过滤、创建归属项目（智能体作用域=打开的项目）
-export const getSessions = (bookId?: string): Promise<unknown[]> =>
-  get<unknown[]>(`/api/conversations${bookId ? `?book_id=${bookId}` : ""}`);
-export const createSession = (bookId: string, title: string): Promise<unknown> =>
-  post("/api/conversations", { title, book_id: bookId });
+export const getSessions = (bookId?: string): Promise<SessionData[]> =>
+  get<SessionData[]>(`/api/conversations${bookId ? `?book_id=${bookId}` : ""}`);
+export const createSession = (bookId: string, title: string): Promise<SessionData> =>
+  post<SessionData>("/api/conversations", { title, book_id: bookId });
 export const deleteSession = (_bookId: string, sessionId: string): Promise<unknown> =>
   del(`/api/conversations/${sessionId}`);
 

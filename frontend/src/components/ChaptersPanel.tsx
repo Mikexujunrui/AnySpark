@@ -97,6 +97,12 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
     localStorage.setItem(`wc_target_${bookId}`, String(wordCountTarget))
   }, [wordCountTarget, bookId])
 
+  // 切换书籍时重读该书的字数目标，避免旧值被上面的 useEffect 误写回新书
+  useEffect(() => {
+    try { setWordCountTarget(parseInt(localStorage.getItem(`wc_target_${bookId}`) || '3000', 10)) }
+    catch { setWordCountTarget(3000) }
+  }, [bookId])
+
   // Ctrl+S 快捷键保存 - 使用 ref 避免闭包陈旧问题
   const handleSaveRef = useRef(null)
   useEffect(() => {
@@ -238,7 +244,7 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
   async function loadChapters() {
     setLoading(true)
     try {
-      const data = await api.getChapters(bookId) as any[]
+      const data = await api.getChapters(bookId)
       const arr = Array.isArray(data) ? data : []
       setChapters(arr)
       if (!selectedId && arr.length > 0) {
@@ -246,7 +252,7 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
         setEditTitle(data[0].title || '')
         setEditContent(data[0].content || '')
       } else if (selectedId) {
-        const current = arr.find((c: any) => c.id === selectedId)
+        const current = arr.find((c) => c.id === selectedId)
         if (current) {
           setEditTitle(current.title || '')
           setEditContent(current.content || '')

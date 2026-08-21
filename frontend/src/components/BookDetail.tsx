@@ -10,6 +10,7 @@ import Icon from './ui/Icon'
 import ConfirmModal from './ui/ConfirmModal'
 import PanelHost from './panels/PanelHost'
 import { useSplitLayout } from "../hooks/useSplitLayout"
+import type { SessionData } from '../api/types'
 import SettingsModal from './SettingsModal'
 import ThemeToggle from './ThemeToggle'
 import CommandPalette from './CommandPalette'
@@ -98,7 +99,7 @@ function BookDetail() {
   const [book, setBook] = useState<Record<string, any> | null>(null)
   const [llmMode, setLlmMode] = useState<string>(DEFAULT_MODE.key)
   const [loadingErr, setLoadingErr] = useState('')
-  const [sessions, setSessions] = useState<Record<string, any>[]>([])
+  const [sessions, setSessions] = useState<SessionData[]>([])
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [showSessionMenu, setShowSessionMenu] = useState(false)
   const [deleteSessionId, setDeleteSessionId] = useState<string | null>(null)
@@ -115,20 +116,20 @@ function BookDetail() {
       try {
         const sess = await api.getSessions(bookId!)
         if (cancelled) return
-        setSessions(sess as Record<string, any>[])
+        setSessions(sess)
         const savedSession = storage.getActiveSession(bookId!)
-        const found = (sess as Record<string, any>[]).find((s: Record<string, any>) => s.id === savedSession)
+        const found = sess.find((s) => s.id === savedSession)
         if (found) {
           setSessionId(found.id)
-        } else if ((sess as any[]).length > 0) {
-          setSessionId((sess as any[])[0].id)
-          storage.setActiveSession(bookId!, (sess as any[])[0].id)
+        } else if (sess.length > 0) {
+          setSessionId(sess[0].id)
+          storage.setActiveSession(bookId!, sess[0].id)
         } else {
           const ns = await api.createSession(bookId!, '默认会话')
           if (cancelled) return
-          setSessions([ns as Record<string, any>])
-          setSessionId((ns as any).id)
-          storage.setActiveSession(bookId!, (ns as any).id)
+          setSessions([ns])
+          setSessionId(ns.id)
+          storage.setActiveSession(bookId!, ns.id)
         }
       } catch {
         if (!cancelled) setLoadingErr('后端连接失败')
@@ -208,8 +209,8 @@ function BookDetail() {
   async function handleNewSession() {
     try {
       const ns = await api.createSession(bookId!, `会话 ${sessions.length + 1}`)
-      setSessions(prev => [ns as Record<string, any>, ...prev])
-      switchSession((ns as any).id)
+      setSessions(prev => [ns, ...prev])
+      switchSession(ns.id)
       setShowSessionMenu(false)
     } catch {
       showToast('创建会话失败', 'error')
@@ -217,12 +218,12 @@ function BookDetail() {
   }
 
   // S161：会话继承派生（fork）——从源会话创建继承它的新会话（复制消息+链条可追溯）
-  async function handleForkSession(s: Record<string, any>) {
+  async function handleForkSession(s: SessionData) {
     try {
       const r = await forkConversation(s.id, `从会话「${s.title || '会话'}」分支`)
-      const newId = (r as any).conversation_id
+      const newId = (r as { conversation_id: string }).conversation_id
       const sess = await api.getSessions(bookId!)
-      setSessions(sess as Record<string, any>[])
+      setSessions(sess)
       switchSession(newId)
       setShowSessionMenu(false)
       showToast('已创建分支会话（继承上下文）')
