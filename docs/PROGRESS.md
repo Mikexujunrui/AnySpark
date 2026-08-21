@@ -5022,3 +5022,19 @@ tool_calls message`，此前 S23/S158d/S158g/S158h/S169/S170/S190/S191/S193 已�
 
 **回归测试**：新增 test_finish_aborted_repairs_preexisting_dangling（10 次随机延迟取消，
 断言任意时机收尾后无悬挂）。test_loop + test_messages 全绿，ruff/mypy 全绿。
+
+### S200b：历史悬挂自动清理（用户零操作）（已完成 ✅）
+
+**需求**：S200 出了 repair 脚本，但"让用户自己清理"不可行。改为**新版后端启动时自动清理**。
+
+**改动**：
+1. `sqlite.py`：`SqliteConversationStore.repair_dangling_decls()`——全库扫描未配对
+   assistant tool_calls 声明并**落库修剪**（幂等；S190 写入守卫会提前修 replace_messages
+   路径的悬挂，append 裸写路径靠本方法兜底）
+2. `app.py` build_app：store 创建后立即调用（幂等，空库/干净库毫秒级 0 变更；失败仅告警不阻塞启动）
+3. `scripts/repair_tool_pairs.py`：改为复用 store 方法（消除重复逻辑，手动巡检仍可用）
+4. 测试：`test_repair_dangling_decls_persists_fix`——模拟旧版直接 append 悬挂数据 → 修复落库
+   （新实例读取干净）→ 幂等二次 0 变更
+
+**验证**：test_sqlite 8 全绿 + test_app 42 全绿（排除既有竞态 test_chat_stream_sse_frames）；
+ruff/mypy 全绿；后端重启实测无悬挂（DB 已干净，repair 返回 0）。

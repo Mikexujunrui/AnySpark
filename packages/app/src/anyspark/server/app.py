@@ -173,6 +173,14 @@ def build_app(
 
     real_db = db_path or DB_PATH
     store = SqliteConversationStore(real_db)
+    # S200：启动时自动修复历史悬挂 tool_calls 声明（幂等；旧版遗留数据一次性落库清干净，
+    # 用户升级后无需任何操作，首次启动即完成——否则旧会话历史可能触发 OpenAI 400）
+    try:
+        _repaired = store.repair_dangling_decls()
+        if _repaired:
+            logger.info("启动修复: 清理 %d 条消息的历史悬挂 tool_calls 声明", _repaired)
+    except Exception:
+        logger.warning("启动修复跳过: 历史悬挂清理失败（不影响服务启动）", exc_info=True)
     # S48 工作区化：每项目一路径（上传/章节/卡片），章节 md 文件为权威
     # 默认与 db 配对隔离（防测试污染全局）：未显式注入时——
     #   默认 db → data/workspace；临时 db → db 同目录 workspace；:memory: → 临时目录

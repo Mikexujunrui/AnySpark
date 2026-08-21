@@ -94,6 +94,64 @@ class SqliteConversationStore(ConversationStore):
     def close(self) -> None:
         self._conn.close()
 
+    def repair_dangling_decls(self) -> int:
+        """全库扫描并落库修复未配对的 assistant tool_calls 声明（S200）。
+
+        历史版本（S170 前）取消收尾不补回填，会给会话留下"声明了 tool_calls
+        但无 tool 结果"的悬挂数据——再次请求该会话时 OpenAI 严格模式报 400
+        （insufficient tool messages following tool_calls）。读取时 _heal_tool_pairs
+        只做内存级修复，DB 永不干净；本方法把修剪结果**落库**一次性根治。
+
+        启动时调用（幂等，无悬挂则 0 变更）。返回修复的消息条数。
+        """
+        rows = self._conn.execute(
+            "SELECT conversation_id, seq, role, metadata FROM messages "
+            "ORDER BY conversation_id, seq"
+        ).fetchall()
+        conv_msgs: dict[str, list[dict[str, Any]]] = {}
+        for r in rows:
+            conv_msgs.setdefault(r["conversation_id"], []).append(dict(r))
+        fixed = 0
+        for conv_id, msgs in conv_msgs.items():
+            declared: list[str] = []
+            for m in msgs:
+                md = json.loads(m["metadata"] or "{}")
+                if m["role"] == "assistant" and md.get("tool_calls"):
+                    for tc in md["tool_calls"]:
+                        if isinstance(tc, dict) and tc.get("id"):
+                            declared.append(str(tc["id"]))
+                elif m["role"] == "tool":
+                    tid = str(md.get("tool_call_id") or "")
+                    if tid in declared:
+                        declared.remove(tid)
+            if not declared:
+                continue
+            dangling = set(declared)
+            for m in msgs:
+                md = json.loads(m["metadata"] or "{}")
+                if m["role"] != "assistant" or not md.get("tool_calls"):
+                    continue
+                calls = [
+                    tc
+                    for tc in md["tool_calls"]
+                    if not (isinstance(tc, dict) and str(tc.get("id") or "") in dangling)
+                ]
+                if len(calls) == len(md["tool_calls"]):
+                    continue
+                new_md = dict(md)
+                if calls:
+                    new_md["tool_calls"] = calls
+                else:
+                    new_md.pop("tool_calls", None)
+                with self._lock:
+                    self._conn.execute(
+                        "UPDATE messages SET metadata=? WHERE conversation_id=? AND seq=?",
+                        (json.dumps(new_md, ensure_ascii=False), conv_id, m["seq"]),
+                    )
+                fixed += 1
+            self._conn.commit()
+        return fixed
+
     def create(self, conversation_id: str | None = None, book_id: str = "main") -> Conversation:
         cid = conversation_id or uuid.uuid4().hex
         now = _now()

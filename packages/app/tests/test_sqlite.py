@@ -168,3 +168,50 @@ def test_replace_messages_editing_text_keeps_pairing() -> None:
         # （此处不直接调 anthropic，断言存储层配对不变量即可）
     finally:
         store.close()
+
+
+def test_repair_dangling_decls_persists_fix() -> None:
+    """S200：repair_dangling_decls 把历史遗留的悬挂 tool_calls 声明落库修剪。
+
+    模拟 S170 之前的旧版数据：assistant 声明 tool_calls 后直接接「已中断」
+    文本（无 tool 结果）——修复后声明应从 metadata 移除且**落库**（新 store
+    实例读取时也干净，证明不是内存级）。"""
+
+    from anyspark.core.types import Message
+
+    db = _db()
+    store = SqliteConversationStore(db)
+    try:
+        conv = store.create()
+        # 旧版遗留：声明 + 取消文本，无 tool 结果。直接写裸 metadata 模拟旧版
+        # 程序落库（不走 replace_messages——新版 S190 写入守卫会提前修掉）
+        store.append(conv.id, Message(role="user", content="写"))
+        store.append(
+            conv.id,
+            Message(
+                role="assistant",
+                content="",
+                metadata={"tool_calls": [{"name": "read_chapter", "arguments": {}, "id": "c1"}]},
+            ),
+        )
+        store.append(conv.id, Message(role="assistant", content="已中断（用户取消）。"))
+        # 确认脏数据确实在库里（append 无写入守卫）
+        raw = store._conn.execute(
+            "SELECT metadata FROM messages WHERE conversation_id=? AND role='assistant'",
+            (conv.id,),
+        ).fetchall()
+        assert any("tool_calls" in (r["metadata"] or "") for r in raw)
+        # 修复：找到 1 条悬挂
+        assert store.repair_dangling_decls() == 1
+        # 修复已落库：新实例读取干净
+        store2 = SqliteConversationStore(db)
+        try:
+            msgs = store2.messages(conv.id)
+            for m in msgs:
+                assert not (m.metadata or {}).get("tool_calls"), f"悬挂未清除: {m.metadata}"
+        finally:
+            store2.close()
+        # 幂等：再跑 0 变更
+        assert store.repair_dangling_decls() == 0
+    finally:
+        store.close()
