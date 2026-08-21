@@ -69,13 +69,30 @@ def test_missing_id_orphan_removed() -> None:
 
 
 def test_separated_pair_kept_relaxed() -> None:
-    """宽松层：tool 结果被 user 插话隔开仍保留（声明有结果、结果有声明）。\n
-    协议特有的“严格紧邻”由各适配器转换防御处理，不在此层。"""
+    """宽松层：tool 结果被 user 插话隔开仍保留，且 S201 重排为紧邻。
+
+    旧语义：保留原顺序（由适配器处理严格紧邻）。新语义（S201）：OpenAI 严格
+    模式要求 tool_calls 声明后紧跟 tool 消息，插话推迟到该组 tool 之后——
+    否则真实日志反复 400（insufficient tool messages following tool_calls）。"""
     msgs = [_user(), _assistant_decl("c1"), _user("插话"), _tool("c1"), _assistant_never()]
     out = sanitize_tool_pairing(msgs)
+    # 配对保留
     assert any(m.role == "tool" and m.metadata.get("tool_call_id") == "c1" for m in out)
     # 声明保留
     assert any(m.role == "assistant" and m.metadata.get("tool_calls") for m in out)
+    # S201：tool_calls 声明后必须紧跟 tool 消息（中间不可有 user）
+    for i, m in enumerate(out):
+        if m.role == "assistant" and m.metadata.get("tool_calls"):
+            assert i + 1 < len(out) and out[i + 1].role == "tool", f"插话隔开: {out}"
+    # 插话内容不丢失（被推到 tool 组之后）
+    assert any(m.role == "user" and m.content == "插话" for m in out)
+    # 顺序可读：声明 → tool → 插话（插话 user 不再夹在声明与 tool 之间）
+    pos_decl = next(
+        i for i, m in enumerate(out) if m.role == "assistant" and m.metadata.get("tool_calls")
+    )
+    pos_tool = next(i for i, m in enumerate(out) if m.role == "tool")
+    pos_chat = next(i for i, m in enumerate(out) if m.role == "user" and m.content == "插话")
+    assert pos_decl < pos_tool < pos_chat
 
 
 def test_multi_id_partial_pairing() -> None:

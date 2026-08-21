@@ -5038,3 +5038,30 @@ tool_calls message`，此前 S23/S158d/S158g/S158h/S169/S170/S190/S191/S193 已�
 
 **验证**：test_sqlite 8 全绿 + test_app 42 全绿（排除既有竞态 test_chat_stream_sse_frames）；
 ruff/mypy 全绿；后端重启实测无悬挂（DB 已干净，repair 返回 0）。
+
+## S201: 400 根因确认——「插话隔开配对」盲区（真实用户日志驱动）
+
+**背景**：远程用户 8.21 日志（E:/Desktop/8.21.log，1683 行）实锤反复 400：
+`insufficient tool messages following tool_calls message`，同一会话 d6c8f88a 连续
+4+ 次，用户反馈"思考中继续发指令导致"。
+
+**日志分析**：
+1. 用户跑的是 **v4.0.8 打包版**（堆栈行号 loop.py:234/deepseek.py:282/retry.py:195
+   与 v4.0.8 精确吻合）——**没有 S191 sanitize_tool_pairing 守卫**、没有 S190 写入守卫、
+   没有 S200b 启动清理
+2. 全日志 `工具调用` 0 次 = 纯对话会话（无工具回填问题）→ 400 只能来自**历史消息残残缺**
+3. queue 接力 & steer 注入（日志 `queue 入队`/`queue→steer 注入` 实锤）——
+   用户"思考中发指令"→ 队列接力/steer 把 user 消息插在「assistant tool_calls 声明」
+   与「tool 结果」之间
+
+**真正的 bug（当前代码也存在）**：`sanitize_tool_pairing` 的宽松层语义
+「被 user 隔开的配对保留」与 OpenAI 严格模式冲突——**OpenAI 要求 tool_calls 声明后
+必须紧跟一整组 tool 消息**，中间插 user 即 400。S190-S193 修了悬挂/孤儿，但
+这个「隔开」盲区从没堵过。
+
+**修复（S201）**：`sanitize_tool_pairing` 增加重排——声明窗口未闭合时遇到的
+user/system 消息推迟到该组 tool 结果之后（保序、保内容、只调位置，幂等）。
+Anthropic 适配器测试从"移除隔开"改为"重排后紧邻"（内容不丢，更好）。
+
+**验证**：真实场景复现（声明→插话→tool）重排正确；多声明+插话正确；Anthropic
+转换正确；test_messages/test_adapters/test_sqlite 全绿；core 58 全绿。

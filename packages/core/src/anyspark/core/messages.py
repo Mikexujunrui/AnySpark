@@ -61,32 +61,58 @@ def sanitize_tool_pairing(messages: list[Message]) -> list[Message]:
     - **缺 id 的工具结果**：tool 消息缺 tool_call_id → 用相邻未配对声明补配，
       补不上（队列空）则移除
 
-    保留正常配对（含被 user 插话隔开的配对——那是"宽松层"允许的，
-    协议特有的"严格紧邻"由各适配器转换防御再处理）。
+    S201：额外处理「被 user 插话隔开的配对」——OpenAI 严格模式要求 assistant
+    tool_calls 声明后**必须紧跟一整组 tool 消息**（中间不可插 user/system）。
+    steer/followup 插话、队列接力若把 user 落在声明与 tool 结果之间，
+    原样发给 API 会 400（insufficient tool messages following tool_calls）。
+    处理：把插在声明↔tool 结果之间的非 tool 消息**推迟到该组 tool 结果之后**
+    （保序、保内容，只调位置）。
     """
     out: list[Message] = []
     declared: deque[str] = deque()
+    # S201：声明组待回填的 tool 数（当前未闭合的声明集合大小）——
+    # 在这个窗口内出现的非 tool 消息先暂存，等 tool 组闭合后插回。
+    pending_defer: list[Message] = []
+    open_decls: set[str] = set()
     for m in messages:
         if m.role == "assistant":
             out.append(m)
             for tid in _declared_ids(m):
                 declared.append(tid)
+                open_decls.add(tid)
         elif m.role == "tool":
             tid = str(m.metadata.get("tool_call_id") or "")
             if tid:
                 if tid in declared:
                     declared.remove(tid)
+                    open_decls.discard(tid)
                     out.append(m)
+                    # 该组闭合：把暂存的其他角色消息插回（保持插话语义）
+                    if not open_decls:
+                        out.extend(pending_defer)
+                        pending_defer.clear()
                 # 无对应声明 → 孤儿，丢弃
+                elif tid in open_decls:
+                    # 声明在但已配对过（多结果同声明异常）——忽略防重
+                    pass
             elif declared:
                 # 缺 id：从相邻未配对声明补配（保持声明→tool 顺序）
                 md = dict(m.metadata)
-                md["tool_call_id"] = declared.popleft()
+                mdid = declared.popleft()
+                md["tool_call_id"] = mdid
+                open_decls.discard(mdid)
                 out.append(Message(role=m.role, content=m.content, metadata=md))
+                if not open_decls:
+                    out.extend(pending_defer)
+                    pending_defer.clear()
             # 队列空且无 id → 孤儿，丢弃
         else:
-            out.append(m)
-    # 裁剪悬挂声明（声明了但无任何 tool 结果配对）
+            # S201：声明窗口未闭合时遇到的 user/system → 推迟到该组 tool 之后
+            if open_decls:
+                pending_defer.append(m)
+            else:
+                out.append(m)
+    # 裁剪悬挂声明（声明了但无任何 tool 结果配对）；暂存未闭合的直接丢弃
     if declared:
         dangling = set(declared)
         out = [_strip_dangling(m, dangling) if m.role == "assistant" else m for m in out]

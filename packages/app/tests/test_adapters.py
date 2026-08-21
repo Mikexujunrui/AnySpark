@@ -480,11 +480,10 @@ def test_responses_dangling_function_call_removed() -> None:
     assert fcs == []
 
 
-def test_anthropic_tool_result_separated_by_user_removed() -> None:
-    """S182：tool_result 被 user 消息隔开（steer 插话在 tool_result 前）→
-    Anthropic 要求 tool_use 后**立即**跟 tool_result（仅存在配对不够）——
-    移除该 tool_use + 孤儿 tool_result，否则 400（messages.N.M tool_use
-    without tool_result blocks immediately after）。"""
+def test_anthropic_tool_result_separated_by_user_reordered() -> None:
+    """S201：tool_result 被 user 消息隔开（steer 插话在 tool_result 前）→
+    通用守卫 sanitize 先把插话重排到 tool 组之后（不再移除内容），
+    Anthropic 转换得到 tool_use 紧邻 tool_result 的合法序列。"""
     msgs = [
         Message(role="user", content="写"),
         Message(
@@ -497,16 +496,26 @@ def test_anthropic_tool_result_separated_by_user_removed() -> None:
         Message(role="assistant", content="完成"),
     ]
     _, conv = to_anthropic_messages(msgs)
-    for m in conv:
-        if m["role"] == "assistant":
-            assert not any(
-                isinstance(b, dict) and b.get("type") == "tool_use" for b in m["content"]
-            ), f"tool_use 应被移除: {m['content']}"
-    for m in conv:
-        if m["role"] == "user" and isinstance(m["content"], list):
-            assert not any(
-                isinstance(b, dict) and b.get("type") == "tool_result" for b in m["content"]
-            ), "孤儿 tool_result 应被移除"
+    # 重排后：tool_use 紧邻 tool_result（不再被插话隔开），内容不丢失
+    # 找 tool_use 所在 assistant 与 tool_result 所在 user 的相邻关系
+    ok = False
+    for i, m in enumerate(conv):
+        if m["role"] == "assistant" and any(
+            isinstance(b, dict) and b.get("type") == "tool_use" for b in m["content"]
+        ):
+            assert i + 1 < len(conv), f"tool_use 后无消息: {conv}"
+            nxt = conv[i + 1]
+            assert nxt["role"] == "user"
+            blocks = nxt["content"] if isinstance(nxt["content"], list) else []
+            assert any(isinstance(b, dict) and b.get("type") == "tool_result" for b in blocks), (
+                f"tool_use 后未紧跟 tool_result: {conv}"
+            )
+            ok = True
+            break
+    assert ok, "转换结果中没有 tool_use"
+    # 插话内容保留（重排后仍在对话里）
+    all_text = " ".join(str(m.get("content")) for m in conv)
+    assert "别写太血腥" in all_text, f"插话丢失: {all_text}"
 
 
 def test_anthropic_partial_tool_use_pairing() -> None:
