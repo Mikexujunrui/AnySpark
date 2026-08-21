@@ -17,14 +17,14 @@ package "领域包（单向依赖 core）" {
 }
 
 package "app 装配层" {
-  [app.py\n组合根：建 store/engine → AppDeps → 挂 15 router\n→ start_bg_worker → shutdown 关连接] as APP
-  [deps.py\nAppDeps 契约（22 store+16 engine+共享状态）] as DEPS
+  [app.py\n组合根：建 store/engine → AppDeps → 挂 20 router\n→ start_bg_worker → shutdown 关连接] as APP
+  [deps.py\nAppDeps 契约（22 store + 2 engine + 共享状态）] as DEPS
   [agent_factory.py\nmake_agent：注入块装配] as AF
   [tasks.py\n后台 7 任务 + worker 线程] as TASKS
   [schemas.py\n82 Pydantic 模型] as SCHEMAS
 }
 
-package "路由层（15 router，工厂注入 deps）" {
+package "路由层（20 router，工厂注入 deps）" {
   [routes_chat\nchat/stream/cancel/steer] as RCHAT
   [routes_mind\nmanual/brief/signals/mind] as RMIND
   [routes_explore\nintent/cards/path/dims/check] as REX
@@ -38,6 +38,9 @@ package "路由层（15 router，工厂注入 deps）" {
   [routes_agency\n能动性/批量改写审读] as RAG
   [routes_plot\n模式库/伏笔/资料] as RPLOT
   [routes_tools\n扩展工具/codex/ingest/export] as RTOOL
+  [routes_check\n检测/规则/骨架增删] as RCHECK
+  [routes_library\n参考书库/拆书入口] as RLIB
+  [routes_update\n版本检测] as RUPD
   [routes_books\n书架] as RBOOK
   [routes_conversations\n会话/模型] as RCONV
 }
@@ -46,7 +49,7 @@ package "工具层（Agent 可调用，enable_* 开关）" {
   [tools_writing\n读/写章节] as TW
   [tools_domain\n图谱/心智/设定/计划/检索/消化] as TD
   [tools_extras\nexplore_direction/read_material] as TX
-  [toolkit.py\n注册表：23 工具按 6 开关装配] as TK
+  [toolkit.py\n注册表：48 工具按开关装配] as TK
 }
 
 CORE <-- ALIGN

@@ -12,14 +12,14 @@
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│ 装配层  app.py（601 行，组合根）                         │
-│   创建 22 store + 16 engine → AppDeps → 15 router 挂载    │
+│ 装配层  app.py（500 行，组合根）                         │
+│   创建 store + engine → AppDeps → 20 router 挂载            │
 │   + start_bg_worker + shutdown 连接关闭                    │
 ├─────────────────────────────────────────────────────────┤
-│ 路由层  routes_*.py（15 个领域 router，~164 端点）        │
+│ 路由层  routes_*.py（20 个领域 router，~207 端点）        │
 │   HTTP 入口 → 校验 → 调领域逻辑/engine → 响应              │
 ├─────────────────────────────────────────────────────────┤
-│ Agent 工具层  toolkit.py + tools_*.py（47 个工具，S114 默认全注册；S145 补 library 后含 reference_lookup）  │
+│ Agent 工具层  toolkit.py + tools_*.py（48 个工具，S114 默认全注册；S145 补 library 后含 reference_lookup）  │
 │   Agent 循环内可调用的领域能力（按 enable_* 开关点亮）      │
 ├─────────────────────────────────────────────────────────┤
 │ 基础设施  deps/tasks/agent_factory/context/pipeline/      │
@@ -49,6 +49,9 @@ POST /api/chat 或 /api/chat/stream（routes_chat）
   → Agent.run（core.loop 循环：模型→工具→回填→终答）
       ├ 事件流 turn_start→text_delta/tool_call→tool_execution_start/end→tool_result→done
       ├ recorder 记录（思维链只进记录不进上下文）
+      ├ S200 工具配对不变量：core Message 层保证 tool_calls 声明与 tool 结果成对——
+      │  收尾前 _collect_dangling_decls 扫描历史未配对 assistant 声明并回填占位 tool 结果
+      │  （治 OpenAI 协议 400：悬挂无配对），S201 补「插话隔开」盲区（tool_calls 声明后必紧跟 tool 组）
       └ steering 插话（/api/chat/steer → agent.steer；S99 排队消息可转插入 /api/chat/queue/…/steer）
   → 响应：ChatResponse / SSE 帧
   → S99 第二步 SSE 接力：chat_stream 单连接跑完整条队列——每轮 done 后消费队列下一条
@@ -115,7 +118,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
     （W3-A 遍历原语）——可断点/可编辑/可重试；与工具同输入对拍一致
 ```
 
-## 3. 路由层职责表（16 router，~166 端点）
+## 3. 路由层职责表（20 router，~207 端点）
 
 | Router | 端点区 | 核心依赖 |
 |---|---|---|
@@ -137,6 +140,9 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | routes_workflow | 工作流模板/草稿/任务 CRUD+run+resume（S138 续跑）+rollback（S138 批级回滚）（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134 + 章节加料 S137） | workflow_store/engine/generator |
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
+| routes_check | 检测网：POST /api/check（硬伤+自然语言规则检测，S104 重建）+ /api/check/rule（规则编译试跑）+ /api/check/skeleton（GET 列/POST 增/DELETE 删/POST restore 恢复默认，S195 用户可增删骨架检测项）+ /api/manual/cross-book-candidates + /api/manual/{id}/promote-global（S195b 跨层升级：发现跨书重复偏好→升级全局→死锁修复） | check/graph_verifier/user_skeleton/manual |
+| routes_library | 参考书库（S86 新增包 anyspark-library）：全局书库 CRUD + import 章节入库 + 项目选参考书（GET/PUT /api/books/{id}/references）+ POST /api/library/{id}/refine-skill（拆书提炼快捷入口，S135 优先走 workflow 模板） | library/workspace/chapters |
+| routes_update | 版本检测更新（S164）：GET /api/update/check（检查新版本）+ GET /api/update/status（本地版本与检查状态）——参考 v3 update_checker，前端启动时提示 | update_checker |
 
 > **S146 标注（无前端入口，设计内非遗漏）**：以下 6 个端点有测试无 UI——
 > `/api/graph/context`（图谱预览，S58 停注入后仅人可预览）、`/api/graph/types*`
@@ -150,7 +156,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 > 传，完整落地需新表+API+UI，属功能扩展非 bug；②skills 索引随条目数线性增长
 > 无体积上限（S130 书名包聚合后可能更多）——当前规模安全，超限再议。
 
-## 4. Agent 工具层（47 工具，S114 默认全注册 × 可显式禁用）
+## 4. Agent 工具层（48 工具，S114 默认全注册 × 可显式禁用）
 
 > S114 语义：所有能力**默认可用**（注册进工具箱，Agent 知道有什么）；开关列 = 显式传
 > False 可禁用的开关名（省 token/安全隔离极端场景），不是"点亮才有"。
@@ -262,7 +268,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 
 - **改某个机制**：查 §6 落点 → 对应领域包/路由
 - **加一个 agent 工具**：tools_domain 建 implementer → toolkit 注册 → 开关分组
-- **加一个 HTTP 端点**：对应 routes_*.py（15 个之一）
+- **加一个 HTTP 端点**：对应 routes_*.py（20 个之一）
 - **改存储结构**：core/db.connect 拿连接 → 对应 store 的 _init_schema
 - **排查请求链路**：routes_chat → agent_factory → core.loop → 工具 → store
 - **排查后台任务**：tasks.py 派发表 + deps.bg_queue
