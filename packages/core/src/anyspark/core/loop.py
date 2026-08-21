@@ -48,6 +48,26 @@ def _messages_differ(a: list[Message], b: list[Message]) -> bool:
     )
 
 
+def _collect_dangling_decls(messages: list[Message]) -> list[str]:
+    """S200：找出消息序列里所有未配对的 assistant tool_calls 声明 id。
+
+    用于取消收尾前补回填（防 OpenAI 严格模式 400）。幂等只读。
+    """
+    declared: list[str] = []
+    for m in messages:
+        if m.role == "assistant":
+            calls = m.metadata.get("tool_calls") or []
+            if isinstance(calls, list):
+                for tc in calls:
+                    if isinstance(tc, dict) and tc.get("id"):
+                        declared.append(str(tc["id"]))
+        elif m.role == "tool":
+            tid = str(m.metadata.get("tool_call_id") or "")
+            if tid in declared:
+                declared.remove(tid)
+    return declared
+
+
 class CancellationToken:
     """协作式取消令牌（S21 移植 pi 的 AbortSignal 模式）。
 
@@ -592,7 +612,25 @@ class Agent:
         executed: list[ToolCall],
         results: list[ToolResult],
     ) -> None:
-        """取消终止的收尾（S22 D5）：append assistant 消息保持上下文平衡 + 发事件。"""
+        """取消终止的收尾（S22 D5）：append assistant 消息保持上下文平衡 + 发事件。
+
+        S200：收尾前先配对修复——若 store 里存在上一轮遗留的未配对 assistant
+        tool_calls 声明（异常中断/旧版遗留），先补 ToolResult 回填再写终止文本，
+        否则下次请求该会话历史时 OpenAI 严格模式报 400
+        （insufficient tool messages following tool_calls）。
+        幂等：只读 store 即可获取完整历史，配对后不产生新悬挂。
+        """
+        try:
+            stale = store.messages(conversation_id)
+            dangling = _collect_dangling_decls(stale)
+            for tid in dangling:
+                backfill = f"[工具调用 {tid[:12]} 未执行：已中断。]"
+                store.append(
+                    conversation_id,
+                    Message(role="tool", content=backfill, metadata={"tool_call_id": tid}),
+                )
+        except Exception:
+            pass  # 收尾阶段不因修复失败阻塞取消本身（read 失败罕见，store 读写同源）
         cancel_text = "已中断（用户取消）。"
         store.append(conversation_id, Message(role="assistant", content=cancel_text))
         self.events.emit(Event(type="aborted", payload={}))

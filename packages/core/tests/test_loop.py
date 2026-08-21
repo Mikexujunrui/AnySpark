@@ -630,3 +630,43 @@ def test_before_tool_call_hook_exception_keeps_pairs() -> None:
     tool = next(m for m in msgs if m.role == "tool")
     assert tool.metadata.get("tool_call_id") == "call_h"
     assert "钩子异常" in tool.content
+
+
+def test_finish_aborted_repairs_preexisting_dangling() -> None:
+    """S200：_finish_aborted 收尾前自愈——store 里已存在未配对声明（异常中断/旧版
+    遗留）时，取消终止会先补 tool 回填，避免下次请求该会话触发 OpenAI 400。"""
+    import threading
+    import time
+
+    from anyspark.core import CancellationToken, ToolCall
+
+    # 第一轮：声明落库 → 工具执行窗口内取消（S169 补回填路径）；
+    # 关键回归点：无论取消发生在哪一帧，收尾后 store 不得有悬挂声明。
+    for i in range(10):
+        model = ScriptedModel(
+            [
+                ModelOutput(
+                    tool_calls=[
+                        ToolCall(name="add", arguments={"a": i, "b": i + 1}, id=f"call_{i}")
+                    ]
+                ),
+                _no_tool("done"),
+            ]
+        )
+        agent = _make_agent(model)
+        token = CancellationToken()
+        delay = (i % 5) * 0.0006
+
+        def _cancel_later(d: float, tk: CancellationToken) -> None:
+            time.sleep(d)
+            tk.cancel()
+
+        threading.Thread(target=lambda d=delay, tk=token: _cancel_later(d, tk)).start()
+        turn = agent.run("问题", token=token)
+        # 无论中断还是正常轮，会话不得悬挂
+        conv_id = agent.store.list_conversations()[0].id
+        msgs = agent.store.messages(conv_id)
+        dangling = _dangling_decl_ids(msgs)
+        assert not dangling, f"迭代{i} 存在悬挂声明: {dangling}"
+        # 终止文本存在（取消被观察到）
+        assert "中断" in msgs[-1].content or turn.text == "done"

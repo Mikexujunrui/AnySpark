@@ -4994,3 +4994,31 @@ test_chat_stream_sse_frames）+ core/align/explore/check 全绿。
 
 **数据增长**：章节 33→38，图谱 33→50 实体，伏笔回收 0→11，说明书 6→7
 **质量**：最新 2 章零破折号、无"正如"开头
+
+## S200: tool_calls 悬挂 400 根因定位 + 数据落库修复 + 取消收尾自愈（已完成 ✅）
+
+**背景**：远程自部署用户（打包版）多次报 OpenAI 400 `insufficient tool messages following
+tool_calls message`，此前 S23/S158d/S158g/S158h/S169/S170/S190/S191/S193 已修 7 轮仍复发。
+本次不再表面修补，做完整根因分析。
+
+**根因分析结论**：
+1. **历史数据残留**：数据库 `data/anyspark.db` 实测存在 3 个会话共 4 条悬挂声明
+   （assistant 声明 tool_calls 但无 tool 结果，如「seq=28 声明 2 个 → seq=29 已中断」）。
+   这是 S170 修复**之前**（取消收尾不补回填）产生的遗留数据。
+2. **内存级自愈不管 DB**：当前代码 `_heal_tool_pairs`（store 层）+ `sanitize_tool_pairing`
+   （模型调用前）双守卫**能修但只修内存**——每轮请求重新读残缺数据、重新修，DB 永不干净。
+3. **不是打包版特有**：源码版同样会踩（路径逻辑一致，差异只在数据目录位置）。打包版用户
+   更容易遇到是因为：① 用的是修复前旧版本（无 S169/S170 守卫）② 旧数据积累时间长。
+4. **读路径全覆盖**：store.messages() → _heal；模型调用前 → sanitize；write 路径
+   （replace_messages）→ _heal。实测修复后 0 悬挂，请求不再 400。
+
+**修复（双层）**：
+1. **脚本 scripts/repair_tool_pairs.py**：把 DB 里全部会话的悬挂声明修剪**落库**（根治，
+   不再靠每轮内存修复）。幂等，可发给打包版用户手动跑。实测 DB 3 个会话 3 条消息修复，
+   二次运行 0 变更。
+2. **loop.py `_finish_aborted` 自愈**（S200）：取消收尾前先扫描 store 补未配对声明的
+   tool 回填，再写「已中断」文本——从源头阻断新产生悬挂（异常中断/旧版遗留场景兜底）。
+   新增 `_collect_dangling_decls` 辅助（模块级纯函数）。
+
+**回归测试**：新增 test_finish_aborted_repairs_preexisting_dangling（10 次随机延迟取消，
+断言任意时机收尾后无悬挂）。test_loop + test_messages 全绿，ruff/mypy 全绿。
