@@ -16,7 +16,7 @@
 │   创建 store + engine → AppDeps → 20 router 挂载            │
 │   + start_bg_worker + shutdown 连接关闭                    │
 ├─────────────────────────────────────────────────────────┤
-│ 路由层  routes_*.py（20 个领域 router，~207 端点）        │
+│ 路由层  routes_*.py（23 个领域 router，~207 端点）        │
 │   HTTP 入口 → 校验 → 调领域逻辑/engine → 响应              │
 ├─────────────────────────────────────────────────────────┤
 │ Agent 工具层  toolkit.py + tools_*.py（48 个工具，S114 默认全注册；S145 补 library 后含 reference_lookup）  │
@@ -118,11 +118,14 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
     （W3-A 遍历原语）——可断点/可编辑/可重试；与工具同输入对拍一致
 ```
 
-## 3. 路由层职责表（20 router，~207 端点）
+## 3. 路由层职责表（23 router，~207 端点）
 
 | Router | 端点区 | 核心依赖 |
 |---|---|---|
-| routes_chat | chat/stream/cancel/steer/stats/direction/candidates/rewrite + S99 队列（queues 查看/queue 入队/queue 删/queue→steer 转插入）+ S116 records/{conv_id}（会话运行记录回放：轮快照+系统事件） | model/store/chapters/active_*/bg_queue/conv_queues |
+| routes_chat | chat/chat_stream（SSE 接力：单连接跑完整队列）/cancel/steer/records（会话运行记录回放） | model/store/chapters/active_*/bg_queue/conv_queues |
+| routes_chat_queue | S99 消息队列：queues 查看/queue 入队/queue 删/queue→steer 转插入（接力执行第一步存储+展示） | queue_lock/conv_queues/active_lock |
+| routes_chat_stats | T7 验证指标 + S101 作者写作统计（纯 SQL 读现有表，零新表） | db_path |
+| routes_chat_aux | 低摩擦交互：direction（方向声明）/candidates（候选卡堆）/rewrite（改写渐变条）——S207 从 routes_chat 拆出 | model/models |
 | routes_conversations | 会话 CRUD/fork/rename + 模型注册表 CRUD/激活（protocol 字段透传 S131）+ S147 历史接口过滤空 assistant 消息（工具轮声明不展示，防空气泡） | store/models |
 | routes_books | 书架（项目枚举/创建/删除） | workspace/chapters |
 | routes_workspace | 工作区总览/章节 import/上传/上传区 CRUD（POST 上传 + GET 读 + DELETE 删素材 S144）+ S141 AI 沙箱浏览（GET /api/sandbox 文件树 + GET /api/sandbox/file 读内容）+ S143 人工编辑保存（PUT /api/sandbox/file 落人工修改标记，AI write_file 不再静默覆盖） | workspace |
@@ -268,7 +271,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 
 - **改某个机制**：查 §6 落点 → 对应领域包/路由
 - **加一个 agent 工具**：tools_domain 建 implementer → toolkit 注册 → 开关分组
-- **加一个 HTTP 端点**：对应 routes_*.py（20 个之一）
+- **加一个 HTTP 端点**：对应 routes_*.py（23 个之一）
 - **改存储结构**：core/db.connect 拿连接 → 对应 store 的 _init_schema
 - **排查请求链路**：routes_chat → agent_factory → core.loop → 工具 → store
 - **排查后台任务**：tasks.py 派发表 + deps.bg_queue

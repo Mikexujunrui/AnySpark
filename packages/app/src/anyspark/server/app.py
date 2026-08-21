@@ -66,6 +66,9 @@ from anyspark.server.routes_agency import make_agency_router
 from anyspark.server.routes_books import make_books_router
 from anyspark.server.routes_chapters import make_chapters_router
 from anyspark.server.routes_chat import make_chat_router
+from anyspark.server.routes_chat_aux import make_chat_aux_router
+from anyspark.server.routes_chat_queue import make_chat_queue_router
+from anyspark.server.routes_chat_stats import make_chat_stats_router
 from anyspark.server.routes_check import make_check_router
 from anyspark.server.routes_conversations import make_conversations_router
 from anyspark.server.routes_explore import make_explore_router
@@ -445,6 +448,9 @@ def build_app(
     app.include_router(make_chapters_router(deps))
     app.include_router(make_check_router(deps))
     app.include_router(make_chat_router(deps))
+    app.include_router(make_chat_aux_router(deps))
+    app.include_router(make_chat_queue_router(deps))
+    app.include_router(make_chat_stats_router(deps))
     app.include_router(make_explore_router(deps))
     app.include_router(make_graph_router(deps))
     app.include_router(make_mind_router(deps))

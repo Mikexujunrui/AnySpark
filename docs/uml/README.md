@@ -40,7 +40,7 @@
 
 | 文件 | 内容 |
 |------|------|
-| [architecture.puml](architecture.puml) | **后端分层架构（S80 后）**：core ← 领域包 ← app（AppDeps）← 20 router ← 工具层；单向依赖无环 |
+| [architecture.puml](architecture.puml) | **后端分层架构（S80 后）**：core ← 领域包 ← app（AppDeps）← 23 router ← 工具层；单向依赖无环 |
 | [activity_tasks.puml](activity_tasks.puml) | **后台任务派发**：bg_queue → 7 种任务（chapter/refine/skill_drafts/summarize/batch_rewrite/batch_review）|
 
 ## 状态机图（State Machine Diagrams）

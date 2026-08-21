@@ -1,8 +1,9 @@
 """
-anyspark.server.routes_chat — 聊天路由（S80c 拆分，从 app.py 搬移）。
+anyspark.server.routes_chat — 聊天主路由（S80c 从 app.py 搬移；S207 拆出 queue/stats/aux）。
 
-chat / chat_stream（SSE）/ cancel / steer / stats / direction / candidates / rewrite。
+chat / chat_stream（SSE）/ cancel / steer / records。
 依赖最重：deps.model / store / chapters / models / recorder / active_* / bg_queue / db_path。
+queue/stats/aux 已拆到 routes_chat_{queue,stats,aux}.py。
 """
 
 from __future__ import annotations
@@ -10,34 +11,26 @@ from __future__ import annotations
 import json
 import queue
 import threading
-import uuid
-from concurrent.futures import ThreadPoolExecutor
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Body, HTTPException
 from fastapi.responses import StreamingResponse
 
 from anyspark.align import parse_agency_declaration
-from anyspark.core import Agent, CancellationToken, Message
-from anyspark.models import DeepSeekModel
-from anyspark.server.agent_factory import make_agent, model_for_task
+from anyspark.core import Agent, CancellationToken
+from anyspark.server.agent_factory import make_agent
 from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import logger
 from anyspark.server.schemas import (
     DEFAULT_SYSTEM,
     CancelIn,
-    CandidatesIn,
     ChatRequest,
     ChatResponse,
-    DirectionIn,
-    QueueIn,
-    RewriteIn,
     SteerIn,
     ToolEvent,
     _now_iso_rec,
     _sse_frame,
 )
-from anyspark.server.stats import compute_stats, compute_writing_stats
 
 # S99 第二步：单连接接力执行的最大轮数（防队列无限消费失控；超限剩余队列保留）
 MAX_QUEUE_ROUNDS = 20
@@ -122,79 +115,6 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
     # -----------------------------------------------------------------------
     # S99 会话消息队列（排队接力第一步——排队/查看/删/转插入；自动消费=第二步）
     # -----------------------------------------------------------------------
-    @router.get("/api/chat/queues")
-    def list_queues() -> dict[str, Any]:
-        """S99：队列信息面板——所有会话的排队消息 + 运行中会话列表。"""
-        with deps.queue_lock:
-            queues = {cid: list(items) for cid, items in deps.conv_queues.items() if items}
-        with deps.active_lock:
-            running = sorted(deps.active_agents.keys())
-        return {"queues": queues, "running": running}
-
-    @router.post("/api/chat/queue", response_model=dict[str, Any])
-    def enqueue_queue(req: Annotated[QueueIn, Body()]) -> dict[str, Any]:
-        """S99：消息入队（接力执行第二步前仅存储/展示；不要求会话正在运行）。"""
-        item = {"id": uuid.uuid4().hex, "text": req.message}
-        with deps.queue_lock:
-            items = deps.conv_queues.setdefault(req.conversation_id, [])
-            items.append(item)
-            snapshot = list(items)
-        logger.info("queue 入队: conv=%s 队列长度=%d", req.conversation_id, len(snapshot))
-        return {"ok": True, "queue": snapshot}
-
-    @router.delete(
-        "/api/chat/queue/{conversation_id}/{queue_item_id}", response_model=dict[str, Any]
-    )
-    def dequeue_queue(conversation_id: str, queue_item_id: str) -> dict[str, Any]:
-        """S99：删除一条排队消息（删空自动清理会话键）。"""
-        with deps.queue_lock:
-            items = deps.conv_queues.get(conversation_id, [])
-            removed = any(i["id"] == queue_item_id for i in items)
-            rest = [i for i in items if i["id"] != queue_item_id]
-            if rest:
-                deps.conv_queues[conversation_id] = rest
-            else:
-                deps.conv_queues.pop(conversation_id, None)
-            snapshot = list(rest)
-        return {"ok": removed, "queue": snapshot}
-
-    @router.post(
-        "/api/chat/queue/{conversation_id}/{queue_item_id}/steer", response_model=dict[str, Any]
-    )
-    def steer_queued(conversation_id: str, queue_item_id: str) -> dict[str, Any]:
-        """S99：排队消息转插入（原子）——steer 成功才移除队列项；
-        会话未运行时保留并提示（区别于删除，不丢指令）。"""
-        with deps.queue_lock:
-            items = deps.conv_queues.get(conversation_id, [])
-            target = next((i for i in items if i["id"] == queue_item_id), None)
-        if target is None:
-            return {"ok": False, "reason": "排队消息不存在"}
-        with deps.active_lock:
-            agent = deps.active_agents.get(conversation_id)
-        if agent is None:
-            return {"ok": False, "reason": "会话未在运行，无法插入（可等它完成或先中止）"}
-        agent.steer(target["text"])
-        logger.info("queue→steer 注入: conv=%s msg=%s", conversation_id, target["text"][:40])
-        with deps.queue_lock:
-            items = deps.conv_queues.get(conversation_id, [])
-            rest = [i for i in items if i["id"] != queue_item_id]
-            if rest:
-                deps.conv_queues[conversation_id] = rest
-            else:
-                deps.conv_queues.pop(conversation_id, None)
-            snapshot = list(rest)
-        return {"ok": True, "queue": snapshot}
-
-    @router.get("/api/stats")
-    def stats() -> dict[str, Any]:
-        """T7 验证指标（代理指标，纯 SQL 统计现有表，零新表）：修改率/提问率/完成率。"""
-        return compute_stats(deps.db_path)
-
-    @router.get("/api/stats/writing")
-    def stats_writing() -> dict[str, Any]:
-        """S101：作者视角写作统计（纯 SQL 读现有表）：趋势/连续写作/版本质量/大纲完成度/线进度。"""
-        return compute_writing_stats(deps.db_path)
-
     @router.post("/api/chat", response_model=ChatResponse)
     def chat(req: ChatRequest) -> ChatResponse:
         # S47 请求级指定模型：不存在 → 400（不是 500）
@@ -565,81 +485,5 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
         )
-
-    @router.post("/api/chat/direction", response_model=dict[str, str])
-    def chat_direction(req: DirectionIn) -> dict[str, str]:
-        """阶段 5 方向声明：AI 只声明"我准备写：…"不写正文（摩擦前置，用户 0.5s 确认）。"""
-        # S109：已知设定阈值 2000→4000；超限告知边界（直调无工具，模型不臆测）
-        ctx = f"\n已知设定：{req.context[:4000]}" if req.context else ""
-        if req.context and len(req.context) > 4000:
-            ctx += f"\n【注意：设定全文 {len(req.context)} 字，以上仅前 4000 字】"
-        prompt = (
-            "你是小说写作智能体。用户将让你写一段内容。"
-            "在动笔前，先输出【方向声明】——一句话说明你准备写什么、怎么切入"
-            "（像'我准备写：主角推开钟表铺的门，雨声里老周欲言又止'）。"
-            "只输出声明，不要写正文。\n\n"
-            f"用户要求：{req.prompt}{ctx}"
-        )
-        out = model_for_task(deps, "writing").respond([Message(role="system", content=prompt)], [])
-        direction = out.text.strip()
-        if not direction.startswith("【方向声明】"):
-            direction = f"【方向声明】{direction}"
-        return {"direction": direction}
-
-    @router.post("/api/chat/candidates", response_model=dict[str, object])
-    def chat_candidates(req: CandidatesIn) -> dict[str, object]:
-        """候选卡堆：并行生成 N 个差异化候选（上下文隔离→真多样性，机制 1/4）。"""
-        # S109：已知设定阈值 2000→4000；超限告知边界
-        ctx = f"\n已知设定：{req.context[:4000]}" if req.context else ""
-        if req.context and len(req.context) > 4000:
-            ctx += f"\n【注意：设定全文 {len(req.context)} 字，以上仅前 4000 字】"
-        n = max(2, min(4, req.n))
-        styles = ["平实叙事", "强画面感", "悬念张力", "细腻心理"]
-
-        def _one(i: int) -> str:
-            prompt = (
-                f"你是小说写作智能体。按风格「{styles[i % len(styles)]}」写下面要求的一段正文"
-                f"（约 150-250 字，直接输出正文，不要解释）。\n\n用户要求：{req.prompt}{ctx}"
-            )
-            out = model_for_task(deps, "planning").respond(
-                [Message(role="system", content=prompt)], []
-            )
-            return out.text.strip()
-
-        with ThreadPoolExecutor(max_workers=n) as pool:
-            results = list(pool.map(_one, range(n)))
-        candidates = [
-            {"id": f"c{i + 1}", "style": styles[i % len(styles)], "text": results[i]}
-            for i in range(n)
-        ]
-        return {"candidates": candidates}
-
-    @router.post("/api/chat/rewrite", response_model=dict[str, str])
-    def chat_rewrite(req: RewriteIn) -> dict[str, str]:
-        """改写渐变条（机制 4）：保原味↔大幅改，温度+指令差异化。"""
-        mode = req.mode if req.mode in ("subtle", "balanced", "bold") else "balanced"
-        temp_map = {"subtle": 0.3, "balanced": 0.7, "bold": 1.1}
-        instruct_map = {
-            "subtle": "尽量保留原文结构与表达，只做轻微润色",
-            "balanced": "在保留原意的基础上改写，语言更生动",
-            "bold": "大胆重构：换切入角度、换句式节奏、大幅改变表达",
-        }
-        # S109：改写原文阈值 3000→8000（用户选中长段落不丢后半）；超限告知边界
-        src = req.text[:8000]
-        if len(req.text) > 8000:
-            src = f"【注意：原文全文 {len(req.text)} 字，以下仅前 8000 字】\n{src}"
-        prompt = (
-            "你是小说写作智能体。改写下面这段正文。"
-            f"要求：{instruct_map[mode]}。直接输出改写后的正文，不要解释。\n\n原文：\n{src}"
-        )
-        # 渐变条温度映射：保原味=低温，大幅改=高温（仅真实模型生效）
-        rewrite_model: Any = deps.model
-        if isinstance(deps.model, DeepSeekModel):
-            rewrite_model = DeepSeekModel(temperature=temp_map[mode])
-        out = rewrite_model.respond(
-            [Message(role="system", content=prompt)],
-            [],
-        )
-        return {"rewritten": out.text.strip(), "mode": mode}
 
     return router

@@ -17,14 +17,14 @@ package "领域包（单向依赖 core）" {
 }
 
 package "app 装配层" {
-  [app.py\n组合根：建 store/engine → AppDeps → 挂 20 router\n→ start_bg_worker → shutdown 关连接] as APP
+  [app.py\n组合根：建 store/engine → AppDeps → 挂 23 router\n→ start_bg_worker → shutdown 关连接] as APP
   [deps.py\nAppDeps 契约（22 store + 2 engine + 共享状态）] as DEPS
   [agent_factory.py\nmake_agent：注入块装配] as AF
   [tasks.py\n后台 7 任务 + worker 线程] as TASKS
   [schemas.py\n82 Pydantic 模型] as SCHEMAS
 }
 
-package "路由层（20 router，工厂注入 deps）" {
+package "路由层（23 router，工厂注入 deps）" {
   [routes_chat\nchat/stream/cancel/steer] as RCHAT
   [routes_mind\nmanual/brief/signals/mind] as RMIND
   [routes_explore\nintent/cards/path/dims/check] as REX
