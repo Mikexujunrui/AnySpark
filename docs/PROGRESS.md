@@ -5085,3 +5085,13 @@ Anthropic 适配器测试从"移除隔开"改为"重排后紧邻"（内容不丢
 
 **验证**：后端 health 返回 version=4.0.10；logs/export 当天 350 行；前端 tsc(-b) 通过、
 vite build 通过；test_health + test_logs_export 2 测试绿。
+
+## S203: v4.0.11 发布——版本 bump + 推送公开仓库
+
+**版本**：4.0.10 → 4.0.11（S199 之后的新提交 S200-S202 发布）
+**bump 三处**：pyproject.toml / uv.lock / build_release.sh
+**本次发布内容**：
+- S200/S200b：tool_calls 悬挂 400 根因（取消/插话隔开）+ 启动自动清理 + 收尾自愈
+- S201：插话隔开配对盲区修复（真实用户日志驱动）
+- S202：关于页版本号 + 当天完整日志导出
+**验证**：test_update 8 全绿；三处版本同步一致
