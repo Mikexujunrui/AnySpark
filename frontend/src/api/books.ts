@@ -3,6 +3,15 @@
 import { del, get, patch, post, put } from "./http";
 import type { BookData } from "./types";
 
+// 资料摘要卡（后端 /api/materials 返回项）
+interface MaterialSummary {
+  id: string;
+  title: string;
+  summary?: string;
+  topic?: string;
+  book_id?: string;
+}
+
 // ── Books（书架：V4 新增 /api/books 端点）──
 export const getBooks = (): Promise<BookData[]> => get<BookData[]>("/api/books");
 export const getBook = (id: string): Promise<BookData> =>
@@ -40,11 +49,11 @@ export const deleteSession = (_bookId: string, sessionId: string): Promise<unkno
   del(`/api/conversations/${sessionId}`);
 
 // ── Materials（资料库）──
-export const getMaterials = (bookId?: string): Promise<unknown[]> =>
-  get<unknown[]>(`/api/materials${bookId ? `?book_id=${bookId}` : ""}`);
-export const searchMaterials = (q: string, _bookId?: string): Promise<unknown[]> => {
-  return get<unknown[]>("/api/materials").then((ms) =>
-    (ms as any[]).filter((m) => (m.title || "").includes(q) || (m.summary || "").includes(q))
+export const getMaterials = (bookId?: string): Promise<MaterialSummary[]> =>
+  get<MaterialSummary[]>(`/api/materials${bookId ? `?book_id=${bookId}` : ""}`);
+export const searchMaterials = (q: string, _bookId?: string): Promise<MaterialSummary[]> => {
+  return get<MaterialSummary[]>("/api/materials").then((ms) =>
+    ms.filter((m) => (m.title || "").includes(q) || (m.summary || "").includes(q))
   );
 };
 export const createMaterial = (data: unknown): Promise<unknown> => post("/api/materials", data);

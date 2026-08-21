@@ -3,6 +3,25 @@
 import { del, diagLog, get, post, put } from "./http";
 import type { Chapter } from "../types";
 
+// ── Response 类型（后端契约对齐，消除 as any）──
+interface ChapterDetail extends Chapter {
+  versions: ChapterVersion[];
+}
+interface ChapterVersion {
+  version_id: number;
+  saved_at: string;
+  content: string;
+  summary?: string;
+}
+interface PlanItem {
+  book_id?: string;
+  id?: string;
+  title?: string;
+  content?: string;
+  status?: string;
+  order_index?: number;
+}
+
 // ── Chapters（章节）──
 export const getChapters = (bookId: string): Promise<unknown[]> =>
   get(`/api/chapters?book_id=${bookId}`);
@@ -44,8 +63,8 @@ export const demoteChapter = (..._args: unknown[]): Promise<{ status: string }> 
 
 // ── Outline（大纲 ≈ V4 计划）──
 export const getOutline = (bookId: string): Promise<unknown> => {
-  return get<unknown[]>("/api/plan").then((plans) => ({
-    outline: (plans as any[]).filter((p) => !p.book_id || p.book_id === bookId),
+  return get<PlanItem[]>("/api/plan").then((plans) => ({
+    outline: plans.filter((p) => !p.book_id || p.book_id === bookId),
   }));
 };
 export const getDetailedOutline = (bookId: string): Promise<unknown> => getOutline(bookId);
@@ -54,15 +73,15 @@ export const getDetailedOutline = (bookId: string): Promise<unknown> => getOutli
 export const getChapterHistory = (...args: unknown[]): Promise<unknown[]> => {
   const chapterId = args[1] as string;
   if (!chapterId) return Promise.resolve([]);
-  return get(`/api/chapters/${chapterId}`).then((ch) => (ch as any)?.versions || []);
+  return get<ChapterDetail>(`/api/chapters/${chapterId}`).then((ch) => ch?.versions || []);
 };
 export const getChapterVersion = (...args: unknown[]): Promise<unknown> => {
   const chapterId = args[1] as string;
   const versionId = args[2] as string;
   if (!chapterId) return Promise.resolve(null);
-  return get(`/api/chapters/${chapterId}`).then((ch) => {
-    const versions = (ch as any)?.versions || [];
-    const found = versions.find((v: any) => String(v.saved_at) === String(versionId));
+  return get<ChapterDetail>(`/api/chapters/${chapterId}`).then((ch) => {
+    const versions = ch?.versions || [];
+    const found = versions.find((v) => String(v.saved_at) === String(versionId));
     return { content: found?.content || '', original_content: null, patches_summary: [] };
   });
 };

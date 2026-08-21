@@ -55,22 +55,31 @@ export const createEntity = (data: {
 export const extract = (text: string, bookId: string): Promise<unknown> =>
   post("/api/graph/extract", { chapter_ref: "手动抽取", text, book_id: bookId || "main" });
 
+// 技巧项（后端 /api/skills 返回）
+interface SkillItem {
+  name: string;
+  id?: string;
+  description?: string;
+  content?: string;
+  category?: string;
+}
+
 // ── Styles（文风：V4 技巧 skills）──
 export const getStyles = (): Promise<StylesListData> => {
-  return get("/api/skills").then((sk) => ({
-    styles: (sk as unknown[]).map((s: any) => ({
-      name: s.name || s.id,
+  return get<SkillItem[]>("/api/skills").then((sk) => ({
+    styles: sk.map((s) => ({
+      name: s.name || s.id || "",
       description: s.description || s.content || "",
       category: s.category || "style",
     })),
   }));
 };
-export const getStyle = (name: string): Promise<unknown> =>
-  get("/api/skills").then((sk) => (sk as any[]).find((s) => s.name === name || s.id === name) || null);
+export const getStyle = (name: string): Promise<SkillItem | null> =>
+  get<SkillItem[]>("/api/skills").then((sk) => sk.find((s) => s.name === name || s.id === name) || null);
 export const createStyle = (data: unknown): Promise<unknown> =>
   post("/api/skills", { ...(data as object), category: "style" });
 export const updateStyle = (name: string, data: unknown): Promise<unknown> => {
-  const d = data as any;
+  const d = data as { name?: string; description?: string; content?: string };
   return put(`/api/skills/${name}`, { name: d.name, description: d.description, content: d.content });
 };
 export const deleteStyle = (name: string): Promise<unknown> => del(`/api/skills/${name}`);
