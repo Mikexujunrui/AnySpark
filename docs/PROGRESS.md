@@ -5130,3 +5130,40 @@ S203d 加 _conda_dll_binaries 收集后 → 变 `拒绝访问`（还是找不到
 **验证**：archive_viewer 确认 `'ffi.dll'` 根级；解压运行 exe → health 200
 （model=deepseek-v4-flash, version=4.0.11）；/api/logs/export 正常。
 至此打包版（Anaconda 环境）启动链路全通。
+
+---
+
+## S205-S210: 项目审查打磨——地图同步/测试补全/复杂度拆分/类型安全/竞态修复
+
+**背景**：S204b 后做了一轮全项目审查，按优先级打磨六处。
+
+### S205: BACKEND-MAP + uml 地图同步
+地图最后更新 S96，代码已到 S204——多处失同步违反 AGENTS.md「改后端必须同步
+地图」纪律。补全：路由 15→20（补 routes_check/library/update）、端点 ~164→~207、
+工具 47→48、app.py 601→500 行、补 S200/S201 配对修复机制记录。
+
+### S206: 补 template 包测试
+template 包此前仅 materials.py 有测试（111 行测 3 源文件，比例全项目最差）。
+新增 test_patterns.py（6）+ test_plot.py（25），src:test 10:1→3:1。覆盖 PlotStore
+前缀匹配/分级渲染/resolve_all、PlotGenerator 宽容解析、PlotResolver 静默失败。
+
+### S207: 拆分 routes_chat
+make_chat_router 600 行塞 14 端点（全项目最大单函数）。拆出 routes_chat_queue
+（4端点）/routes_chat_stats（2）/routes_chat_aux（3），主函数 600→451 行。
+router 总数 20→23，地图同步。
+
+### S208: 前端类型安全——api 层
+api/*.ts 的 `as any` 是后端返回未类型化就强转。定义 5 个 response 接口
+（ChapterDetail/ChapterVersion/PlanItem/MaterialSummary/SkillItem），用 get<T>
+泛型替代强转。any 总数 68→61。
+
+### S209: 修复 test_chat_stream_sse_frames 竞态
+SSE done 帧发出时图谱抽取后台任务可能未完成，直接断言实体存在会竞态失败
+（改动前已复现）。采用项目已有模式（轮询 8s），3 次连跑稳定。全量 739 全绿。
+
+### S210: 前端类型安全——组件层
+延续 S208，BookDetail sessions state Record<string,any>[]→SessionData[]，
+ChaptersPanel getChapters 不再 as any[]。any 61→52。
+
+**_loop 400 行未动**：复杂性是领域复杂性的真实反映（配对完整性/死循环检测/压缩/
+steering/取消/重试），配对修复等已抽成独立方法，强行拆只会破坏可读性。
