@@ -61,7 +61,7 @@ wheels = [
 
 [[package]]
 name = "anyspark"
-version = "4.0.9"
+version = "4.0.10"
 source = { virtual = "." }
 dependencies = [
     { name = "anyspark-align" },
