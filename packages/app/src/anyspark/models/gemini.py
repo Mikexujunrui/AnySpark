@@ -35,7 +35,7 @@ from anyspark.core import (
     ToolCall,
     sanitize_tool_pairing,
 )
-from anyspark.core.protocol import ToolSpec
+from anyspark.core.protocol import ParamSpec, ToolSpec
 
 DEFAULT_BASE_URL = os.getenv("GEMINI_BASE_URL", "https://generativelanguage.googleapis.com")
 
@@ -61,18 +61,44 @@ def thinking_to_gemini(thinking: str | None) -> dict[str, int] | None:
 
 
 def to_gemini_tool(spec: ToolSpec) -> dict[str, Any]:
-    """core ToolSpec → Gemini functionDeclarations 定义。"""
+    """core ToolSpec → Gemini functionDeclarations 定义。
+
+    Gemini 的 FunctionDeclaration schema 要求：
+    - type 用**大写枚举**（STRING/INTEGER/NUMBER/BOOLEAN/ARRAY/OBJECT）——小写会被校验器拒
+    - type=ARRAY 时**必须提供 items**（内嵌元素 schema）——缺失报
+      `properties[xxx].items: missing field`（真实用户报错驱动，含自定义工具的 array 参数）
+    - 未知类型退化为 STRING（保守，避免请求被拒）
+    """
+    type_map: dict[str, str] = {
+        "string": "STRING",
+        "integer": "INTEGER",
+        "number": "NUMBER",
+        "boolean": "BOOLEAN",
+        "array": "ARRAY",
+        "object": "OBJECT",
+    }
+
+    def _prop_schema(p: ParamSpec) -> dict[str, Any]:
+        t = type_map.get(p.type, "STRING")
+        schema: dict[str, Any] = {"type": t, "description": p.description}
+        if t == "ARRAY":
+            # Gemini 要求数组必须声明元素类型；未知元素类型退化为 STRING
+            schema["items"] = {"type": "STRING"}
+        elif t == "OBJECT":
+            schema["properties"] = {}
+        return schema
+
     properties: dict[str, Any] = {}
     required: list[str] = []
     for p in spec.params:
-        properties[p.name] = {"type": p.type, "description": p.description}
+        properties[p.name] = _prop_schema(p)
         if p.required:
             required.append(p.name)
     return {
         "name": spec.name,
         "description": spec.description,
         "parameters": {
-            "type": "object",
+            "type": "OBJECT",
             "properties": properties,
             "required": required,
         },

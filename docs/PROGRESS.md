@@ -5095,3 +5095,24 @@ vite build 通过；test_health + test_logs_export 2 测试绿。
 - S201：插话隔开配对盲区修复（真实用户日志驱动）
 - S202：关于页版本号 + 当天完整日志导出
 **验证**：test_update 8 全绿；三处版本同步一致
+
+## S204: Gemini 适配器 array 参数补 items + type 大写枚举（真实用户报错驱动）
+
+**背景**：远程用户报 Gemini 400：`*tools[0].function_declarations[20]..properties[patches].items:
+missing field.`——Gemini functionDeclarations 校验拒绝。
+
+**根因**：
+1. `to_gemini_tool` 把参数 type 原样小写映射（"string"）——Gemini 要求大写枚举
+   （STRING/INTEGER/NUMBER/BOOLEAN/ARRAY/OBJECT），小写可能触发校验器异常路径
+2. type=array 的参数**必须提供 items**（元素 schema）——缺失报 `properties[xxx].items:
+   missing field`。我们的内置工具无 array 参数，但用户环境的自定义工具（扩展工具/
+   旧版打包）可能声明了 array——转换层必须防御
+
+**修复**（gemini.py to_gemini_tool）：
+- type 映射为 Gemini 大写枚举；未知类型退化为 STRING（保守不被拒）
+- ARRAY 自动补 `items: {type: STRING}`；OBJECT 补空 properties
+- parameters.type 用 OBJECT 大写
+
+**验证**：新增 test_gemini_array_param_gets_items（array 参数必须含 items + 大写）；
+test_adapters 30 全绿；ruff/mypy 全绿。anthropic/responses 用 JSON Schema 风格对小写
+type 兼容，无需同样修复。

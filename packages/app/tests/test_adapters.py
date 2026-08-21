@@ -612,3 +612,28 @@ def test_anthropic_empty_result_id_removed() -> None:
             for b in c["content"]:
                 if isinstance(b, dict) and b.get("type") == "tool_result":
                     assert b.get("tool_use_id") != "", f"空 id tool_result 应移除: {b}"
+
+
+def test_gemini_array_param_gets_items() -> None:
+    """S204：Gemini functionDeclarations 对 array 参数必须提供 items——
+    否则真实用户 400 `properties[xxx].items: missing field`（自定义工具 array 参数）。"""
+    from anyspark.core.protocol import ParamSpec, ToolSpec
+
+    spec = ToolSpec(
+        name="batch_apply",
+        description="批量应用补丁",
+        params=[
+            ParamSpec(name="patches", type="array", required=True, description="补丁列表"),
+            ParamSpec(name="count", type="integer", required=False, description="数量"),
+        ],
+    )
+    tool = to_gemini_tool(spec)
+    params = tool["parameters"]
+    # Gemini schema：type 大写枚举
+    assert params["type"] == "OBJECT"
+    patches = params["properties"]["patches"]
+    assert patches["type"] == "ARRAY"
+    assert "items" in patches, f"array 参数缺 items: {patches}"
+    assert patches["items"]["type"] == "STRING"
+    # 非 array 参数不受影响
+    assert params["properties"]["count"]["type"] == "INTEGER"
