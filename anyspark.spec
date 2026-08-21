@@ -13,14 +13,65 @@ ROOT = Path(SPECPATH).resolve()
 FRONTEND_DIST = ROOT / "frontend" / "dist"
 IS_DARWIN = sys.platform == "darwin"
 
+# S203d：Windows Anaconda/conda 布局的 DLL 兜底收集。
+# 坑：_ctypes.pyd/_sqlite3.pyd 等 pyd 在 <prefix>/DLLs，但依赖的 ffi-8.dll /
+# sqlite3.dll / liblzma.dll / libbz2.dll / libexpat.dll 分散在 conda 的
+# Library/bin 或 envs/<env>/Library/bin——PyInstaller 默认搜索不到，打包后的
+# exe 启动即崩（ImportError: DLL load failed while importing _ctypes）。
+# 解法：从多个候选目录收集缺失 DLL 进 binaries（只收存在的，跨机器不报错）。
+
+
+def _conda_dll_binaries() -> list[tuple[str, str]]:
+    """返回 (dll源路径, exe内目标目录) 列表；找不到的 DLL 跳过。"""
+    import os
+
+    wanted = [
+        "ffi-8.dll",
+        "libffi-8.dll",
+        "sqlite3.dll",
+        "liblzma.dll",
+        "LIBBZ2.dll",
+        "libbz2.dll",
+        "libexpat.dll",
+    ]
+    # 候选目录：当前 conda env 的 Library/bin、根 env 的 Library/bin、
+    # python 安装目录 DLLs（标准 python.org 布局）
+    candidates: list[Path] = []
+    if os.environ.get("CONDA_PREFIX"):
+        candidates.append(Path(os.environ["CONDA_PREFIX"]) / "Library" / "bin")
+    base_prefix = Path(sys.base_prefix)
+    if (base_prefix / "conda-meta" / "history").exists():  # 根 conda env
+        candidates.append(base_prefix / "Library" / "bin")
+    candidates.append(Path(sys.executable).resolve().parent.parent / "DLLs")
+    candidates.append(Path(sys.base_prefix) / "DLLs")
+    # envs 子目录（多个 env 时 ffi 可能只在某个 env 里）
+    for sub in sorted((base_prefix / "envs").glob("*/Library/bin")) if (base_prefix / "envs").exists() else []:
+        candidates.append(sub)
+
+    out: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for name in wanted:
+        if name.lower() in seen:
+            continue
+        for d in candidates:
+            p = d / name
+            if p.exists():
+                out.append((str(p), "."))
+                seen.add(name.lower())
+                break
+    return out
+
+
 # tiktoken：编码表（cl100k_base 等）是数据文件，PyInstaller 默认不收集——
 # 缺了会 ValueError: Unknown encoding cl100k_base
 _TIKTOKEN_DATAS = collect_data_files("tiktoken")
 _TIKTOKEN_HIDDEN = collect_submodules("tiktoken_ext")
+_WIN_DLL_BINARIES = _conda_dll_binaries()
 
 a = Analysis(
     ["packages/desktop/src/anyspark/desktop/__init__.py"],
     pathex=[str(ROOT / "packages" / "desktop" / "src")],
+    binaries=_WIN_DLL_BINARIES,
     datas=[
         (str(FRONTEND_DIST), "frontend/dist"),
         # S109：.env 模板（frozen 启动时复制到 exe 同目录 data/）+ 系统评审员
