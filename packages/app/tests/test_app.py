@@ -67,7 +67,24 @@ def _make_client() -> TestClient:
 
 def test_health() -> None:
     client = _make_client()
-    assert client.get("/api/health").status_code == 200
+    resp = client.get("/api/health")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "ok"
+    assert "version" in data  # S202：health 带版本号（关于页展示）
+
+
+def test_logs_export() -> None:
+    """S202：
+    日志导出端点返回当天日志（无日志文件时 count=0 且不报错）。
+    """
+    client = _make_client()
+    resp = client.get("/api/logs/export")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "date" in data
+    assert "count" in data
+    assert isinstance(data.get("lines"), list)
 
 
 def test_chat_writes_chapter() -> None:

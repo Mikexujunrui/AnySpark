@@ -293,6 +293,11 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
   const [modelForm, setModelForm] = useState(EMPTY_MODEL_FORM)
   const [savingModel, setSavingModel] = useState(false)
 
+  // S202：关于页——版本号 + 当天日志导出
+  const [appVersion, setAppVersion] = useState<string>('')
+  const [logInfo, setLogInfo] = useState<{ date: string; count: number } | null>(null)
+  const [logBusy, setLogBusy] = useState(false)
+
   const showToast = useCallback((msg: string, _type?: string) => {
     setToast(msg)
     setTimeout(() => setToast(''), 2500)
@@ -316,16 +321,48 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
     } catch { /* 静默 */ }
   }, [])
 
+  // S202：拉版本号（/api/health 读后端 get_local_version）
+  const loadHealth = useCallback(async () => {
+    try {
+      const res = await fetch('/api/health')
+      const data = await res.json()
+      if (data && typeof data.version === 'string') setAppVersion(data.version)
+    } catch { /* 版本不可得时保持空 */ }
+  }, [])
+
+  // S202：导出当天完整日志为 .log 文件（排查/反馈用）
+  const handleExportLog = useCallback(async () => {
+    setLogBusy(true)
+    try {
+      const res = await fetch('/api/logs/export')
+      const data = await res.json()
+      const lines: string[] = Array.isArray(data?.lines) ? data.lines : []
+      setLogInfo({ date: data?.date || '', count: data?.count ?? lines.length })
+      const text = lines.join('\n')
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `anyspark-log-${data?.date || 'today'}.log`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {
+      showToast('日志导出失败')
+    } finally {
+      setLogBusy(false)
+    }
+  }, [showToast])
+
 
 
   useEffect(() => {
     async function init() {
       setLoading(true)
-      await Promise.all([loadModels(), loadAgency()])
+      await Promise.all([loadModels(), loadAgency(), loadHealth()])
       setLoading(false)
     }
     init()
-  }, [loadModels, loadAgency])
+  }, [loadModels, loadAgency, loadHealth])
 
   async function activateModel(id: string) {
     try {
@@ -564,10 +601,32 @@ export default function SettingsModal({ onClose, onModeChanged, bookId }: { onCl
               <div className="space-y-3">
                 <div className="px-3 py-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
                   <p className="text-sm text-zinc-200 font-medium">AnySpark v4</p>
-                  <p className="text-[11px] text-zinc-500 mt-1">小说特化版 AI 写作工作台——旧壳配新芯（feat/shell-port）</p>
-                  <p className="text-[11px] text-zinc-600 mt-2">
+                  <div className="flex items-center gap-2 mt-1">
+                    <span className="text-[11px] text-zinc-400">版本号：</span>
+                    <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 border border-zinc-700 text-zinc-200 font-mono">
+                      {appVersion ? `v${appVersion}` : '未知（后端未返回）'}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-zinc-500 mt-2">小说特化版 AI 写作工作台——旧壳配新芯（feat/shell-port）</p>
+                  <p className="text-[11px] text-zinc-600 mt-1">
                     能力：心智模型（偏好记忆）/ 知识图谱 / 特化工具 / 多项目 / 互动推演 / 评审团
                   </p>
+                </div>
+                <div className="px-3 py-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
+                  <p className="text-sm text-zinc-200 font-medium">后端日志</p>
+                  <p className="text-[11px] text-zinc-500 mt-1">调试/排查时把当天日志发给开发者。</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    <button
+                      onClick={handleExportLog}
+                      disabled={logBusy}
+                      className="text-[11px] px-2.5 py-1 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded disabled:opacity-50"
+                    >
+                      {logBusy ? '导出中…' : '导出当天完整日志'}
+                    </button>
+                    {logInfo && logInfo.count > 0 && (
+                      <span className="text-[10px] text-zinc-500">{logInfo.date} · {logInfo.count} 行</span>
+                    )}
+                  </div>
                 </div>
                 <div className="px-3 py-3 bg-zinc-900/50 rounded-lg border border-zinc-800">
                   <p className="text-sm text-zinc-200 font-medium">快捷键</p>

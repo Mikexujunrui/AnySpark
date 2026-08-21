@@ -37,3 +37,24 @@ export const toggleUpdateCheck = (): Promise<unknown> => Promise.resolve({ ok: t
 export const anthropic = { name: "anthropic", label: "Anthropic" };
 export const openai = { name: "openai", label: "OpenAI" };
 export const example = { name: "example", label: "示例" };
+
+// S202：关于页——版本号 + 日志导出
+// 版本来自后端 /api/health（含 get_local_version：源码读仓库 pyproject，frozen 读打包打入的 pyproject）
+export interface HealthInfo {
+  status: string;
+  model: string;
+  log: string;
+  version?: string;
+}
+
+export const getHealth = (): Promise<HealthInfo> =>
+  get("/api/health").then((r) => r as HealthInfo);
+
+export interface LogExport {
+  date: string;
+  count: number;
+  lines: string[];
+}
+
+export const exportTodayLog = (): Promise<LogExport> =>
+  get("/api/logs/export").then((r) => r as LogExport);

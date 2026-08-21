@@ -5065,3 +5065,23 @@ Anthropic 适配器测试从"移除隔开"改为"重排后紧邻"（内容不丢
 
 **验证**：真实场景复现（声明→插话→tool）重排正确；多声明+插话正确；Anthropic
 转换正确；test_messages/test_adapters/test_sqlite 全绿；core 58 全绿。
+
+## S202: 关于页版本号 + 当天完整日志导出（用户反馈驱动）
+
+**需求**：用户发现"关于"界面缺版本号标注（无法确认跑的打包版是否最新），
+且排查时要自己找日志文件。升级排查体验。
+
+**后端**：
+- `/api/health` 增加 `version` 字段（复用 update_checker.get_local_version：
+  源码读仓库 pyproject.toml，frozen 读打包打入的 pyproject.toml——真正暴露打包版版本，
+  可直接确认用户是否最新版）
+- 新增 `GET /api/logs/export?day=YYYY-MM-DD`：按行首时间戳过滤 anyspark.log 返回当天
+  完整日志（缺省当天，最多 2000 行）；纯只读、无敏感字段
+
+**前端**（Settings → 关于）：
+- 版本号从 /api/health 实时拉取显示（`v${version}`，未知时提示）
+- "导出当天完整日志"按钮 → 拉 /api/logs/export → 下载 `anyspark-log-<date>.log`
+  文件 + 显示行数
+
+**验证**：后端 health 返回 version=4.0.10；logs/export 当天 350 行；前端 tsc(-b) 通过、
+vite build 通过；test_health + test_logs_export 2 测试绿。

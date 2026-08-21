@@ -93,6 +93,7 @@ from anyspark.server.tasks import start_bg_worker
 from anyspark.server.tools_extensions import (
     ExtensionToolStore,
 )
+from anyspark.server.update_checker import get_local_version
 from anyspark.server.workspace import Workspace
 from anyspark.store import ChapterStore, SqliteConversationStore
 from anyspark.template import (
@@ -462,7 +463,28 @@ def build_app(
     @app.get("/api/health")
     def health() -> dict[str, str]:
         name = getattr(model, "model_name", "unknown")
-        return {"status": "ok", "model": str(name), "log": log_path()}
+        version = get_local_version() or ""
+        return {"status": "ok", "model": str(name), "log": log_path(), "version": version}
+
+    @app.get("/api/logs/export")
+    def export_logs(day: str = "") -> dict[str, Any]:
+        """导出日志（“关于”界面用）：缺省当天日期；带 day=YYYY-MM-DD 返回当日行。
+
+        实现：读 anyspark.log，按行首时间戳过滤出当天。日志纯只读（排查用，无敏感数据）。
+        """
+        import datetime as _dt
+
+        today = _dt.date.today().isoformat()
+        target = day.strip() or today
+        path = Path(log_path())
+        lines: list[str] = []
+        if path.exists():
+            with open(path, encoding="utf-8", errors="replace") as fh:
+                for line in fh:
+                    head = line[:10]
+                    if head == target or line.lstrip()[:10] == target:
+                        lines.append(line.rstrip("\n"))
+        return {"date": target, "count": len(lines), "lines": lines[-2000:]}
 
     # S88：生产模式——frontend/dist 存在时由后端同端口 serve（单端口全包）。
     # /api/* 路由优先（FastAPI 先匹配路由后匹配 mount），静态资源走 dist。
