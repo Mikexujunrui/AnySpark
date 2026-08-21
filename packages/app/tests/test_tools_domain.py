@@ -64,8 +64,9 @@ def test_plot_register_and_list() -> None:
     assert r2.ok is True
 
     rl = _call(list_impl)
-    assert "怀表背面刻有一串数字" in rl.content  # must 展开列出
-    assert "另有 1 条细节线索开放中" in rl.content  # soft 只汇总数量（S31 设计）
+    assert "怀表背面刻有一串数字" in rl.content  # 展开列出
+    assert "雾城钟楼的地基" in rl.content  # S198：plot_list 返回带 id 明细（供 plot_resolve 回收）
+    assert "id=" in rl.content  # S198：带 plot_id（agent 回收伏笔需要）
 
     # S104：回收归档 + 修改 + 删除
     plot_id = r.data["plot_id"]  # type: ignore[index]
@@ -73,9 +74,9 @@ def test_plot_register_and_list() -> None:
     assert rr.ok is True and "已回收归档" in rr.content
     assert plots.get(plot_id).status == "resolved"  # type: ignore[union-attr]
     assert plots.get(plot_id).resolved_chapter == "第 12 章"  # type: ignore[union-attr]
-    # 已回收的伏笔在 render 中以 ✓ 标记（不再开放提醒）
+    # 已回收的伏笔在列表中以 ✓ 标记（不再开放提醒）
     rl2 = _call(list_impl)
-    assert "✓ [伏笔] 怀表背面刻有一串数字" in rl2.content
+    assert "✓" in rl2.content and "怀表背面刻有一串数字" in rl2.content
     # update：升级 soft 为 must
     r2_id = r2.data["plot_id"]  # type: ignore[index]
     ru = _call(update_point, plot_id=r2_id, priority="must")
