@@ -33,6 +33,9 @@ def _conda_dll_binaries() -> list[tuple[str, str]]:
         "LIBBZ2.dll",
         "libbz2.dll",
         "libexpat.dll",
+        # _ssl.pyd/_hashlib.pyd 依赖（OpenSSL 3 命名）
+        "libcrypto-3-x64.dll",
+        "libssl-3-x64.dll",
     ]
     # 候选目录：当前 conda env 的 Library/bin、根 env 的 Library/bin、
     # python 安装目录 DLLs（标准 python.org 布局）
@@ -59,6 +62,20 @@ def _conda_dll_binaries() -> list[tuple[str, str]]:
                 out.append((str(p), "."))
                 seen.add(name.lower())
                 break
+    # _ctypes.pyd 的导入名是 ffi.dll（非 ffi-8.dll）——conda 只有 ffi-8.dll，
+    # 需要按 ffi.dll 名义收集。PyInstaller 的 binaries (src, dest) 中 dest 是**目标目录**
+    # 不是文件名（实测 (src, "ffi.dll") 生成 ffi.dll/ffi-8.dll 嵌套，_ctypes 仍找不到）——
+    # 正确做法：复制一份名为 ffi.dll 的临时文件再收集（解压后同名在根级）。
+    for d in candidates:
+        src = d / "ffi-8.dll"
+        if src.exists():
+            import shutil
+
+            tmp_ffi = Path(SPECPATH) / "build" / "_ffi_rename" / "ffi.dll"
+            tmp_ffi.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, tmp_ffi)
+            out.append((str(tmp_ffi), "."))
+            break
     return out
 
 

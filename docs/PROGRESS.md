@@ -5116,3 +5116,17 @@ missing field.`——Gemini functionDeclarations 校验拒绝。
 **验证**：新增 test_gemini_array_param_gets_items（array 参数必须含 items + 大写）；
 test_adapters 30 全绿；ruff/mypy 全绿。anthropic/responses 用 JSON Schema 风格对小写
 type 兼容，无需同样修复。
+
+## S204b: 打包 ffi.dll 修复——PyInstaller binaries dest 语义坑（实测验证 exe 启动）
+
+**背景**：v4.0.11 exe 启动即崩。第一轮 `import _ctypes: 找不到模块`——Anaconda 布局
+下 _ctypes.pyd 依赖 ffi.dll（conda 只有 ffi-8.dll），PyInstaller 默认搜不到。
+S203d 加 _conda_dll_binaries 收集后 → 变 `拒绝访问`（还是找不到）。
+
+**二次根因**：PyInstaller 的 binaries `(src, dest)` 中 **dest 是目标目录不是文件名**——
+传 `(ffi-8.dll, "ffi.dll")` 实际生成 `ffi.dll/ffi-8.dll` 嵌套，解压后根级无 ffi.dll。
+**修复**：复制 ffi-8.dll 为临时 ffi.dll 同名收集（解压后根级同名）。
+
+**验证**：archive_viewer 确认 `'ffi.dll'` 根级；解压运行 exe → health 200
+（model=deepseek-v4-flash, version=4.0.11）；/api/logs/export 正常。
+至此打包版（Anaconda 环境）启动链路全通。
