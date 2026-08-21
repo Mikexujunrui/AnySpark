@@ -319,7 +319,8 @@ class AnthropicModel:
             raise RuntimeError(f"Anthropic API {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
         text, tool_calls, reasoning = _parse_content(data.get("content") or [])
-        truncated = data.get("stop_reason") == "max_tokens"
+        stop_reason = data.get("stop_reason") or ""
+        truncated = stop_reason == "max_tokens"
         usage: dict[str, int] | None = None
         u = data.get("usage")
         if isinstance(u, dict):
@@ -334,6 +335,7 @@ class AnthropicModel:
             truncated=truncated,
             reasoning=reasoning,
             usage=usage,
+            finish_reason=stop_reason,
         )
 
     def respond_stream(
@@ -348,12 +350,13 @@ class AnthropicModel:
         reasoning_parts: list[str] = []
         tool_acc: dict[int, dict[str, str]] = {}  # index -> {id, name, input(累积)}
         truncated = False
+        finish_reason = ""
         usage: dict[str, int] | None = None
         current_event = ""
         current_data: list[str] = []
 
         def _handle(event: str, data: dict[str, Any]) -> None:
-            nonlocal truncated, usage
+            nonlocal truncated, usage, finish_reason
             etype = data.get("type")
             if etype == "content_block_delta":
                 idx = int(data.get("index") or 0)
@@ -385,7 +388,10 @@ class AnthropicModel:
                     acc["name"] = block.get("name") or ""
             elif etype == "message_delta":
                 d = data.get("delta") or {}
-                if d.get("stop_reason") == "max_tokens":
+                sr = d.get("stop_reason") or ""
+                if sr:
+                    finish_reason = sr
+                if sr == "max_tokens":
                     truncated = True
                 # S180：message_delta 的 usage 含最终 output_tokens（message_start
                 # 的 output_tokens 是初始值 ~1）；不捕获则记录的 completion_tokens 恒为 ~1
@@ -450,4 +456,5 @@ class AnthropicModel:
             truncated=truncated,
             reasoning="".join(reasoning_parts),
             usage=usage,
+            finish_reason=finish_reason,
         )

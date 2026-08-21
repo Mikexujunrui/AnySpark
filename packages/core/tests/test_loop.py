@@ -50,6 +50,29 @@ def test_loop_runs_without_tools() -> None:
     assert [m.role for m in msgs] == ["user", "assistant"]
 
 
+def test_loop_empty_response_gives_diagnostic_message() -> None:
+    """S211：模型返回空文本（无 tool_calls）时不静默结束，给诊断提示。
+
+    覆盖 content_filter / insufficient_system_resource / 未知空响应三种场景。
+    """
+    # content_filter：审核拦截（text 空 + finish_reason=content_filter）
+    agent = _make_agent(ScriptedModel([ModelOutput(text="", finish_reason="content_filter")]))
+    turn = agent.run("写点东西")
+    assert "审核" in turn.text
+
+    # insufficient_system_resource：资源中断
+    agent2 = _make_agent(
+        ScriptedModel([ModelOutput(text="", finish_reason="insufficient_system_resource")])
+    )
+    turn2 = agent2.run("写点东西")
+    assert "资源不足" in turn2.text
+
+    # 未知空响应（finish_reason 空）
+    agent3 = _make_agent(ScriptedModel([ModelOutput(text="   ")]))
+    turn3 = agent3.run("写点东西")
+    assert "空响应" in turn3.text
+
+
 def test_context_compressor_is_applied() -> None:
     """S8：token 预算压缩回调（app 注入）在每轮模型调用前生效。"""
     calls: list[list[Message]] = []

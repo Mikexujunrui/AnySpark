@@ -235,8 +235,10 @@ class DeepSeekModel:
         def _call() -> ModelOutput:
             response = self._client.chat.completions.create(**kwargs)
             message = response.choices[0].message
+            choice = response.choices[0] if response.choices else None
+            fr = getattr(choice, "finish_reason", "") or ""
             # S22（D3）：finish_reason=="length" = 输出被 token 上限截断 → 标记
-            truncated = bool(response.choices and response.choices[0].finish_reason == "length")
+            truncated = fr == "length"
 
             text = message.content or ""
             # S49：思维链（reasoning_content）保留进 ModelOutput（只进运行记录，不注入上下文）
@@ -253,7 +255,11 @@ class DeepSeekModel:
                     tool_calls.append(ToolCall(name=fn.name, arguments=args, id=tc.id or ""))
 
             return ModelOutput(
-                text=text, tool_calls=tool_calls, truncated=truncated, reasoning=reasoning
+                text=text,
+                tool_calls=tool_calls,
+                truncated=truncated,
+                reasoning=reasoning,
+                finish_reason=fr,
             )
 
         return _call()
@@ -300,6 +306,7 @@ class DeepSeekModel:
         usage: dict[str, int] | None = None
         # S22（D3）：流式路径跟踪 finish_reason——"length" = 输出被截断
         truncated = False
+        finish_reason = ""
         for chunk in stream:
             if not chunk.choices:
                 # usage 帧（choices 为空）：流式结束前携带累计 token
@@ -309,6 +316,7 @@ class DeepSeekModel:
             choice = chunk.choices[0]
             delta = choice.delta
             if choice.finish_reason:
+                finish_reason = choice.finish_reason
                 truncated = truncated or choice.finish_reason == "length"
             if delta.content:
                 text_parts.append(delta.content)
@@ -354,4 +362,5 @@ class DeepSeekModel:
             truncated=truncated,
             reasoning=reasoning,
             usage=usage,  # S99：流式 usage（include_usage 末尾帧）
+            finish_reason=finish_reason,
         )

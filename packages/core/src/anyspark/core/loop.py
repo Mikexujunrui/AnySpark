@@ -305,10 +305,22 @@ class Agent:
                         )
                     continue
                 # 真终答
-                store.append(conversation_id, Message(role="assistant", content=output.text))
-                self.events.emit(Event(type="text", payload={"content": output.text}))
+                # S211：空响应保护——模型返回空文本（content_filter 审核截断 /
+                # insufficient_system_resource 资源中断 / 流式未收到任何 delta）时，
+                # 不静默发空 text 结束，给用户明确诊断提示。
+                final_text = output.text
+                if not final_text.strip():
+                    fr = output.finish_reason
+                    if fr == "content_filter":
+                        final_text = "（输出被内容审核拦截，请调整请求内容后重试。）"
+                    elif fr == "insufficient_system_resource":
+                        final_text = "（生成因推理资源不足中断，请重试。）"
+                    else:
+                        final_text = "（模型返回了空响应，请重试或调整指令。）"
+                store.append(conversation_id, Message(role="assistant", content=final_text))
+                self.events.emit(Event(type="text", payload={"content": final_text}))
                 self.events.emit(Event(type="done", payload={}))
-                return Turn(text=output.text, tool_calls=executed, tool_results=results)
+                return Turn(text=final_text, tool_calls=executed, tool_results=results)
 
             # S108：重复调用检测（智能停止，非硬限——对齐 pi shouldStopAfterTurn 钩子位）：
             # 连续 6 轮工具调用签名完全相同（name+参数）→ 判定死循环，停止报错。

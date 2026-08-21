@@ -86,6 +86,10 @@ class ModelOutput:
     reasoning（S49）：思维链（推理过程文本，如 DeepSeek 的 reasoning_content）。
     **只进运行记录（训练/复盘用），不注入上下文**——推理过程不是输出，
     回填/注入会污染上下文、改变模型行为（决策记录：保留但看情况才注入）。
+
+    finish_reason（S211）：模型返回的原始停止原因（openai: stop/length/content_filter/tool_calls；
+    anthropic: end_turn/max_tokens/stop_sequence；gemini: STOP/MAX_TOKENS/SAFETY）。
+    空响应（content_filter/SAFETY）时 text 为空——loop 据此给用户明确提示而非静默断流。
     """
 
     text: str = ""
@@ -95,3 +99,5 @@ class ModelOutput:
     # S99：token 消耗（模型适配器从 API usage 字段上报：prompt/completion/total_tokens）
     # 只进运行记录/SSE 汇总（前端展示消耗），不参与任何上下文逻辑
     usage: dict[str, int] | None = None
+    # S211：原始停止原因（content_filter/SAFETY 等空响应场景的根因诊断用）
+    finish_reason: str = ""

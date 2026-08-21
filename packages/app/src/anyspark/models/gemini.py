@@ -298,7 +298,8 @@ class GeminiModel:
         cand = candidates[0]
         content = cand.get("content") or {}
         text, tool_calls = _parse_parts(content.get("parts") or [])
-        truncated = cand.get("finishReason") == "MAX_TOKENS"
+        fr = cand.get("finishReason") or ""
+        truncated = fr == "MAX_TOKENS"
         usage: dict[str, int] | None = None
         u = data.get("usageMetadata")
         if isinstance(u, dict):
@@ -313,6 +314,7 @@ class GeminiModel:
             truncated=truncated,
             reasoning="",  # Gemini 思考内容默认不进响应（需显式 includeThoughts，暂不启用）
             usage=usage,
+            finish_reason=fr,
         )
 
     def respond_stream(
@@ -328,6 +330,7 @@ class GeminiModel:
         # 在 dict 下会覆盖丢失；列表保留每个 functionCall。
         tool_acc: list[dict[str, Any]] = []
         truncated = False
+        finish_reason = ""
         usage: dict[str, int] | None = None
         current_data: list[str] = []
 
@@ -356,7 +359,10 @@ class GeminiModel:
                             cands = chunk.get("candidates") or []
                             if cands:
                                 parts = (cands[0].get("content") or {}).get("parts") or []
-                                if cands[0].get("finishReason") == "MAX_TOKENS":
+                                gfr = cands[0].get("finishReason") or ""
+                                if gfr:
+                                    finish_reason = gfr
+                                if gfr == "MAX_TOKENS":
                                     truncated = True
                                 for part in parts:
                                     if "text" in part:
@@ -411,4 +417,5 @@ class GeminiModel:
             truncated=truncated,
             reasoning="",
             usage=usage,
+            finish_reason=finish_reason,
         )
