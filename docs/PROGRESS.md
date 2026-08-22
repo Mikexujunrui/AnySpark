@@ -24,11 +24,13 @@
 
 - **设计实现审计报告**：见 `docs/AUDIT-V1.md`（基准 `6e8df7f`：S32-S63 全复核；此后 S64-S96 进展以本文件各阶段记录为准）
 - **设计演进补记**：见 `docs/DESIGN.md` §12（S32-S46 变更集中追溯；§12.22-12.26 为 S59-S63，§12.39-12.42 为 S79-S82）
-- **当前状态（S96）**：
+- **当前状态（S211）**：
   - **核心功能全部完成**（S0-S75）：七阶段 + 全部补缺 + 实测驱动演进 + 特化路线 P1-P5（工作区化/领域工具化/格式管线/角色推演/代码扩展/正文检索/运行时模型）+ 架构深化 S53-S63（心智模型=会话规划器/叙事技巧生成器/C 架构/skill 注入瘦身/工作流扩展包/哲学审查）
   - **S79-S82 后端收敛**：SQLite 连接收敛 + app.py 按领域拆 router + 双层资料库（全局池↔项目池）+ 资料库写入通道补全 + 会话绑定项目/智能体作用域隔离 + 图谱 API 项目隔离（跨书保护）
   - **S83-S96 收尾加固**：约束机制 + 审计修复 + 破限提示自编辑 + 模型注册表编辑功能（S89）+ 门禁自动分层（S96）
-  - **剩余（按主人路线，非缺陷）**：多模态（未来计划）/ B 真自我修复（补丁应用，按需）/ httpx2 迁移（等 starlette）/ 实体改名（S72 主键语义，前端表单待适配）
+  - **S97-S152 深化期**：拆书三层（S114）+ DSH 借鉴四提案（S116-S121：事件溯源/沙箱/skill 生态/子 Agent）+ skill 容器统一（S127-S130）+ 工作流统一化（S129-S135）+ 规模化安全网（S138-S140）+ 第三方评审修复（S145/S146）+ 质量债修复（S147-S151）
+  - **S153-S211 治理收敛期**：注释纪律固化（S153-S159）+ 项目级综合审查（S193，见 docs/REVIEW-PROJECT.md）+ app.py 瘦身 -75%（S187）+ tools_domain.py 拆分 -96%（S188）+ 路由拆分/竞态修复/空响应保护（S207-S211）+ 地图同步（S205）
+  - **剩余（按主人路线，非缺陷）**：多模态（未来计划）/ B 真自我修复（补丁应用，按需）/ 实体改名（S72 主键语义，前端表单待适配）/ benchmark 自 S211 起暂搁置（体系保留，未重跑验证）
   - 测试现状：pytest 508 例全绿 + 前端 tsc/lint/build 全绿（分层门禁见 AGENTS.md）
 
 > 📍 **接续锚点（2026-08-14，新会话必读）**：
@@ -36,13 +38,13 @@
 > - **S114 拆书三层已落地**（commit `faf7d4a`）：结构感知选章 + 骨架扫描 + 定点精读，猎手准则 367 万字实测发现回环（见 DESIGN §12.43）
 > - **并行会话 S120-S126 已全部提交**（run_subagent/调研模板/资料库闭环/文档清洗），门禁红已清零
 > - **两个规划已拍板待实施**（12 决策点主人全部确认）：
->   - `docs/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1 ✅ + S128 阶段 2 ✅ + S130 阶段 3 ✅ 三阶段全部完成（容器统一收官）
->   - `docs/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）——S129 第 1 批（拆书模板化打样）已实施
+>   - `docs/archive/plans/PLAN-SKILL-UNIFY.md`：统一 skill 容器（type 分流 writing/main/plot + 书名包 + templates 并入；消费方等价性三纪律见 §6.1）——S127 阶段 1 ✅ + S128 阶段 2 ✅ + S130 阶段 3 ✅ 三阶段全部完成（容器统一收官）
+>   - `docs/archive/plans/PLAN-WORKFLOW-UNIFY.md`：流程工具收编为 workflow 模板（加料用例/定时通知/节点导入 skill）——S129 第 1 批（拆书模板化打样）已实施
 > - **下一步开工（建议顺序）**：
 >   1. ~~SKILL 阶段 1/2/3~~ ✅（S127/S128/S130）；~~WORKFLOW 第 1/2/3 批 + 收尾~~ ✅（S129/S133/S134/S135）；~~加料模板~~ ✅（S137 非敏感指令验证）
 >   2. 本地 vLLM/LM Studio 适配文档 ✅（S137 已出 docs/LOCAL-LLM.md）
 >   3. WORKFLOW 收尾后续：/api/batch 内存实现可再收编（前端已工作流模式并存，按需）
->   4. ~~质量债修复清单~~ ✅（S148 A 死代码 + S149 B 决策三删 + S150 C 测试装配 helper + S151 D1 _wf_run_script 拆分；D2 app.py 瘦身留待按需——见 docs/REPAIR-LIST.md）
+>   4. ~~质量债修复清单~~ ✅（S148 A 死代码 + S149 B 决策三删 + S150 C 测试装配 helper + S151 D1 _wf_run_script 拆分；D2 app.py 瘦身留待按需——见 docs/archive/plans/REPAIR-LIST.md）
 ### 并行声明区（开工必读/必写——改共享文件前先在此声明，提交后删除本行）
 > ⚠️ S81 事故留痕（归属说明，勿删）：commit `f7cbec8`（S81 档位高亮修复）提交时裹挟了并行会话对 `frontend/src/components/SettingsModal.tsx` 的**未提交**模型编辑功能改动（EMPTY_MODEL_FORM / startEditModel / registerModel 改造，S88 系内容）。代码无丢失、可编译，但归属混在该 commit——相关会话如需单独追溯见 `git show f7cbec8` diff。
 > ⚠️ S152 撞号裹挟留痕（归属说明，勿删）：并行会话 commit `ffc383a`（S152 预置模板保护）提交时裹挟了本会话对 `api/workflow.ts`/`WorkflowPanel.tsx`/`routes_workflow.py`/`test_workflow_api.py` 的**未提交**改动（工作流画布打开 setDraft/原地保存 id/运行绑 bookId）。代码无丢失、可编译；但该提交的 `req.id` 与 `startRun(bookId)` 依赖本会话的 `schemas.py`/`workflowStore.ts` 未提交改动——二者已随本会话提交 `b9xxxx` 补齐，HEAD 才完整。
@@ -60,8 +62,8 @@
   4. **设定档渐进式披露**：条目多时分段/按需注入（当前全量）
   5. **影响分析主角线过度报告优化**：核心实体与事件线区分报告（当前主角线=全影响提示）
   6. **list_events 默认 limit**：200 对超长书截断，调用方需显式传大 limit（当前用法已知）
-  7. **工作流统一化（规划见 docs/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路；S129 拆书 ✅ + S133 批量 ✅ + S134 轻流程 ✅ + S135 收尾 ✅）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书 ✅→批量 ✅→轻流程 ✅→工具收编 ✅），每批对拍验证可回退
-  8. **统一 skill 容器（方案见 docs/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127/S128/S130 三阶段全部完成 ✅）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（pack_id 聚合，整包引用写作只取 writing/both——纪律 3），拆书一次产出整包（含剧情模式骨架派生）；templates 已并入 ✅；workflow（执行）保持独立——加 type ✅ → 并 templates ✅ → 书名包 ✅，skills/templates 归属竞争彻底消除
+  7. **工作流统一化（规划见 docs/archive/plans/PLAN-WORKFLOW-UNIFY.md，2026-08-13 主人指示先写思路；S129 拆书 ✅ + S133 批量 ✅ + S134 轻流程 ✅ + S135 收尾 ✅）**：固定流程工具（拆书/批量改写/批量审读/图谱抽取等）收编为预置 workflow 模板，工具只留 agent 决策的原子动作 + 执行器——分批迁移（拆书 ✅→批量 ✅→轻流程 ✅→工具收编 ✅），每批对拍验证可回退
+  8. **统一 skill 容器（方案见 docs/archive/plans/PLAN-SKILL-UNIFY.md，2026-08-13 主人定方向；S127/S128/S130 三阶段全部完成 ✅）**：知识统一进 skill 容器按 type 分流（writing/main/plot），书名成包（pack_id 聚合，整包引用写作只取 writing/both——纪律 3），拆书一次产出整包（含剧情模式骨架派生）；templates 已并入 ✅；workflow（执行）保持独立——加 type ✅ → 并 templates ✅ → 书名包 ✅，skills/templates 归属竞争彻底消除
 - ~~httpx2 迁移~~ ✅（S66 完成）；~~Autopilot~~ —— 已划掉：S59 工作流（loop+gate+approval+AI 生成流程）已吸收其全部机制价值，需要"全书自动连写"时用 workflow_generate + 人工确认 + 跑循环即可，不另起包（同评审团判断逻辑）
 - 纪律：每阶段开工前向主人确认；对设计的偏离/新增先确认再改 DESIGN.md
 
@@ -3207,7 +3209,7 @@ L116/L776 保留产品历史，注册层已默认可用。
 ## S116-S119 DSH 借鉴四提案落地（已完成 ✅）——会话事件溯源/沙箱进程隔离/内容生态/子 Agent 内核
 
 **背景（主人驱动）**：对比 DeepSeek Harness（机器之心 8-13 报道，当日开源）后
-定稿四提案（docs/HARNESS-UPGRADE-PLAN.md），主人授权自主调研+实施。
+定稿四提案（docs/archive/plans/HARNESS-UPGRADE-PLAN.md），主人授权自主调研+实施。
 
 ### S116 提案 C：codex 沙箱进程级隔离（实证 RCE 修复）
 - **调研实证 6 缺口**（scout 复现）：①白名单属性链逃逸→完全 RCE（os.system 实证）
@@ -3705,7 +3707,7 @@ NSFW 审核坎）；本地 vLLM/LM Studio 适配文档（S131 接续）。
 
 **背景**：主人质询"规模化修改后能否回溯"驱动——workflow 引擎层断点恢复已有（S129）
 但无应用层续跑入口；chapter_versions 有快照数据但无恢复端点、无批级标识。规划
-docs/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回溯）在前，收编
+docs/archive/plans/PLAN-SCALE-SAFETY.md（主人 2026-08-14 拍板）：安全网（续跑+回溯）在前，收编
 内存 batch 在后。
 
 **交付（commit `c7afaa5`）**：
