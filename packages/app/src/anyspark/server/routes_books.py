@@ -102,6 +102,7 @@ def make_books_router(deps: AppDeps) -> APIRouter:
                 mode=req.mode or "chapters",
                 allowed_ext=INGEST_ALLOWED_EXT,
                 skills=deps.skills,
+                bg_queue=deps.bg_queue,
             )
         except Exception:
             shutil.rmtree(d, ignore_errors=True)  # 回滚：不留半成品项目

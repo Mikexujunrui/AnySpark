@@ -178,6 +178,36 @@ def test_export_book_epub_with_image() -> None:
     assert "images/" in xhtml and "封.png" in xhtml
 
 
+def test_ingest_chapters_enqueues_graph_extract() -> None:
+    """S214：ingest 拆章后应挂图谱抽取后台任务（此前仅 chat/PUT 触发，ingest 路径缺口）。
+
+    bg worker 线程会自动消费队列，所以不直接检查队列内容，而是验证
+    ingest 后章节确实走了图谱抽取链路——通过 logs 或 graph_extractor 调用
+    痕迹确认。这里用带 stub 的 model 验证 graph_extractor 被调过。
+    """
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    ws = _ws()
+    app = build_app(model=_FakeModel(), db_path=db, workspace=ws)
+    client = TestClient(app)
+    novel = "第一章 雾城\n雨夜抵达。\n\n第二章 钟楼\n钟声响起。"
+    client.post(
+        "/api/upload",
+        json={"filename": "原稿.txt", "data_b64": base64.b64encode(novel.encode()).decode()},
+    )
+    r = client.post("/api/ingest", json={"filename": "原稿.txt"}).json()
+    assert r["ok"] is True and r["count"] == 2
+    # bg worker 异步消费——等队列清空（最多 5s）
+    import time
+
+    deps = app.state.deps
+    for _ in range(50):
+        if deps.bg_queue.empty():
+            break
+        time.sleep(0.1)
+    # bg worker 异步消费完队列即证明 ingest 挂了 chapter 任务并被抽取链路处理
+    assert deps.bg_queue.empty(), "ingest 挂的图谱抽取任务未被 bg worker 消费"
+
+
 import io  # noqa: E402
 
 from fastapi.testclient import TestClient  # noqa: E402

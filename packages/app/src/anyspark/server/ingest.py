@@ -51,6 +51,7 @@ def ingest_pipeline(
     mode: str = "auto",
     allowed_ext: set[str] | None = None,
     skills: Any | None = None,
+    bg_queue: Any | None = None,
 ) -> IngestResult:
     """消化上传区文件：skill 文件判别 / 长文拆章 / 短文本摘要卡。
 
@@ -58,6 +59,9 @@ def ingest_pipeline(
     - allowed_ext：扩展名校验（端点传 INGEST_ALLOWED_EXT；工具传 None 不校验）
     - skills（S118）：传入 WritingSkillStore 时启用 skill 文件判别分支——
       front-matter 五段式 → 解析 → skill_drafts 草稿（全局，人工确认转正）
+    - bg_queue（S214）：传入后台队列时，拆章完成后对每个新章挂图谱抽取
+      BgTask(kind="chapter")，与 chat/PUT 走同一链路——否则导入章节在图谱里
+      隐形（写章节有三条路径，仅 ingest 不触发抽取，导致图谱缺口）
     - 失败返回 IngestResult(ok=False, error_code, error, ...)；不抛异常
     """
     from anyspark.server.pipeline import chapterize, extract_text
@@ -146,7 +150,30 @@ def ingest_pipeline(
         for i, ch in enumerate(chaps):
             workspace.write_chapter(book_id, i, ch["title"], ch["content"])
             chapters.upsert(book_id, ch["title"], ch["content"], i, "main")
-            written.append({"order": i, "title": ch["title"], "chars": len(ch["content"])})
+            written.append(
+                {
+                    "order": i,
+                    "title": ch["title"],
+                    "content": ch["content"],
+                    "chars": len(ch["content"]),
+                }
+            )
+        # S214：拆章完成后挂图谱抽取（与 chat write_chapter / PUT 保存同一链路），
+        # 否则导入的章节在图谱里隐形——实测 main 项目 38 章中 20 章因走 ingest 未抽取
+        if bg_queue is not None:
+            from anyspark.server.deps import BgTask
+
+            for i, ch in enumerate(written):
+                bg_queue.put(
+                    BgTask(
+                        kind="chapter",
+                        title=ch["title"],
+                        content=ch["content"],
+                        order=i,
+                        line="main",
+                        book_id=book_id,
+                    )
+                )
         return IngestResult(ok=True, kind="chapters", chapters=written)
     except Exception as exc:
         return IngestResult(

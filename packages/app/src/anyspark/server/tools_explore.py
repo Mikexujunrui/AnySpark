@@ -387,12 +387,17 @@ def make_ingest_implementer(
     model: Any,
     book_id: str = "main",
     skills: Any | None = None,
+    bg_queue: Any | None = None,
 ) -> tuple[Any, Any]:
     """上传消化工具（S48-P3）：把上传区原始文档消化成章节 md / 摘要卡 / skill 草稿。
 
     Agent 在用户上传了原稿/设定文档后调用——拆章进格式化区（可继续写作），
     或生成摘要卡（设定/资料，进卡片区 + 图谱关联），或识别为 skill 文件
     （S118：front-matter 五段式 → 草稿待人工确认）。
+
+    bg_queue（S214）：传入后台队列时拆章后挂图谱抽取（与 ingest 端点同一链路）；
+    agent 工具调 ingest_document 拆章后 chat loop 不会挂抽取（只看 write_chapter），
+    需在此处自行挂载，否则工具路径导入的章节在图谱里隐形。
     """
 
     spec = ToolSpec(
@@ -428,7 +433,15 @@ def make_ingest_implementer(
         from anyspark.server.ingest import ingest_pipeline
 
         result = ingest_pipeline(
-            workspace, chapters, materials, model, book_id, filename, mode=mode, skills=skills
+            workspace,
+            chapters,
+            materials,
+            model,
+            book_id,
+            filename,
+            mode=mode,
+            skills=skills,
+            bg_queue=bg_queue,
         )
         if not result.ok:
             return ToolResult(call=call, ok=False, content=result.error)

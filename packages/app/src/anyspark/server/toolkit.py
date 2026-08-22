@@ -54,6 +54,7 @@ class ToolContext:
     signals: Any = None  # S132c 信号存储（mind_reconcile 对账读最近行为信号）
     book_id: str = "main"  # S74：当前项目 id——工具层多书隔离（此前各 implementer 硬编码 main）
     subagent_deps: Any = None  # S121 提案 B：子 Agent 内核装配依赖（主循环 run_subagent 工具用）
+    bg_queue: Any = None  # S214：后台任务队列（ingest 工具拆章后挂图谱抽取）
 
 
 def build_toolkit(
@@ -168,6 +169,7 @@ def build_toolkit(
             ctx.model,
             book_id=ctx.book_id,
             skills=ctx.skills_store,
+            bg_queue=ctx.bg_queue,
         )
         registry.register(ig_spec, ig_impl)
         plot_specs, plot_impls = make_plot_implementer(ctx.plots, book_id=ctx.book_id)

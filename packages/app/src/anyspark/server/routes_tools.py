@@ -137,6 +137,7 @@ def make_tools_router(deps: AppDeps) -> APIRouter:
             mode=req.mode,
             allowed_ext=INGEST_ALLOWED_EXT,
             skills=deps.skills,
+            bg_queue=deps.bg_queue,
         )
         if not result.ok:
             if result.error_code == "not_found":
