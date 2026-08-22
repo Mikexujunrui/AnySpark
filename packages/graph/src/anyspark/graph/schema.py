@@ -155,7 +155,7 @@ class GraphStore:
         # S79：连接配置收敛到 anyspark.core.db.connect（WAL/timeout/多线程一处定义，
         # check_same_thread=False 供 FastAPI 多线程 endpoint 共用）
         self._conn = sqlite_connect(self._db)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # S215：可重入（ingest_chapter 调 upsert_entity/get_entity）
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -521,9 +521,10 @@ class GraphStore:
         )
 
     def get_entity(self, book_id: str, name: str) -> Entity | None:
-        row = self._conn.execute(
-            "SELECT * FROM graph_entities WHERE book_id=? AND name=?", (book_id, name)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM graph_entities WHERE book_id=? AND name=?", (book_id, name)
+            ).fetchone()
         return self._entity_from_row(row) if row else None
 
     def list_entities(
@@ -541,11 +542,12 @@ class GraphStore:
         if entity_type:
             where += " AND entity_type=?"
             args.append(entity_type)
-        rows = self._conn.execute(
-            f"SELECT * FROM graph_entities WHERE {where} "
-            "ORDER BY last_order DESC, rowid DESC LIMIT ?",
-            (*args, limit),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM graph_entities WHERE {where} "
+                "ORDER BY last_order DESC, rowid DESC LIMIT ?",
+                (*args, limit),
+            ).fetchall()
         return [self._entity_from_row(r) for r in rows]
 
     def search(self, book_id: str, query: str, limit: int = 10) -> list[Entity]:
@@ -680,14 +682,15 @@ class GraphStore:
         return self._entity_from_row(row) if row else None
 
     def list_relations(self, book_id: str, limit: int = 200) -> list[Relation]:
-        rows = self._conn.execute(
-            "SELECT r.*, fe.name AS from_name, te.name AS to_name "
-            "FROM graph_relations r "
-            "JOIN graph_entities fe ON fe.id = r.from_id "
-            "JOIN graph_entities te ON te.id = r.to_id "
-            "WHERE r.book_id=? ORDER BY r.rowid DESC LIMIT ?",
-            (book_id, limit),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT r.*, fe.name AS from_name, te.name AS to_name "
+                "FROM graph_relations r "
+                "JOIN graph_entities fe ON fe.id = r.from_id "
+                "JOIN graph_entities te ON te.id = r.to_id "
+                "WHERE r.book_id=? ORDER BY r.rowid DESC LIMIT ?",
+                (book_id, limit),
+            ).fetchall()
         return [self._relation_from_row(r) for r in rows]
 
     def relations_of(self, book_id: str, entity_id: str, limit: int = 50) -> list[Relation]:
@@ -889,10 +892,11 @@ class GraphStore:
         if chapter_ref:
             where += " AND chapter_ref=?"
             args.append(chapter_ref)
-        rows = self._conn.execute(
-            f"SELECT * FROM graph_events WHERE {where} ORDER BY chapter_order, rowid LIMIT ?",
-            (*args, limit),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM graph_events WHERE {where} ORDER BY chapter_order, rowid LIMIT ?",
+                (*args, limit),
+            ).fetchall()
         return [self._event_from_row(r) for r in rows]
 
     # ------------------------------------------------------------------

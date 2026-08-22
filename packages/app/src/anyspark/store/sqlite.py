@@ -47,7 +47,10 @@ class SqliteConversationStore(ConversationStore):
         self._db = str(db_path)
         # S79：连接配置收敛到 anyspark.core.db.connect（WAL/timeout/多线程一处定义）
         self._conn = sqlite_connect(self._db)
-        self._lock = threading.Lock()
+        # RLock（可重入）：append/fork/replace_messages 内部调 get/create，
+        # Lock 会死锁；RLock 同线程可重入获取。跨线程仍互斥——并发请求/bg worker
+        # 安全共享同一连接（此前 get/create/append/messages 等无锁→InterfaceError）
+        self._lock = threading.RLock()
         self._init_schema()
 
     def _init_schema(self) -> None:
@@ -155,7 +158,7 @@ class SqliteConversationStore(ConversationStore):
     def create(self, conversation_id: str | None = None, book_id: str = "main") -> Conversation:
         cid = conversation_id or uuid.uuid4().hex
         now = _now()
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT OR IGNORE INTO conversations (id, created_at, book_id) VALUES (?, ?, ?)",
                 (cid, now, book_id),
@@ -163,31 +166,33 @@ class SqliteConversationStore(ConversationStore):
         return self.get(cid) or Conversation(id=cid, created_at=now, book_id=book_id)
 
     def get(self, conversation_id: str) -> Conversation | None:
-        row = self._conn.execute(
-            "SELECT id, created_at, parent_id, fork_point, title, book_id "
-            "FROM conversations WHERE id = ?",
-            (conversation_id,),
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT id, created_at, parent_id, fork_point, title, book_id "
+                "FROM conversations WHERE id = ?",
+                (conversation_id,),
+            ).fetchone()
         return _conversation_from_row(row) if row else None
 
     def list_conversations(self, book_id: str | None = None) -> list[Conversation]:
         """S80：会话列表；book_id=None 返回全部（兼容），传了按项目过滤。"""
-        if book_id is None:
-            rows = self._conn.execute(
-                "SELECT id, created_at, parent_id, fork_point, title, book_id "
-                "FROM conversations ORDER BY created_at"
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT id, created_at, parent_id, fork_point, title, book_id "
-                "FROM conversations WHERE book_id=? ORDER BY created_at",
-                (book_id,),
-            ).fetchall()
+        with self._lock:
+            if book_id is None:
+                rows = self._conn.execute(
+                    "SELECT id, created_at, parent_id, fork_point, title, book_id "
+                    "FROM conversations ORDER BY created_at"
+                ).fetchall()
+            else:
+                rows = self._conn.execute(
+                    "SELECT id, created_at, parent_id, fork_point, title, book_id "
+                    "FROM conversations WHERE book_id=? ORDER BY created_at",
+                    (book_id,),
+                ).fetchall()
         return [_conversation_from_row(row) for row in rows]
 
     def save(self, conversation: Conversation) -> None:
         """更新会话元信息（title/parent_id/fork_point/book_id）。"""
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "UPDATE conversations SET title=?, parent_id=?, fork_point=?, book_id=? WHERE id=?",
                 (
@@ -201,31 +206,33 @@ class SqliteConversationStore(ConversationStore):
 
     def delete(self, conversation_id: str) -> bool:
         """删除会话及其所有消息。"""
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
             cur = self._conn.execute("DELETE FROM conversations WHERE id = ?", (conversation_id,))
         return cur.rowcount > 0
 
     def append(self, conversation_id: str, message: Message) -> None:
-        # 确保会话存在
-        self.get(conversation_id) or self.create(conversation_id)
-        seq = self._conn.execute(
-            "SELECT COALESCE(MAX(seq), -1) + 1 AS n FROM messages WHERE conversation_id = ?",
-            (conversation_id,),
-        ).fetchone()["n"]
-        with self._conn:
-            self._conn.execute(
-                "INSERT INTO messages (conversation_id, role, content, metadata, seq, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (
-                    conversation_id,
-                    message.role,
-                    message.content,
-                    json.dumps(message.metadata, ensure_ascii=False),
-                    seq,
-                    _now(),
-                ),
-            )
+        with self._lock:
+            # 确保会话存在
+            self.get(conversation_id) or self.create(conversation_id)
+            seq = self._conn.execute(
+                "SELECT COALESCE(MAX(seq), -1) + 1 AS n FROM messages WHERE conversation_id = ?",
+                (conversation_id,),
+            ).fetchone()["n"]
+            with self._lock, self._conn:
+                self._conn.execute(
+                    "INSERT INTO messages (conversation_id, role, content, metadata, seq, "
+                    "created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        conversation_id,
+                        message.role,
+                        message.content,
+                        json.dumps(message.metadata, ensure_ascii=False),
+                        seq,
+                        _now(),
+                    ),
+                )
 
     def last_user_message_time(self, conversation_id: str) -> str | None:
         """S154（会话回滚）：最后一条 user 消息时间（本轮起点 t0）。"""
@@ -238,18 +245,20 @@ class SqliteConversationStore(ConversationStore):
         return str(row["created_at"]) if row else None
 
     def messages(self, conversation_id: str) -> list[Message]:
-        rows = self._conn.execute(
-            "SELECT role, content, metadata FROM messages WHERE conversation_id = ? ORDER BY seq",
-            (conversation_id,),
-        ).fetchall()
-        msgs = [
-            Message(
-                role=row["role"],
-                content=row["content"],
-                metadata=json.loads(row["metadata"] or "{}"),
-            )
-            for row in rows
-        ]
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT role, content, metadata FROM messages "
+                "WHERE conversation_id = ? ORDER BY seq",
+                (conversation_id,),
+            ).fetchall()
+            msgs = [
+                Message(
+                    role=row["role"],
+                    content=row["content"],
+                    metadata=json.loads(row["metadata"] or "{}"),
+                )
+                for row in rows
+            ]
         return self._heal_tool_pairs(msgs, conversation_id)
 
     def _load_recorder_tool_index(self, conversation_id: str) -> dict[str, Any] | None:
@@ -402,19 +411,20 @@ class SqliteConversationStore(ConversationStore):
         inherit_messages=True 时把源会话全部消息复制为新会话起始上下文
         （新会话"接着上次聊"，参考 pi 全量复制语义）。源不存在返回 None。
         """
-        src = self.get(conversation_id)
-        if src is None:
-            return None
-        new_conv = self.create(book_id=src.book_id)  # S80：fork 继承源会话的项目归属
-        with self._conn:
-            self._conn.execute(
-                "UPDATE conversations SET parent_id=?, fork_point=? WHERE id=?",
-                (conversation_id, fork_point, new_conv.id),
-            )
-        if inherit_messages:
-            for m in self.messages(conversation_id):
-                self.append(new_conv.id, m)
-        return self.get(new_conv.id)
+        with self._lock:
+            src = self.get(conversation_id)
+            if src is None:
+                return None
+            new_conv = self.create(book_id=src.book_id)  # S80：fork 继承源会话的项目归属
+            with self._conn:
+                self._conn.execute(
+                    "UPDATE conversations SET parent_id=?, fork_point=? WHERE id=?",
+                    (conversation_id, fork_point, new_conv.id),
+                )
+            if inherit_messages:
+                for m in self.messages(conversation_id):
+                    self.append(new_conv.id, m)
+            return self.get(new_conv.id)
 
     def replace_messages(self, conversation_id: str, messages: list[Message]) -> None:
         """S26：整体替换该会话消息（压缩回写，事务内删旧插新，seq 从 0 重排）。
@@ -425,32 +435,36 @@ class SqliteConversationStore(ConversationStore):
         落库都必须是配对完整的序列：孤儿 tool、悬挂 assistant 声明在写入前修剪，
         带 tool_calls 的 assistant 改文本后丢失的声明从 recorder 找回。否则残留到
         协议转换时 400（前端编辑 AI 输出历史是主要触发源）。"""
-        self.get(conversation_id) or self.create(conversation_id)
-        messages = self._heal_tool_pairs(messages, conversation_id)  # S190 写入守卫
-        with self._conn:
-            self._conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
-            for seq, m in enumerate(messages):
+        with self._lock:
+            self.get(conversation_id) or self.create(conversation_id)
+            messages = self._heal_tool_pairs(messages, conversation_id)  # S190 写入守卫
+            with self._conn:
                 self._conn.execute(
-                    "INSERT INTO messages (conversation_id, role, content, metadata, seq, "
-                    "created_at) "
-                    "VALUES (?, ?, ?, ?, ?, ?)",
-                    (
-                        conversation_id,
-                        m.role,
-                        m.content,
-                        json.dumps(m.metadata, ensure_ascii=False),
-                        seq,
-                        _now(),
-                    ),
+                    "DELETE FROM messages WHERE conversation_id = ?", (conversation_id,)
                 )
+                for seq, m in enumerate(messages):
+                    self._conn.execute(
+                        "INSERT INTO messages (conversation_id, role, content, metadata, seq, "
+                        "created_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (
+                            conversation_id,
+                            m.role,
+                            m.content,
+                            json.dumps(m.metadata, ensure_ascii=False),
+                            seq,
+                            _now(),
+                        ),
+                    )
 
     def recent_messages(self, limit: int = 10) -> list[Message]:
         """S28：跨会话最近消息（按全局 id 倒序）——信号提炼的对话上下文。
         返回保序（最旧在前）。"""
-        rows = self._conn.execute(
-            "SELECT role, content, metadata FROM messages ORDER BY id DESC LIMIT ?",
-            (limit,),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT role, content, metadata FROM messages ORDER BY id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
         return [
             Message(
                 role=row["role"],
@@ -486,7 +500,7 @@ class ChapterStore:
         self._db = str(db_path)
         # S79：连接配置收敛到 anyspark.core.db.connect
         self._conn = sqlite_connect(self._db)
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()  # S215：可重入（upsert 调 get）
         # 复用同一 db 时与会话表共存
         self._conn.executescript(
             """
