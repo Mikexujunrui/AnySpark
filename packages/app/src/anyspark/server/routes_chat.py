@@ -224,6 +224,19 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                 if wc.name == "write_chapter":
                     title = str(wc.arguments.get("title", "")).strip()
                     content = str(wc.arguments.get("content", ""))
+                    # S216：意图模式（C 架构）content 为空——正文由写作引擎生成后落盘，
+                    # 从已落盘章节读取（否则意图模式 write_chapter 不触发图谱抽取）
+                    if title and not content:
+                        ch = next(
+                            (
+                                c
+                                for c in deps.chapters.list_by_book(req.book_id)
+                                if c.title == title
+                            ),
+                            None,
+                        )
+                        if ch:
+                            content = ch.content
                     if title and content:
                         chs = deps.chapters.list_by_book(req.book_id)
                         order = next((c.order_index for c in chs if c.title == title), len(chs))
@@ -298,6 +311,18 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                                 if wc.name == "write_chapter":
                                     title = str(wc.arguments.get("title", "")).strip()
                                     content = str(wc.arguments.get("content", ""))
+                                    # S216：意图模式 content 为空→从落盘章节读取
+                                    if title and not content:
+                                        ch = next(
+                                            (
+                                                c
+                                                for c in deps.chapters.list_by_book(req.book_id)
+                                                if c.title == title
+                                            ),
+                                            None,
+                                        )
+                                        if ch:
+                                            content = ch.content
                                     if title and content:
                                         chs = deps.chapters.list_by_book(req.book_id)
                                         order = next(
@@ -317,6 +342,11 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                                                 line=line,
                                                 book_id=req.book_id,
                                             )
+                                        )
+                                        logger.info(
+                                            "SSE debug: 已挂抽取 title=%r order=%d",
+                                            title,
+                                            order,
                                         )
                         # 取消只停当前轮：不消费队列（队列保留，前端队列条仍可见）
                         if token.is_cancelled():
