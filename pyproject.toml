@@ -91,6 +91,8 @@ ignore = [
 "packages/workflow/src/anyspark/workflow/generator.py" = ["E501"]
 "packages/workflow/tests/test_workflow.py" = ["E501"]
 "packages/app/tests/test_workflow_api.py" = ["E501"]
+# S213/S214：reasoning 流式转发测试含长 SSE JSON 帧，断行破坏内容
+"packages/app/tests/test_reasoning_stream.py" = ["E501"]
 # S59 补充：workflow model 条件冒烟脚本是长中文 JSON 行
 "scripts/workflow_model_cond_smoke.py" = ["E501"]
 # S64：评审团提示词是给 LLM 看的内容（JSON 示例紧凑性优先），断行破坏语义

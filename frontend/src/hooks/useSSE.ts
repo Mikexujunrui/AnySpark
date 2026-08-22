@@ -30,10 +30,9 @@ export interface SSEOptions {
   autoModeEnabled: boolean
 }
 
-// S157：SSE 空闲超时兜底（8-15 事故修复）——后端 120s 无事件才发 error 帧，且 error 帧的
-// send 可能因客户端不读而阻塞（turn2 回答生成后流中断，streaming 永久 true 锁死输入、
-// 无法再发命令）。前端 90s 无任何事件 → abort 连接 + 报错解锁；后端 send 失败自动清理线程。
-const IDLE_STREAM_TIMEOUT_MS = 90_000
+// S157/S213/S214：SSE 空闲超时兑底——思考期有 reasoning_delta 持续流，不会触发；
+// 仅真正无任何事件 180s 才 abort（与后端 SSE 队列 get timeout 对齐）。原来 90s 会误杀长思考。
+const IDLE_STREAM_TIMEOUT_MS = 180_000
 
 export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, onKnowledgeChanged, onMetrics, onQueueConsume, onBatchProposal, onSkillRefine, onError }: SSEOptions & SSECallbacks) {
   const [streaming, setStreaming] = useState(false)
@@ -80,7 +79,7 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
       idleTimer = setTimeout(() => {
         idleTimer = null
         if (mountedRef.current) {
-          onError?.(new Error('流式响应空闲超时（90 秒无数据），连接已中断，请重试。'), msg)
+          onError?.(new Error('流式响应空闲超时（180 秒无事件，模型可能卡死），连接已中断，请重试。'), msg)
           controller.abort()
         }
       }, IDLE_STREAM_TIMEOUT_MS)
@@ -146,6 +145,14 @@ export function useSSE({ bookId, sessionId, agentMode, onMessage, onProgress, on
               } else {
                 onMessage?.({ type: 'append', text })
               }
+            }
+            break
+          }
+          case 'reasoning_delta': {
+            // S213：思考增量——实时转发宿主流式渲染，避免思考期黑屏
+            const rtext = typeof data === 'string' ? data : String((data as Record<string, unknown>)?.content || '')
+            if (rtext) {
+              onMessage?.({ type: 'reasoning_append', text: rtext })
             }
             break
           }

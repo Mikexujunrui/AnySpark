@@ -435,8 +435,15 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
                         )
                 events_queue.put((e.type, payload))
 
-            # S21 流式核心：Agent 内部流式（model.respond_stream），text_delta 事件转 SSE 帧
+            # S21 流式核心：Agent 内部流式（model.respond_stream），
+            # text_delta/reasoning_delta 事件转 SSE 帧
             agent.events.on("text_delta", lambda e: events_queue.put(("text_delta", e.payload)))
+            # S213：思考增量实时转发 SSE——避免思考期静默致前端 idle 超时误杀
+            # （对齐 pi thinking_delta）
+            agent.events.on(
+                "reasoning_delta",
+                lambda e: events_queue.put(("reasoning_delta", e.payload)),
+            )
             for t in (
                 "turn_start",
                 "text",
@@ -455,9 +462,12 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
             ).start()
             while True:
                 try:
-                    etype, payload = events_queue.get(timeout=120)
+                    # S214：活动感知 idle 超时——思考期现在有 reasoning_delta 持续流，
+                    # get 不断被重置；仅真正无任何事件 180s 才报错（对齐 pi bodyTimeout：
+                    # 不因思考时长杀流，只对真卡死兑底。与前端 IDLE_STREAM_TIMEOUT_MS 对齐）
+                    etype, payload = events_queue.get(timeout=180)
                 except queue.Empty:
-                    yield _sse_frame("error", {"message": "流式超时（120s 无事件）"})
+                    yield _sse_frame("error", {"message": "流式超时（180s 无事件，模型可能卡死）"})
                     break
                 if etype == "stream_end":
                     # S99 第二步：整条队列跑完（或取消/超限）才发最终 done 帧

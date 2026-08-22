@@ -17,6 +17,7 @@ from typing import Any
 GENERIC_EVENT_TYPES = {
     "text",  # 一段自然语言输出
     "text_delta",  # 流式文本增量（打字机；事件名对齐 pi 的 stream 事件）
+    "reasoning_delta",  # 流式思考增量（思维链实时转发，避免思考期 SSE 静默致 idle 超时误杀）
     "toolcall_delta",  # 流式工具调用参数增量
     "done",  # 一轮完成
     "error",  # 出错

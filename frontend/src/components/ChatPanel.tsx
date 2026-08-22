@@ -100,6 +100,9 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   // ── Chunk buffering: avoid per-chunk setMessages during streaming ──
   const chunkBufferRef = useRef('')
   const chunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // S213：思考增量缓冲（节流同 chunk 机制，避免 per-chunk re-render）
+  const reasoningBufferRef = useRef('')
+  const reasoningTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const streamingRef = useRef(false)
 
   const flushChunks = useCallback(() => {
@@ -116,13 +119,57 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     })
   }, [])
 
+  // S213：思考增量节流 flush——累积到当前 agent 消息的 streamingReasoning 字段
+  const flushReasoning = useCallback(() => {
+    const text = reasoningBufferRef.current
+    if (!text) return
+    reasoningBufferRef.current = ''
+    setMessages(prev => {
+      const updated = [...prev]
+      let idx = updated.length - 1
+      while (idx >= 0 && updated[idx].role !== 'agent') idx--
+      if (idx < 0) {
+        // 思考先于正文开始：创建一条空正文的 agent 消息承载 streamingReasoning
+        updated.push({ role: 'agent', text: '', streamingReasoning: text })
+      } else {
+        const target = updated[idx] as any
+        updated[idx] = { ...target, streamingReasoning: (target.streamingReasoning || '') + text }
+      }
+      return updated
+    })
+  }, [])
+
   const { sendMessage: sseSend, cancel: sseCancel, streaming } = useSSE({
     bookId,
     sessionId,
     agentMode: 'write',
     autoModeEnabled,
     onMessage: (event) => {
-      if (event.type === 'start') {
+      if (event.type === 'reasoning_append') {
+        // S213：思考增量节流缓冲（同 chunk 机制），避免 per-chunk re-render
+        if (event.text) {
+          reasoningBufferRef.current += event.text
+          if (!reasoningTimerRef.current) {
+            reasoningTimerRef.current = setTimeout(() => {
+              reasoningTimerRef.current = null
+              flushReasoning()
+            }, CHUNK_FLUSH_MS)
+          }
+        }
+      } else if (event.type === 'start') {
+        // S213：正文开始——如果已有 streamingReasoning 的 agent 消息（思考先于正文），复用它开始正文
+        streamingRef.current = true
+        setMessages(prev => {
+          const updated = [...prev]
+          const last = updated[updated.length - 1]
+          if (last && last.role === 'agent' && (last as any).streamingReasoning) {
+            // 复用思考期创建的消息，开始正文（保留 streamingReasoning）
+            updated[updated.length - 1] = { ...last, text: event.text || '' }
+          } else if (event.text) {
+            updated.push({ role: 'agent', text: event.text })
+          }
+          return updated
+        })
         streamingRef.current = true
         if (event.text) setMessages(prev => [...prev, { role: 'agent', text: event.text }])
       } else if (event.type === 'append') {
@@ -167,6 +214,8 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
                 ...target,
                 parts: event.parts || target.parts,
                 metrics: event.metrics || target.metrics,
+                // S213：done 帧到达——清除流式思考（parts 里的完整 reasoning 已经替代）
+                streamingReasoning: undefined,
               }
             }
             return updated
@@ -264,6 +313,12 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     onMetrics: (data) => {
       setMetrics(data)
       setTurnDone(true) // S154：done 帧到达 = 本轮结束，可回滚
+      // S213：done 帧到达——flush 残留思考缓冲（避免最后一批堆叠消息丢失）
+      if (reasoningTimerRef.current) {
+        clearTimeout(reasoningTimerRef.current)
+        reasoningTimerRef.current = null
+      }
+      flushReasoning()
     },
     // S99 第二步：接力轮开始——把队列消息作为 user 消息显示、队列条同步减少
     onQueueConsume: (data) => {
@@ -842,6 +897,12 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
       chunkTimerRef.current = null
     }
     flushChunks()
+    // S213：同样 flush 思考缓冲
+    if (reasoningTimerRef.current) {
+      clearTimeout(reasoningTimerRef.current)
+      reasoningTimerRef.current = null
+    }
+    flushReasoning()
     streamingRef.current = false
     await sseCancel()
     setProgress(null)

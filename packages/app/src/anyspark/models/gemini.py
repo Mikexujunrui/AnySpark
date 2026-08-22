@@ -205,13 +205,17 @@ def to_gemini_contents(
     return system, contents
 
 
-def _parse_parts(parts: list[dict[str, Any]]) -> tuple[str, list[ToolCall]]:
-    """Gemini parts → (text, tool_calls)。"""
+def _parse_parts(parts: list[dict[str, Any]]) -> tuple[str, list[ToolCall], str]:
+    """Gemini parts → (text, tool_calls, reasoning)。"""
     text_parts: list[str] = []
+    reasoning_parts: list[str] = []  # S213：thought part（includeThoughts=true 时带 thought=true）
     tool_calls: list[ToolCall] = []
     for part in parts:
         if "text" in part:
-            text_parts.append(part["text"] or "")
+            if part.get("thought"):
+                reasoning_parts.append(part["text"] or "")
+            else:
+                text_parts.append(part["text"] or "")
         elif "functionCall" in part:
             fc = part["functionCall"]
             raw = fc.get("args")
@@ -227,7 +231,7 @@ def _parse_parts(parts: list[dict[str, Any]]) -> tuple[str, list[ToolCall]]:
                     id=fc.get("name") or "",  # Gemini 无 call id——用函数名兼作 id
                 )
             )
-    return "".join(text_parts), tool_calls
+    return "".join(text_parts), tool_calls, "".join(reasoning_parts)
 
 
 class GeminiModel:
@@ -252,7 +256,11 @@ class GeminiModel:
         self._max_tokens = max_tokens
         self._thinking_cfg = thinking_to_gemini(thinking)
         self._context_window = context_window or int(os.getenv("GEMINI_CONTEXT_WINDOW", "1000000"))
-        self._client = httpx.Client(trust_env=False, timeout=120.0)
+        # S214：超时分阶段——connect/pool 10s，read 不超时（流式思考数分钟不断产 token）
+        self._client = httpx.Client(
+            trust_env=False,
+            timeout=httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0),
+        )
 
     @property
     def model_name(self) -> str:
@@ -278,6 +286,8 @@ class GeminiModel:
         }
         if self._thinking_cfg is not None:
             gen["thinkingConfig"] = self._thinking_cfg
+            # S213：启用思考内容返回——流式 thought part 实时转发，避免思考期 SSE 静默
+            gen["thinkingConfig"] = {**self._thinking_cfg, "includeThoughts": True}
         payload["generationConfig"] = gen
         return payload
 
@@ -297,7 +307,7 @@ class GeminiModel:
             raise RuntimeError(f"Gemini 无候选输出: {json.dumps(data, ensure_ascii=False)[:300]}")
         cand = candidates[0]
         content = cand.get("content") or {}
-        text, tool_calls = _parse_parts(content.get("parts") or [])
+        text, tool_calls, reasoning = _parse_parts(content.get("parts") or [])
         fr = cand.get("finishReason") or ""
         truncated = fr == "MAX_TOKENS"
         usage: dict[str, int] | None = None
@@ -312,7 +322,7 @@ class GeminiModel:
             text=text,
             tool_calls=tool_calls,
             truncated=truncated,
-            reasoning="",  # Gemini 思考内容默认不进响应（需显式 includeThoughts，暂不启用）
+            reasoning=reasoning,  # S213：思考内容（includeThoughts 启用后非流式也可取）
             usage=usage,
             finish_reason=fr,
         )
@@ -326,6 +336,7 @@ class GeminiModel:
         """流式协议：SSE 增量 parts → text_delta / toolcall_delta 事件。"""
         payload = self._payload(messages, tools)
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []  # S213：思考内容累积（includeThoughts）
         # S178：用列表而非以 name 为键的 dict——同名工具调用并行（如两次 read_chapter）
         # 在 dict 下会覆盖丢失；列表保留每个 functionCall。
         tool_acc: list[dict[str, Any]] = []
@@ -367,6 +378,17 @@ class GeminiModel:
                                 for part in parts:
                                     if "text" in part:
                                         t = part["text"] or ""
+                                        # S213：thought part（includeThoughts 时带 thought=true）
+                                        # 转发 reasoning_delta，避免思考期静默
+                                        is_thought = bool(part.get("thought"))
+                                        if is_thought:
+                                            reasoning_parts.append(t)
+                                            if on_event is not None:
+                                                on_event(Event(
+                                                    type="reasoning_delta",
+                                                    payload={"content": t},
+                                                ))
+                                            continue
                                         text_parts.append(t)
                                         if on_event is not None:
                                             on_event(
@@ -415,7 +437,7 @@ class GeminiModel:
             text="".join(text_parts),
             tool_calls=tool_calls,
             truncated=truncated,
-            reasoning="",
+            reasoning="".join(reasoning_parts),  # S213：思考内容进记录（recorder 消费）
             usage=usage,
             finish_reason=finish_reason,
         )

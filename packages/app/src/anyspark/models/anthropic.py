@@ -267,7 +267,11 @@ class AnthropicModel:
         self._context_window = context_window or int(
             os.getenv("ANTHROPIC_CONTEXT_WINDOW", "200000")
         )
-        self._client = httpx.Client(trust_env=False, timeout=120.0)
+        # S214：超时分阶段——connect/pool 10s，read 不超时（流式思考数分钟不断产 token）
+        self._client = httpx.Client(
+            trust_env=False,
+            timeout=httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0),
+        )
 
     @property
     def model_name(self) -> str:
@@ -369,6 +373,13 @@ class AnthropicModel:
                         on_event(Event(type="text_delta", payload={"content": t}))
                 elif dtype == "thinking_delta":
                     reasoning_parts.append(delta.get("thinking") or "")
+                    # S213：思考增量实时转发—避免思考期 SSE 静默
+                    # 致前端 idle 超时误杀（对齐 pi thinking_delta）
+                    if on_event is not None:
+                        on_event(Event(
+                            type="reasoning_delta",
+                            payload={"content": delta.get("thinking") or ""},
+                        ))
                 elif dtype == "input_json_delta":
                     acc = tool_acc.setdefault(idx, {"id": "", "name": "", "input": ""})
                     acc["input"] += delta.get("partial_json") or ""

@@ -185,11 +185,13 @@ class ResponsesModel:
         self._reasoning = thinking_to_responses(thinking)
         self._context_window = context_window or int(os.getenv("OPENAI_CONTEXT_WINDOW", "200000"))
         # S131：同 deepseek.py——trust_env=False 防环境变量代理劫持本地端点请求（502）
+        # S214：超时分阶段——connect/pool 10s，read 不超时（流式思考数分钟不断产 token）
+        _httpx_timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
         self._client = OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
             timeout=120.0,
-            http_client=httpx.Client(trust_env=False, timeout=120.0),  # type: ignore[arg-type]
+            http_client=httpx.Client(trust_env=False, timeout=_httpx_timeout),  # type: ignore[arg-type]
         )
 
     @property
@@ -281,6 +283,13 @@ class ResponsesModel:
                 acc["name"] = getattr(event, "name", "") or ""
             elif etype == "response.reasoning_summary_text.delta":
                 reasoning_parts.append(getattr(event, "delta", "") or "")
+                # S213：思考增量实时转发——避免思考期 SSE 静默致前端 idle 超时误杀
+                if on_event is not None:
+                    _rd = getattr(event, "delta", "") or ""
+                    on_event(Event(
+                        type="reasoning_delta",
+                        payload={"content": _rd},
+                    ))
             elif etype == "response.completed":
                 resp = getattr(event, "response", None)
                 if resp is not None:

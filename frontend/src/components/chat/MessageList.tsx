@@ -130,6 +130,24 @@ function ReasoningBlock({ text, index }: { text: string; index?: number }) {
   )
 }
 
+// S213：流式思考块——思考进行中实时显示（默认展开，带“思考中…”动画），done 后由 ReasoningBlock 替代
+function StreamingReasoningBlock({ text }: { text: string }) {
+  if (!text) return null
+  return (
+    <div className="mb-2">
+      <div className="flex items-center gap-1 text-[10px] text-amber-400/70 mb-1">
+        <Icon name="brain" size={10} className="animate-pulse" />
+        <span>思考中…</span>
+        <span className="text-zinc-600">（{text.length}字）</span>
+      </div>
+      <div className="text-[11px] text-zinc-500 bg-zinc-900/40 border border-zinc-800 rounded-md p-2 max-h-60 overflow-y-auto whitespace-pre-wrap italic">
+        {text}
+        <span className="inline-block w-1.5 h-3 bg-amber-400/60 ml-0.5 animate-pulse align-middle" />
+      </div>
+    </div>
+  )
+}
+
 // S184：TurnParts 折叠——批量任务一轮可能有几十上百次工具调用，逐条渲染会刷满整个视口。
 // 超过阈值默认只展开头部几条 + 一条聚合概要，点击展开全部。
 const TOOL_CARD_COLLAPSE_THRESHOLD = 6
@@ -361,6 +379,9 @@ export default function MessageList({
                     />
                   ) : msg.role === 'agent' ? (
                     <>
+                      {msg.streamingReasoning && (
+                        <StreamingReasoningBlock text={msg.streamingReasoning} />
+                      )}
                       {showToolCalls !== false && msg.parts && <TurnParts parts={msg.parts} />}
                       <MemoizedMarkdown text={msg.text} />
                     </>

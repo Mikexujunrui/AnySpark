@@ -338,6 +338,7 @@ export default function CharactersPanel({ bookId }: { bookId: string }) {
               {/* 图谱字段 */}
               {selectedPerson.entity ? (
                 <EntityEditor
+                  key={selectedPerson.entity.id}
                   entity={selectedPerson.entity}
                   onSave={handleSaveEntity}
                   saving={saving}

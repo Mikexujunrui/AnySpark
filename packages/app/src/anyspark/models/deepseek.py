@@ -198,11 +198,14 @@ class DeepSeekModel:
         # S131：显式 trust_env=False——openai SDK 默认 client 会读环境变量代理（国内网络
         # 常配 HTTP(S)_PROXY），把本地端点（Ollama/vLLM 等 127.0.0.1）请求发到代理导致 502。
         # 用 httpx2 自建 client 关闭代理读取；远端 API 不受影响（SDK 直连不走系统代理）。
+        # S214：超时分阶段——connect/pool 10s 快速发现连不上；read 不超时（流式深度思考
+        # 可能数分钟持续产 token，read timeout 会误杀正常流。idle 兜底由 SSE 层管）。
+        _httpx_timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
         self._client = OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
             timeout=self._timeout,
-            http_client=httpx.Client(trust_env=False, timeout=self._timeout),  # type: ignore[arg-type]
+            http_client=httpx.Client(trust_env=False, timeout=_httpx_timeout),  # type: ignore[arg-type]
         )
 
     @property
@@ -327,6 +330,13 @@ class DeepSeekModel:
             rc = getattr(delta, "reasoning_content", None)
             if rc:
                 reasoning_parts.append(str(rc))
+                # S213：思考增量实时转发—避免思考期 SSE
+                # 静默致前端 idle 超时误杀（对齐 pi）
+                if on_event is not None:
+                    on_event(Event(
+                        type="reasoning_delta",
+                        payload={"content": str(rc)},
+                    ))
             for tc in delta.tool_calls or []:
                 acc = tool_acc.setdefault(tc.index, {"name": "", "arguments": "", "id": ""})
                 if tc.function and tc.function.name:
