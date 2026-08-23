@@ -101,3 +101,32 @@ def test_multi_id_partial_pairing() -> None:
     out = sanitize_tool_pairing(msgs)
     asst = next(m for m in out if m.role == "assistant" and m.metadata.get("tool_calls"))
     assert [tc["id"] for tc in asst.metadata["tool_calls"]] == ["c1", "c2"]
+
+
+def test_dangling_deferred_messages_not_lost() -> None:
+    """S230：悬挂声明窗口内暂存的消息（user/assistant 纯文本）不丢弃。
+
+    场景：assistant 声明 [A, B]，只有 tool 结果 A，后面跟了 user 插话和
+    assistant 纯文本。旧实现循环结束时 pending_defer 里的消息被丢弃
+    （只有 open_decls 清空时才 extend），导致用户消息丢失→任务中断。
+    修复：裁剪悬挂声明后把 pending_defer 插回 out。
+    """
+    msgs = [
+        _user(),
+        _assistant_decl("c1", "c2"),  # c2 无结果
+        _tool("c1"),
+        _user("继续写"),  # 悬挂窗口内暂存
+        Message(role="assistant", content="生成失败"),  # 也在悬挂窗口内
+    ]
+    out = sanitize_tool_pairing(msgs)
+    # c2 被裁剪
+    asst = next(m for m in out if m.role == "assistant" and m.metadata.get("tool_calls"))
+    assert [tc["id"] for tc in asst.metadata["tool_calls"]] == ["c1"]
+    # user 消息不丢
+    assert any(m.role == "user" and m.content == "继续写" for m in out), (
+        f"pending_defer 中的 user 消息丢失: {out}"
+    )
+    # assistant 纯文本不丢
+    assert any(m.role == "assistant" and m.content == "生成失败" for m in out), (
+        f"pending_defer 中的 assistant 文本丢失: {out}"
+    )

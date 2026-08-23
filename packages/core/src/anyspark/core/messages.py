@@ -116,6 +116,9 @@ def sanitize_tool_pairing(messages: list[Message]) -> list[Message]:
     if declared:
         dangling = set(declared)
         out = [_strip_dangling(m, dangling) if m.role == "assistant" else m for m in out]
+        # S230 修复：悬挂声明窗口内暂存的消息（user 插话/assistant 纯文本等）
+        # 不能丢弃——裁剪声明后插回 out，否则用户消息丢失导致任务中断。
+        out.extend(pending_defer)
     return out
 
 

@@ -270,6 +270,14 @@ def make_chat_router(deps: AppDeps) -> APIRouter:
         S8（模型局限弥补 + A 类硬编码 SSE 传输）：长文生成逐字流式，用户不等全量。
         事件帧格式：event: <type>\ndata: <json>\n\n（core 事件协议 → 传输层）。
         """
+        # S230：并发保护（与 /api/chat 一致）——会话正在处理中时拒绝并发新消息，
+        # 防止两个 agent 同时读写同一会话导致历史损坏（tool_calls 声明与 tool 结果
+        # 配对错乱 → 后续请求 400「insufficient tool messages」→ 任务中断）。
+        if req.conversation_id and req.conversation_id in deps.active_tokens:
+            raise HTTPException(
+                status_code=409,
+                detail="该会话正在处理中（可 POST /api/chat/cancel 中断后再发）",
+            )
         events_queue: queue.Queue[tuple[str, dict[str, Any]]] = queue.Queue()
         # S82：本轮 parts 累积（tool_call 卡片 + reasoning 思考过程）——done 帧附带给前端 attach
         parts_acc: list[dict[str, Any]] = []
