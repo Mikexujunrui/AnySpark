@@ -6,47 +6,64 @@ import Icon from '../ui/Icon'
 
 /**
  * 将 TipTap 文档转为纯文本（用于兼容后端存储）
+ *
+ * S231 修复：paragraph 内的 hardBreak 节点必须输出为 '\n'——
+ * plainTextToDoc 把单换行多行文本转成「一个 paragraph + hardBreak 子节点」，
+ * 若 tipTapToPlainText 只取 textContent 会丢失换行→每次编辑保存往返都丢换行，
+ * 2-3 次后全文连成一个大段。
  */
 function tipTapToPlainText(editor) {
   if (!editor) return ''
   const doc = editor.state.doc
-  const lines = []
+  const blocks = []
   doc.forEach(node => {
     if (node.type.name === 'paragraph') {
-      if (node.textContent.trim() === '' && node.childCount === 0) {
-        lines.push('') // 空行
+      // S231：遍历子节点，hardBreak 输出 '\n'，text 拼接——
+      // node.textContent 会忽略 hardBreak（它无文本），导致换行丢失。
+      if (node.childCount === 0) {
+        blocks.push('') // 空行
       } else {
-        lines.push(node.textContent)
+        let paraText = ''
+        node.forEach(child => {
+          if (child.type.name === 'hardBreak') {
+            paraText += '\n'
+          } else {
+            paraText += child.textContent
+          }
+        })
+        blocks.push(paraText)
       }
     } else if (node.type.name === 'heading') {
       const prefix = '#'.repeat(node.attrs.level || 1)
-      lines.push(prefix + ' ' + node.textContent)
+      blocks.push(prefix + ' ' + node.textContent)
     } else if (node.type.name === 'bulletList') {
       node.forEach(item => {
         if (item.type.name === 'listItem') {
           const text = item.textContent
-          lines.push('- ' + text)
+          blocks.push('- ' + text)
         }
       })
     } else if (node.type.name === 'orderedList') {
       node.forEach((item, i) => {
         if (item.type.name === 'listItem') {
-          lines.push((i + 1) + '. ' + item.textContent)
+          blocks.push((i + 1) + '. ' + item.textContent)
         }
       })
     } else if (node.type.name === 'blockquote') {
       node.forEach(child => {
         if (child.type.name === 'paragraph') {
-          lines.push('> ' + child.textContent)
+          blocks.push('> ' + child.textContent)
         }
       })
     } else if (node.type.name === 'codeBlock') {
-      lines.push('```\n' + node.textContent + '\n```')
+      blocks.push('```\n' + node.textContent + '\n```')
     } else if (node.type.name === 'horizontalRule') {
-      lines.push('---')
+      blocks.push('---')
     }
   })
-  return lines.join('\n')
+  // S231：paragraph 之间用 '\n\n' 连接（块级分隔），paragraph 内 hardBreak 用 '\n'。
+  // 旧实现用 '\n' 连接所有行——双换行被压成单换行，多次往返后段落边界丢失。
+  return blocks.join('\n\n')
 }
 
 /**
