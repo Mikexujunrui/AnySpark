@@ -84,8 +84,10 @@ class ModelOutput:
     （截断的参数可能 JSON 合法但语义残缺，执行会写坏数据），让模型重发。
 
     reasoning（S49）：思维链（推理过程文本，如 DeepSeek 的 reasoning_content）。
-    **只进运行记录（训练/复盘用），不注入上下文**——推理过程不是输出，
-    回填/注入会污染上下文、改变模型行为（决策记录：保留但看情况才注入）。
+    进运行记录（训练/复盘用）+ 存入 assistant 消息 metadata（回传 API 用——
+    DeepSeek 思考模式要求 reasoning_content 必须随 assistant 消息发回，
+    否则 API 返回 400「reasoning_content must be passed back」）。
+    不进 content 字段（推理过程不是输出，不混入可见对话内容）。
 
     finish_reason（S211）：模型返回的原始停止原因（openai: stop/length/content_filter/tool_calls；
     anthropic: end_turn/max_tokens/stop_sequence；gemini: STOP/MAX_TOKENS/SAFETY）。

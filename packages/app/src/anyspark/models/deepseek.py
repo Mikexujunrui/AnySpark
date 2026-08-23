@@ -121,8 +121,14 @@ def to_openai_message(m: Message) -> dict[str, Any]:
 
     S23 协议完整化：metadata 里的结构化信息转成原生字段——
     - assistant 消息带 metadata.tool_calls → OpenAI 原生 tool_calls 数组（配对声明）
+    - assistant 消息带 metadata.reasoning → reasoning_content 字段（思考模式回传）
     - tool 消息带 metadata.tool_call_id → OpenAI 原生 tool_call_id（配对结果）
     旧数据（无 metadata）保持纯文本，兼容 DashScope 宽容模式。
+
+    思考模式回传（S49 修正）：DeepSeek 思考模式下生成的 assistant 消息带
+    reasoning_content，后续请求把该消息作为上下文发回时 MUST 带回 reasoning_content，
+    否则 API 返回 400「reasoning_content must be passed back」——表现为前端一直
+    「思考中」但无响应（流连接打开 200/0ms 后模型调用立即失败）。
     """
     msg: dict[str, Any] = {"role": m.role, "content": m.content}
     if m.role == "assistant":
@@ -148,6 +154,10 @@ def to_openai_message(m: Message) -> dict[str, Any]:
                     }
                 )
             msg["tool_calls"] = native_calls
+        # 思考模式回传：metadata.reasoning 非空时作为 reasoning_content 发回
+        reasoning = m.metadata.get("reasoning")
+        if isinstance(reasoning, str) and reasoning:
+            msg["reasoning_content"] = reasoning
     elif m.role == "tool":
         tid = m.metadata.get("tool_call_id")
         if isinstance(tid, str) and tid:
@@ -333,10 +343,12 @@ class DeepSeekModel:
                 # S213：思考增量实时转发—避免思考期 SSE
                 # 静默致前端 idle 超时误杀（对齐 pi）
                 if on_event is not None:
-                    on_event(Event(
-                        type="reasoning_delta",
-                        payload={"content": str(rc)},
-                    ))
+                    on_event(
+                        Event(
+                            type="reasoning_delta",
+                            payload={"content": str(rc)},
+                        )
+                    )
             for tc in delta.tool_calls or []:
                 acc = tool_acc.setdefault(tc.index, {"name": "", "arguments": "", "id": ""})
                 if tc.function and tc.function.name:

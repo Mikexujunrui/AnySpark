@@ -287,7 +287,18 @@ class Agent:
                 # 终答，插话也不丢失：先把本轮终答落上下文，再注入队列消息续跑。
                 queued = self._drain(self.steer_queue) + self._drain(self.followup_queue)
                 if queued:
-                    store.append(conversation_id, Message(role="assistant", content=output.text))
+                    store.append(
+                        conversation_id,
+                        Message(
+                            role="assistant",
+                            content=output.text,
+                            metadata={
+                                "reasoning": output.reasoning,
+                            }
+                            if output.reasoning
+                            else {},
+                        ),
+                    )
                     self.events.emit(Event(type="text", payload={"content": output.text}))
                     for m in queued:
                         store.append(conversation_id, m)
@@ -317,7 +328,18 @@ class Agent:
                         final_text = "（生成因推理资源不足中断，请重试。）"
                     else:
                         final_text = "（模型返回了空响应，请重试或调整指令。）"
-                store.append(conversation_id, Message(role="assistant", content=final_text))
+                store.append(
+                    conversation_id,
+                    Message(
+                        role="assistant",
+                        content=final_text,
+                        metadata={
+                            "reasoning": output.reasoning,
+                        }
+                        if output.reasoning
+                        else {},
+                    ),
+                )
                 self.events.emit(Event(type="text", payload={"content": final_text}))
                 self.events.emit(Event(type="done", payload={}))
                 return Turn(text=final_text, tool_calls=executed, tool_results=results)
@@ -365,21 +387,24 @@ class Agent:
             #   user → assistant(tool_calls 声明) → tool(带 tool_call_id) → ...
             # （此前只存 tool 结果、assistant 声明丢失，DashScope 宽容模式能跑但不规范，
             #   多工具并行时模型只能靠文本前缀猜归属）
+            tool_calls_meta: dict[str, object] = {
+                "tool_calls": [
+                    {
+                        "name": c.name,
+                        "arguments": c.arguments,
+                        "id": c.id or "",
+                    }
+                    for c in calls
+                ]
+            }
+            if output.reasoning:
+                tool_calls_meta["reasoning"] = output.reasoning
             store.append(
                 conversation_id,
                 Message(
                     role="assistant",
                     content=output.text,
-                    metadata={
-                        "tool_calls": [
-                            {
-                                "name": c.name,
-                                "arguments": c.arguments,
-                                "id": c.id or "",
-                            }
-                            for c in calls
-                        ]
-                    },
+                    metadata=tool_calls_meta,
                 ),
             )
 
@@ -585,7 +610,7 @@ class Agent:
         """S49 运行记录事件：完整轮次快照（上下文 + 输出含思维链 + 工具结果）。
 
         只发事件不落盘——存储由 app 层订阅（写 data/records/*.jsonl）；
-        思维链 reasoning **不注入上下文**（只进记录，训练/复盘用）。
+        思维链 reasoning 只进运行记录 + metadata（回传 API 用），不进 content。
         """
         # S180：tool_results 记录本轮工具结果——但 _emit_record 在模型输出后、
         # 工具执行前调用，本轮工具结果尚未产生；旧代码遍历累积 results + pop

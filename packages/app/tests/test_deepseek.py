@@ -13,6 +13,26 @@ def test_to_openai_message() -> None:
     assert to_openai_message(m) == {"role": "user", "content": "你好"}
 
 
+def test_to_openai_message_assistant_reasoning() -> None:
+    """思考模式：assistant 消息带 metadata.reasoning → reasoning_content 回传。"""
+    m = Message(
+        role="assistant",
+        content="答案是42",
+        metadata={"reasoning": "让我想想...6×7=42"},
+    )
+    result = to_openai_message(m)
+    assert result["role"] == "assistant"
+    assert result["content"] == "答案是42"
+    assert result["reasoning_content"] == "让我想想...6×7=42"
+
+
+def test_to_openai_message_assistant_no_reasoning() -> None:
+    """无 reasoning 时不带 reasoning_content 字段。"""
+    m = Message(role="assistant", content="你好")
+    result = to_openai_message(m)
+    assert "reasoning_content" not in result
+
+
 def test_to_openai_tool_with_params() -> None:
     spec = ToolSpec(
         name="add",
