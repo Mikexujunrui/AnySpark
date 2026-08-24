@@ -708,7 +708,7 @@ def test_anthropic_parse_content_captures_full_thinking_block() -> None:
     """
     from anyspark.models.anthropic import _parse_content
 
-    content = [
+    content: list[dict[str, Any]] = [
         {"type": "thinking", "thinking": "先想一步", "signature": "SIG123"},
         {"type": "text", "text": "回答"},
         {"type": "tool_use", "id": "c1", "name": "write", "input": {"x": 1}},
@@ -730,7 +730,7 @@ def test_anthropic_parse_content_redacted_thinking() -> None:
     """S232：redacted_thinking 块也纳入 reasoning_blocks（data 字段）。"""
     from anyspark.models.anthropic import _parse_content
 
-    content = [
+    content: list[dict[str, Any]] = [
         {"type": "redacted_thinking", "data": "REDACTED_X"},
         {"type": "text", "text": "好"},
     ]

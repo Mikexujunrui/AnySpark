@@ -58,7 +58,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     + '· AI 命令（`/w` 写作、`/s` 提取设定、`/style` 文风…）——翻译为明确指令交给 AI\n'
     + '自然语言描述则走 Agent 智能路由。' }
 
-  const [messages, setMessages] = useState([welcomeMsg])
+  const [messages, setMessages] = useState<Array<{ role: string; text: string; streamingReasoning?: string }>>([welcomeMsg])
   // S154：本轮完成标记（done 帧到达）——显示'回滚本轮修改'按钮
   const [turnDone, setTurnDone] = useState(false)
   const [rollbackBusy, setRollbackBusy] = useState(false)
