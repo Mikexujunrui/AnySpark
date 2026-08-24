@@ -5,7 +5,7 @@
 # ---------------------------------------------------------------------------
 [project]
 name = "anyspark"
-version = "4.0.12"  # S212：v4.0.12 发布（S205-S211 打磨+空响应保护）
+version = "4.0.13"  # S233：v4.0.13 发布（S212-S232 累积修复 + 类型安全收尾）
 description = "AnySpark v4 创作引擎（workspace 根项目）"
 requires-python = ">=3.11"
 dependencies = [

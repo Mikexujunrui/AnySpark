@@ -493,3 +493,18 @@ ChaptersPanel getChapters 不再 as any[]。any 61→52。
 
 **_loop 400 行未动**：复杂性是领域复杂性的真实反映（配对完整性/死循环检测/压缩/
 steering/取消/重试），配对修复等已抽成独立方法，强行拆只会破坏可读性。
+
+---
+
+## S233: v4.0.13 发布——版本 bump + 推送公开仓库 + EXE 打包
+
+**版本**：4.0.12 → 4.0.13（代码 S212 已置 4.0.12 但从未发布；本次 +0.0.1）
+**bump 三处**：pyproject.toml / uv.lock / build_release.sh（缺省版本 v4.0.11→v4.0.13）
+**范围**：feat/shell-port 相对 public/main(S211) 领先 10 个提交（S212-S232）：
+  文档收敛 / PROGRESS 拆分归档 / 意图模式 write_chapter 图谱抽取 /
+  SQLite 线程安全修复 / 并发流损坏会话历史修复 / 思考模式 reasoning_content 回传 /
+  章节编辑器多次保存排版丢失修复 / Anthropic thinking block 未回传修复
+**打包**：`bash scripts/build_release.sh v4.0.13` → `AnySpark_Windows_x64_v4.0.13.zip`
+  （PyInstaller 独立 exe，双击即用；含前端 dist + 后端，零依赖）
+**推送**：`git push public feat/shell-port:main`（快进 public/main 至 S232）+ 打 tag `v4.0.13`
+**验证**：全量门禁（ruff+mypy+pytest+tsc+eslint+vite build）绿；exe 启动 health 200
