@@ -15,7 +15,6 @@ from __future__ import annotations
 import argparse
 import json
 import random
-import sys
 import time
 from pathlib import Path
 
@@ -24,7 +23,6 @@ from benchmarks.compare.tasks import (
     HP_SETTINGS,
     PREFERENCE_C,
     SEED_B,
-    _anyspark_write,
     run_task_a,
     run_task_b,
     run_task_c,

@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Any
 
 import httpx2 as httpx  # S66: httpx2（下一代，API 兼容）
 

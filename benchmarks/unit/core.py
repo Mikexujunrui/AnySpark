@@ -154,8 +154,8 @@ class ApiClient:
             buf = ""
             for line in resp.iter_lines():
                 if line == "":
-                    evt = re.search(r"^event: (.+)$", buf, re.M)
-                    data = re.search(r"^data: (.+)$", buf, re.M)
+                    evt = re.search(r"^event: (.+)$", buf, re.MULTILINE)
+                    data = re.search(r"^data: (.+)$", buf, re.MULTILINE)
                     if evt and data:
                         frames.append((evt.group(1), json.loads(data.group(1))))
                     buf = ""

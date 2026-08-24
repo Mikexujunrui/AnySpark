@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from benchmarks.unit.core import ApiClient
 
-
 SEED = "一个侦探在雨夜里收到一封写着自己死亡时间的信"
 
 

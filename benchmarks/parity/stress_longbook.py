@@ -10,10 +10,9 @@
 
 from __future__ import annotations
 
-import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -25,13 +24,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "app" 
 
 def run_real(chapters: int) -> dict:
     """真实 DeepSeek 链路（TestClient + 小窗口模型）。"""
-    from fastapi.testclient import TestClient
+    import tempfile
 
     from anyspark.models.deepseek import DeepSeekModel
     from anyspark.server.app import build_app
     from anyspark.store import SqliteConversationStore
-
-    import tempfile
+    from fastapi.testclient import TestClient
 
     tmp = Path(tempfile.mkdtemp()) / "stress.db"
     model = DeepSeekModel(context_window=4000)  # 小窗口 → 预算 ~2800 → 快速触发压缩
@@ -75,7 +73,7 @@ def run_scripted(chapters: int) -> dict:
     """脚本化快速压力（确定性）：Agent + TokenBudget 小预算 + persist_compression。"""
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "core" / "src"))
 
-    from anyspark.core import Agent, Message, ModelOutput, ToolRegistry
+    from anyspark.core import Agent, ModelOutput, ToolRegistry
     from anyspark.server.context import TokenBudget, make_summarizer
 
     class FakeModel:
@@ -110,7 +108,7 @@ def run_scripted(chapters: int) -> dict:
 class _InMemoryStore:
     """最小内存 store（避免依赖 app 包）。"""
 
-    from anyspark.core.storage import InMemoryConversationStore  # noqa: F401
+    from anyspark.core.storage import InMemoryConversationStore
 
     def __init__(self) -> None:
         from anyspark.core.storage import InMemoryConversationStore
@@ -128,7 +126,7 @@ def main() -> None:
     result = run_real(chapters) if real else run_scripted(chapters)
     hist = result["history"]
     REPORT_DIR.mkdir(exist_ok=True)
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     report = REPORT_DIR / f"stress-longbook-{ts}.md"
 
     # 断言：消息数有界（不随轮次线性爆炸——压缩回写生效）
@@ -141,7 +139,7 @@ def main() -> None:
     lines = [
         "# 长书压力测试",
         "",
-        f"> 时间：{datetime.now(timezone.utc).isoformat()} | 模式：{'真实 DeepSeek（窗口4000）' if real else '脚本化（预算400）'} | 章节数：{chapters}",
+        f"> 时间：{datetime.now(UTC).isoformat()} | 模式：{'真实 DeepSeek（窗口4000）' if real else '脚本化（预算400）'} | 章节数：{chapters}",
         "",
         "| 轮次 | 消息数 | 累计字符 | 已压缩(含摘要) |",
         "|------|--------|----------|----------------|",

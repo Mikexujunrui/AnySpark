@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -22,7 +22,7 @@ REPORT_DIR = HERE / "report"
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "core" / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "app" / "src"))
 
-import httpx2 as httpx  # noqa: E402  # S66: httpx2（下一代，API 兼容）
+import httpx2 as httpx  # S66: httpx2（下一代，API 兼容）
 
 
 def run_round(client: httpx.Client, round_no: int) -> dict:
@@ -78,12 +78,12 @@ def main() -> None:
     with httpx.Client(trust_env=False) as client:
         results = [run_round(client, i + 1) for i in range(rounds)]
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     report = REPORT_DIR / f"perf-{ts}.md"
     lines = [
         "# AnySpark 循环性能基线",
         "",
-        f"> 时间：{datetime.now(timezone.utc).isoformat()} | 模型：deepseek-v4-flash | 任务：写 300 字章节（含工具链路）",
+        f"> 时间：{datetime.now(UTC).isoformat()} | 模型：deepseek-v4-flash | 任务：写 300 字章节（含工具链路）",
         "",
         "| 轮次 | 总时长(s) | TTFT(s) | 输出字符 | delta帧 | 字符/s |",
         "|------|-----------|---------|----------|---------|--------|",

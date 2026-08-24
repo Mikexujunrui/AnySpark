@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import yaml
 
-from benchmarks.unit.core import ApiClient, GOLD_DIR, normalize
+from benchmarks.unit.core import GOLD_DIR, ApiClient, normalize
 
 ASSETS = GOLD_DIR.parent.parent / "assets"
 

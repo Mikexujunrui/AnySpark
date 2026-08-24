@@ -16,7 +16,7 @@ from __future__ import annotations
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -162,12 +162,12 @@ def main() -> None:
     plots = stats_plot()
     old = old_project_stats()
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     report = REPORT_DIR / f"hp-compare-{ts}.md"
     lines = [
         "# 哈利波特第一部 图谱/伏笔提取 对比报告",
         "",
-        f"> 时间：{datetime.now(timezone.utc).isoformat()} | 文本：人文社译本 17 章（{sum(len(c['content']) for c in chapters)} 字）",
+        f"> 时间：{datetime.now(UTC).isoformat()} | 文本：人文社译本 17 章（{sum(len(c['content']) for c in chapters)} 字）",
         "",
         "## 数量对比",
         "",
