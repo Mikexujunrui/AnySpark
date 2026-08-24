@@ -507,4 +507,7 @@ steering/取消/重试），配对修复等已抽成独立方法，强行拆只�
 **打包**：`bash scripts/build_release.sh v4.0.13` → `AnySpark_Windows_x64_v4.0.13.zip`
   （PyInstaller 独立 exe，双击即用；含前端 dist + 后端，零依赖）
 **推送**：`git push public feat/shell-port:main`（快进 public/main 至 S232）+ 打 tag `v4.0.13`
-**验证**：全量门禁（ruff+mypy+pytest+tsc+eslint+vite build）绿；exe 启动 health 200
+**验证**：frontend 构建（tsc -b + vite build）通过；exe PyInstaller 构建成功（25MB）；
+  exe 启动生成 .env 模板并起服务（health 需填 API Key 后方可用）。
+  ⚠️ 门禁分层判定仅查未提交改动、本发布提交已落地故跳过实检；分支现存 46 处历史 ruff
+  错误（S232 等累积引入，非本次发布引入），建议后续 `ruff check --fix` 清理后再发下一版。
