@@ -15,12 +15,11 @@ S21 系统层：分支剧本测哲学过程指标（T7：修改率↓ / 说明�
 
 from __future__ import annotations
 
-import json
 import sqlite3
 import sys
 import tempfile
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -29,10 +28,9 @@ REPORT_DIR = HERE / "report"
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "core" / "src"))
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "packages" / "app" / "src"))
 
-from fastapi.testclient import TestClient  # noqa: E402
-
-from anyspark.models.deepseek import DeepSeekModel  # noqa: E402
-from anyspark.server.app import build_app  # noqa: E402
+from anyspark.models.deepseek import DeepSeekModel
+from anyspark.server.app import build_app
+from fastapi.testclient import TestClient
 
 PREFERENCE = "不要使用破折号（——），一律用句号断句"
 
@@ -64,7 +62,7 @@ def _wait_refine(client: TestClient, expect_min: int, timeout_s: float = 60) -> 
 
 
 def run_branch(rounds: int, with_alignment: bool) -> dict:
-    client, db_path, conn = _new_client()
+    client, _, conn = _new_client()
     conv: str | None = None
     chapters: list[dict] = []
     signals_sent = 0
@@ -157,12 +155,12 @@ def main() -> None:
     dash_b = [c["dashes"] for c in b["chapters"]]
     a_first_last = f"{dash_a[0]} → {dash_a[-1]}" if dash_a else "n/a"
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     report = REPORT_DIR / f"learn-curve-{ts}.md"
     lines = [
         "# 学习曲线（分支剧本哲学指标）",
         "",
-        f"> 时间：{datetime.now(timezone.utc).isoformat()} | 模型：deepseek-v4-flash | 轮数：{rounds} | A/B 隔离实例",
+        f"> 时间：{datetime.now(UTC).isoformat()} | 模型：deepseek-v4-flash | 轮数：{rounds} | A/B 隔离实例",
         "",
         "## 分支 A（对齐学习：轮1拒绝+修改→说明书→后续接受）",
         "",

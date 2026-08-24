@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import signal
 import subprocess
@@ -19,6 +20,7 @@ from pathlib import Path
 import httpx2 as httpx  # S66: httpx2（下一代，API 兼容）
 
 ROOT = Path(__file__).resolve().parent.parent.parent
+logger = logging.getLogger(__name__)
 
 
 def _wait_health(base: str, timeout: float = 90.0) -> bool:
@@ -27,8 +29,8 @@ def _wait_health(base: str, timeout: float = 90.0) -> bool:
         try:
             if httpx.get(f"{base}/api/health", timeout=3, trust_env=False).status_code == 200:
                 return True
-        except Exception:
-            pass
+        except httpx.HTTPError:
+            logger.debug("后端尚未就绪，等待重试")
         time.sleep(2)
     return False
 
@@ -65,6 +67,7 @@ def _stop_tree(proc: subprocess.Popen[bytes]) -> None:
         subprocess.run(
             ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
             capture_output=True,
+            check=False,
         )
     else:
         try:
@@ -106,7 +109,7 @@ def main() -> None:
             print(f"▶ {task_id} {name} ...", flush=True)
             try:
                 passed, metrics, detail = fn(api)
-            except Exception as exc:  # 任务自身异常 = FAIL（记详情）
+            except Exception as exc:  # noqa: BLE001  任务自身异常 = FAIL（记详情）
                 reporter.record(task_id, name, False, {}, f"异常: {exc}")
                 print(f"  ✗ {exc}")
                 continue

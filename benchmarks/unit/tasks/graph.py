@@ -9,8 +9,8 @@ from __future__ import annotations
 import yaml
 
 from benchmarks.unit.core import (
-    ApiClient,
     GOLD_DIR,
+    ApiClient,
     entity_hit,
     normalize,
     precision_recall_f1,
@@ -55,10 +55,7 @@ def t1_extract_f1(api: ApiClient) -> tuple[bool, dict, str]:
     n_pred = len(extracted)
     if n_pred == 0:
         return False, {"f1": 0.0, "detail": "抽取 0 实体"}, "无实体被抽取（两次尝试）"
-    # 精确率：每个抽取实体是否命中任一 gold
-    tp_pred = sum(
-        1 for e in extracted if any(entity_hit(g, e.get("name", "")) for g in gold_entities)
-    )
+    # 注：tp_pred（命中 gold 的预测数）为死代码未使用；精确率由 precision_recall_f1 用 n_pred 近似
     # 召回率：每个 gold 实体是否被任一抽取命中
     tp_gold = sum(
         1 for g in gold_entities if any(entity_hit(g, e.get("name", "")) for e in extracted)
@@ -92,7 +89,7 @@ def t2_idempotent(api: ApiClient) -> tuple[bool, dict, str]:
     return (
         dup == 0,
         {"total": len(names), "duplicate_names": dup},
-        f"实体名重复数（应为 0；LLM 抽取不确定性不计入，见说明）",
+        "实体名重复数（应为 0；LLM 抽取不确定性不计入，见说明）",
     )
 
 

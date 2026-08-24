@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -32,6 +32,7 @@ def run_pi(scenario_id: str) -> list[str]:
         text=True,
         cwd=HERE,
         timeout=30,
+        check=False,
     )
     if out.returncode != 0:
         return [f"harness_error:{out.stderr.strip()[:200]}"]
@@ -46,6 +47,7 @@ def run_local(scenario_id: str) -> list[str]:
         text=True,
         cwd=HERE,
         timeout=30,
+        check=False,
     )
     if out.returncode != 0:
         return [f"harness_error:{out.stderr.strip()[:200]}"]
@@ -81,7 +83,7 @@ def main() -> None:
     lines.append("# pi vs 本地 循环行为对照（parity）")
     lines.append("")
     lines.append(
-        f"> 时间：{datetime.now(timezone.utc).isoformat()} | 引擎：pi-agent-core dist/agent-loop.js vs anyspark core/loop.py | 模型：脚本化（确定性）"
+        f"> 时间：{datetime.now(UTC).isoformat()} | 引擎：pi-agent-core dist/agent-loop.js vs anyspark core/loop.py | 模型：脚本化（确定性）"
     )
     lines.append("")
     lines.append("| 场景 | 结果 |")
@@ -107,7 +109,7 @@ def main() -> None:
         lines.append("```")
         lines.append("")
 
-    ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     report = REPORT_DIR / f"parity-{ts}.md"
     report.write_text("\n".join(lines), encoding="utf-8")
 

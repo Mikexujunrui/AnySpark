@@ -511,3 +511,16 @@ steering/取消/重试），配对修复等已抽成独立方法，强行拆只�
   exe 启动生成 .env 模板并起服务（health 需填 API Key 后方可用）。
   ⚠️ 门禁分层判定仅查未提交改动、本发布提交已落地故跳过实检；分支现存 46 处历史 ruff
   错误（S232 等累积引入，非本次发布引入），建议后续 `ruff check --fix` 清理后再发下一版。
+
+---
+
+## S234: ruff --fix 清理 46 处历史 lint 错误
+
+**背景**：S233 发布记录披露分支现存 46 处 ruff 错误（S232 等累积；门禁分层只查未提交改动故漏检）。
+**处理**：`ruff check --fix` 自动修 36 处 + 手动修 10 处：
+- subprocess.run 补 `check=False`（run_parity.py / run_unit.py 的 taskkill）
+- 未用解包变量 `db_path` → `_`（learn_curve.py）；死代码 `tp_pred` 删除（tasks/graph.py）
+- `_wait_health` 盲捕 `Exception: pass` → `except httpx.HTTPError` + 命名 logger（LOG015/S110/BLE001）
+- 任务循环盲捕 `Exception` 加 `noqa: BLE001`（benchmark 故意全捕记录 FAIL，非盲错）
+- E501 长行包裹：anthropic.py `_parse_content` 返回类型、test_adapters.py tool_calls 字面量
+**验证**：`ruff check .` 全绿（All checks passed）；test_adapters.py 全过（exit 0）。

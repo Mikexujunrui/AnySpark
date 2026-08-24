@@ -654,7 +654,9 @@ def test_anthropic_thinking_blocks_preserved_in_roundtrip() -> None:
             role="assistant",
             content="好的，调用写章工具。",
             metadata={
-                "tool_calls": [{"name": "write_chapter", "arguments": {"title": "第一章"}, "id": "c1"}],
+                "tool_calls": [
+                    {"name": "write_chapter", "arguments": {"title": "第一章"}, "id": "c1"}
+                ],
                 # S232：完整 thinking 块结构（含 signature）——回传必需
                 "reasoning_blocks": [
                     {"type": "thinking", "thinking": "让我构思一下开头…", "signature": sig},
