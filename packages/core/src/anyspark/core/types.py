@@ -89,6 +89,13 @@ class ModelOutput:
     否则 API 返回 400「reasoning_content must be passed back」）。
     不进 content 字段（推理过程不是输出，不混入可见对话内容）。
 
+    reasoning_blocks（S232）：厂商原生推理块结构（如 Anthropic 的 thinking/
+    redacted_thinking 块，含 signature 等不可改字段）——部分厂商（Anthropic）
+    要求开启思考 + 工具调用时**完整原样回传**这些块（含 signature，不可修改，
+    否则 400「thinking blocks cannot be modified」）。与 reasoning（纯文本）不同，
+    它承载回传所需的完整结构；无此需求的适配器（DeepSeek）留空列表。
+    不进 content 字段（推理过程不是输出，不混入可见对话内容）。
+
     finish_reason（S211）：模型返回的原始停止原因（openai: stop/length/content_filter/tool_calls；
     anthropic: end_turn/max_tokens/stop_sequence；gemini: STOP/MAX_TOKENS/SAFETY）。
     空响应（content_filter/SAFETY）时 text 为空——loop 据此给用户明确提示而非静默断流。
@@ -98,6 +105,9 @@ class ModelOutput:
     tool_calls: list[ToolCall] = field(default_factory=list)
     truncated: bool = False
     reasoning: str = ""
+    # S232：厂商原生推理块结构（Anthropic thinking/redacted_thinking 等），
+    # 用于 thinking + 工具调用场景的完整回传（含 signature，不可改）。
+    reasoning_blocks: list[dict[str, Any]] = field(default_factory=list)
     # S99：token 消耗（模型适配器从 API usage 字段上报：prompt/completion/total_tokens）
     # 只进运行记录/SSE 汇总（前端展示消耗），不参与任何上下文逻辑
     usage: dict[str, int] | None = None

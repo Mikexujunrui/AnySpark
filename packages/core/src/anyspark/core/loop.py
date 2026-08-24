@@ -294,8 +294,9 @@ class Agent:
                             content=output.text,
                             metadata={
                                 "reasoning": output.reasoning,
+                                "reasoning_blocks": output.reasoning_blocks,
                             }
-                            if output.reasoning
+                            if (output.reasoning or output.reasoning_blocks)
                             else {},
                         ),
                     )
@@ -335,8 +336,9 @@ class Agent:
                         content=final_text,
                         metadata={
                             "reasoning": output.reasoning,
+                            "reasoning_blocks": output.reasoning_blocks,
                         }
-                        if output.reasoning
+                        if (output.reasoning or output.reasoning_blocks)
                         else {},
                     ),
                 )
@@ -399,6 +401,10 @@ class Agent:
             }
             if output.reasoning:
                 tool_calls_meta["reasoning"] = output.reasoning
+            # S232：Anthropic 原生 thinking 块（含 signature）——thinking + 工具调用
+            # 场景必须随 assistant 消息原样发回，否则 400「thinking blocks cannot be modified」
+            if output.reasoning_blocks:
+                tool_calls_meta["reasoning_blocks"] = output.reasoning_blocks
             store.append(
                 conversation_id,
                 Message(

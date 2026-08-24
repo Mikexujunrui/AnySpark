@@ -637,3 +637,102 @@ def test_gemini_array_param_gets_items() -> None:
     assert patches["items"]["type"] == "STRING"
     # 非 array 参数不受影响
     assert params["properties"]["count"]["type"] == "INTEGER"
+
+
+def test_anthropic_thinking_blocks_preserved_in_roundtrip() -> None:
+    """S232：thinking 块（含 signature）随 assistant 消息回传——
+
+    开启 thinking + 工具调用时，Anthropic 要求完整原样回传 thinking 块
+    （含 signature，不可修改），否则 400「thinking blocks cannot be modified」。
+    旧实现丢弃 reasoning_blocks，只存 reasoning 文本，回传时 assistant 消息
+    无 thinking 块 → 后续工具调用请求 400。
+    """
+    sig = "EqoBCgIACgoKCGNsaXBweS1vc2IKRWRpc29uLW9uLXRoZS1jbGlmZQo="
+    msgs = [
+        Message(role="user", content="写一章"),
+        Message(
+            role="assistant",
+            content="好的，调用写章工具。",
+            metadata={
+                "tool_calls": [{"name": "write_chapter", "arguments": {"title": "第一章"}, "id": "c1"}],
+                # S232：完整 thinking 块结构（含 signature）——回传必需
+                "reasoning_blocks": [
+                    {"type": "thinking", "thinking": "让我构思一下开头…", "signature": sig},
+                ],
+            },
+        ),
+        Message(role="tool", content="已保存", metadata={"tool_call_id": "c1"}),
+    ]
+    _, conv = to_anthropic_messages(msgs)
+    asst = next(
+        m for m in conv if m["role"] == "assistant" and isinstance(m["content"], list)
+    )
+    # thinking 块必须位于 assistant 消息开头（thinking-first 约束）
+    assert asst["content"][0]["type"] == "thinking"
+    assert asst["content"][0]["thinking"] == "让我构思一下开头…"
+    # signature 必须原样保留（不可改，否则 400）
+    assert asst["content"][0]["signature"] == sig
+    # thinking 块必须在 tool_use 之前
+    types = [b.get("type") for b in asst["content"]]
+    assert types.index("thinking") < types.index("tool_use")
+
+
+def test_anthropic_redacted_thinking_preserved() -> None:
+    """S232：redacted_thinking 块（内容不可读）也必须回传。"""
+    msgs = [
+        Message(role="user", content="分析一下"),
+        Message(
+            role="assistant",
+            content="结论。",
+            metadata={
+                "tool_calls": [{"name": "search", "arguments": {}, "id": "c1"}],
+                "reasoning_blocks": [
+                    {"type": "redacted_thinking", "data": "EkQBCgEACgwIvgIQARgCIAE="},
+                ],
+            },
+        ),
+        Message(role="tool", content="", metadata={"tool_call_id": "c1"}),
+    ]
+    _, conv = to_anthropic_messages(msgs)
+    asst = next(
+        m for m in conv if m["role"] == "assistant" and isinstance(m["content"], list)
+    )
+    assert asst["content"][0]["type"] == "redacted_thinking"
+    assert asst["content"][0]["data"] == "EkQBCgEACgwIvgIQARgCIAE="
+
+
+def test_anthropic_parse_content_captures_full_thinking_block() -> None:
+    """S232：_parse_content 必须捕获完整 thinking 块（含 signature），
+
+    不只文本——reasoning_blocks 用于回传，signature 不可丢。
+    """
+    from anyspark.models.anthropic import _parse_content
+
+    content = [
+        {"type": "thinking", "thinking": "先想一步", "signature": "SIG123"},
+        {"type": "text", "text": "回答"},
+        {"type": "tool_use", "id": "c1", "name": "write", "input": {"x": 1}},
+    ]
+    text, tool_calls, reasoning, reasoning_blocks = _parse_content(content)
+    assert text == "回答"
+    assert reasoning == "先想一步"
+    assert len(reasoning_blocks) == 1
+    assert reasoning_blocks[0] == {
+        "type": "thinking",
+        "thinking": "先想一步",
+        "signature": "SIG123",
+    }
+    assert len(tool_calls) == 1
+    assert tool_calls[0].id == "c1"
+
+
+def test_anthropic_parse_content_redacted_thinking() -> None:
+    """S232：redacted_thinking 块也纳入 reasoning_blocks（data 字段）。"""
+    from anyspark.models.anthropic import _parse_content
+
+    content = [
+        {"type": "redacted_thinking", "data": "REDACTED_X"},
+        {"type": "text", "text": "好"},
+    ]
+    _, _, _, reasoning_blocks = _parse_content(content)
+    assert reasoning_blocks == [{"type": "redacted_thinking", "data": "REDACTED_X"}]

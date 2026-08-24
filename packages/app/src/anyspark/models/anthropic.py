@@ -118,6 +118,18 @@ def to_anthropic_messages(
             pending_results = []
         if m.role == "assistant":
             content: list[dict[str, Any]] = []
+            # S232：回传 thinking/redacted_thinking 块（thinking + 工具调用场景必需）
+            # Anthropic 要求 thinking 块位于 assistant 消息**开头**（thinking-first），
+            # 且完整原样（含 signature，不可改）——当前 manual thinking 模式 thinking
+            # 永远在 turn 开头，前置符合原始顺序。
+            rb = m.metadata.get("reasoning_blocks")
+            if isinstance(rb, list) and rb:
+                for blk in rb:
+                    if isinstance(blk, dict) and blk.get("type") in (
+                        "thinking",
+                        "redacted_thinking",
+                    ):
+                        content.append(dict(blk))
             if m.content:
                 content.append({"type": "text", "text": m.content})
             calls = m.metadata.get("tool_calls")
@@ -215,10 +227,16 @@ def to_anthropic_messages(
     return system, merged
 
 
-def _parse_content(content: list[dict[str, Any]]) -> tuple[str, list[ToolCall], str]:
-    """Anthropic content 块 → (text, tool_calls, reasoning)。"""
+def _parse_content(content: list[dict[str, Any]]) -> tuple[str, list[ToolCall], str, list[dict[str, Any]]]:
+    """Anthropic content 块 → (text, tool_calls, reasoning, reasoning_blocks)。
+
+    reasoning_blocks（S232）：完整原生推理块列表（按出现顺序），用于 thinking +
+    工具调用场景的完整回传——Anthropic 要求 thinking/redacted_thinking 块
+    **完整原样**发回（含 signature，不可修改），否则 400。
+    """
     text_parts: list[str] = []
     reasoning_parts: list[str] = []
+    reasoning_blocks: list[dict[str, Any]] = []
     tool_calls: list[ToolCall] = []
     for block in content:
         btype = block.get("type")
@@ -239,8 +257,26 @@ def _parse_content(content: list[dict[str, Any]]) -> tuple[str, list[ToolCall], 
                 )
             )
         elif btype == "thinking":
+            # S232：完整块（含 signature）——回传需原样，只取文本会丢 signature
             reasoning_parts.append(block.get("thinking") or "")
-    return "".join(text_parts), tool_calls, "".join(reasoning_parts)
+            rb: dict[str, Any] = {"type": "thinking"}
+            if block.get("thinking") is not None:
+                rb["thinking"] = block.get("thinking")
+            if block.get("signature") is not None:
+                rb["signature"] = block.get("signature")
+            reasoning_blocks.append(rb)
+        elif btype == "redacted_thinking":
+            # S232：红acted 块（内容不可读，data 字段）同样必须回传
+            rb = {"type": "redacted_thinking"}
+            if block.get("data") is not None:
+                rb["data"] = block.get("data")
+            reasoning_blocks.append(rb)
+    return (
+        "".join(text_parts),
+        tool_calls,
+        "".join(reasoning_parts),
+        reasoning_blocks,
+    )
 
 
 class AnthropicModel:
@@ -322,7 +358,7 @@ class AnthropicModel:
         if resp.status_code != 200:
             raise RuntimeError(f"Anthropic API {resp.status_code}: {resp.text[:300]}")
         data = resp.json()
-        text, tool_calls, reasoning = _parse_content(data.get("content") or [])
+        text, tool_calls, reasoning, reasoning_blocks = _parse_content(data.get("content") or [])
         stop_reason = data.get("stop_reason") or ""
         truncated = stop_reason == "max_tokens"
         usage: dict[str, int] | None = None
@@ -338,6 +374,7 @@ class AnthropicModel:
             tool_calls=tool_calls,
             truncated=truncated,
             reasoning=reasoning,
+            reasoning_blocks=reasoning_blocks,
             usage=usage,
             finish_reason=stop_reason,
         )
@@ -352,6 +389,10 @@ class AnthropicModel:
         payload = self._payload(messages, tools, stream=True)
         text_parts: list[str] = []
         reasoning_parts: list[str] = []
+        # S232：thinking 块按 index 暂存（含 thinking 文本 + signature），
+        # 收尾按 index 排序收集为 reasoning_blocks（流式增量里 signature 走
+        # signature_delta，必须 accumlate 而非只看 thinking_delta）。
+        thinking_blocks: dict[int, dict[str, Any]] = {}
         tool_acc: dict[int, dict[str, str]] = {}  # index -> {id, name, input(累积)}
         truncated = False
         finish_reason = ""
@@ -362,7 +403,22 @@ class AnthropicModel:
         def _handle(event: str, data: dict[str, Any]) -> None:
             nonlocal truncated, usage, finish_reason
             etype = data.get("type")
-            if etype == "content_block_delta":
+            if etype == "content_block_start":
+                idx = int(data.get("index") or 0)
+                block = data.get("content_block") or {}
+                btype = block.get("type")
+                if btype == "thinking":
+                    thinking_blocks[idx] = {"type": "thinking", "thinking": "", "signature": ""}
+                elif btype == "redacted_thinking":
+                    rb: dict[str, Any] = {"type": "redacted_thinking"}
+                    if block.get("data") is not None:
+                        rb["data"] = block.get("data")
+                    thinking_blocks[idx] = rb
+                elif btype == "tool_use":
+                    acc = tool_acc.setdefault(idx, {"id": "", "name": "", "input": ""})
+                    acc["id"] = block.get("id") or ""
+                    acc["name"] = block.get("name") or ""
+            elif etype == "content_block_delta":
                 idx = int(data.get("index") or 0)
                 delta = data.get("delta") or {}
                 dtype = delta.get("type")
@@ -372,14 +428,26 @@ class AnthropicModel:
                     if on_event is not None:
                         on_event(Event(type="text_delta", payload={"content": t}))
                 elif dtype == "thinking_delta":
-                    reasoning_parts.append(delta.get("thinking") or "")
+                    td = delta.get("thinking") or ""
+                    reasoning_parts.append(td)
+                    blk = thinking_blocks.get(idx)
+                    if blk is not None and blk.get("type") == "thinking":
+                        blk["thinking"] = (blk.get("thinking") or "") + td
                     # S213：思考增量实时转发—避免思考期 SSE 静默
                     # 致前端 idle 超时误杀（对齐 pi thinking_delta）
                     if on_event is not None:
-                        on_event(Event(
-                            type="reasoning_delta",
-                            payload={"content": delta.get("thinking") or ""},
-                        ))
+                        on_event(
+                            Event(
+                                type="reasoning_delta",
+                                payload={"content": td},
+                            )
+                        )
+                elif dtype == "signature_delta":
+                    # S232：thinking 块签名（回传必需，不可改）累积
+                    sd = delta.get("signature") or ""
+                    blk = thinking_blocks.get(idx)
+                    if blk is not None and blk.get("type") == "thinking":
+                        blk["signature"] = (blk.get("signature") or "") + sd
                 elif dtype == "input_json_delta":
                     acc = tool_acc.setdefault(idx, {"id": "", "name": "", "input": ""})
                     acc["input"] += delta.get("partial_json") or ""
@@ -390,13 +458,6 @@ class AnthropicModel:
                                 payload={"content": delta.get("partial_json") or ""},
                             )
                         )
-            elif etype == "content_block_start":
-                idx = int(data.get("index") or 0)
-                block = data.get("content_block") or {}
-                if block.get("type") == "tool_use":
-                    acc = tool_acc.setdefault(idx, {"id": "", "name": "", "input": ""})
-                    acc["id"] = block.get("id") or ""
-                    acc["name"] = block.get("name") or ""
             elif etype == "message_delta":
                 d = data.get("delta") or {}
                 sr = d.get("stop_reason") or ""
@@ -461,11 +522,18 @@ class AnthropicModel:
                 # 截断防护（S21）：参数非法→标记，不执行，让模型重发
                 args = {"_raw": raw, "_malformed": True}
             tool_calls.append(ToolCall(name=acc["name"], arguments=args, id=acc.get("id", "")))
+        # S232：thinking 块按 index 排序收集（流式中以 index 为 key 暂存）
+        reasoning_blocks: list[dict[str, Any]] = [
+            b
+            for i in sorted(thinking_blocks)
+            if (b := thinking_blocks[i]).get("type") in ("thinking", "redacted_thinking")
+        ]
         return ModelOutput(
             text="".join(text_parts),
             tool_calls=tool_calls,
             truncated=truncated,
             reasoning="".join(reasoning_parts),
+            reasoning_blocks=reasoning_blocks,
             usage=usage,
             finish_reason=finish_reason,
         )
