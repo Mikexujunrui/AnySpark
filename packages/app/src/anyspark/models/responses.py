@@ -286,10 +286,12 @@ class ResponsesModel:
                 # S213：思考增量实时转发——避免思考期 SSE 静默致前端 idle 超时误杀
                 if on_event is not None:
                     _rd = getattr(event, "delta", "") or ""
-                    on_event(Event(
-                        type="reasoning_delta",
-                        payload={"content": _rd},
-                    ))
+                    on_event(
+                        Event(
+                            type="reasoning_delta",
+                            payload={"content": _rd},
+                        )
+                    )
             elif etype == "response.completed":
                 resp = getattr(event, "response", None)
                 if resp is not None:

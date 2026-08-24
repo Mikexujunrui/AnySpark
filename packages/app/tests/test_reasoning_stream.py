@@ -166,7 +166,10 @@ def test_deepseek_reasoning_content_forwarded() -> None:
         # 正文
         {"choices": [{"delta": {"content": "我来帮你"}, "finish_reason": None}]},
         # 结束
-        {"choices": [{"delta": {}, "finish_reason": "stop"}], "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8}},
+        {
+            "choices": [{"delta": {}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 5, "completion_tokens": 3, "total_tokens": 8},
+        },
     ]
     # frames 变量保留供未来 httpx transport 测试使用（当前用 fake stream）
     # DeepSeek 用 OpenAI SDK，需要 mock httpx transport——但 SDK 自己管 client，
@@ -207,7 +210,17 @@ def test_deepseek_reasoning_content_forwarded() -> None:
     def _fake_create(self: Any = None, **kwargs: Any) -> _FakeStream:
         return _FakeStream(chunks)
 
-    model._client = type("FakeClient", (), {"chat": type("FakeChat", (), {"completions": type("FakeCompletions", (), {"create": _fake_create})()})()})()
+    model._client = type(
+        "FakeClient",
+        (),
+        {
+            "chat": type(
+                "FakeChat",
+                (),
+                {"completions": type("FakeCompletions", (), {"create": _fake_create})()},
+            )()
+        },
+    )()
 
     out = model.respond_stream(
         [Message(role="user", content="hi")], [], on_event=lambda e: captured.append(e)
@@ -379,11 +392,11 @@ def test_gemini_thought_part_forwarded() -> None:
     # Gemini 流式 SSE：data: {candidates:[{content:{parts:[...]}}]}
     frames = [
         # 思考 part（thought=true）
-        f'data: {json.dumps({"candidates":[{"content":{"parts":[{"text":"分析中","thought":True}]}}]})}',
+        f"data: {json.dumps({'candidates': [{'content': {'parts': [{'text': '分析中', 'thought': True}]}}]})}",
         # 正文 part
-        f'data: {json.dumps({"candidates":[{"content":{"parts":[{"text":"答案"}]}}],"finishReason":"STOP"})}',
+        f"data: {json.dumps({'candidates': [{'content': {'parts': [{'text': '答案'}]}}], 'finishReason': 'STOP'})}",
         # usage
-        f'data: {json.dumps({"usageMetadata":{"promptTokenCount":5,"candidatesTokenCount":2,"totalTokenCount":7}})}',
+        f"data: {json.dumps({'usageMetadata': {'promptTokenCount': 5, 'candidatesTokenCount': 2, 'totalTokenCount': 7}})}",
     ]
     from anyspark.models.gemini import GeminiModel
 
@@ -412,7 +425,7 @@ def test_gemini_non_thought_text_not_misclassified() -> None:
     import json
 
     frames = [
-        f'data: {json.dumps({"candidates":[{"content":{"parts":[{"text":"普通正文"}]}}],"finishReason":"STOP"})}',
+        f"data: {json.dumps({'candidates': [{'content': {'parts': [{'text': '普通正文'}]}}], 'finishReason': 'STOP'})}",
     ]
     from anyspark.models.gemini import GeminiModel
 

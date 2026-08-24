@@ -384,10 +384,12 @@ class GeminiModel:
                                         if is_thought:
                                             reasoning_parts.append(t)
                                             if on_event is not None:
-                                                on_event(Event(
-                                                    type="reasoning_delta",
-                                                    payload={"content": t},
-                                                ))
+                                                on_event(
+                                                    Event(
+                                                        type="reasoning_delta",
+                                                        payload={"content": t},
+                                                    )
+                                                )
                                             continue
                                         text_parts.append(t)
                                         if on_event is not None:

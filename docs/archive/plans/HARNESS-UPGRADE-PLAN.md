@@ -83,13 +83,13 @@ S49 RunRecorder 已记录（`data/records/<conv>/events.jsonl`，每轮一行）
 
 ```python
 EventType = Literal[
-    "record",              # 已有：轮快照
+    "record",  # 已有：轮快照
     "context_compressed",  # 新增：{from_turn, to_turn, before_tokens, after_tokens, kept_ids}
-    "inject_cut",          # 新增：{block, reason, char_dropped}
-    "model_switched",      # 新增：{task, old_id, new_id, reason}
-    "steering_injected",   # 新增：{text, at_turn}
-    "tool_approved",       # 新增：{tool, approved, by}
-    "runtime_warning",     # 新增：{origin, message}（评审员加载失败等非致命告警）
+    "inject_cut",  # 新增：{block, reason, char_dropped}
+    "model_switched",  # 新增：{task, old_id, new_id, reason}
+    "steering_injected",  # 新增：{text, at_turn}
+    "tool_approved",  # 新增：{tool, approved, by}
+    "runtime_warning",  # 新增：{origin, message}（评审员加载失败等非致命告警）
 ]
 ```
 

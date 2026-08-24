@@ -170,10 +170,10 @@ case "error":
 ```python
 # 建议的数据结构
 {
-  "book_id": "main",
-  "enabled": true,
-  "level": "standard" | "aggressive" | "custom",
-  "custom_prompt": "..."  # level=custom 时使用
+    "book_id": "main",
+    "enabled": true,
+    "level": "standard" | "aggressive" | "custom",
+    "custom_prompt": "...",  # level=custom 时使用
 }
 ```
 

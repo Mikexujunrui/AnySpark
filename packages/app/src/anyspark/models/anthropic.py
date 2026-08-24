@@ -227,9 +227,9 @@ def to_anthropic_messages(
     return system, merged
 
 
-def _parse_content(content: list[dict[str, Any]]) -> tuple[
-    str, list[ToolCall], str, list[dict[str, Any]]
-]:
+def _parse_content(
+    content: list[dict[str, Any]],
+) -> tuple[str, list[ToolCall], str, list[dict[str, Any]]]:
     """Anthropic content 块 → (text, tool_calls, reasoning, reasoning_blocks)。
 
     reasoning_blocks（S232）：完整原生推理块列表（按出现顺序），用于 thinking +

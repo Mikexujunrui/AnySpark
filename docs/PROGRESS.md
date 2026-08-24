@@ -524,3 +524,15 @@ steering/取消/重试），配对修复等已抽成独立方法，强行拆只�
 - 任务循环盲捕 `Exception` 加 `noqa: BLE001`（benchmark 故意全捕记录 FAIL，非盲错）
 - E501 长行包裹：anthropic.py `_parse_content` 返回类型、test_adapters.py tool_calls 字面量
 **验证**：`ruff check .` 全绿（All checks passed）；test_adapters.py 全过（exit 0）。
+
+---
+
+## S235: v4.0.14 发布——版本 bump 4.0.13→4.0.14 + 推送公开仓库 + EXE 打包
+
+**版本**：4.0.13 → 4.0.14（相对 v4.0.13 仅叠加 S234 ruff 46 处历史错误清理，无功能变更）
+**bump 三处**：pyproject.toml / uv.lock / build_release.sh（缺省版本 v4.0.13→v4.0.14）
+**范围**：feat/shell-port 相对 v4.0.13 tag 领先 2 个提交（S234 + S234b ruff 清理）
+**打包**：`bash scripts/build_release.sh v4.0.14` → 触发 CI 自动构建三平台独立 exe
+  （Windows/macOS/Linux，双击/直接运行即用，零依赖）
+**推送**：`git push public feat/shell-port:main`（public/main 至 S234b 干净态）+ 打 tag `v4.0.14`
+**验证**：`ruff check .` 全绿（All checks passed）；仓库已无历史 lint 债务

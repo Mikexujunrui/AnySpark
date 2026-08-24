@@ -666,9 +666,7 @@ def test_anthropic_thinking_blocks_preserved_in_roundtrip() -> None:
         Message(role="tool", content="已保存", metadata={"tool_call_id": "c1"}),
     ]
     _, conv = to_anthropic_messages(msgs)
-    asst = next(
-        m for m in conv if m["role"] == "assistant" and isinstance(m["content"], list)
-    )
+    asst = next(m for m in conv if m["role"] == "assistant" and isinstance(m["content"], list))
     # thinking 块必须位于 assistant 消息开头（thinking-first 约束）
     assert asst["content"][0]["type"] == "thinking"
     assert asst["content"][0]["thinking"] == "让我构思一下开头…"
@@ -696,9 +694,7 @@ def test_anthropic_redacted_thinking_preserved() -> None:
         Message(role="tool", content="", metadata={"tool_call_id": "c1"}),
     ]
     _, conv = to_anthropic_messages(msgs)
-    asst = next(
-        m for m in conv if m["role"] == "assistant" and isinstance(m["content"], list)
-    )
+    asst = next(m for m in conv if m["role"] == "assistant" and isinstance(m["content"], list))
     assert asst["content"][0]["type"] == "redacted_thinking"
     assert asst["content"][0]["data"] == "EkQBCgEACgwIvgIQARgCIAE="
 
