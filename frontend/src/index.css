@@ -115,6 +115,81 @@ button, a, input, textarea, select {
   color: transparent;
 }
 
+/* ════ S243 原生控件统一化——消除系统默认控件的锐利/突兀感 ════
+   问题：checkbox 原生方框锐利简陋、select 系统箭头 3D 浅灰、
+   下拉弹层白底——全是浏览器默认样式，与圆角暗色 UI 语言冲突。 */
+
+/* color-scheme：原生弹层（select 下拉列表/日期选择器/滚动条）跟随主题渲染 */
+html {
+  color-scheme: dark;
+}
+[data-theme="light"] {
+  color-scheme: light;
+}
+
+/* 复选框：appearance-none 重绘——圆角方框 + accent 填色 + 勾形 clip-path，
+   贴合全 UI 的 rounded 设计语言（原 accent-* 色彩类自动失效，统一品牌色） */
+input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  border: 1.5px solid var(--color-hairline);
+  border-radius: 4.5px;
+  background: var(--color-surface-raised);
+  display: inline-grid;
+  place-content: center;
+  vertical-align: -2px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+input[type="checkbox"]:hover {
+  border-color: var(--color-zinc-500);
+  background: color-mix(in oklab, var(--color-surface-raised) 80%, var(--color-accent) 20%);
+}
+input[type="checkbox"]:checked {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+input[type="checkbox"]:checked::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  background: #fff;
+  clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+}
+input[type="checkbox"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 下拉框：去系统箭头，换线性 SVG chevron（zinc-400，双主题可见） */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6' fill='none'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23a1a1aa' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  /* 现有 px-2/px-3 类会覆盖元素级 padding-right，需 !important 保证文字不压箭头 */
+  padding-right: 22px !important;
+}
+select option {
+  background: var(--color-surface-raised);
+  color: var(--color-content);
+}
+
+/* 数字输入：隐藏原生上下 spinner（系统样式突兀；键盘上下键仍可调） */
+input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* ── Light theme: zinc palette inversion ──
    This inverts the built-in zinc color scale so that ALL bg-zinc-*,
    text-zinc-*, border-zinc-* classes auto-respond to data-theme
