@@ -295,6 +295,12 @@ def build_app(
     play_store = PlayStore(real_db)
     # S86 参考书库（全局文件区 data/library/ + 关联表）
     library = LibraryStore(real_db)
+    # S244 书库 RAG：向量索引 + embedding 客户端（未配 key 时 None/不可用，检索降级关键词）
+    from anyspark.library.embedding import EmbeddingClient
+    from anyspark.library.vectors import LibraryVectors
+
+    embedder = EmbeddingClient()
+    library_vectors = LibraryVectors(str(real_db)) if embedder.available else None
     # S195：用户自定义骨架检测项存储（DESIGN 机制 9 第③层持久化）
     from anyspark.server.check_store import UserSkeletonStore
 
@@ -398,6 +404,8 @@ def build_app(
         play_store=play_store,
         library=library,
         user_skeleton=user_skeleton,
+        library_vectors=library_vectors,
+        embedder=embedder,
         mind_planner=mind_planner,
         signal_collector=signal_collector,
         provider=provider,

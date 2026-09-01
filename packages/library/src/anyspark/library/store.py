@@ -147,6 +147,21 @@ class LibraryStore:
                 break
         return "\n\n".join(parts)
 
+    def iter_book_files(self, book_id: str) -> list[tuple[str, str, float, int]]:
+        """枚举书目录全部 md 文件（S244 向量索引用）：[(filename, text, mtime, size)]。"""
+        d = self.root / book_id
+        if not d.exists():
+            return []
+        out: list[tuple[str, str, float, int]] = []
+        for f in sorted(d.glob("*.md")):
+            try:
+                text = f.read_text(encoding="utf-8")
+                st = f.stat()
+                out.append((f.name, text, st.st_mtime, st.st_size))
+            except OSError:
+                continue
+        return out
+
     def delete_book(self, book_id: str) -> bool:
         with self._lock:
             cur = self._conn.execute("DELETE FROM library_books WHERE id=?", (book_id,))

@@ -130,6 +130,9 @@ class AppDeps:
     workflow_engine: WorkflowEngine | None = None
     play_engine: PlayEngine | None = None
     review_panel: ReviewPanel | None = None
+    # S244：书库 RAG（语义检索）——未配 embedding 时 None，检索降级关键词
+    library_vectors: Any | None = None
+    embedder: Any | None = None
 
     # --- 进程内共享状态（单例，不能每 router 重建） ---
     active_tokens: dict[str, CancellationToken] = field(default_factory=dict)

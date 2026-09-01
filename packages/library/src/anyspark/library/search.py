@@ -69,3 +69,96 @@ def search_reference_books(
             total += len(hits)
             results.append({"ref_name": name, "type": ref["type"], "hits": hits})
     return {"total_hits": total, "results": results}
+
+
+# ---------------------------------------------------------------------------
+# S244：全局书库混合检索（关键词 + 语义向量）
+# ---------------------------------------------------------------------------
+
+
+def search_library_keyword(
+    store: LibraryStore,
+    keyword: str,
+    max_per_book: int = 3,
+) -> list[dict[str, Any]]:
+    """全书库关键词检索（不限于项目已选参考书）。返回 [{book_id, book_name, snippet, count}]。"""
+    keyword = (keyword or "").strip()
+    if not keyword:
+        return []
+    out: list[dict[str, Any]] = []
+    for b in store.list_books():
+        text = store.read_book(b["id"], max_chars=300000)
+        if not text.strip():
+            continue
+        for h in _hit_lines(text, keyword, max_hits=max_per_book):
+            out.append(
+                {
+                    "book_id": b["id"],
+                    "book_name": b["name"],
+                    "snippet": h["snippet"],
+                    "count": h["count"],
+                }
+            )
+    return out
+
+
+def search_library_hybrid(
+    store: LibraryStore,
+    vectors: Any | None,
+    embedder: Any | None,
+    query: str,
+    top_k: int = 8,
+    max_keyword_per_book: int = 3,
+) -> dict[str, Any]:
+    """全局书库混合检索：语义（向量余弦）+ 关键词（包含匹配）双通道。
+
+    - embedder 不可用（未配 key）→ 语义通道降级跳过（degraded=True），
+      只返回关键词通道——RAG 是增强层，绝不阻塞检索
+    - 双通道各自排序返回（source 标记），前端分组展示；
+      语义命中天然带相似度分，关键词命中带命中次数
+    """
+    query = (query or "").strip()
+    if not query:
+        return {"query": "", "semantic": [], "keyword": [], "degraded": False, "indexed_chunks": 0}
+
+    # 语义通道
+    semantic: list[dict[str, Any]] = []
+    degraded = False
+    indexed_chunks = 0
+    if vectors is not None:
+        st = vectors.stats()
+        indexed_chunks = st.get("chunks", 0) or 0
+    if vectors is not None and embedder is not None and embedder.available and indexed_chunks > 0:
+        try:
+            qvec = embedder.embed([query])[0]
+            for h in vectors.search(qvec, top_k=top_k):
+                book = store.get_book(h["book_id"])
+                semantic.append(
+                    {
+                        "book_id": h["book_id"],
+                        "book_name": book["name"] if book else h["book_id"],
+                        "filename": h["filename"],
+                        "snippet": h["text"][:400],
+                        "score": h["score"],
+                    }
+                )
+        except Exception as exc:  # embedding 服务故障时降级关键词，不阻塞检索
+            degraded = True
+            import logging
+
+            logging.getLogger("anyspark.library").warning(
+                "书库语义检索降级（embedding 失败）: %s", exc
+            )
+    else:
+        degraded = embedder is None or not embedder.available
+
+    # 关键词通道
+    keyword_hits = search_library_keyword(store, query, max_per_book=max_keyword_per_book)
+
+    return {
+        "query": query,
+        "semantic": semantic,
+        "keyword": keyword_hits,
+        "degraded": degraded,
+        "indexed_chunks": indexed_chunks,
+    }

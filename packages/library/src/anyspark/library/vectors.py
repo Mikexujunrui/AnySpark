@@ -1,0 +1,253 @@
+"""
+anyspark.library.vectors — 书库向量索引（S244，语义检索存储层）。
+
+设计：
+- 分块：中文友好——按段落聚合到 ~CHUNK_SIZE 字，段间少量重叠上下文
+- 存储：SQLite（与书库元数据同库）——chunk 文本 + float32 BLOB 向量 +
+  索引状态（filename/mtime/size），书库规模（千级 chunk）纯 Python 余弦足够
+- 增量：按文件 mtime+size 判断跳过未变文件；书删除/文件消失时清残留
+- 依赖：无 numpy——1024 维点积纯 Python ~50µs，万级 chunk 检索 <1s
+"""
+
+from __future__ import annotations
+
+import struct
+import threading
+from pathlib import Path
+from datetime import UTC, datetime
+from typing import Any
+
+from anyspark.core.db import connect as sqlite_connect
+
+CHUNK_SIZE = 500  # 每块目标字数（中文）
+CHUNK_OVERLAP = 60  # 相邻块重叠字数（保上下文连贯）
+DEFAULT_TOP_K = 8
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS library_chunks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    chunk_idx INTEGER NOT NULL,
+    text TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    embedding BLOB NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(book_id, filename, chunk_idx)
+);
+CREATE TABLE IF NOT EXISTS library_index_state (
+    book_id TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mtime REAL NOT NULL,
+    size INTEGER NOT NULL,
+    chunks INTEGER NOT NULL,
+    dim INTEGER NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (book_id, filename)
+);
+"""
+
+
+def _now() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def pack_vector(vec: list[float]) -> bytes:
+    """float 列表 → float32 BLOB（4x 体积省一半，精度对余弦足够）。"""
+    return struct.pack(f"<{len(vec)}f", *vec)
+
+
+def unpack_vector(blob: bytes) -> list[float]:
+    return list(struct.unpack(f"<{len(blob) // 4}f", blob))
+
+
+def cosine(a: list[float], b: list[float]) -> float:
+    """余弦相似度（纯 Python；调用方保证等维）。"""
+    dot = 0.0
+    na = 0.0
+    nb = 0.0
+    for x, y in zip(a, b, strict=True):
+        dot += x * y
+        na += x * x
+        nb += y * y
+    if na == 0.0 or nb == 0.0:
+        return 0.0
+    return dot / ((na**0.5) * (nb**0.5))  # type: ignore[no-any-return]
+
+
+def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """中文友好分块：按空行分段 → 聚合到目标大小；超长单段硬切带重叠。
+
+    短段聚合保留段落边界（语义完整）；单段超长按 size 硬切并回退 overlap 字，
+    避免句子被腰斩后检索片段不可读。
+    """
+    text = (text or "").strip()
+    if not text:
+        return []
+    paras = [p.strip() for p in text.split("\n") if p.strip()]
+    chunks: list[str] = []
+    buf = ""
+    for p in paras:
+        # 单段超长：硬切（带重叠回退）
+        if len(p) > size:
+            if buf:
+                chunks.append(buf)
+                buf = ""
+            step = size - overlap
+            for i in range(0, len(p), step):
+                piece = p[i : i + size]
+                chunks.append(piece)
+                if i + size >= len(p):
+                    break
+            continue
+        # 聚合：放得下就并，放不下先落一块
+        if buf and len(buf) + len(p) + 1 > size:
+            chunks.append(buf)
+            buf = p
+        else:
+            buf = f"{buf}\n{p}" if buf else p
+    if buf:
+        chunks.append(buf)
+    return chunks
+
+
+class LibraryVectors:
+    """书库向量索引：增量索引 + 余弦检索（SQLite 持久化）。"""
+
+    def __init__(self, db_path: str | Path) -> None:
+        self._conn = sqlite_connect(str(db_path))
+        self._lock = threading.Lock()
+        with self._lock:
+            self._conn.executescript(_SCHEMA)
+            self._conn.commit()
+
+    # -- 索引 --
+
+    def index_book_signed(
+        self,
+        book_id: str,
+        signed_files: list[tuple[str, str, float, int]],  # (filename, text, mtime, size)
+        embed: Any,
+    ) -> dict[str, Any]:
+        """增量索引（带文件签名版）。签名未变的文件跳过。"""
+        indexed = 0
+        skipped = 0
+        total_chunks = 0
+        seen_files: set[str] = set()
+        with self._lock:
+            for filename, text, mtime, size in signed_files:
+                seen_files.add(filename)
+                st = self._state(book_id, filename)
+                if st and st["mtime"] == mtime and st["size"] == size:
+                    skipped += 1
+                    total_chunks += st["chunks"]
+                    continue
+                chunks = chunk_text(text)
+                # 清掉该文件旧 chunk 再写新（简单可靠的增量策略）
+                self._conn.execute(
+                    "DELETE FROM library_chunks WHERE book_id=? AND filename=?",
+                    (book_id, filename),
+                )
+                if chunks:
+                    vecs = embed(chunks)
+                    dim = len(vecs[0]) if vecs else 0
+                    now = _now()
+                    self._conn.executemany(
+                        "INSERT OR REPLACE INTO library_chunks"
+                        " (book_id, filename, chunk_idx, text, dim, embedding, created_at)"
+                        " VALUES (?,?,?,?,?,?,?)",
+                        [
+                            (book_id, filename, i, c, dim, pack_vector(v), now)
+                            for i, (c, v) in enumerate(zip(chunks, vecs, strict=True))
+                        ],
+                    )
+                    self._conn.execute(
+                        "INSERT OR REPLACE INTO library_index_state"
+                        " (book_id, filename, mtime, size, chunks, dim, updated_at)"
+                        " VALUES (?,?,?,?,?,?,?)",
+                        (book_id, filename, mtime, size, len(chunks), dim, now),
+                    )
+                    total_chunks += len(chunks)
+                else:
+                    self._conn.execute(
+                        "DELETE FROM library_index_state WHERE book_id=? AND filename=?",
+                        (book_id, filename),
+                    )
+                indexed += 1
+            # 清理已消失文件的残留索引
+            rows = self._conn.execute(
+                "SELECT DISTINCT filename FROM library_index_state WHERE book_id=?",
+                (book_id,),
+            ).fetchall()
+            for (fname,) in rows:
+                if fname not in seen_files:
+                    self._conn.execute(
+                        "DELETE FROM library_chunks WHERE book_id=? AND filename=?",
+                        (book_id, fname),
+                    )
+                    self._conn.execute(
+                        "DELETE FROM library_index_state WHERE book_id=? AND filename=?",
+                        (book_id, fname),
+                    )
+            self._conn.commit()
+        return {"indexed": indexed, "skipped": skipped, "chunks": total_chunks}
+
+    def drop_book(self, book_id: str) -> None:
+        with self._lock:
+            self._conn.execute("DELETE FROM library_chunks WHERE book_id=?", (book_id,))
+            self._conn.execute("DELETE FROM library_index_state WHERE book_id=?", (book_id,))
+            self._conn.commit()
+
+    def _state(self, book_id: str, filename: str) -> dict[str, Any] | None:
+        row = self._conn.execute(
+            "SELECT mtime, size, chunks, dim FROM library_index_state"
+            " WHERE book_id=? AND filename=?",
+            (book_id, filename),
+        ).fetchone()
+        if not row:
+            return None
+        return {"mtime": row[0], "size": row[1], "chunks": row[2], "dim": row[3]}
+
+    # -- 检索 --
+
+    def search(
+        self,
+        query_vec: list[float],
+        book_ids: list[str] | None = None,
+        top_k: int = DEFAULT_TOP_K,
+    ) -> list[dict[str, Any]]:
+        """余弦检索 top-K（可选限定书范围）。返回 [{book_id, filename, chunk_idx, text, score}]。"""
+        sql = "SELECT book_id, filename, chunk_idx, text, embedding FROM library_chunks"
+        args: list[Any] = []
+        if book_ids:
+            sql += f" WHERE book_id IN ({','.join('?' * len(book_ids))})"
+            args = list(book_ids)
+        rows = self._conn.execute(sql, args).fetchall()
+        scored: list[dict[str, Any]] = []
+        for book_id, filename, chunk_idx, text, blob in rows:
+            vec = unpack_vector(blob)
+            if len(vec) != len(query_vec):
+                continue  # 维度不符（换过模型）——跳过，重索引后恢复
+            score = cosine(query_vec, vec)
+            if score > 0.25:  # 阈值：低于此基本无关（经验值，宁缺毋滥）
+                scored.append(
+                    {
+                        "book_id": book_id,
+                        "filename": filename,
+                        "chunk_idx": chunk_idx,
+                        "text": text,
+                        "score": round(score, 4),
+                    }
+                )
+        scored.sort(key=lambda h: h["score"], reverse=True)
+        return scored[:top_k]
+
+    def stats(self) -> dict[str, Any]:
+        """索引概况（书数/chunk 数/维度）。"""
+        with self._lock:
+            books = self._conn.execute(
+                "SELECT COUNT(DISTINCT book_id) FROM library_chunks"
+            ).fetchone()[0]
+            chunks = self._conn.execute("SELECT COUNT(*) FROM library_chunks").fetchone()[0]
+            dim = self._conn.execute("SELECT dim FROM library_chunks LIMIT 1").fetchone()
+        return {"books": books, "chunks": chunks, "dim": dim[0] if dim else None}

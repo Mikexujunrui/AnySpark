@@ -18,6 +18,7 @@ from anyspark.server.schemas import (
     LibraryImportIn,
     LibraryRefineIn,
     LibraryRefsIn,
+    LibrarySearchIn,
 )
 
 
@@ -52,14 +53,78 @@ def make_library_router(deps: AppDeps) -> APIRouter:
         for i, ch in enumerate(chaps):
             deps.library.import_chapter(req.book_id, ch["title"], ch["content"], i)
             count += 1
-        return {"ok": True, "book_id": req.book_id, "chapters": count}
+        # S244：导入后尽力向量索引（embedding 未配/失败不阻塞导入）
+        index_note = _try_index_book(req.book_id)
+        return {"ok": True, "book_id": req.book_id, "chapters": count, "index": index_note}
 
     @router.delete("/api/library/{book_id}", response_model=dict[str, bool])
     def delete_library_book(book_id: str) -> dict[str, bool]:
         ok = deps.library.delete_book(book_id)
         if not ok:
             raise HTTPException(status_code=404, detail="书不存在")
+        # S244：同步清向量残留
+        if deps.library_vectors is not None:
+            deps.library_vectors.drop_book(book_id)
         return {"ok": True}
+
+    # -- S244 书库 RAG（语义检索 + 混合排序 + 索引管理） --
+
+    def _try_index_book(book_id: str) -> dict[str, Any]:
+        """尽力索引一本书（embedding 不可用/失败返回说明，不抛异常）。"""
+        if deps.library_vectors is None or deps.embedder is None or not deps.embedder.available:
+            return {"skipped": "embedding 未配置"}
+        try:
+            files = deps.library.iter_book_files(book_id)
+            result: dict[str, Any] = deps.library_vectors.index_book_signed(
+                book_id, files, deps.embedder.embed
+            )
+            return result
+        except Exception as exc:  # 索引失败不影响导入主流程
+            logger.warning("书库向量索引失败 book=%s: %s", book_id, exc)
+            return {"error": str(exc)[:200]}
+
+    @router.post("/api/library/{book_id}/reindex", response_model=dict[str, Any])
+    def reindex_library_book(book_id: str) -> dict[str, Any]:
+        """（重）索引一本书的向量（增量：未变更文件跳过）。"""
+        if deps.library_vectors is None or deps.embedder is None or not deps.embedder.available:
+            raise HTTPException(
+                status_code=400,
+                detail="向量索引不可用：未配置 EMBEDDING（可用 DEEPSEEK_* 兑底）",
+            )
+        book = deps.library.get_book(book_id)
+        if book is None:
+            raise HTTPException(status_code=404, detail="书不存在")
+        files = deps.library.iter_book_files(book_id)
+        if not files:
+            raise HTTPException(status_code=400, detail="书内无章节文件")
+        result = deps.library_vectors.index_book_signed(book_id, files, deps.embedder.embed)
+        return {"ok": True, "book_id": book_id, "book_name": book["name"], **result}
+
+    @router.post("/api/library/search", response_model=dict[str, Any])
+    def search_library_global(req: LibrarySearchIn) -> dict[str, Any]:
+        """全局书库混合检索（S244）：语义（向量余弦）+ 关键词双通道。
+
+        embedding 未配置时自动降级纯关键词（degraded=true 标记）。
+        """
+        from anyspark.library.search import search_library_hybrid
+
+        result: dict[str, Any] = search_library_hybrid(
+            deps.library,
+            deps.library_vectors,
+            deps.embedder,
+            req.query,
+            top_k=req.top_k,
+        )
+        return result
+
+    @router.get("/api/library/index-status", response_model=dict[str, Any])
+    def library_index_status() -> dict[str, Any]:
+        """向量索引概况（书数/chunk 数/维度/可用性）。"""
+        if deps.library_vectors is None:
+            return {"available": False, "books": 0, "chunks": 0, "dim": None}
+        st: dict[str, Any] = deps.library_vectors.stats()
+        st["available"] = bool(deps.embedder and deps.embedder.available) and st["chunks"] > 0
+        return st
 
     # -- 项目-参考书关联 --
     @router.get("/api/books/{book_id}/references", response_model=list[dict[str, Any]])

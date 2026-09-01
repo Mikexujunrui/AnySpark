@@ -816,6 +816,13 @@ class LibraryImportIn(BaseModel):
     title: str = ""  # 缺省用书名
 
 
+class LibrarySearchIn(BaseModel):
+    """S244：全局书库混合检索请求。"""
+
+    query: str
+    top_k: int = 8  # 语义通道返回上限
+
+
 class LibraryRefsIn(BaseModel):
     refs: list[dict[str, str]] = Field(
         default_factory=list, description="[{type: library|project, id: ...}]"

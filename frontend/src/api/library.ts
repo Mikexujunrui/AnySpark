@@ -61,3 +61,40 @@ export async function setReferences(
 ): Promise<{ ok: boolean; book_id: string; refs: RefItem[] }> {
   return apiPut(`/api/books/${bookId}/references`, { refs });
 }
+
+// S244：书库 RAG——混合检索（语义 + 关键词）与向量索引管理
+export interface LibrarySearchHit {
+  book_id: string;
+  book_name: string;
+  filename?: string;
+  snippet: string;
+  score?: number;
+  count?: number;
+}
+
+export interface LibrarySearchResult {
+  query: string;
+  semantic: LibrarySearchHit[];
+  keyword: LibrarySearchHit[];
+  degraded: boolean;
+  indexed_chunks: number;
+}
+
+export async function searchLibrary(query: string, topK = 8): Promise<LibrarySearchResult> {
+  return apiPost("/api/library/search", { query, top_k: topK });
+}
+
+export async function reindexLibraryBook(
+  bookId: string,
+): Promise<{ ok: boolean; indexed: number; skipped: number; chunks: number }> {
+  return apiPost(`/api/library/${bookId}/reindex`, {});
+}
+
+export async function libraryIndexStatus(): Promise<{
+  available: boolean;
+  books: number;
+  chunks: number;
+  dim: number | null;
+}> {
+  return apiGet("/api/library/index-status");
+}

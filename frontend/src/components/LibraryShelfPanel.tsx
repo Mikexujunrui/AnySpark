@@ -5,8 +5,11 @@ import {
   createLibraryBook,
   deleteLibraryBook,
   importLibraryText,
+  libraryIndexStatus,
   listLibrary,
   refineLibrarySkill,
+  searchLibrary,
+  type LibrarySearchResult,
 } from "../api/library";
 import {
   type SkillDraft,
@@ -62,6 +65,31 @@ export default function LibraryShelfPanel() {
       setLoading(false);
     }
   }, []);
+
+  // S244：书库语义检索状态
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searching, setSearching] = useState(false);
+  const [searchResult, setSearchResult] = useState<LibrarySearchResult | null>(null);
+  const [indexInfo, setIndexInfo] = useState<{ available: boolean; chunks: number } | null>(null);
+
+  useEffect(() => {
+    libraryIndexStatus()
+      .then((st) => setIndexInfo({ available: st.available, chunks: st.chunks }))
+      .catch(() => setIndexInfo(null));
+  }, []);
+
+  const onSearch = async () => {
+    const q = searchQuery.trim();
+    if (!q || searching) return;
+    setSearching(true);
+    try {
+      setSearchResult(await searchLibrary(q));
+    } catch {
+      flash("err", "检索失败，请检查后端");
+    } finally {
+      setSearching(false);
+    }
+  };
 
   useEffect(() => {
     loadData();
@@ -284,6 +312,103 @@ export default function LibraryShelfPanel() {
             </div>
           </div>
         )}
+
+        {/* S244：语义搜索（混合检索） */}
+        <section className="mb-12">
+          <div className="flex items-center gap-2 mb-3 flex-wrap">
+            <Icon name="search" size={15} className="text-violet-400" />
+            <h2 className="text-sm font-semibold text-zinc-200">语义检索</h2>
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-violet-900/30 text-violet-300 border border-violet-800/40">
+              RAG 混合：语义 + 关键词
+            </span>
+            {indexInfo && (
+              <span className="text-[10px] text-zinc-600">
+                {indexInfo.available
+                  ? `已索引 ${indexInfo.chunks} 段`
+                  : "向量索引未启用（配置 EMBEDDING 后自动开启）"}
+              </span>
+            )}
+          </div>
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+              <input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && onSearch()}
+                placeholder="用自然语言模糊搜书库，如「类似中世纪行会的权力斗争设定」…"
+                className="w-full bg-zinc-900/80 border border-zinc-700 rounded-lg pl-9 pr-3 py-2.5 text-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:border-violet-500 focus:shadow-[0_0_0_3px_rgb(139_92_246/0.12)] transition-all"
+              />
+              <Icon name="zap" size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500" />
+            </div>
+            <button
+              onClick={onSearch}
+              disabled={searching || !searchQuery.trim()}
+              className="bg-gradient-to-r from-violet-600 to-indigo-500 hover:from-violet-500 hover:to-indigo-400 active:scale-95 disabled:opacity-40 text-white px-4 py-2.5 rounded-lg transition-all text-sm font-medium flex items-center gap-1.5 shrink-0"
+            >
+              {searching ? <Icon name="loader" size={14} className="animate-spin" /> : <Icon name="search" size={14} />}
+              {searching ? "检索中…" : "检索"}
+            </button>
+          </div>
+
+          {searchResult && (
+            <div className="mt-4 space-y-4 animate-fade-in">
+              {searchResult.degraded && (
+                <p className="text-[11px] text-amber-500/80 flex items-center gap-1">
+                  <Icon name="alert-circle" size={11} />
+                  语义通道未启用，以下为关键词结果（配置 EMBEDDING 后可用语义检索）
+                </p>
+              )}
+              {searchResult.semantic.length > 0 && (
+                <div>
+                  <p className="text-[11px] text-violet-300/80 mb-2 flex items-center gap-1">
+                    <Icon name="zap" size={11} /> 语义匹配（按相似度）
+                  </p>
+                  <div className="space-y-2">
+                    {searchResult.semantic.map((h, i) => (
+                      <div
+                        key={`s-${i}`}
+                        className="bg-zinc-900/60 border border-zinc-800 rounded-lg px-3.5 py-2.5 hover:border-zinc-700 transition-colors"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-medium text-zinc-200">《{h.book_name}》</span>
+                          {h.filename && <span className="text-[10px] text-zinc-600">{h.filename.replace(/\.md$/, "")}</span>}
+                          <span className="ml-auto text-[10px] font-mono text-violet-400/80">
+                            {((h.score ?? 0) * 100).toFixed(1)}%
+                          </span>
+                        </div>
+                        <p className="text-xs text-zinc-400 leading-relaxed line-clamp-3">{h.snippet}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {searchResult.keyword.length > 0 && (
+                <div>
+                  <p className="text-[11px] text-sky-300/80 mb-2 flex items-center gap-1">
+                    <Icon name="type" size={11} /> 关键词命中
+                  </p>
+                  <div className="space-y-2">
+                    {searchResult.keyword.map((h, i) => (
+                      <div
+                        key={`k-${i}`}
+                        className="bg-zinc-900/60 border border-zinc-800 rounded-lg px-3.5 py-2.5 hover:border-zinc-700 transition-colors"
+                      >
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-xs font-medium text-zinc-200">《{h.book_name}》</span>
+                          <span className="ml-auto text-[10px] font-mono text-sky-400/80">×{h.count}</span>
+                        </div>
+                        <p className="text-xs text-zinc-400 leading-relaxed line-clamp-3">{h.snippet}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {searchResult.semantic.length === 0 && searchResult.keyword.length === 0 && (
+                <p className="text-xs text-zinc-600 py-4 text-center">书库中未找到相关内容</p>
+              )}
+            </div>
+          )}
+        </section>
 
         {/* 技能草稿区 */}
         <section className="mb-12">
