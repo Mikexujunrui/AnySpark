@@ -50,6 +50,13 @@
 | [state_agent_loop.puml](state_agent_loop.puml) | **Agent 循环状态机**：Idle → Running（构建上下文 → 调模型 → 解析 → 执行工具 → 回填 → 迭代）→ FinalAnswer / Error / Aborted |
 | [state_workflow.puml](state_workflow.puml) | **工作流状态机**：TaskStatus（queued → running → done/failed/cancelled/waiting_approval）+ NodeStatus（pending → running → done/failed/skipped）+ 5 种节点行为 |
 
+## 交互式架构图（Archify）
+
+| 文件 | 内容 |
+|------|------|
+| [archify/anyspark-architecture.html](archify/anyspark-architecture.html) | **可交互运行时架构图**：浏览器→FastAPI→Agent 循环→模型适配层→DeepSeek 主路径 + 工具循环/持久化两个侧视图；暗/亮主题、PNG 导出，浏览器直接打开 |
+| [archify/anyspark-architecture.json](archify/anyspark-architecture.json) | 上图的 JSON IR 源（showcase 9/9 校验过）；改架构后用 pi-archify 包的 `archify_validate`/`archify_deliver` 重新生成 HTML |
+
 ## 接口全清单
 
 | 文件 | 内容 |

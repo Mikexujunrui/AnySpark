@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "AnySpark v4 运行时架构",
+    "output": "anyspark-architecture.html",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "chat-primary", "label": "对话写作主路径", "focus": ["browser", "api", "loop", "models", "llm"], "note": "浏览器 SSE 流式对话进入 agent 循环，经模型适配层到达 DeepSeek。" },
+      { "id": "tool-loop", "label": "工具循环与领域包", "focus": ["loop", "tools", "domain", "store", "fs"], "note": "agent 循环调用 48 个领域工具，领域能力落 SQLite 与章节工作区。" },
+      { "id": "persistence", "label": "持久化与工作区", "focus": ["domain", "store", "fs", "api"], "note": "领域包读写 SQLite，章节 markdown 是权威副本，data/ 不入 git。" }
+    ]
+  },
+  "components": [
+    { "id": "browser", "type": "external", "label": "用户浏览器", "sublabel": "创作台会话", "pos": [40, 290], "size": [120, 60] },
+    { "id": "frontend", "type": "frontend", "label": "创作台 SPA", "sublabel": "vite dist", "pos": [240, 150], "size": [130, 60] },
+    { "id": "api", "type": "backend", "label": "FastAPI", "sublabel": "单端口 :8000 · 23 routers", "pos": [440, 290], "size": [130, 64] },
+    { "id": "loop", "type": "backend", "label": "Agent 循环", "sublabel": "core · SSE 流式", "pos": [640, 290], "size": [130, 64] },
+    { "id": "models", "type": "backend", "label": "模型适配层", "sublabel": "registry · 4 协议", "pos": [640, 150], "size": [130, 60] },
+    { "id": "llm", "type": "cloud", "label": "DeepSeek API", "sublabel": "官方 / DashScope", "pos": [840, 150], "size": [120, 60] },
+    { "id": "fs", "type": "database", "label": "章节工作区", "sublabel": "markdown 权威", "pos": [840, 290], "size": [130, 60] },
+    { "id": "tools", "type": "backend", "label": "领域工具集", "sublabel": "48 个工具", "pos": [420, 440], "size": [130, 60] },
+    { "id": "domain", "type": "backend", "label": "领域包 ×9", "sublabel": "graph/align/check…", "pos": [620, 440], "size": [130, 60] },
+    { "id": "store", "type": "database", "label": "SQLite", "sublabel": "data/anyspark.db", "pos": [840, 440], "size": [130, 60] }
+  ],
+  "boundaries": [
+    { "kind": "region", "label": "AnySpark 本机进程 :8000（前后端同源）", "wraps": ["frontend", "api", "loop", "models", "tools", "domain"] },
+    { "kind": "region", "label": "data/ 工作区（不入 git）", "wraps": ["fs", "store"] }
+  ],
+  "connections": [
+    { "id": "browser-open", "from": "browser", "to": "frontend", "label": "打开创作台" },
+    { "id": "browser-chat", "from": "browser", "to": "api", "label": "SSE /api/chat", "variant": "emphasis" },
+    { "id": "frontend-rest", "from": "frontend", "to": "api", "label": "REST /api/*", "variant": "dashed", "fromSide": "bottom", "toSide": "top" },
+    { "id": "api-loop", "from": "api", "to": "loop", "label": "会话 prompt" },
+    { "id": "loop-models", "from": "loop", "to": "models", "label": "chat(stream)", "labelDy": -18 },
+    { "id": "models-llm", "from": "models", "to": "llm", "label": "API Key", "variant": "security", "labelDy": -18 },
+    { "id": "loop-tools", "from": "loop", "to": "tools", "label": "tool calls", "variant": "dashed", "labelDy": -18 },
+    { "id": "tools-domain", "from": "tools", "to": "domain" },
+    { "id": "domain-store", "from": "domain", "to": "store", "label": "SQLite 读写" },
+    { "id": "tools-fs", "from": "tools", "to": "fs", "label": "章节 md 落盘", "variant": "dashed", "fromSide": "top", "toSide": "left", "labelDy": -18 }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "入口", "items": ["单端口 8000，前后端同源", "FastAPI 静态托管 vite dist；API 层 23 routers 直读写 SQLite"] },
+    { "dot": "emerald", "title": "Agent 循环", "items": ["SSE 流式 + 思考模式回传", "48 个领域工具按需调用", "write_chapter 意图模式防上下文毒化"] },
+    { "dot": "rose", "title": "持久化", "items": ["SQLite 单库存会话/章节/图谱", "章节 markdown 是权威副本", "data/ 整体不入 git，可拷贝迁移"] }
+  ]
+}
