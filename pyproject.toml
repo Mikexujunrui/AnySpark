@@ -133,6 +133,13 @@ mypy_path = [
 ]
 explicit_package_bases = true
 
+[[tool.mypy.overrides]]
+# S247：numpy 2.5+ stub 用 3.12+ type 语句语法，mypy（py311 目标）无法解析——跳过
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
+follow_imports_for_stubs = true
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = [
     "packages/core/tests",

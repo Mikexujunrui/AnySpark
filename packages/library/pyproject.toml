@@ -11,6 +11,7 @@ description = "AnySpark v4 参考书库：全局书库 + 项目选参考书 + �
 requires-python = ">=3.11"
 dependencies = [
     "anyspark-core==0.0.1",  # workspace 成员
+    "numpy>=1.26",  # S247：向量检索矩阵化（万级 chunk 毫秒级）
 ]
 
 [build-system]

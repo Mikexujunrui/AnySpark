@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException
 
-from anyspark.server.deps import AppDeps
+from anyspark.server.deps import AppDeps, BgTask
 from anyspark.server.logging import logger
 from anyspark.server.schemas import (
     LibraryBookIn,
@@ -53,9 +53,9 @@ def make_library_router(deps: AppDeps) -> APIRouter:
         for i, ch in enumerate(chaps):
             deps.library.import_chapter(req.book_id, ch["title"], ch["content"], i)
             count += 1
-        # S244：导入后尽力向量索引（embedding 未配/失败不阻塞导入）
-        index_note = _try_index_book(req.book_id)
-        return {"ok": True, "book_id": req.book_id, "chapters": count, "index": index_note}
+        # S244/S247：导入后后台向量索引（大书同步索引会阻塞 HTTP，改投 bg_queue）
+        deps.bg_queue.put(BgTask(kind="library_index", book_id=req.book_id))
+        return {"ok": True, "book_id": req.book_id, "chapters": count, "index": "queued"}
 
     @router.delete("/api/library/{book_id}", response_model=dict[str, bool])
     def delete_library_book(book_id: str) -> dict[str, bool]:
@@ -68,20 +68,6 @@ def make_library_router(deps: AppDeps) -> APIRouter:
         return {"ok": True}
 
     # -- S244 书库 RAG（语义检索 + 混合排序 + 索引管理） --
-
-    def _try_index_book(book_id: str) -> dict[str, Any]:
-        """尽力索引一本书（embedding 不可用/失败返回说明，不抛异常）。"""
-        if deps.library_vectors is None or deps.embedder is None or not deps.embedder.available:
-            return {"skipped": "embedding 未配置"}
-        try:
-            files = deps.library.iter_book_files(book_id)
-            result: dict[str, Any] = deps.library_vectors.index_book_signed(
-                book_id, files, deps.embedder.embed
-            )
-            return result
-        except Exception as exc:  # 索引失败不影响导入主流程
-            logger.warning("书库向量索引失败 book=%s: %s", book_id, exc)
-            return {"error": str(exc)[:200]}
 
     @router.post("/api/library/{book_id}/reindex", response_model=dict[str, Any])
     def reindex_library_book(book_id: str) -> dict[str, Any]:
