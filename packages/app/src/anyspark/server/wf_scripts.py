@@ -979,3 +979,38 @@ def wf_script_tree_commit(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> Node
 
 
 wf_scripts["tree_commit"] = wf_script_tree_commit
+
+
+def wf_script_list_split(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> NodeResult:
+    """S246：通用清单切分原语——JSON 数组或逐条文本 → 数组（loop 遍历源）。
+
+    机制（A 类硬编码）：格式归一；条目内容不做任何语义加工（内容归模型）。
+    JSON 数组优先；否则按行切并剥编号/项目符号（1. / 1、/ (1) / - / * / •）。
+    params.text：清单原文（支持 {{var}}）。输出纯 JSON 数组（对齐 batch_prepare
+    与 loop collection_var 的约束：只输出数组，不拼报告）。"""
+    import json as _json
+    import re as _re
+
+    raw = wf_resolve(str(node.params.get("text") or ""), ctx).strip()
+    if not raw:
+        return NodeResult(error="list_split 缺 text（清单为空）")
+    items: list[str] = []
+    try:
+        parsed = _json.loads(raw)
+        if isinstance(parsed, list):
+            items = [str(x).strip() for x in parsed if str(x).strip()]
+    except Exception:
+        items = []
+    if not items:
+        for line in raw.splitlines():
+            t = line.strip()
+            t = _re.sub(r"^\(?\d+[.、)）]\s*", "", t)
+            t = _re.sub(r"^(?:[-*•]|意见\s*\d+[：:.]?)\s*", "", t)
+            if t:
+                items.append(t)
+    if not items:
+        return NodeResult(error="list_split 未切出任何条目")
+    return NodeResult(output=_json.dumps(items, ensure_ascii=False))
+
+
+wf_scripts["list_split"] = wf_script_list_split

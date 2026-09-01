@@ -20,10 +20,13 @@ from anyspark.check import compile_rule, compile_with_model, run_review
 from anyspark.core import ParamSpec, ToolCall, ToolResult, ToolSpec
 
 
-def make_check_implementer(model: Any) -> tuple[Any, Any]:
+def make_check_implementer(model: Any, checks: list[Any] | None = None) -> tuple[Any, Any]:
     """硬伤检测 + 自然语言规则检测工具（S104 重建）。
 
     model：ToolContext.model（agent 当前模型——按 S98 任务分流后的模型）。
+    checks：S246 接线——合并后的检测项列表（默认骨架 + 用户添加项 - 用户删除项，
+    与 /api/check 同源）；缺省 None 时 run_review 用默认骨架。此前 agent 自查
+    看不见用户自定义检测项（只有 HTTP 路由合并），纯数据接线补齐。
     """
 
     spec = ToolSpec(
@@ -82,8 +85,8 @@ def make_check_implementer(model: Any) -> tuple[Any, Any]:
                 if len(hits) > 20:
                     lines.append(f"…等共 {len(hits)} 处")
                 return ToolResult(call=call, ok=True, content="\n".join(lines))
-            # 标准硬伤检测
-            report = run_review(model, "自查", text)
+            # 标准硬伤检测（checks=S246：与 /api/check 同源的合并骨架）
+            report = run_review(model, "自查", text, checks=checks)
             if report.hard_count == 0:
                 return ToolResult(
                     call=call,

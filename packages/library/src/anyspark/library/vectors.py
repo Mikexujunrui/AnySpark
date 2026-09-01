@@ -13,8 +13,8 @@ from __future__ import annotations
 
 import struct
 import threading
-from pathlib import Path
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from anyspark.core.db import connect as sqlite_connect

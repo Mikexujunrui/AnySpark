@@ -140,10 +140,10 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials（S128：模式库读 skill 表 type=plot） | plots/skills/materials |
 | routes_graph | 图谱 types/entities/relations/events/network（S153 邻居子图）/context/extract/impact | graph/graph_extractor/impact |
 | routes_story | 计划 plan/叙事树 nodes/threads/layout | plans/story_tree/story_threads |
-| routes_workflow | 工作流模板/草稿/任务 CRUD+run+resume（S138 续跑）+rollback（S138 批级回滚）（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134 + 章节加料 S137 + 叙事树提炼 S242：章题轨迹→树形草案→落库） | workflow_store/engine/generator |
+| routes_workflow | 工作流模板/草稿/任务 CRUD+run+resume（S138 续跑）+rollback（S138 批级回滚）（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134 + 章节加料 S137 + 叙事树提炼 S243：章题轨迹→树形草案→落库 + 审稿回复 S246：逐条意见→回应→汇编回复信） | workflow_store/engine/generator |
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
-| routes_check | 检测网：POST /api/check（硬伤+自然语言规则检测，S104 重建）+ /api/check/rule（规则编译试跑）+ /api/check/skeleton（GET 列/POST 增/DELETE 删/POST restore 恢复默认，S195 用户可增删骨架检测项）+ /api/manual/cross-book-candidates + /api/manual/{id}/promote-global（S195b 跨层升级：发现跨书重复偏好→升级全局→死锁修复） | check/graph_verifier/user_skeleton/manual |
+| routes_check | 检测网：POST /api/check（硬伤+自然语言规则检测，S104 重建）+ /api/check/rule（规则编译试跑）+ /api/check/skeleton（GET 列/POST 增/DELETE 删/POST restore 恢复默认，S195 用户可增删骨架检测项；S246 内置学术规则包七项经同通道自举——check_text 工具与路由同源合并骨架）+ /api/manual/cross-book-candidates + /api/manual/{id}/promote-global（S195b 跨层升级：发现跨书重复偏好→升级全局→死锁修复） | check/graph_verifier/user_skeleton/manual |
 | routes_library | 参考书库（S86 新增包 anyspark-library）：全局书库 CRUD + import 章节入库 + 项目选参考书（GET/PUT /api/books/{id}/references）+ POST /api/library/{id}/refine-skill（拆书提炼快捷入口，S135 优先走 workflow 模板） | library/workspace/chapters |
 | routes_update | 版本检测更新（S164）：GET /api/update/check（检查新版本）+ GET /api/update/status（本地版本与检查状态）——参考 v3 update_checker，前端启动时提示 | update_checker |
 

@@ -77,6 +77,7 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
         "会话摘要",
         "章节加料",
         "资料调研",
+        "审稿回复",
     )
     for name in _preset_names:
         workflow_store.mark_builtin_by_name(name)
@@ -96,6 +97,8 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
         _seed_conversation_summarize_template(workflow_store, WorkflowDef)
     if "章节加料" not in existing:
         _seed_enrich_template(workflow_store, WorkflowDef)
+    if "审稿回复" not in existing:  # S246：学术场景（逐条意见→回应+修改方案→回复信）
+        _seed_review_reply_template(workflow_store, WorkflowDef)
 
 
 def _seed_graph_extract_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -223,6 +226,112 @@ def _seed_tree_extract_template(workflow_store: Any, wf_def_cls: Any) -> None:
     errors = wf.validate()
     if errors:
         raise ValueError(f"叙事树提炼模板校验失败: {errors}")
+    workflow_store.add_template(wf, builtin=True)
+
+
+def _seed_review_reply_template(workflow_store: Any, wf_def_cls: Any) -> None:
+    """S246：审稿回复——逐条审稿意见 → 回应策略+修改方案+措辞 → 汇编回复信。
+
+    全部复用既有原语（list_split 切分 / loop 遍历 / accumulate 累计 / agent 汇编），
+    模板即数据：用户改节点指令即改回应风格，不碰代码。直接出结果（草稿给人
+    过目后自行采纳，不落库——回复信是作者署名的文档，人工确认闸门前置到采纳）。
+    运行参数：comments（审稿意见，JSON 数组或逐条文本）+ manuscript_title（原稿章节标题）。
+    """
+    wf = wf_def_cls.from_dict(
+        {
+            "name": "审稿回复",
+            "description": (
+                "逐条回应审稿意见：每条产出意见解读/回应策略/修改方案/回复措辞，"
+                "最终汇编成完整回复信草稿（供作者过目采纳）。"
+                "运行参数：comments=审稿意见（JSON 数组或逐条文本）；"
+                "manuscript_title=要修改的章节标题（用于给出具体修改方案）。"
+            ),
+            "nodes": [
+                {
+                    "id": "read",
+                    "kind": "script",
+                    "label": "读原稿",
+                    "params": {
+                        "function": "read_chapter",
+                        "chapter_title": "{{manuscript_title}}",
+                        "output_key": "manuscript",
+                    },
+                },
+                {
+                    "id": "split",
+                    "kind": "script",
+                    "label": "意见切分",
+                    "params": {
+                        "function": "list_split",
+                        "text": "{{comments}}",
+                        "output_key": "comment_list",
+                    },
+                },
+                {
+                    "id": "loop",
+                    "kind": "loop",
+                    "label": "逐条回应",
+                    "params": {
+                        "body": ["reply", "accumulate"],
+                        "max_iterations": 24,  # 安全上限（实际=意见条数）
+                        "collection_var": "comment_list",
+                        "item_var": "comment",
+                    },
+                },
+                {
+                    "id": "reply",
+                    "kind": "agent",
+                    "label": "回应单条",
+                    "params": {
+                        "instruction": (
+                            "你是学术审稿回复专家。针对一条审稿意见，基于原稿产出：\n"
+                            "1.【意见解读】一句话确认意见核心关切\n"
+                            "2.【回应策略】接受/部分接受/解释澄清，及理由\n"
+                            "3.【修改方案】正文具体怎么改（位置/内容）\n"
+                            "4.【回复措辞】回复信中该条的礼貌表述（Response to Reviewer）\n"
+                            "要求：具体可执行，不空泛承诺；意见合理时坦承不足。\n\n"
+                            "【审稿意见】{{comment}}\n\n【原稿】\n{{manuscript}}"
+                        ),
+                        "output_key": "reply_item",
+                    },
+                },
+                {
+                    "id": "accumulate",
+                    "kind": "script",
+                    "label": "累计回应",
+                    "params": {
+                        "function": "book_refine_accumulate",
+                        "item_var": "reply_item",
+                        "list_var": "replies",
+                        "output_key": "replies",
+                    },
+                },
+                {
+                    "id": "merge",
+                    "kind": "agent",
+                    "label": "汇编回复信",
+                    "params": {
+                        "instruction": (
+                            "把逐条回应汇编成一封完整审稿回复信：\n"
+                            "- 开头：感谢审稿人 + 总体修改说明\n"
+                            "- 主体：逐条 Response（意见摘录 + 回应 + 修改说明），保留编号对应\n"
+                            "- 结尾：再次致谢\n"
+                            "语气诚恳专业，不删减具体修改细节。以下是各条回应：\n\n{{replies}}"
+                        ),
+                        "output_key": "response_letter",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "read", "target": "split"},
+                {"source": "split", "target": "loop"},
+                {"source": "loop", "target": "merge"},
+            ],
+        }
+    )
+    errors = wf.validate()
+    if errors:
+        raise ValueError(f"审稿回复模板校验失败: {errors}")
     workflow_store.add_template(wf, builtin=True)
 
 

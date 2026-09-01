@@ -30,13 +30,15 @@ class FakeEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
         out = []
         for t in texts:
-            out.append([
-                float(t.count("魔法")),
-                float(t.count("剑")),
-                float(t.count("行会")),
-                float(t.count("权力")),
-                1.0,
-            ])
+            out.append(
+                [
+                    float(t.count("魔法")),
+                    float(t.count("剑")),
+                    float(t.count("行会")),
+                    float(t.count("权力")),
+                    1.0,
+                ]
+            )
         return out
 
 

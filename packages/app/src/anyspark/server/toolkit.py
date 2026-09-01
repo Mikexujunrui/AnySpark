@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from anyspark.check import SKELETON_CHECKS
 from anyspark.core import ToolRegistry
 from anyspark.server.tools_writing import register_writing_tools
 
@@ -53,6 +54,7 @@ class ToolContext:
     library: Any = None  # S86 参考书库（reference_lookup 工具：不注入，按需检索）
     signals: Any = None  # S132c 信号存储（mind_reconcile 对账读最近行为信号）
     story_tree: Any = None  # S242：叙事树写入（story_node_add 工具；缺省关=不注册）
+    user_skeleton: Any = None  # S246：用户自定义检测项（check_text 合并骨架同源）
     book_id: str = "main"  # S74：当前项目 id——工具层多书隔离（此前各 implementer 硬编码 main）
     subagent_deps: Any = None  # S121 提案 B：子 Agent 内核装配依赖（主循环 run_subagent 工具用）
     bg_queue: Any = None  # S214：后台任务队列（ingest 工具拆章后挂图谱抽取）
@@ -132,7 +134,13 @@ def build_toolkit(
         # S104：检测工具（智能体自查硬伤/自然语言规则，替代人用 /api/check）
         from anyspark.server.tools_check import make_check_implementer
 
-        ck_spec, ck_impl = make_check_implementer(ctx.model)
+        # S246：检测项与 /api/check 同源（默认骨架 + 用户增删）——含内置学术规则包
+        merged = (
+            ctx.user_skeleton.merged_checks(SKELETON_CHECKS)
+            if ctx.user_skeleton is not None
+            else None
+        )
+        ck_spec, ck_impl = make_check_implementer(ctx.model, checks=merged)
         registry.register(ck_spec, ck_impl)
 
         gq_spec, gq_impl = make_graph_query_implementer(ctx.graph, book_id=ctx.book_id)

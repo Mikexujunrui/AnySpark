@@ -560,3 +560,28 @@ agent 写工具，但叙事树完全没有 agent 写渠道、计划只能标完�
 **验证**：gate --pytest（story_tools/tools_domain/workflow_api/test_app）+ tsc + vitest 全绿
 **踩坑**：_call 助手 `name` 形参与工具参数 name 撞名（name= 字面漏进 kwargs）→
 助手改位置限定参数（`name, /`）
+
+---
+
+## S246: 校园智能体比赛向——学术检测规则包 + 审稿回复模板（领域拓展=内容非机制）
+
+**背景**（主人指令：参赛文档 + 自主补全高价值功能；实现纪律追加：优先工作流/
+拓展包形式，不打补丁）。第一版曾把学术七项硬编码为第二骨架+pack 选择器，
+主人指出补丁味后推翻重做——改为内容种子走既有机制。
+
+**交付**（DESIGN §12.47，详见 docs/COMPETITION.md）：
+- 学术检测规则包：七项（术语一致性/论断证据/结构完备/逻辑链条/语言规范/
+  数据一致/诚信自查）作为内置内容借 S195 用户骨架通道自举（幂等 + 尊重删除 +
+  恢复重新物化）；check_store.py 内置包数据与自举守卫
+- check_text 与 /api/check 同源（接线补缺）：toolkit 传 merged_checks，
+  此前 agent 自查看不见用户自定义检测项
+- 「审稿回复」预置工作流（第 10 个模板）：逐条意见→回应→汇编回复信，
+  复用 read_chapter/list_split/loop/accumulate 四原语零新机制
+- list_split 通用清单切分原语（JSON 数组/逐条文本→遍历源）
+- docs/COMPETITION.md：参赛能力清单/缺陷清单 D1-D7/七分钟演示脚本
+
+**测试**：test_builtin_packs.py 4 用例（种子/幂等与删除尊重/工具合并骨架/模板 e2e）
+
+**门禁如实记录**：ruff check 与 format --check 各 1 处失败均来自并行会话
+未完成文件 library/vectors.py（向量检索 WIP，非本阶段改动，未触碰）；
+本阶段相关检查全绿（mypy 226 文件/pytest 73 过/tsc/vitest）。
