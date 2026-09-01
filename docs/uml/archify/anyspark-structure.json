@@ -6,7 +6,7 @@
     "output": "anyspark-structure.html",
     "quality_profile": "showcase",
     "views": [
-      { "id": "chat-primary", "label": "写作主路径", "focus": ["browser", "frontend", "api", "loop", "models", "llm"], "note": "浏览器/桌面壳进入 SPA，SSE 对话经组合根装配进 Agent 循环，模型适配层四协议出站。" },
+      { "id": "chat-primary", "label": "写作主路径", "focus": ["browser", "frontend", "api", "loop", "models", "llm"], "note": "浏览器/桌面壳进入 SPA，SSE 对话经组合根装配进 Agent 循环；模型适配层按注册表 protocol 分发出站，DeepSeek 主力，可热切本地端点。" },
       { "id": "dep-flow", "label": "工具循环与领域包", "focus": ["loop", "tools", "domain", "store", "fs"], "note": "core 循环调用 48 个工具，落 9 个领域包，写入 SQLite 与章节工作区——依赖单向无环。" },
       { "id": "persistence", "label": "持久化与规模", "focus": ["api", "tools", "domain", "store", "fs"], "note": "HTTP 管理端点与工具两条路径共享同一批领域包；SQLite 单库 22 store，章节 md 是权威副本。" }
     ]
@@ -18,7 +18,7 @@
     { "id": "api", "type": "backend", "label": "组合根 + Routers", "sublabel": "server/ 16.1k · 23 routers", "pos": [440, 290], "size": [140, 64] },
     { "id": "loop", "type": "backend", "label": "Agent 循环", "sublabel": "core · 1.8k 行", "pos": [640, 290], "size": [130, 64] },
     { "id": "models", "type": "backend", "label": "模型适配层", "sublabel": "4 协议 · 2.4k 行", "pos": [640, 150], "size": [130, 60] },
-    { "id": "llm", "type": "cloud", "label": "DeepSeek API", "sublabel": "官方 / DashScope", "pos": [840, 150], "size": [120, 60] },
+    { "id": "llm", "type": "cloud", "label": "LLM 端点", "sublabel": "DeepSeek 主力 · 本地可接", "pos": [840, 150], "size": [120, 60] },
     { "id": "fs", "type": "database", "label": "章节工作区", "sublabel": "md 权威副本", "pos": [840, 290], "size": [130, 60] },
     { "id": "tools", "type": "backend", "label": "Agent 工具集", "sublabel": "51 工具 · 16 文件", "pos": [420, 440], "size": [140, 60] },
     { "id": "domain", "type": "backend", "label": "领域包 ×9", "sublabel": "12.1k 行 · align 最大", "pos": [620, 440], "size": [130, 60] },
@@ -45,6 +45,7 @@
     { "dot": "cyan", "title": "规模分布", "items": ["Python 11 包 src 33.2k 行：app 19.3k（58%）> align 4.5k > workflow 1.7k ≈ core 1.8k ≈ graph 1.6k", "前端 React 24.9k 行 TS，最大单文件 WorkflowPanel 1.4k 行（S239 已拆分）", "测试 90 文件 18.6k 行，app 包占 11.9k"] },
     { "dot": "emerald", "title": "依赖方向（单向无环）", "items": ["core ← 领域包 ×9 ← app；core 零第三方依赖", "唯一跨领域依赖：play → explore（推演复用探索引擎）", "唯一跨层依赖：desktop → server（桌面壳拉起后端，正常）"] },
     { "dot": "rose", "title": "持久化", "items": ["SQLite 单库 22 store，连接收敛 core/db 一处", "章节 markdown 是权威副本，SQLite 存元数据", "data/ 整体不入 git，可拷贝迁移"] },
+    { "dot": "violet", "title": "模型层（多协议）", "items": ["4 协议适配器：openai / anthropic / gemini / responses（S131 注册表工厂）", "DeepSeek/DashScope 主力；本地 vLLM / LM Studio / Ollama 走 openai 兼容（LOCAL-LLM.md）", "model_configs 多配置 + /api/models 运行时热切换，任务槽位分流（S98）"] },
     { "dot": "amber", "title": "后台与质量基建", "items": ["tasks.py 单例 worker：chapter / refine / skill_drafts / summarize 4 类后台任务", "预置 workflow 模板 9 个（拆书/批量改写/审读/图谱抽取/信号提炼/会话摘要/章节加料/资料调研/叙事树提炼 S243）", "gate.py 分层门禁（ruff+mypy+tsc+pytest）+ scan_main_hardcode 审计"] }
   ]
 }

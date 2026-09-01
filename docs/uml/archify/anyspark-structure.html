@@ -4840,7 +4840,7 @@
       </div>
     </div>
 
-    <script id="archify-guided-views-data" type="application/json">[{"id":"chat-primary","label":"写作主路径","focus":["browser","frontend","api","loop","models","llm"],"note":"浏览器/桌面壳进入 SPA，SSE 对话经组合根装配进 Agent 循环，模型适配层四协议出站。"},{"id":"dep-flow","label":"工具循环与领域包","focus":["loop","tools","domain","store","fs"],"note":"core 循环调用 48 个工具，落 9 个领域包，写入 SQLite 与章节工作区——依赖单向无环。"},{"id":"persistence","label":"持久化与规模","focus":["api","tools","domain","store","fs"],"note":"HTTP 管理端点与工具两条路径共享同一批领域包；SQLite 单库 22 store，章节 md 是权威副本。"}]</script>
+    <script id="archify-guided-views-data" type="application/json">[{"id":"chat-primary","label":"写作主路径","focus":["browser","frontend","api","loop","models","llm"],"note":"浏览器/桌面壳进入 SPA，SSE 对话经组合根装配进 Agent 循环；模型适配层按注册表 protocol 分发出站，DeepSeek 主力，可热切本地端点。"},{"id":"dep-flow","label":"工具循环与领域包","focus":["loop","tools","domain","store","fs"],"note":"core 循环调用 48 个工具，落 9 个领域包，写入 SQLite 与章节工作区——依赖单向无环。"},{"id":"persistence","label":"持久化与规模","focus":["api","tools","domain","store","fs"],"note":"HTTP 管理端点与工具两条路径共享同一批领域包；SQLite 单库 22 store，章节 md 是权威副本。"}]</script>
 
     <div class="guided-views no-print" id="guided-views" hidden aria-label="Guided diagram views">
       <button id="guided-view-prev" type="button" aria-label="Previous guided view" title="Previous guided view ([)">&#8592;</button>
@@ -5000,15 +5000,15 @@
         <text data-detail="context" x="705" y="194" class="t-muted" font-size="9" text-anchor="middle">4 协议 · 2.4k 行</text>
         </g>
 
-        <g id="node-llm" data-node-id="llm" data-node-label="DeepSeek API" tabindex="0" role="button" aria-label="Focus DeepSeek API, 官方 / DashScope, Architecture component" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="官方 / DashScope" data-node-context="Architecture component">
-          <title>DeepSeek API · 官方 / DashScope · Architecture component</title>
+        <g id="node-llm" data-node-id="llm" data-node-label="LLM 端点" tabindex="0" role="button" aria-label="Focus LLM 端点, DeepSeek 主力 · 本地可接, Architecture component" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="DeepSeek 主力 · 本地可接" data-node-context="Architecture component">
+          <title>LLM 端点 · DeepSeek 主力 · 本地可接 · Architecture component</title>
           <rect x="840" y="150" width="120" height="60" rx="6" class="c-mask"/>
           <rect x="840" y="150" width="120" height="60" rx="6" class="c-cloud" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(846 156) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
-          <text data-detail-anchor x="900" y="178" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">DeepSeek API</text>
-        <text data-detail="context" x="900" y="194" class="t-muted" font-size="9" text-anchor="middle">官方 / DashScope</text>
+          <text data-detail-anchor x="900" y="178" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">LLM 端点</text>
+        <text data-detail="context" x="900" y="194" class="t-muted" font-size="7.7" text-anchor="middle">DeepSeek 主力 · 本地可接</text>
         </g>
 
         <g id="node-fs" data-node-id="fs" data-node-label="章节工作区" tabindex="0" role="button" aria-label="Focus 章节工作区, md 权威副本, data/ 工作区（不入 git）" aria-pressed="false" data-node-kind="database" data-node-sublabel="md 权威副本" data-node-context="data/ 工作区（不入 git）">
@@ -5340,6 +5340,18 @@
           <li>&bull; SQLite 单库 22 store，连接收敛 core/db 一处</li>
           <li>&bull; 章节 markdown 是权威副本，SQLite 存元数据</li>
           <li>&bull; data/ 整体不入 git，可拷贝迁移</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot violet"></div>
+          <h3>模型层（多协议）</h3>
+        </div>
+        <ul>
+          <li>&bull; 4 协议适配器：openai / anthropic / gemini / responses（S131 注册表工厂）</li>
+          <li>&bull; DeepSeek/DashScope 主力；本地 vLLM / LM Studio / Ollama 走 openai 兼容（LOCAL-LLM.md）</li>
+          <li>&bull; model_configs 多配置 + /api/models 运行时热切换，任务槽位分流（S98）</li>
         </ul>
       </div>
 
