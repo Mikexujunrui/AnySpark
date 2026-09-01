@@ -14,13 +14,13 @@
   "components": [
     { "id": "browser", "type": "external", "label": "用户浏览器", "sublabel": "创作台会话", "pos": [40, 290], "size": [120, 60] },
     { "id": "desktop", "type": "external", "label": "pywebview 壳", "sublabel": "desktop 包 · EXE", "pos": [40, 150], "size": [130, 60] },
-    { "id": "frontend", "type": "frontend", "label": "React SPA", "sublabel": "24.8k 行 TS · vite", "pos": [240, 150], "size": [130, 60] },
-    { "id": "api", "type": "backend", "label": "组合根 + Routers", "sublabel": "server/ 15.7k · 23 routers", "pos": [440, 290], "size": [140, 64] },
+    { "id": "frontend", "type": "frontend", "label": "React SPA", "sublabel": "24.9k 行 TS · vite", "pos": [240, 150], "size": [130, 60] },
+    { "id": "api", "type": "backend", "label": "组合根 + Routers", "sublabel": "server/ 16.1k · 23 routers", "pos": [440, 290], "size": [140, 64] },
     { "id": "loop", "type": "backend", "label": "Agent 循环", "sublabel": "core · 1.8k 行", "pos": [640, 290], "size": [130, 64] },
     { "id": "models", "type": "backend", "label": "模型适配层", "sublabel": "4 协议 · 2.4k 行", "pos": [640, 150], "size": [130, 60] },
     { "id": "llm", "type": "cloud", "label": "DeepSeek API", "sublabel": "官方 / DashScope", "pos": [840, 150], "size": [120, 60] },
     { "id": "fs", "type": "database", "label": "章节工作区", "sublabel": "md 权威副本", "pos": [840, 290], "size": [130, 60] },
-    { "id": "tools", "type": "backend", "label": "Agent 工具集", "sublabel": "48 工具 · 12 文件", "pos": [420, 440], "size": [140, 60] },
+    { "id": "tools", "type": "backend", "label": "Agent 工具集", "sublabel": "51 工具 · 16 文件", "pos": [420, 440], "size": [140, 60] },
     { "id": "domain", "type": "backend", "label": "领域包 ×9", "sublabel": "12.1k 行 · align 最大", "pos": [620, 440], "size": [130, 60] },
     { "id": "store", "type": "database", "label": "SQLite", "sublabel": "22 store · 单库", "pos": [840, 440], "size": [130, 60] }
   ],
@@ -42,9 +42,9 @@
     { "id": "tools-fs", "from": "tools", "to": "fs", "label": "章节 md 落盘", "variant": "dashed", "fromSide": "top", "toSide": "left", "labelDy": -18 }
   ],
   "cards": [
-    { "dot": "cyan", "title": "规模分布", "items": ["Python 12 包 51.2k 行：app 18.9k（37%）> align 4.5k > workflow 1.7k ≈ core 1.8k ≈ graph 1.6k", "前端 React 24.8k 行 TS，最大单文件 WorkflowPanel 1.9k 行", "测试 89 文件 20k 行，app 包占 11.4k"] },
+    { "dot": "cyan", "title": "规模分布", "items": ["Python 11 包 src 33.2k 行：app 19.3k（58%）> align 4.5k > workflow 1.7k ≈ core 1.8k ≈ graph 1.6k", "前端 React 24.9k 行 TS，最大单文件 WorkflowPanel 1.4k 行（S239 已拆分）", "测试 90 文件 18.6k 行，app 包占 11.9k"] },
     { "dot": "emerald", "title": "依赖方向（单向无环）", "items": ["core ← 领域包 ×9 ← app；core 零第三方依赖", "唯一跨领域依赖：play → explore（推演复用探索引擎）", "唯一跨层依赖：desktop → server（桌面壳拉起后端，正常）"] },
     { "dot": "rose", "title": "持久化", "items": ["SQLite 单库 22 store，连接收敛 core/db 一处", "章节 markdown 是权威副本，SQLite 存元数据", "data/ 整体不入 git，可拷贝迁移"] },
-    { "dot": "amber", "title": "后台与质量基建", "items": ["tasks.py 单例 worker：chapter / refine / skill_drafts / summarize 4 类后台任务", "gate.py 分层门禁（ruff+mypy+tsc+pytest）+ scan_main_hardcode 审计", "scripts/ 16 个冒烟脚本对拍真实链路"] }
+    { "dot": "amber", "title": "后台与质量基建", "items": ["tasks.py 单例 worker：chapter / refine / skill_drafts / summarize 4 类后台任务", "预置 workflow 模板 9 个（拆书/批量改写/审读/图谱抽取/信号提炼/会话摘要/章节加料/资料调研/叙事树提炼 S243）", "gate.py 分层门禁（ruff+mypy+tsc+pytest）+ scan_main_hardcode 审计"] }
   ]
 }
