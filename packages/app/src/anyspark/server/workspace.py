@@ -133,6 +133,26 @@ class Workspace:
         except OSError:
             return ""
 
+    # S247：项目文体（genre）——权威在文件，与简介同型；未知/缺省回退 fiction
+    def genre_file(self, book_id: str = "main") -> Path:
+        return self.project_dir(book_id) / "文体.txt"
+
+    def read_genre(self, book_id: str = "main") -> str:
+        """读项目文体名（fiction/academic/report）；无文件=fiction（缺省）。"""
+        f = self.genre_file(book_id)
+        if not f.exists():
+            return "fiction"
+        try:
+            return f.read_text(encoding="utf-8").strip() or "fiction"
+        except OSError:
+            return "fiction"
+
+    def write_genre(self, book_id: str = "main", genre: str = "fiction") -> Path:
+        """写项目文体（覆盖；权威在文件）。不校验合法性——读方 get_profile 兜底。"""
+        f = self.genre_file(book_id)
+        f.write_text(genre.strip() + "\n", encoding="utf-8")
+        return f
+
     def write_brief(self, book_id: str = "main", content: str = "") -> Path:
         """写项目简介（覆盖；权威在文件）。"""
         f = self.brief_file(book_id)

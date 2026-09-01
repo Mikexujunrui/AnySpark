@@ -1,7 +1,7 @@
-"""S246：内置规则包（学术检测项种子）+ 审稿回复模板测试。
+"""S246/S247：内置规则包（按文体选择）+ 审稿回复模板 + 文体 profile 测试。
 
-设计要点：学术检测项是内容数据（借 S195 用户骨架通道自举，尊重用户删除），
-不是硬编码第二骨架；审稿回复是纯模板（既有原语接线，零新机制）。"""
+演化说明：S246 曾以"种子入库用户骨架"交付学术检测项，S247 修正为内置双骨架
+按文体选择——种子无法表达体裁维度，导致小说检测被学术项污染。"""
 
 from __future__ import annotations
 
@@ -13,11 +13,16 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from anyspark.core.protocol import ToolSpec
-from anyspark.core.types import Message, ModelOutput, ToolResult
+from anyspark.check import ACADEMIC_CHECKS, SKELETON_CHECKS, get_pack
+from anyspark.check.skeleton import SkeletonCheckItem
+from anyspark.core import ToolRegistry
+from anyspark.core.protocol import ToolSpec, execute
+from anyspark.core.types import Message, ModelOutput, ToolCall, ToolResult
 from anyspark.server.app import build_app
-from anyspark.server.check_store import BUILTIN_ACADEMIC_CHECKS, UserSkeletonStore
 from anyspark.server.tools_check import make_check_implementer
+from anyspark.server.tools_writing import register_writing_tools
+from anyspark.server.workspace import Workspace
+from anyspark.store import ChapterStore
 
 
 def _db() -> Path:
@@ -32,54 +37,138 @@ def _call(impl: Any, name: str = "t", /, **kwargs: Any) -> ToolResult:
 
 
 # ---------------------------------------------------------------------------
-# 学术规则包：自举 + 幂等 + 尊重用户删除
+# 规则包选择：内置双骨架 + 未知回退
 # ---------------------------------------------------------------------------
-def test_academic_skeleton_seeded() -> None:
-    store = UserSkeletonStore(_db())
-    cats = {i.category for i in store.list_additions()}
-    assert cats == {c for c, _ in BUILTIN_ACADEMIC_CHECKS}  # 七项全数入库
+def test_get_pack_selection() -> None:
+    assert get_pack(None) is SKELETON_CHECKS  # 缺省 novel（历史行为不变）
+    assert get_pack("novel") is SKELETON_CHECKS
+    assert get_pack("academic") is ACADEMIC_CHECKS
+    assert get_pack("未知体裁") is SKELETON_CHECKS  # 未知回退
+    assert len(ACADEMIC_CHECKS) == 7
+    assert isinstance(ACADEMIC_CHECKS[0], SkeletonCheckItem)
 
 
-def test_seed_idempotent_and_respects_deletion() -> None:
-    db = _db()
-    store = UserSkeletonStore(db)
-    store.delete_addition_by_category("术语一致性")  # 用户删除
-    # 重建实例（模拟重启）：已删除类别不得复活
-    store2 = UserSkeletonStore(db)
-    cats = {i.category for i in store2.list_additions()}
-    assert "术语一致性" not in cats
-    assert len(cats) == len(BUILTIN_ACADEMIC_CHECKS) - 1
+def test_check_route_genre_aware() -> None:
+    """项目文体=academic 时，/api/check 的检测者提示应含学术项、不含小说项。"""
+
+    class CapturingModel:
+        model_name = "capture"
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def respond(self, messages: list[Message], tools: object) -> ModelOutput:
+            for m in messages:
+                if m.role == "system" and m.content:
+                    self.prompts.append(m.content)
+            return ModelOutput(text="[]", tool_calls=[])
+
+    model = CapturingModel()
+    client = TestClient(build_app(model=model, db_path=_db()))
+    client.post("/api/genre", json={"genre": "academic", "book_id": "main"})
+    r = client.post(
+        "/api/check",
+        json={"text": "本文提出一种方法。实验表明效果很好。", "book_id": "main"},
+    )
+    assert r.status_code == 200, r.text
+    joined = "\n".join(model.prompts)
+    assert "术语一致性" in joined  # 学术项参与检测
+    assert "动机因果" not in joined  # 小说项不再污染（S246 缺陷修复）
 
 
-def test_check_tool_uses_merged_checks() -> None:
-    """agent 自查应使用传入的合并骨架（含用户/内置添加项）——S246 接线。"""
+# ---------------------------------------------------------------------------
+# 文体 profile：写作引擎人设按项目文体切换（运行时读工作区文件）
+# ---------------------------------------------------------------------------
+class _Skills:
+    def list_skills(self) -> list[object]:
+        return []
+
+
+class CleanWriteModel:
+    def __init__(self) -> None:
+        self.systems: list[str] = []
+        self.model_name = "writer"
+
+    def respond(self, messages: list[Message], tools: object) -> ModelOutput:
+        for m in messages:
+            if m.role == "system" and m.content:
+                self.systems.append(m.content)
+        return ModelOutput(text="正文内容。")
+
+
+def test_write_chapter_genre_persona() -> None:
+    root = Path(tempfile.mkdtemp())
+    workspace = Workspace(root=root)
+    chapters = ChapterStore(_db())
+    model = CleanWriteModel()
+    reg = ToolRegistry()
+    register_writing_tools(
+        reg, chapters, book_id="main", workspace=workspace, model=model, skills_store=_Skills()
+    )
+
+    def _invoke() -> ToolResult:
+        reg2 = ToolRegistry()
+        register_writing_tools(
+            reg2, chapters, book_id="main", workspace=workspace, model=model, skills_store=_Skills()
+        )
+        return execute(
+            reg2,
+            ToolCall(
+                name="write_chapter",
+                arguments={
+                    "title": "第一章",
+                    "intent": "写一段引言",
+                    "references": "",
+                },
+            ),
+        )
+
+    workspace.write_genre("main", "academic")
+    r = _invoke()
+    assert r.ok is True
+    assert "学术写作引擎" in model.systems[-1]
+
+    workspace.write_genre("main", "fiction")
+    r2 = _invoke()
+    assert r2.ok is True
+    assert "小说写作引擎" in model.systems[-1]  # fiction 回到原文人设（逐字一致）
+
+
+def test_genre_api_roundtrip() -> None:
+    client = TestClient(build_app(model=_Skills(), db_path=_db()))
+    g = client.get("/api/genre").json()
+    assert g["genre"] == "fiction"  # 无文件=缺省
+    r = client.post("/api/genre", json={"genre": "academic", "book_id": "main"})
+    assert r.status_code == 200 and "学术" in r.json()["label"]
+    assert client.get("/api/genre").json()["genre"] == "academic"
+
+
+def test_check_tool_accepts_custom_checks() -> None:
+    """check_text 的 checks 注入仍生效（S246 接线保留，基准集由调用方按文体给）。"""
 
     class FakeCheckModel:
         model_name = "fake-check"
 
         def respond(self, messages: list[Message], tools: object) -> ModelOutput:
             prompt = messages[0].content if messages else ""
-            if "术语一致性" in prompt:
-                finding = json.dumps(
-                    [{"message": "同一概念前后称谓不一", "evidence": "第2段", "severity": "hard"}],
-                    ensure_ascii=False,
+            if "自定义项" in prompt:
+                return ModelOutput(
+                    text=json.dumps(
+                        [{"message": "命中", "evidence": "第1段", "severity": "hard"}],
+                        ensure_ascii=False,
+                    ),
+                    tool_calls=[],
                 )
-                return ModelOutput(text=finding, tool_calls=[])
             return ModelOutput(text="[]", tool_calls=[])
 
-    custom = [
-        item
-        for item in (UserSkeletonStore(_db()).list_additions())  # 借种子内容当自定义项
-        if item.category == "术语一致性"
-    ]
+    custom = [SkeletonCheckItem("自定义项", "检测自定义问题")]
     _, impl = make_check_implementer(FakeCheckModel(), checks=custom)
-    r = _call(impl, "check_text", text="测试正文：A 方法与 a 方法混用。")
-    assert r.ok is True
-    assert "同一概念前后称谓不一" in r.content
+    r = _call(impl, "check_text", text="测试正文。")
+    assert r.ok is True and "命中" in r.content
 
 
 # ---------------------------------------------------------------------------
-# 审稿回复模板：预置存在 + e2e（逐条回应 → 汇编回复信）
+# 审稿回复模板：e2e（逐条回应 → 汇编回复信）
 # ---------------------------------------------------------------------------
 def test_review_reply_template_runs() -> None:
     class FakeReplyModel:
@@ -99,8 +188,6 @@ def test_review_reply_template_runs() -> None:
 
     db = _db()
     client = TestClient(build_app(model=FakeReplyModel(), db_path=db))
-
-    from anyspark.store.sqlite import ChapterStore
 
     ChapterStore(str(db)).upsert("main", "第一章 引言", "本文研究……", 1)
 

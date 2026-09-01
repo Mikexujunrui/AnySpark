@@ -51,3 +51,50 @@ SKELETON_CHECKS: list[SkeletonCheckItem] = [
 ]
 
 # 用户可增删骨架：扩展点（后续可持久化用户增删）
+
+
+# ── S247：学术骨架（学术体裁的第一性原理默认值，与 SKELETON_CHECKS 同型）──
+# 演化说明：S246 曾以"种子入库用户骨架"交付学术七项，实测缺陷——用户骨架
+# 无体裁维度，小说文本的检测也被学术项污染（成本翻倍+无关发现）。修正为
+# 内置双骨架 + 按文体选择（get_pack）；用户增删仍在所选骨架之上叠加。
+ACADEMIC_CHECKS: list[SkeletonCheckItem] = [
+    SkeletonCheckItem(
+        "术语一致性",
+        "同一概念在全文中的称谓是否统一：术语、译名、缩写不得随意变换；首次出现应有定义。",
+    ),
+    SkeletonCheckItem(
+        "论断证据",
+        "每个论断是否有数据/文献/推导支撑：无出处的断言、以'显然''众所周知'搪塞的要标出。",
+    ),
+    SkeletonCheckItem(
+        "结构完备",
+        "结构要素是否完整且各司其职：引言是否交代问题与贡献、方法是否可复现、结论是否回应引言。",
+    ),
+    SkeletonCheckItem(
+        "逻辑链条",
+        "推理步骤是否衔接：有无逻辑跳跃、循环论证、前提与结论错位。",
+    ),
+    SkeletonCheckItem(
+        "语言规范",
+        "是否存在口语化表达、绝对化断言（'证明了'应为'结果表明'）、无意义修饰与冗余。",
+    ),
+    SkeletonCheckItem(
+        "数据一致",
+        "数字/单位/统计指标在摘要、正文、图表描述之间是否一致；前后引用同一数据是否同值。",
+    ),
+    SkeletonCheckItem(
+        "诚信自查",
+        "是否有疑似空泛套话、无出处的引文、语焉不详的关键表述——提示作者逐条核实（诚信护栏：辅助自查，不代替作者判断）。",
+    ),
+]
+
+# 内置骨架注册表：按文体选择基础集（novel=缺省，历史行为不变）
+CHECK_PACKS: dict[str, list[SkeletonCheckItem]] = {
+    "novel": SKELETON_CHECKS,
+    "academic": ACADEMIC_CHECKS,
+}
+
+
+def get_pack(name: str | None) -> list[SkeletonCheckItem]:
+    """按文体名取内置骨架；未知/缺省回退 novel（向后兼容）。"""
+    return CHECK_PACKS.get((name or "novel").strip().lower(), SKELETON_CHECKS)

@@ -32,12 +32,30 @@ def _bg_worker_inner(
                 refine_skill_drafts(deps)
             elif task.kind == "summarize":
                 summarize_conversation(deps, task.conv_id)
+            elif task.kind == "library_index":  # S247：书库向量索引（大书导入后台化）
+                index_library_book(deps, task.book_id)
             else:
                 logger.warning("后台任务未知 kind: %r", getattr(task, "kind", task))
         except Exception as exc:
             logger.warning("后台任务异常: %s", exc)
         finally:
             deps.bg_queue.task_done()
+
+
+def index_library_book(deps: AppDeps, book_id: str) -> None:
+    """S247：书库向量索引（后台任务）——导入大书时同步索引会阻塞 HTTP 请求
+    （100 万字 ≈ 200 次 embedding 调用 ≈ 40s+），改由 bg_queue 异步执行。"""
+    if deps.library_vectors is None or deps.embedder is None or not deps.embedder.available:
+        return  # 未配置 embedding——静默跳过（RAG 是增强层）
+    try:
+        files = deps.library.iter_book_files(book_id)
+        result = deps.library_vectors.index_book_signed(book_id, files, deps.embedder.embed)
+        logger.info(
+            "书库向量索引完成 book=%s indexed=%s skipped=%s chunks=%s",
+            book_id, result["indexed"], result["skipped"], result["chunks"],
+        )
+    except Exception as exc:
+        logger.warning("书库向量索引失败 book=%s: %s", book_id, exc)
 
 
 def refine_from_signals(
@@ -192,7 +210,16 @@ def review_for_learning(deps: AppDeps, book_id: str, title: str, content: str) -
     """
     try:
         entries = deps.manual.list("project", book_id)
-        prompt = build_learning_review_prompt(entries, f"章节：{title}\n\n{content[:1200]}")
+        # S247：学习审查关注点按文体切换（fiction 无附加提示，行为不变）
+        from anyspark.server.genres import get_profile
+
+        hint = ""
+        if deps.workspace is not None:
+            hint = get_profile(deps.workspace.read_genre(book_id)).learning_hint
+        subject = f"章节：{title}\n\n{content[:1200]}"
+        if hint:
+            subject = f"{hint}\n\n{subject}"
+        prompt = build_learning_review_prompt(entries, subject)
         output = model_for_task(deps, "extraction").respond(
             [Message(role="system", content=prompt)], []
         )

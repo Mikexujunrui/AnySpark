@@ -8,9 +8,11 @@ anyspark.check — 检测网包。
 from .report import Finding, ReviewReport
 from .reviewers import ReviewEngine, generate_dynamic_checks, run_review
 from .rules import CompiledRule, check_text, compile_rule, compile_with_model
-from .skeleton import SKELETON_CHECKS, SkeletonCheckItem
+from .skeleton import ACADEMIC_CHECKS, CHECK_PACKS, SKELETON_CHECKS, SkeletonCheckItem, get_pack
 
 __all__ = [
+    "ACADEMIC_CHECKS",
+    "CHECK_PACKS",
     "SKELETON_CHECKS",
     "CompiledRule",
     "Finding",
@@ -21,5 +23,6 @@ __all__ = [
     "compile_rule",
     "compile_with_model",
     "generate_dynamic_checks",
+    "get_pack",
     "run_review",
 ]

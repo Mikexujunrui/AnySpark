@@ -240,10 +240,13 @@ class WritingTools:
         from anyspark.align import render_skills_by_name
 
         # 干净上下文：意图 + 参考 + 点名技巧（不带对话历史/工具记录/旧章节全文）
-        parts = [
-            "你是 AnySpark 小说写作引擎。严格根据【写作意图】与【写作参考】撰写正文。",
-            "要求：具体、有画面感、杜绝空泛总结；直接输出正文，不要解释。",
-        ]
+        # S247：人设/要求按项目文体切换（运行时读工作区，中途切文体即时生效；
+        # fiction 与历史行为逐字一致——存量项目零变化）
+        from anyspark.server.genres import get_profile
+
+        genre = self._workspace.read_genre(self._book_id) if self._workspace else "fiction"
+        _profile = get_profile(genre)
+        parts = [_profile.engine_persona, _profile.engine_requirements]
         # S70→S153：沉浸模式（书籍级开关）——写作自由度：黑暗/暴力/敏感题材不设禁区
         if self._workspace is not None and self._workspace.is_immersive(self._book_id):
             parts.append(IMMERSIVE_PROMPT)

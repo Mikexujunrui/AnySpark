@@ -585,3 +585,25 @@ agent 写工具，但叙事树完全没有 agent 写渠道、计划只能标完�
 **门禁如实记录**：ruff check 与 format --check 各 1 处失败均来自并行会话
 未完成文件 library/vectors.py（向量检索 WIP，非本阶段改动，未触碰）；
 本阶段相关检查全绿（mypy 226 文件/pytest 73 过/tsc/vitest）。
+
+---
+
+## S247: 文体 profile——写作引擎/检测骨架/学习审查按项目文体切换（DESIGN §12.48）
+
+**背景**（缺陷 D1 修复）：小说语境固化在 prompt 层；学术/报告文本硬套小说引擎。
+实现路径避开并行会话持有文件（agent_factory/toolkit/app）——genre 走工作区文件
+权威（文体.txt），工具层运行时读取而非装配注入（中途切换即时生效）。
+
+**交付**：
+- genres.py：GenreProfile + fiction/academic/report 三内置 profile（fiction 逐字
+  保持历史行为；学术拆解七维：研究问题/方法数据/贡献结论/论证链/结构组织/表达规范/文献使用）
+- workspace.read_genre/write_genre（文体.txt）+ /api/genre GET/POST（routes_mind）
+- _clean_write 人设/要求按 profile（运行时读）
+- check 骨架演化：ACADEMIC_CHECKS 升为内置双骨架 + get_pack（修正 S246 种子方案
+  的体裁污染缺陷——种子无法表达"按体裁选择"，实测小说检测被学术项污染）；
+  /api/check 按 req.genre 或项目文体选 base，用户增删叠加；CheckRequest + genre 字段
+- 学习审查：academic/report 文体拼关注点提示（fiction 行为不变）
+- 测试：test_builtin_packs.py 重写 6 用例（pack 选择/路由体裁感知 e2e/写作人设切换/
+  genre API/check 工具注入/审稿回复 e2e）
+
+**待接线**：check_text 工具基准集按文体（toolkit 一行，并行会话持有中暂缓）
