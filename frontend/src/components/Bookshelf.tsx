@@ -200,7 +200,7 @@ export default function Bookshelf() {
         <div className="max-w-6xl mx-auto px-6 flex gap-0">
           <button
             onClick={() => setTab('books')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all duration-200 border-b-2 ${
               tab === 'books'
                 ? 'text-zinc-200 border-accent'
                 : 'text-zinc-500 border-transparent hover:text-zinc-400'
@@ -210,7 +210,7 @@ export default function Bookshelf() {
           </button>
           <button
             onClick={() => setTab('materials')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all duration-200 border-b-2 ${
               tab === 'materials'
                 ? 'text-zinc-200 border-accent'
                 : 'text-zinc-500 border-transparent hover:text-zinc-400'
@@ -220,7 +220,7 @@ export default function Bookshelf() {
           </button>
           <button
             onClick={() => setTab('library')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all duration-200 border-b-2 ${
               tab === 'library'
                 ? 'text-zinc-200 border-accent'
                 : 'text-zinc-500 border-transparent hover:text-zinc-400'
@@ -230,7 +230,7 @@ export default function Bookshelf() {
           </button>
           <button
             onClick={() => setTab('workflows')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all duration-200 border-b-2 ${
               tab === 'workflows'
                 ? 'text-zinc-200 border-accent'
                 : 'text-zinc-500 border-transparent hover:text-zinc-400'
@@ -240,7 +240,7 @@ export default function Bookshelf() {
           </button>
           <button
             onClick={() => setTab('stats')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all duration-200 border-b-2 ${
               tab === 'stats'
                 ? 'text-zinc-200 border-accent'
                 : 'text-zinc-500 border-transparent hover:text-zinc-400'
@@ -250,7 +250,7 @@ export default function Bookshelf() {
           </button>
           <button
             onClick={() => setTab('skills')}
-            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-colors border-b-2 ${
+            className={`flex items-center gap-2 px-5 py-3 text-sm font-medium transition-all duration-200 border-b-2 ${
               tab === 'skills'
                 ? 'text-zinc-200 border-accent'
                 : 'text-zinc-500 border-transparent hover:text-zinc-400'
@@ -275,7 +275,7 @@ export default function Bookshelf() {
         <div className="max-w-6xl mx-auto px-6 py-10">
           <header className="flex items-center justify-between mb-8">
             <div>
-              <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
+              <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3 gradient-title">
                 <Icon name="library" size={28} /> 我的书架
               </h1>
               <p className="text-zinc-500 mt-1 text-sm">每个项目拥有独立的知识库与写作空间</p>
@@ -310,7 +310,7 @@ export default function Bookshelf() {
               </button>
               <button
                 onClick={() => setShowCreate(true)}
-                className="bg-accent hover:bg-accent-hover text-white px-5 py-2.5 rounded-lg transition-all active:scale-95 text-sm font-medium flex items-center gap-2 shadow-sm"
+                className="bg-accent hover:bg-accent-hover text-white px-5 py-2.5 rounded-lg transition-all active:scale-95 text-sm font-medium flex items-center gap-2 shadow-md hover:shadow-lg"
               >
                 <Icon name="plus" size={16} /> 新建项目
               </button>
@@ -337,7 +337,7 @@ export default function Bookshelf() {
                 <div
                   key={book.id}
                   onClick={() => navigate(`/book/${book.id}`)}
-                  className="group cursor-pointer relative"
+                  className="group cursor-pointer relative card-lift"
                 >
                   <div className={`aspect-[3/4] rounded-xl bg-gradient-to-br ${progressColor(book.totalChars || 0)} p-4 flex flex-col justify-end relative overflow-hidden shadow-lg hover:shadow-xl hover:scale-[1.02] transition-all duration-200`}>
                     <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />

@@ -159,7 +159,7 @@ export default function MessageInput({
                 : '输入 / 查看所有命令，或用自然语言描述需求 (Shift+Enter 换行)'
             }
             disabled={uploading}
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1 text-sm text-zinc-100 focus:outline-none focus:border-zinc-500 disabled:opacity-50 placeholder-zinc-500 w-full resize-none overflow-y-auto box-border h-7 min-h-[28px] max-h-[120px] leading-tight"
+            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-1 text-sm text-zinc-100 focus:outline-none focus:border-accent/60 focus:shadow-[0_0_0_3px_rgb(14_165_233/0.12)] disabled:opacity-50 placeholder-zinc-500 w-full resize-none overflow-y-auto box-border h-7 min-h-[28px] max-h-[120px] leading-tight transition-all duration-200"
           />
           {showSlash && (
             <SlashMenu

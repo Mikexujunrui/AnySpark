@@ -6,6 +6,9 @@
 @theme {
   --animate-slide-in: slide-in 0.2s ease-out;
   --animate-fade-in: fade-in 0.15s ease-out;
+  --animate-menu-pop: menu-pop 0.14s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-message-in: message-in 0.25s ease-out;
+  --animate-progress-indeterminate: progress-indeterminate 1.4s ease-in-out infinite;
 
   --color-surface: #18181b;
   --color-surface-raised: #27272a;
@@ -26,6 +29,7 @@
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.3);
   --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.4);
   --shadow-lg: 0 12px 32px -4px rgb(0 0 0 / 0.5);
+  --shadow-pop: 0 8px 24px -4px rgb(0 0 0 / 0.55), 0 2px 8px -2px rgb(0 0 0 / 0.4);
 }
 
 @keyframes slide-in {
@@ -38,11 +42,77 @@
   to { opacity: 1; }
 }
 
+/* S242：菜单弹出（下拉/浮层）——轻微上滑 + 缩放，spring 感 */
+@keyframes menu-pop {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+/* S242：消息入场——自下而上淡入（流式新消息/历史加载） */
+@keyframes message-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* S242：不定进度条——无百分比时流动扫过（替代静态 30%） */
+@keyframes progress-indeterminate {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(320%); }
+}
+
 /* ── Global theme transitions ── */
 html, body {
   background-color: var(--color-surface);
   color: var(--color-content-muted);
   transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* ── S242 排版基础：CJK 优化字体栈 + 亚像素渲染 ──
+   中文界面在 Windows/默认字体下渲染发虚——显式声明
+   平台最优栈（Segoe UI/PingFang/雅黑）+ 抗锯齿。 */
+html {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* ── S242 键盘可达性：focus-visible 焦点环（鼠标点击不出现）── */
+:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--color-accent) 65%, transparent);
+  outline-offset: 2px;
+}
+
+/* ── S242 文本选区：accent 半透明高亮（暗/亮主题自适应）── */
+::selection {
+  background: color-mix(in oklab, var(--color-accent) 32%, transparent);
+  color: var(--color-content);
+}
+
+/* ── S242 全局控件过渡默认值 ──
+   元素选择器优先级低于 Tailwind 类——已有 transition-* 类不被覆盖，
+   裸按钮/链接瞬间获得平滑过渡（交互手感整体提升的最低成本路径）。 */
+button, a, input, textarea, select {
+  transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+  transition-duration: 150ms;
+  transition-timing-function: ease;
+}
+
+/* ── S242 卡片悬浮微升（书架/资料卡等表面通用，逐个采用）── */
+.card-lift {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.card-lift:hover {
+  transform: translateY(-2px);
+}
+
+/* ── S242 渐变标题（书架页头等大标题点缀）── */
+.gradient-title {
+  background: linear-gradient(120deg, var(--color-content) 30%, var(--color-accent) 110%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 
 /* ── Light theme: zinc palette inversion ──
@@ -63,6 +133,7 @@ html, body {
   --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.05);
   --shadow-md: 0 4px 12px -2px rgb(0 0 0 / 0.08);
   --shadow-lg: 0 12px 32px -4px rgb(0 0 0 / 0.12);
+  --shadow-pop: 0 8px 24px -4px rgb(0 0 0 / 0.14), 0 2px 8px -2px rgb(0 0 0 / 0.08);
 
   /* ── Zinc palette mirror ── */
   --color-zinc-50: #09090b;

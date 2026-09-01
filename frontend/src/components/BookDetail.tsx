@@ -302,14 +302,14 @@ function BookDetail() {
               <Icon name="download" size={16} />
             </button>
             {showExportMenu && (
-              <div className="absolute right-0 top-full mt-1 w-44 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-40 overflow-hidden">
+              <div className="absolute right-0 top-full mt-1 w-44 bg-zinc-800 border border-zinc-700 rounded-lg shadow-pop z-40 overflow-hidden animate-menu-pop origin-top-right">
                 {(['txt', 'md', 'epub'] as const).map(fmt => (
                   <a
                     key={fmt}
                     href={`/api/export/book?format=${fmt}`}
                     download
                     onClick={() => setShowExportMenu(false)}
-                    className="block w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700"
+                    className="block w-full text-left px-3 py-2 text-xs text-zinc-300 hover:bg-zinc-700 hover:text-zinc-100"
                   >
                     导出 {fmt.toUpperCase()}
                   </a>
@@ -322,7 +322,7 @@ function BookDetail() {
               <Icon name="more-horizontal" size={18} />
             </button>
             {showSessionMenu && (
-              <div className="absolute right-0 top-full mt-1 w-64 bg-zinc-800 border border-zinc-700 rounded-lg shadow-lg z-40 overflow-hidden">
+              <div className="absolute right-0 top-full mt-1 w-64 bg-zinc-800 border border-zinc-700 rounded-lg shadow-pop z-40 overflow-hidden animate-menu-pop origin-top-right">
                 <button onClick={handleNewSession} className="w-full px-3 py-2 text-left text-xs text-zinc-200 hover:bg-zinc-700 flex items-center gap-2">
                   <Icon name="plus" size={14} /> 新建会话
                 </button>
@@ -360,7 +360,7 @@ function BookDetail() {
                     onContextMenu={(e) => { if (isSplit) { e.preventDefault(); switchSecondaryTab(t.key) } }}
                     title={`${t.label}${isSplit ? ' (左键=主面板, 右键=次面板)' : ` (Ctrl+${idx + 1})`}`}
                     aria-current={isPrimary ? 'page' : undefined}
-                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-all border-b-2 whitespace-nowrap relative ${isPrimary ? 'border-accent text-zinc-100' : isSecondary ? 'border-purple-500/60 text-purple-300' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'}`}>
+                    className={`flex items-center gap-1.5 px-3 py-2 text-xs font-medium transition-all duration-200 border-b-2 whitespace-nowrap relative ${isPrimary ? 'border-accent text-zinc-100' : isSecondary ? 'border-purple-500/60 text-purple-300' : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:border-zinc-600'}`}>
                     <Icon name={t.icon} size={14} />
                     <span className="hidden sm:inline">{t.label}</span>
                     {isSecondary && <span className="absolute -top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-purple-400" />}

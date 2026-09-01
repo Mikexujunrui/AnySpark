@@ -27,10 +27,15 @@ export default function ProgressIndicator({ progress }) {
         </div>
         {detail && <p className="text-xs text-zinc-500 mb-2 truncate">{detail}</p>}
         <div className="h-1.5 bg-zinc-700/60 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-accent rounded-full transition-all duration-300"
-            style={{ width: `${pct ?? 30}%` }}
-          />
+          {pct !== null ? (
+            <div
+              className="h-full bg-accent rounded-full transition-all duration-300"
+              style={{ width: `${pct}%` }}
+            />
+          ) : (
+            /* S242：无百分比时流动扫过，替代静态 30% */
+            <div className="h-full w-2/5 bg-gradient-to-r from-transparent via-accent to-transparent rounded-full animate-progress-indeterminate" />
+          )}
         </div>
         <div className="flex justify-between text-[10px] text-zinc-500 mt-1.5">
           <span>{turnIndex ? roundLabel : '推进中'}</span>

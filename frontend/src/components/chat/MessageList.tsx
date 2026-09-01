@@ -328,6 +328,8 @@ export default function MessageList({
   }
 
   const items = groupToolMessages(messages)
+  // S242：已有流式思考块时隐藏「思考中…」行（避免双重活动指示）
+  const lastStreamingReasoning = [...messages].reverse().find(m => m?.role === 'agent' && (m as any).streamingReasoning)
 
   return (
     <div className="flex-1 min-h-0 relative">
@@ -343,7 +345,7 @@ export default function MessageList({
           const msg = item.msg
           const i = item.index
           return (
-            <div key={i} className={`flex min-w-0 gap-3 group ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+            <div key={i} className={`flex min-w-0 gap-3 group animate-message-in ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
               {msg.role === 'tool' ? (
                 <div className="w-full text-center">
                   <span className="inline-block text-[10px] text-zinc-600 bg-zinc-800/40 px-2 py-0.5 rounded">{msg.text}</span>
@@ -429,7 +431,7 @@ export default function MessageList({
             </div>
           )
         })}
-        {(streaming || uploading) && (
+        {(streaming || uploading) && !lastStreamingReasoning && (
           <div className="flex gap-3">
             <div className="w-8 h-8 rounded-full bg-gradient-to-br from-sky-800/60 to-sky-900/80 border border-sky-700/50 flex items-center justify-center shrink-0 mt-0.5 shadow-sm">
               <Icon name="lightbulb" size={14} className="text-sky-300" />
