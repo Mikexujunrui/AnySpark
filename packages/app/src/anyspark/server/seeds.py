@@ -69,6 +69,10 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
     # 使工具收编执行路径/安全网载体全部受保护
     _preset_names = (
         "拆书提炼",
+        "拆论文",
+        "文献综述",
+        "申报书起草",
+        "多平台改写",
         "叙事树提炼",
         "批量改写",
         "批量审读",
@@ -85,6 +89,22 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
         _seed_refine_template(workflow_store, WorkflowDef)
     if "叙事树提炼" not in existing:  # S242：导入项目按需建树（DESIGN §12.46）
         _seed_tree_extract_template(workflow_store, WorkflowDef)
+    # S248：校园场景模板包拆分至 seeds_campus（seeds.py 体量控制）
+    from anyspark.server.seeds_campus import (
+        _seed_literature_review_template,
+        _seed_multi_platform_template,
+        _seed_paper_refine_template,
+        _seed_proposal_draft_template,
+    )
+
+    if "拆论文" not in existing:
+        _seed_paper_refine_template(workflow_store, WorkflowDef)
+    if "文献综述" not in existing:
+        _seed_literature_review_template(workflow_store, WorkflowDef)
+    if "申报书起草" not in existing:
+        _seed_proposal_draft_template(workflow_store, WorkflowDef)
+    if "多平台改写" not in existing:
+        _seed_multi_platform_template(workflow_store, WorkflowDef)
     if "批量改写" not in existing:
         _seed_batch_rewrite_template(workflow_store, WorkflowDef)
     if "批量审读" not in existing:

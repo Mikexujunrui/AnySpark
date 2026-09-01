@@ -607,3 +607,17 @@ agent 写工具，但叙事树完全没有 agent 写渠道、计划只能标完�
   genre API/check 工具注入/审稿回复 e2e）
 
 **待接线**：check_text 工具基准集按文体（toolkit 一行，并行会话持有中暂缓）
+
+---
+
+## S248: 校园模板包——拆论文/文献综述/申报书起草/多平台改写（纯数据模板）
+
+**设计**：全部复用既有原语（book_refine_*/list_split/batch_prepare/read_chapter/
+chapter_by_id/write_chapter/accumulate），零新机制；模板即数据（改指令即改行为）。
+seeds.py 近千行 → 校园模板拆分至 seeds_campus.py（结构改进）。
+
+**模板**：拆论文（学术七维→skill 草稿人工确认）/ 文献综述（逐篇要点→分主题汇编，
+V1 标题轨迹口径已注明）/ 申报书起草（大纲→逐节→汇编）/ 多平台改写（一稿多平台）。
+预置模板总数 14。学术润色无需新模板：批量改写 + instruction 参数。
+
+**测试**：模板预置断言 + 多平台改写 e2e（8 用例全过）。文档：COMPETITION/BACKEND-MAP 同步。

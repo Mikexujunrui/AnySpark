@@ -210,3 +210,47 @@ def test_review_reply_template_runs() -> None:
             break
         time.sleep(0.5)
     assert t["status"] == "done", t.get("error")
+
+
+# ---------------------------------------------------------------------------
+# S248：校园模板包（拆论文/文献综述/申报书起草/多平台改写）预置 + e2e
+# ---------------------------------------------------------------------------
+def test_campus_templates_seeded() -> None:
+    client = TestClient(build_app(model=_Skills(), db_path=_db()))
+    names = {t["name"] for t in client.get("/api/workflows").json()}
+    assert {"拆论文", "文献综述", "申报书起草", "多平台改写"} <= names
+
+
+def test_multi_platform_template_runs() -> None:
+    class FakeAdaptModel:
+        model_name = "fake-adapt"
+
+        def respond(self, messages: list[Message], tools: object) -> ModelOutput:
+            prompt = messages[-1].content if messages else ""
+            if "整理为交付稿" in prompt:
+                return ModelOutput(text="【公众号】…\n【小红书】…", tool_calls=[])
+            return ModelOutput(text="平台版本正文。", tool_calls=[])
+
+    db = _db()
+    client = TestClient(build_app(model=FakeAdaptModel(), db_path=db))
+    ChapterStore(str(db)).upsert("main", "第一章", "原稿内容。", 1)
+
+    tpls = client.get("/api/workflows").json()
+    tpl = next(t for t in tpls if t["name"] == "多平台改写")
+    task_id = client.post(
+        f"/api/workflows/{tpl['id']}/run",
+        json={
+            "book_id": "main",
+            "params": {
+                "chapter_title": "第一章",
+                "platforms": "公众号,小红书",
+            },
+        },
+    ).json()["task_id"]
+    t: dict[str, Any] = {}
+    for _ in range(30):
+        t = client.get(f"/api/workflows/tasks/{task_id}").json()
+        if t["status"] in ("done", "failed"):
+            break
+        time.sleep(0.5)
+    assert t["status"] == "done", t.get("error")
