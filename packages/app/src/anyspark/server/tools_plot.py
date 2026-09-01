@@ -311,7 +311,59 @@ def make_plan_implementer(plans: Any, book_id: str = "main") -> tuple[list[Any],
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"操作失败：{exc}")
 
-    return [list_spec, done_spec], [list_plans, mark_done]
+    register_spec = ToolSpec(
+        name="plan_register",
+        description=(
+            "登记/更新剧情计划：写作前落'接下来某章打算写什么'，写完用 plan_mark_done "
+            "推进。同一章重复登记=更新该章计划内容（不重复建条）。"
+        ),
+        params=[
+            ParamSpec(
+                name="chapter_order",
+                type="integer",
+                required=True,
+                description="章节序号",
+            ),
+            ParamSpec(
+                name="title",
+                type="string",
+                required=True,
+                description="章节标题",
+            ),
+            ParamSpec(
+                name="content",
+                type="string",
+                required=True,
+                description="这章的安排/要点（场景/目标/转折）",
+            ),
+        ],
+    )
+
+    def register_plan(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        title = str(arguments.get("title", "")).strip()
+        content = str(arguments.get("content", "")).strip()
+        if not title or not content:
+            return ToolResult(call=call, ok=False, content="缺少 title 或 content。")
+        try:
+            order = int(arguments.get("chapter_order", 0) or 0)
+        except (TypeError, ValueError):
+            return ToolResult(call=call, ok=False, content="chapter_order 需要是整数。")
+        if order < 1:
+            return ToolResult(call=call, ok=False, content="chapter_order 需为正整数。")
+        try:
+            entries = plans.list(book_id)
+            existing = next((p for p in entries if p.chapter_order == order), None)
+            if existing is not None:
+                # 同章重登 = 更新（保留 status，避免把已 done 的章打回 planned）
+                plans.update(existing.id, title=title, content=content)
+                return ToolResult(call=call, ok=True, content=f"已更新第 {order} 章计划：{title}")
+            plans.add(order, title, content, book_id)
+            return ToolResult(call=call, ok=True, content=f"已登记第 {order} 章计划：{title}")
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"登记失败：{exc}")
+
+    return [list_spec, done_spec, register_spec], [list_plans, mark_done, register_plan]
 
 
 def make_setting_implementer(settings: Any, book_id: str = "main") -> tuple[Any, Any]:
@@ -367,3 +419,169 @@ def make_setting_implementer(settings: Any, book_id: str = "main") -> tuple[Any,
             return ToolResult(call=call, ok=False, content=f"查询失败：{exc}")
 
     return spec, implementer
+
+
+def _story_line_tail(story_tree: Any, book_id: str) -> Any | None:
+    """主线末节点：根沿 chosen 子链走到尾（store 侧树结构无环，步进安全）。
+
+    空树返回 None；无根（理论不该发生，防御）取最早创建的节点当锚。
+    """
+    nodes = story_tree.list_nodes(book_id)
+    if not nodes:
+        return None
+    by_parent: dict[Any, list[Any]] = {}
+    for n in nodes:
+        by_parent.setdefault(n.parent_id, []).append(n)
+    roots = by_parent.get(None) or []
+    cur = roots[0] if roots else min(nodes, key=lambda n: n.created_at)
+    while True:
+        chosen_children = [c for c in by_parent.get(cur.id, []) if c.chosen]
+        if not chosen_children:
+            return cur
+        cur = chosen_children[-1]
+
+
+def make_story_tree_implementer(story_tree: Any, book_id: str = "main") -> tuple[Any, Any]:
+    """叙事树写入工具（DESIGN §12.46）：agent 把叙事走向落成节点，树随写作生长。
+
+    此前叙事树只能前端面板手搭/定向探索落节点——agent 无写渠道，原生写作的树
+    长不起来。parent 缺省自动接主线末节点（chosen 链），agent 不用管树形细节。
+    """
+    add_spec = ToolSpec(
+        name="story_node_add",
+        description=(
+            "在叙事树上落一个节点（叙事状态/走向）。适合：写完一章记录主线推进"
+            "（kind=main）；规划到的必经转折/关键节点（kind=anchor）；想到可能的分叉"
+            "但还没定（kind=candidate）；确定在走的次要支线（kind=subplot）。"
+            "parent 缺省自动接主线末尾；要挂到别的节点下才传 parent_id。"
+            "叙事树会注入你的上下文，落了节点后续写作就能看到。"
+        ),
+        params=[
+            ParamSpec(
+                name="content",
+                type="string",
+                required=True,
+                description="叙事状态（一句话，如'主角发现石墙刻字，悬念指向地下祭坛'）",
+            ),
+            ParamSpec(
+                name="kind",
+                type="string",
+                required=False,
+                description="节点角色：main/anchor/candidate/subplot（缺省 main）",
+            ),
+            ParamSpec(
+                name="chosen",
+                type="boolean",
+                required=False,
+                description="是否主线已走过（缺省随 kind：main=true，其余 false）",
+            ),
+            ParamSpec(
+                name="parent_id",
+                type="string",
+                required=False,
+                description="父节点 id（缺省接主线末节点；首节点自动成为根）",
+            ),
+        ],
+    )
+
+    valid_kinds = {"root", "main", "anchor", "candidate", "subplot", "loop"}
+
+    def add_node(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        content = str(arguments.get("content", "")).strip()
+        if not content:
+            return ToolResult(call=call, ok=False, content="缺少参数 content。")
+        kind = str(arguments.get("kind") or "main").strip()
+        if kind not in valid_kinds:
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=f"kind 只支持 {'/'.join(sorted(valid_kinds))}，收到：{kind}",
+            )
+        chosen_arg = arguments.get("chosen")
+        chosen = bool(chosen_arg) if chosen_arg is not None else kind == "main"
+        try:
+            parent_id = str(arguments.get("parent_id") or "").strip() or None
+            if parent_id is not None and story_tree.get(parent_id) is None:
+                return ToolResult(call=call, ok=False, content=f"父节点不存在：{parent_id}")
+            if parent_id is None:
+                tail = _story_line_tail(story_tree, book_id)
+                if tail is None:
+                    # 空树：首节点即根（主线起点）
+                    kind = "root"
+                    chosen = True
+                else:
+                    parent_id = tail.id
+            node = story_tree.add_node(
+                content, book_id=book_id, parent_id=parent_id, kind=kind, chosen=chosen
+            )
+            tag = "主线" if chosen else kind
+            return ToolResult(
+                call=call,
+                ok=True,
+                content=f"已落节点（{tag}）：{content}",
+                data={"node_id": node.id, "parent_id": node.parent_id, "kind": node.kind},
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"落节点失败：{exc}")
+
+    return add_spec, add_node
+
+
+def make_setting_register_implementer(settings: Any, book_id: str = "main") -> tuple[Any, Any]:
+    """设定入档工具（DESIGN §12.46）：写作中确立的新设定当场落正典。
+
+    与 graph_register 分工：设定档=作者正典（规则/体系/禁忌，权威约束），
+    图谱=情节中的实体/关系事实。source=agent 标记 AI 登记（与人工/导入区分）。
+    """
+    spec = ToolSpec(
+        name="setting_register",
+        description=(
+            "把新确立的设定写入设定档（作者正典）：世界观规则/能力体系/人物属性/"
+            "势力/物品/禁忌等。写作中当场确立了新事实（如'换形药可暂时改变外貌，"
+            "超时当众现形'）时落档——后续章节查证（read_setting）可命中，防前后矛盾。"
+            "规则/体系/禁忌进这里；具体人物/地点/事件事实用 graph_register，勿两处重复。"
+        ),
+        params=[
+            ParamSpec(
+                name="content",
+                type="string",
+                required=True,
+                description="设定内容（完整陈述，防歧义）",
+            ),
+            ParamSpec(
+                name="name",
+                type="string",
+                required=False,
+                description="设定名（如'换形药'；缺省取内容前 12 字）",
+            ),
+            ParamSpec(
+                name="category",
+                type="string",
+                required=False,
+                description="类别（世界观/能力体系/人物/势力/地点/物品/规则/禁忌…；缺省'世界观'）",
+            ),
+        ],
+    )
+
+    def register(spec_: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
+        call = ToolCall(name=spec_.name, arguments=arguments)
+        content = str(arguments.get("content", "")).strip()
+        if not content:
+            return ToolResult(call=call, ok=False, content="缺少参数 content。")
+        name = str(arguments.get("name") or "").strip() or content[:12]
+        category = str(arguments.get("category") or "").strip() or "世界观"
+        try:
+            entry = settings.add(
+                content, category=category, name=name, source="agent", book_id=book_id
+            )
+            return ToolResult(
+                call=call,
+                ok=True,
+                content=f"设定已入档【{entry.category}】{entry.name}（id={entry.id}）",
+                data={"id": entry.id},
+            )
+        except Exception as exc:
+            return ToolResult(call=call, ok=False, content=f"入档失败：{exc}")
+
+    return spec, register

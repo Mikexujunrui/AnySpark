@@ -887,3 +887,95 @@ def wf_judge(wfd: WfScriptDeps, prompt: str, ctx: RunContext) -> bool:
     has_pos = any(w in lower for w in ("yes", "true", "通过", "可以", "同意"))
     has_neg = any(w in lower for w in ("no", "false", "不是", "不通过", "没有", "无法"))
     return has_pos and not has_neg
+
+
+# ── S242（DESIGN §12.46）：叙事树按需提炼（导入项目一次性建树） ──
+
+_TREE_KINDS = {"root", "main", "anchor", "candidate", "subplot", "loop"}
+
+
+def wf_script_tree_trajectory(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> NodeResult:
+    """S242：全量章题轨迹——标题是廉价全局视图（千章 ≈ 十几 KB，单次可容纳），
+    复用拆书"骨架扫描：卷+章标题轨迹（无正文）"的洞察，不做逐章正文批处理。
+    params.max_titles：抽稀封顶（缺省 500）。"""
+    try:
+        max_titles = int(node.params.get("max_titles") or 500)
+    except (TypeError, ValueError):
+        max_titles = 500
+    chaps = sorted(wfd.chapters.list_by_book(ctx.book_id), key=lambda c: c.order_index)
+    if not chaps:
+        return NodeResult(error="无章节可提炼（先导入/写入章节）")
+    n = len(chaps)
+    if n > max_titles:
+        step = n / max_titles
+        picked = [chaps[int(i * step)] for i in range(max_titles - 1)] + [chaps[-1]]
+    else:
+        picked = chaps
+    lines = [f"第{c.order_index}章 {c.title}" for c in picked]
+    head = f"共 {n} 章" + ("（已抽稀展示）" if n > max_titles else "")
+    return NodeResult(output=head + "\n" + "\n".join(lines))
+
+
+wf_scripts["tree_trajectory"] = wf_script_tree_trajectory
+
+
+def wf_script_tree_commit(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> NodeResult:
+    """S242：树形草案落库——上游 agent 输出严格 JSON 数组
+    [{id,parent,kind,chosen,content}]，draft 内部 id 映射真实节点 id 后逐条落
+    story_tree。直接落库（加性产物，面板可删可调——与图谱抽取模板同哲学）。
+    防御：parent 引用失效 → 链到最近创建节点；kind 非法 → 按主线处理。"""
+    import json as _json
+    import re as _re
+
+    raw = wf_resolve(str(node.params.get("draft") or "{{tree_draft}}"), ctx).strip()
+    if not raw:
+        return NodeResult(error="tree_commit 缺 draft（上游未产出草案）")
+    cleaned = raw
+    fence = _re.search(r"```(?:json)?\s*(.*?)\s*```", cleaned, _re.DOTALL)
+    if fence:
+        cleaned = fence.group(1)
+    start, end = cleaned.find("["), cleaned.rfind("]")
+    if start == -1 or end <= start:
+        return NodeResult(error="草案不是 JSON 数组（缺 [...] 包裹）")
+    try:
+        arr = _json.loads(cleaned[start : end + 1])
+    except _json.JSONDecodeError as exc:
+        return NodeResult(error=f"草案 JSON 解析失败：{exc}")
+    if not isinstance(arr, list) or not arr:
+        return NodeResult(error="草案为空或不是节点数组")
+    story = getattr(wfd.deps, "story_tree", None) if wfd.deps is not None else None
+    if story is None:
+        return NodeResult(error="叙事树存储不可用")
+    id_map: dict[str, str] = {}
+    skipped = 0
+    last: Any = None
+    for item in arr:
+        if not isinstance(item, dict):
+            skipped += 1
+            continue
+        content = str(item.get("content", "")).strip()
+        if not content:
+            skipped += 1
+            continue
+        kind = str(item.get("kind") or "main")
+        if kind not in _TREE_KINDS:
+            kind = "main"
+        parent_ref = str(item.get("parent") or "").strip() or None
+        parent_id = id_map.get(parent_ref) if parent_ref else None
+        if parent_ref and parent_id is None:
+            parent_id = last.id if last is not None else None
+        if parent_id is None:
+            # 无父 = 根/主线起点（树结构上只能有一个根）
+            kind, chosen = "root", True
+        else:
+            chosen = bool(item.get("chosen", kind == "main"))
+        created = story.add_node(
+            content, book_id=ctx.book_id, parent_id=parent_id, kind=kind, chosen=chosen
+        )
+        id_map[str(item.get("id") or "")] = created.id
+        last = created
+    note = f"，跳过 {skipped} 条无效" if skipped else ""
+    return NodeResult(output=f"叙事树落库完成：{len(id_map)} 节点{note}")
+
+
+wf_scripts["tree_commit"] = wf_script_tree_commit

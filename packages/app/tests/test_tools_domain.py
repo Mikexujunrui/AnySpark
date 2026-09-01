@@ -93,7 +93,7 @@ def test_plan_list_and_mark_done() -> None:
     plans.add(1, "第一章 雾城", "雨夜抵达")
     plans.add(2, "第二章 灯塔", "发现怀表")
     _, impls = make_plan_implementer(plans)
-    list_impl, done_impl = impls
+    list_impl, done_impl = impls[0], impls[1]
 
     rl = _call(list_impl)
     assert "第一章 雾城" in rl.content

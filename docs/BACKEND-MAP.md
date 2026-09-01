@@ -19,7 +19,7 @@
 │ 路由层  routes_*.py（23 个领域 router，~207 端点）        │
 │   HTTP 入口 → 校验 → 调领域逻辑/engine → 响应              │
 ├─────────────────────────────────────────────────────────┤
-│ Agent 工具层  toolkit.py + tools_*.py（48 个工具，S114 默认全注册；S145 补 library 后含 reference_lookup）  │
+│ Agent 工具层  toolkit.py + tools_*.py（51 个工具，S114 默认全注册；S145 补 library；S242 补叙事树/计划/设定写入）  │
 │   Agent 循环内可调用的领域能力（按 enable_* 开关点亮）      │
 ├─────────────────────────────────────────────────────────┤
 │ 基础设施  deps/tasks/agent_factory/context/pipeline/      │
@@ -140,7 +140,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | routes_plot | 模式库 templates/伏笔 plot/资料 materials（S128：模式库读 skill 表 type=plot） | plots/skills/materials |
 | routes_graph | 图谱 types/entities/relations/events/network（S153 邻居子图）/context/extract/impact | graph/graph_extractor/impact |
 | routes_story | 计划 plan/叙事树 nodes/threads/layout | plans/story_tree/story_threads |
-| routes_workflow | 工作流模板/草稿/任务 CRUD+run+resume（S138 续跑）+rollback（S138 批级回滚）（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134 + 章节加料 S137） | workflow_store/engine/generator |
+| routes_workflow | 工作流模板/草稿/任务 CRUD+run+resume（S138 续跑）+rollback（S138 批级回滚）（agent 节点支持 delegate：子 Agent 独立上下文跑工具循环，S115；预置模板：拆书 S129 + 批量改写/审读 S133 + 轻流程图谱抽取/信号提炼/会话摘要 S134 + 章节加料 S137 + 叙事树提炼 S242：章题轨迹→树形草案→落库） | workflow_store/engine/generator |
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 | routes_check | 检测网：POST /api/check（硬伤+自然语言规则检测，S104 重建）+ /api/check/rule（规则编译试跑）+ /api/check/skeleton（GET 列/POST 增/DELETE 删/POST restore 恢复默认，S195 用户可增删骨架检测项）+ /api/manual/cross-book-candidates + /api/manual/{id}/promote-global（S195b 跨层升级：发现跨书重复偏好→升级全局→死锁修复） | check/graph_verifier/user_skeleton/manual |
@@ -159,7 +159,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 > 传，完整落地需新表+API+UI，属功能扩展非 bug；②skills 索引随条目数线性增长
 > 无体积上限（S130 书名包聚合后可能更多）——当前规模安全，超限再议。
 
-## 4. Agent 工具层（48 工具，S114 默认全注册 × 可显式禁用）
+## 4. Agent 工具层（51 工具，S114 默认全注册 × 可显式禁用；S242 +3 写入工具）
 
 > S114 语义：所有能力**默认可用**（注册进工具箱，Agent 知道有什么）；开关列 = 显式传
 > False 可禁用的开关名（省 token/安全隔离极端场景），不是"点亮才有"。
@@ -171,6 +171,9 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | skill_lookup | 按需细看技巧全文 | enable_domain |
 | graph_query / graph_register | 图谱查证/登记 | enable_domain |
 | plot_list / plot_register / plot_resolve / plot_update / plot_delete | 伏笔查看/登记/回收归档/修改/删除（S104 补回收链路） | enable_domain |
+| story_node_add | 叙事树落节点（S242：parent 缺省接主线末尾，空树首节点即根；树随写作生长） | enable_domain |
+| plan_register | 剧情计划登记/同章更新（S242 补齐"能标完成不能建"断链） | enable_domain |
+| setting_register | 设定入档（S242：source=agent 标记 AI 登记；与 graph_register 分工：正典规则 vs 情节事实） | enable_domain |
 | check_text | 硬伤检测 + 自然语言规则检测（S104 重建，智能体自查） | enable_domain |
 | plan_list | 剧情计划查看 | enable_domain |
 | setting_query | 设定档查证 | enable_domain |

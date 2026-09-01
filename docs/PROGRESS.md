@@ -536,3 +536,27 @@ steering/取消/重试），配对修复等已抽成独立方法，强行拆只�
   （Windows/macOS/Linux，双击/直接运行即用，零依赖）
 **推送**：`git push public feat/shell-port:main`（public/main 至 S234b 干净态）+ 打 tag `v4.0.14`
 **验证**：`ruff check .` 全绿（All checks passed）；仓库已无历史 lint 债务
+
+---
+
+## S243: AI 自主规划写入渠道（原编号 S242，撞号让位改 S243）——叙事树/计划/设定的 agent 写工具 + 叙事树按需提炼
+
+**背景**（主人复盘哈利波特项目）：规划产物生产渠道不对称——图谱全自动、伏笔有
+agent 写工具，但叙事树完全没有 agent 写渠道、计划只能标完成不能建、设定只能查证
+不能登记。原生项目产物不完备，导入项目（千章存量）只能手搭面板。
+
+**交付**（DESIGN §12.46）：
+- `story_node_add`：叙事树落节点（parent 缺省接主线末尾 chosen 链，空树首节点即根；
+  kind 缺省 main，chosen 缺省随 kind）——tools_plot.py `make_story_tree_implementer`
+- `plan_register`：补齐计划断链（同章重登=更新且保留 done 状态）
+- `setting_register`：设定入档（source=agent；与 graph_register 分工：正典规则 vs 情节事实）
+- 装配：ToolContext.story_tree 新字段 + agent_factory 传参 + toolkit enable_domain 注册
+- 预置 workflow 模板「叙事树提炼」：tree_trajectory（章题轨迹，抽稀封顶 500）→
+  agent 树形草案（严格 JSON）→ tree_commit（落库，parent 引用失效防御链最近节点）；
+  轻流程直接落库（加性可删，与图谱抽取模板同哲学）
+- 前端：WorkflowPanel 画布脚本目录补 tree_trajectory/tree_commit 两函数
+- 测试：test_story_tools.py 5 用例（三工具 + 模板 e2e + 查证闭环）全过
+
+**验证**：gate --pytest（story_tools/tools_domain/workflow_api/test_app）+ tsc + vitest 全绿
+**踩坑**：_call 助手 `name` 形参与工具参数 name 撞名（name= 字面漏进 kwargs）→
+助手改位置限定参数（`name, /`）

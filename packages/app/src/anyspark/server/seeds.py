@@ -69,6 +69,7 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
     # 使工具收编执行路径/安全网载体全部受保护
     _preset_names = (
         "拆书提炼",
+        "叙事树提炼",
         "批量改写",
         "批量审读",
         "图谱抽取",
@@ -81,6 +82,8 @@ def _seed_book_refine_template(workflow_store: Any) -> None:
         workflow_store.mark_builtin_by_name(name)
     if "拆书提炼" not in existing:
         _seed_refine_template(workflow_store, WorkflowDef)
+    if "叙事树提炼" not in existing:  # S242：导入项目按需建树（DESIGN §12.46）
+        _seed_tree_extract_template(workflow_store, WorkflowDef)
     if "批量改写" not in existing:
         _seed_batch_rewrite_template(workflow_store, WorkflowDef)
     if "批量审读" not in existing:
@@ -149,6 +152,77 @@ def _seed_graph_extract_template(workflow_store: Any, wf_def_cls: Any) -> None:
     errors = wf.validate()
     if errors:
         raise ValueError(f"图谱抽取模板校验失败: {errors}")
+    workflow_store.add_template(wf, builtin=True)
+
+
+def _seed_tree_extract_template(workflow_store: Any, wf_def_cls: Any) -> None:
+    """S242（DESIGN §12.46）：叙事树提炼——导入项目按需一次性建树。
+
+    标题轨迹（script，廉价全局视图）→ agent 归纳树形草案 → 落库（script）。
+    轻流程直接落库（加性产物，面板可删可调——与图谱抽取模板同哲学）。
+    """
+    wf = wf_def_cls.from_dict(
+        {
+            "name": "叙事树提炼",
+            "description": (
+                "从全书章节标题轨迹提炼叙事树（主线阶段/支线/分叉）并直接落库。"
+                "适合导入的存量项目一次性建树；原生项目建议写作中用 story_node_add "
+                "工具随手落节点。无运行参数（默认全部章节）。"
+            ),
+            "nodes": [
+                {
+                    "id": "traj",
+                    "kind": "script",
+                    "label": "章题轨迹",
+                    "params": {
+                        "function": "tree_trajectory",
+                        "max_titles": 500,
+                        "output_key": "trajectory",
+                    },
+                },
+                {
+                    "id": "draft",
+                    "kind": "agent",
+                    "label": "树形草案",
+                    "params": {
+                        "instruction": (
+                            "你在为一条小说章题轨迹构建叙事树草案。轨迹是全书章节标题"
+                            "（按序）。任务：识别主线阶段与支线，产出树形草案。\n"
+                            "要求：\n"
+                            "- 输出严格 JSON 数组，不要其它文字：\n"
+                            '  [{"id":"n1","parent":null,"kind":"main",'
+                            '   "chosen":true,"content":"..."}]\n'
+                            "- 首节点 parent=null；其余 parent 指向已有 id\n"
+                            "- 主线链 chosen=true（kind=main）；确定在走的支线 kind=subplot；"
+                            "轨迹里可辨识但未展开的分叉 kind=candidate\n"
+                            "- content 是该阶段的叙事状态（一句话，含关键事件/悬念，"
+                            "不是章节名罗列）\n"
+                            "- 粒度：主线 8-20 个阶段节点为宜；支线按轨迹中可辨识的"
+                            "次要线索归纳\n\n轨迹：\n{{trajectory}}"
+                        ),
+                        "output_key": "tree_draft",
+                    },
+                },
+                {
+                    "id": "commit",
+                    "kind": "script",
+                    "label": "落库",
+                    "params": {
+                        "function": "tree_commit",
+                        "draft": "{{tree_draft}}",
+                        "output_key": "tree_report",
+                    },
+                },
+            ],
+            "edges": [
+                {"source": "traj", "target": "draft"},
+                {"source": "draft", "target": "commit"},
+            ],
+        }
+    )
+    errors = wf.validate()
+    if errors:
+        raise ValueError(f"叙事树提炼模板校验失败: {errors}")
     workflow_store.add_template(wf, builtin=True)
 
 

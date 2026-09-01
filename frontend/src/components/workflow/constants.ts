@@ -47,6 +47,14 @@ export const SCRIPT_FUNCTIONS: Record<string, { label: string; params: { key: st
     ],
   },
   list_chapters: { label: "列章节", params: [] },
+  tree_trajectory: {
+    label: "章题轨迹（叙事树提炼）",
+    params: [{ key: "max_titles", label: "抽稀封顶", type: "number" }],
+  },
+  tree_commit: {
+    label: "叙事树草案落库",
+    params: [{ key: "draft", label: "草案变量", placeholder: "缺省 tree_draft" }],
+  },
   review_chapter: {
     label: "审读章节（检测网）",
     params: [{ key: "chapter_title", label: "章名" }],

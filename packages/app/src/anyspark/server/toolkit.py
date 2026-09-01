@@ -52,6 +52,7 @@ class ToolContext:
     templates: list[str] = None  # type: ignore[assignment]  # S68 模板描述列表（explore_direction 注入）
     library: Any = None  # S86 参考书库（reference_lookup 工具：不注入，按需检索）
     signals: Any = None  # S132c 信号存储（mind_reconcile 对账读最近行为信号）
+    story_tree: Any = None  # S242：叙事树写入（story_node_add 工具；缺省关=不注册）
     book_id: str = "main"  # S74：当前项目 id——工具层多书隔离（此前各 implementer 硬编码 main）
     subagent_deps: Any = None  # S121 提案 B：子 Agent 内核装配依赖（主循环 run_subagent 工具用）
     bg_queue: Any = None  # S214：后台任务队列（ingest 工具拆章后挂图谱抽取）
@@ -178,6 +179,17 @@ def build_toolkit(
         plan_specs, plan_impls = make_plan_implementer(ctx.plans, book_id=ctx.book_id)
         for s, i in zip(plan_specs, plan_impls, strict=True):
             registry.register(s, i)
+        # S242（DESIGN §12.46）：叙事树/设定写入——agent 自主落节点/入正典，
+        # 读写闭环（树 render 已随上下文注入，read_setting 查证已有）
+        if ctx.story_tree is not None:
+            from anyspark.server.tools_plot import make_story_tree_implementer
+
+            st_spec, st_impl = make_story_tree_implementer(ctx.story_tree, book_id=ctx.book_id)
+            registry.register(st_spec, st_impl)
+        from anyspark.server.tools_plot import make_setting_register_implementer
+
+        sr_spec, sr_impl = make_setting_register_implementer(ctx.settings, book_id=ctx.book_id)
+        registry.register(sr_spec, sr_impl)
         st_spec, st_impl = make_setting_implementer(ctx.settings, book_id=ctx.book_id)
         registry.register(st_spec, st_impl)
         rp_spec, rp_impl = make_roleplay_implementer(
