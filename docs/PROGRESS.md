@@ -636,3 +636,24 @@ proposal（含合规论证完整申报书）全部通过。
 **实测抓到并修复**：①list_split 漏剥 ```json 围栏（大纲 agent 输出带围栏→JSON
 解析失败→按行切碎；对齐 PlotGenerator/tree_commit 先剥围栏）②冒烟取终局节点
 不能 reversed（node_states 字母序非执行序）——按 merge/finish 节点名取。
+
+---
+
+## S250: D2/D3 学术硬能力——引用管理 + LaTeX 导出 + arXiv 连接器（文献=书库条目+cite_meta）
+
+**架构定案（主人问"文献库与书库能否合并"→能且必须）**：不建新库，文献 =
+书库条目 + cite_meta JSON 列——导入即获 RAG/reference_lookup/工作流全通道。
+library_books 加列（ALTER 幂等迁移，旧库兼容）。
+
+**D2 引用管理**：library/citation.py 纯函数格式化器（GB/T 7714-2015 顺序编码制：
+>3 作者取前3加等/et al、[J][M][D][C][R][EB/OL] 标识；BibTeX：and 连接、--页码、
+键=姓氏+年+题名首词、特殊字符转义）+ citation_export agent 工具（无元数据书
+诚实降级「待补全」，不编造）+ POST cite-meta / GET citations 路由。
+**D2 LaTeX 导出**：export_latex（ctexart 可编译骨架：section/subsection/itemize/
+verbatim/转义）+ format=latex 路由。
+**D3 arXiv 连接器**：library/connectors.py（Atom API，stdlib 零依赖）——
+id 归一/建库书/摘要章节/cite_meta 落全；知网无公开 API 不做（诚实边界）。
+
+**实测**：真实 arXiv 导入（Attention Is All You Need，8 作者→et al 正确、
+键 vaswani2017attention）+ 24 库测试 + 12 app e2e + 42 回归全过。
+campus_smoke.py 加 d2 场景。

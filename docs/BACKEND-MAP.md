@@ -144,7 +144,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | routes_play | 推演 sessions/choose/branch + 评审团 review | play_engine/review_panel |
 | routes_tools | 扩展工具 CRUD/approve + codex/ingest/export | ext_tools/workspace/codex/export |
 | routes_check | 检测网：POST /api/check（硬伤+自然语言规则检测，S104 重建）+ /api/check/rule（规则编译试跑）+ /api/check/skeleton（GET 列/POST 增/DELETE 删/POST restore 恢复默认，S195 用户可增删骨架检测项；S246 内置学术规则包七项经同通道自举——check_text 工具与路由同源合并骨架）+ /api/manual/cross-book-candidates + /api/manual/{id}/promote-global（S195b 跨层升级：发现跨书重复偏好→升级全局→死锁修复） | check/graph_verifier/user_skeleton/manual |
-| routes_library | 参考书库（S86 新增包 anyspark-library）：全局书库 CRUD + import 章节入库 + 项目选参考书（GET/PUT /api/books/{id}/references）+ POST /api/library/{id}/refine-skill（拆书提炼快捷入口，S135 优先走 workflow 模板） | library/workspace/chapters |
+| routes_library | 参考书库（S86 新增包 anyspark-library）：全局书库 CRUD + import 章节入库 + 项目选参考书（GET/PUT /api/books/{id}/references）+ POST /api/library/{id}/refine-skill（拆书提炼快捷入口，S135 优先走 workflow 模板）+ POST /api/library/{id}/cite-meta、GET /api/library/{id}/citations（S250，D2 引用元数据读写与导出）+ POST /api/library/import-arxiv（S250，D3：arXiv Atom API 连接器，建书+摘要章节+cite_meta） | library/workspace/chapters |
 | routes_update | 版本检测更新（S164）：GET /api/update/check（检查新版本）+ GET /api/update/status（本地版本与检查状态）——参考 v3 update_checker，前端启动时提示 | update_checker |
 
 > **S146 标注（无前端入口，设计内非遗漏）**：以下 6 个端点有测试无 UI——
@@ -178,6 +178,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | plan_list | 剧情计划查看 | enable_domain |
 | setting_query | 设定档查证 | enable_domain |
 | search_chapters / read_context | 正文检索/锚点阅读 | enable_domain |
+| citation_export | 引用条目导出（S250，D2：GB/T 7714/BibTeX；文献=书库条目+cite_meta，无元数据诚实降级「待补全」） | enable_domain + library 非空 |
 | mind_register / mind_manage | 心智登记/管理 | enable_domain |
 | skill_refine | 技巧提炼候选 / 拆书（mode=book 四步：结构感知微观方法论 + 骨架扫描 + 定点精读架构技法 + 剧情模式双落；S135 收编：mode=book 优先走「拆书提炼」workflow 模板，快捷入口→底层统一 workflow） | enable_domain |
 | role_play | 角色推演 | enable_domain |

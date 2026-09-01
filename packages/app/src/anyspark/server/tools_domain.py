@@ -46,6 +46,7 @@ from anyspark.server.tools_plot import (
 )
 from anyspark.server.tools_reference import (
     make_batch_implementer,
+    make_citation_export_implementer,
     make_reference_lookup_implementer,
     render_reference_knowledge,
 )
@@ -58,6 +59,7 @@ __all__ = [
     "_QUERY_LIMIT",
     "_RELATION_LIMIT",
     "make_batch_implementer",
+    "make_citation_export_implementer",
     "make_codex_implementer",
     "make_graph_query_implementer",
     "make_graph_register_implementer",

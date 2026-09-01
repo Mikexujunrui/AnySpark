@@ -15,6 +15,8 @@ import zipfile
 from pathlib import Path
 
 _IMG_RE = re.compile(r"!\[([^\]]*)\]\(([^)]+)\)")
+_HEAD_RE = re.compile(r"^(#{1,3})\s+(.+)$")
+_NUM_ITEM_RE = re.compile(r"^\d+[.、)]\s+")
 
 
 def export_txt(chapters: list[dict[str, str]]) -> str:
@@ -23,6 +25,91 @@ def export_txt(chapters: list[dict[str, str]]) -> str:
 
 def export_md(chapters: list[dict[str, str]]) -> str:
     return "\n\n".join(f"# {c['title']}\n\n{c['content']}" for c in chapters)
+
+
+_TEX_SPECIALS = {
+    "\\": r"\textbackslash{}",
+    "&": r"\&",
+    "%": r"\%",
+    "$": r"\$",
+    "#": r"\#",
+    "_": r"\_",
+    "{": r"\{",
+    "}": r"\}",
+    "~": r"\textasciitilde{}",
+    "^": r"\textasciicircum{}",
+}
+
+
+def _tex_escape(text: str) -> str:
+    return "".join(_TEX_SPECIALS.get(ch, ch) for ch in text)
+
+
+def export_latex(chapters: list[dict[str, str]]) -> str:
+    """LaTeX 导出（S250，D2 学术硬缺口）：md 章节 → 可编译 tex 骨架。"""
+    body: list[str] = []
+
+    def _flush_para(p: list[str]) -> None:
+        if p:
+            body.append("\n".join(p))
+            p.clear()
+
+    for c in chapters:
+        body.append(f"\\section{{{_tex_escape(c['title'])}}}")
+        lines = str(c["content"]).splitlines()
+        in_code = False
+        para: list[str] = []
+        in_list = False
+        for line in lines:
+            if line.strip().startswith("```"):
+                _flush_para(para)
+                if in_list:
+                    body.append("\\end{itemize}")
+                    in_list = False
+                body.append("\\begin{verbatim}" if not in_code else "\\end{verbatim}")
+                in_code = not in_code
+                continue
+            if in_code:
+                body.append(line)
+                continue
+            m = _HEAD_RE.match(line)
+            if m:
+                _flush_para(para)
+                if in_list:
+                    body.append("\\end{itemize}")
+                    in_list = False
+                # ##/### → subsection/subsubsection（# 已被章标题占用）
+                hashes = len(m.group(1))
+                cmd = "subsection" if hashes <= 2 else "subsubsection"
+                body.append(f"\\{cmd}{{{_tex_escape(m.group(2).strip())}}}")
+                continue
+            stripped = line.strip()
+            if not stripped:
+                _flush_para(para)
+                if in_list:
+                    body.append("\\end{itemize}")
+                    in_list = False
+                continue
+            if stripped.startswith(("- ", "* ", "+ ")) or _NUM_ITEM_RE.match(stripped):
+                _flush_para(para)
+                if not in_list:
+                    body.append("\\begin{itemize}")
+                    in_list = True
+                inner = stripped.lstrip("-*+ ").lstrip("0123456789. ")
+                body.append(f"\\item {_tex_escape(inner)}")
+                continue
+            para.append(_tex_escape(line))
+        _flush_para(para)
+        if in_list:
+            body.append("\\end{itemize}")
+    preamble = (
+        "% AnySpark LaTeX 导出（V1：ctex 文档类，中文直出）\n"
+        "\\documentclass[UTF8]{ctexart}\n"
+        "\\usepackage{geometry}\n"
+        "\\geometry{a4paper, margin=2.5cm}\n"
+        "\n\\begin{document}\n"
+    )
+    return preamble + "\n\n".join(body) + "\n\\end{document}\n"
 
 
 def _md_to_xhtml(title: str, content: str) -> str:

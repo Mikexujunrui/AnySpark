@@ -23,6 +23,21 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+def scenario_d2() -> None:
+    """D2/D3：真实 arXiv 导入 → 引用导出 → LaTeX 导出（纯机制，零模型调用）。"""
+    import tempfile
+
+    from anyspark.library import LibraryStore, import_arxiv_paper
+    from anyspark.library.citation import fmt_bibtex, fmt_gbt7714
+
+    store = LibraryStore(str(Path(tempfile.mkdtemp()) / "t.db"))
+    out = import_arxiv_paper(store, "1706.03762")  # Attention Is All You Need
+    meta = store.get_book(out["book_id"])["cite_meta"]
+    _show("arXiv 导入 cite_meta", str(meta), 400)
+    _show("GB/T 7714", fmt_gbt7714(meta), 300)
+    _show("BibTeX", fmt_bibtex(meta), 500)
+
+
 # 故意埋瑕疵的学术段落（术语漂移/口语化/无据断言/数据不一致）
 FLAWED_ACADEMIC = (
     "本研究探讨了手机依赖这个问题。大学生们每天都离不开智能手机，"
@@ -193,6 +208,7 @@ def main() -> None:
         "review": scenario_review,
         "multiplatform": scenario_multiplatform,
         "proposal": scenario_proposal,
+        "d2": scenario_d2,
     }
     chosen = sys.argv[1:] or ["check"]
     for name in chosen:
