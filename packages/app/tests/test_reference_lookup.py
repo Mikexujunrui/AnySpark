@@ -227,3 +227,130 @@ def test_reference_lookup_absent_without_library(make_toolkit: Any) -> None:
     registry = make_toolkit()  # library 缺省 None
     names = {s.name for s in registry.specs()}
     assert "reference_lookup" not in names
+
+
+# ---------------------------------------------------------------------------
+# S244：语义通道（mode=auto/keyword/semantic 三模式 + 降级）
+# ---------------------------------------------------------------------------
+
+
+class _FakeEmbedder:
+    """确定性 fake：向量=[魔法, 剑, 行会, 权力, 1]，共现结构区分语义。"""
+
+    available = True
+    model = "fake-embed"
+
+    def embed(self, texts: list) -> list:
+        out = []
+        for t in texts:
+            out.append([
+                float(t.count("魔法")),
+                float(t.count("剑")),
+                float(t.count("行会")),
+                float(t.count("权力")),
+                1.0,
+            ])
+        return out
+
+
+class _FakeVectors:
+    """fake 向量索引：返回固定命中（模拟全书库语义召回）。"""
+
+    def __init__(self, hits: list) -> None:
+        self._hits = hits
+
+    def search(self, query_vec: list, book_ids: list | None = None, top_k: int = 8) -> list:
+        _ = query_vec, book_ids
+        return self._hits[:top_k]
+
+
+def _make_semantic_tool(vectors: Any = None, embedder: Any = None) -> tuple[Any, LibraryStore]:
+    """建一个带书库的工具（可选带语义通道）。"""
+    d = Path(tempfile.mkdtemp())
+    lib = LibraryStore(d / "lib.db", library_root=d / "library")
+    lib.add_book("魔法之书")
+    lib.import_chapter("魔法之书", "第一章", "少年握紧法杖，魔法的光辉照亮塔顶。")
+    lib.set_references("main", [{"type": "library", "id": "魔法之书"}])
+    spec, impl = make_reference_lookup_implementer(
+        lib, None, book_id="main", vectors=vectors, embedder=embedder
+    )
+    return impl, lib
+
+
+def test_semantic_mode_hits_whole_library() -> None:
+    """mode=semantic：不依赖项目参考书选择，直接语义搜全书库。"""
+    hits = [
+        {"book_id": "魔法之书", "filename": "第一章.md", "chunk_idx": 0,
+         "text": "少年握紧法杖，魔法的光辉照亮塔顶。", "score": 0.72},
+    ]
+    impl, _ = _make_semantic_tool(
+        vectors=_FakeVectors(hits), embedder=_FakeEmbedder()
+    )
+    r = _call(impl, keyword="学徒的修行", mode="semantic")
+    assert r.ok
+    assert "语义命中" in r.content
+    assert "魔法之书" in r.content
+    assert "0.72" in r.content
+    assert "关键词匹配" not in r.content  # semantic 模式跳过关键词通道
+
+
+def test_auto_mode_merges_both_channels() -> None:
+    """mode=auto（缺省）：语义 + 关键词双通道合并输出。"""
+    hits = [
+        {"book_id": "魔法之书", "filename": "第一章.md", "chunk_idx": 0,
+         "text": "少年握紧法杖，魔法的光辉照亮塔顶。", "score": 0.65},
+    ]
+    impl, _ = _make_semantic_tool(
+        vectors=_FakeVectors(hits), embedder=_FakeEmbedder()
+    )
+    r = _call(impl, keyword="魔法")  # 不传 mode → auto
+    assert r.ok
+    assert "语义匹配" in r.content
+    assert "关键词匹配" in r.content  # "魔法"关键词也命中书库章节
+    assert "魔法之书" in r.content
+
+
+def test_semantic_unavailable_degrades_gracefully() -> None:
+    """vectors/embedder 为 None（未配 embedding）→ auto 模式降级关键词，不报错。"""
+    impl, _ = _make_semantic_tool(vectors=None, embedder=None)
+    r = _call(impl, keyword="魔法")
+    assert r.ok
+    assert "关键词匹配" in r.content
+    assert "语义" not in r.content
+
+
+def test_semantic_mode_no_vectors_clear_error() -> None:
+    """mode=semantic 但语义通道不可用 → 明确报错（而非空结果）。"""
+    impl, _ = _make_semantic_tool(vectors=None, embedder=None)
+    r = _call(impl, keyword="学徒", mode="semantic")
+    assert not r.ok
+    assert "语义" in r.content and "不可用" in r.content
+
+
+def test_semantic_embedder_down_reports_unavailable() -> None:
+    """mode=semantic 且 embedding 调用抛异常 → 明确提示服务异常。"""
+
+    class DownEmbedder:
+        available = True
+
+        def embed(self, texts: list) -> list:
+            raise RuntimeError("embedding 服务 502")
+
+    hits = [{"book_id": "魔法之书", "filename": "第一章.md", "chunk_idx": 0,
+             "text": "魔法", "score": 0.5}]
+    impl, _ = _make_semantic_tool(vectors=_FakeVectors(hits), embedder=DownEmbedder())
+    r = _call(impl, keyword="学徒", mode="semantic")
+    assert not r.ok
+    assert "不可用" in r.content
+
+
+def test_invalid_mode_falls_back_to_auto() -> None:
+    """非法 mode → 回落 auto（不报错）。"""
+    hits = [
+        {"book_id": "魔法之书", "filename": "第一章.md", "chunk_idx": 0,
+         "text": "魔法", "score": 0.5},
+    ]
+    impl, _ = _make_semantic_tool(vectors=_FakeVectors(hits), embedder=_FakeEmbedder())
+    r = _call(impl, keyword="魔法", mode="nonsense")
+    assert r.ok
+    assert "语义匹配" in r.content  # auto 行为：双通道

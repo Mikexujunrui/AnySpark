@@ -435,6 +435,9 @@ def build_app(
 
     # S187：回填 wfd.deps（wf_run_subagent/tasks 脚本需要 AppDeps）
     wfd.deps = deps
+    # S244：工作流 query_reference 节点的语义通道
+    wfd.library_vectors = library_vectors
+    wfd.embedder = embedder
 
     # S81：shutdown 时统一 close 各 store 连接（WAL 优雅收尾；防连接泄漏）
     @app.on_event("shutdown")

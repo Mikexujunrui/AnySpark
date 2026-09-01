@@ -122,6 +122,8 @@ def make_agent(
             # （S86 声称"检索走 agent 工具"实际落空；仅 workflow query_reference
             # script 可用）。原子查询应开放给 agent（决策点边界：单点查询留工具）。
             library=deps.library,
+            library_vectors=deps.library_vectors,  # S244：语义通道
+            embedder=deps.embedder,
             bg_queue=deps.bg_queue,
         ),
         enable_domain=enable_domain,

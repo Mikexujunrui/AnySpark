@@ -54,6 +54,9 @@ def build_subagent_registry(
             skill_generator=deps.skill_generator,
             book_id=book_id,
             templates=[f"{s.name}：{s.description}" for s in deps.skills.plot_skills()],
+            library=deps.library,
+            library_vectors=deps.library_vectors,  # S244：子 Agent 同样可用语义检索
+            embedder=deps.embedder,
             bg_queue=deps.bg_queue,
         ),
         enable_domain=True,

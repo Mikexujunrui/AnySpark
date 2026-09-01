@@ -52,6 +52,8 @@ class ToolContext:
     skill_generator: Any = None  # S72 文风参考 → skill 提炼工具（skill_refine）
     templates: list[str] = None  # type: ignore[assignment]  # S68 模板描述列表（explore_direction 注入）
     library: Any = None  # S86 参考书库（reference_lookup 工具：不注入，按需检索）
+    library_vectors: Any = None  # S244：书库向量索引（语义检索通道，未配 embedding 时 None）
+    embedder: Any = None  # S244：embedding 客户端（与 library_vectors 成对）
     signals: Any = None  # S132c 信号存储（mind_reconcile 对账读最近行为信号）
     story_tree: Any = None  # S242：叙事树写入（story_node_add 工具；缺省关=不注册）
     user_skeleton: Any = None  # S246：用户自定义检测项（check_text 合并骨架同源）
@@ -218,6 +220,8 @@ def build_toolkit(
                 book_id=ctx.book_id,
                 graph=ctx.graph,
                 settings=ctx.settings,
+                vectors=ctx.library_vectors,  # S244：语义通道（未配时 None，自动降级）
+                embedder=ctx.embedder,
             )
             registry.register(rl_spec, rl_impl)
         rc_spec, rc_impl = make_read_context_implementer(ctx.chapters, book_id=ctx.book_id)

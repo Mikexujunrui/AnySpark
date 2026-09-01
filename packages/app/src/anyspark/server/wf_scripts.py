@@ -39,6 +39,8 @@ class WfScriptDeps:
         self.graph: Any = None  # GraphStore
         self.settings: Any = None  # WorldSettingStore
         self.library: Any = None  # LibraryStore
+        self.library_vectors: Any = None  # S244：书库向量索引（语义检索）
+        self.embedder: Any = None  # S244：embedding 客户端
         self.workspace: Any = None  # Workspace | None
         self.skills: Any = None  # WritingSkillStore | None
         self.deps: Any = None  # AppDeps（后赋值）
@@ -326,18 +328,26 @@ wf_scripts["read_graph"] = wf_script_read_graph
 
 
 def wf_script_query_reference(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> NodeResult:
-    """查参考书（分级检索）：原文片段 + 高级参考书（项目）的图谱/设定知识层。
+    """查参考书（分级检索 + S244 语义通道）：原文片段 + 高级参考书（项目）的图谱/设定知识层。
 
     params: keyword 必填（支持 {{var}} 解析，如 run params 传 ref_keyword）；
-    max_per_book 缺省 3。复用 reference_lookup 分级检索。
+    mode 可选 auto（缺省，关键词+语义双通道）/keyword/semantic；
+    max_per_book 缺省 3；top_k 语义命中上限缺省 5。
     """
     keyword = wf_resolve(str(node.params.get("keyword") or ""), ctx).strip()
     if not keyword:
         return NodeResult(error="query_reference 缺 keyword")
+    mode = str(node.params.get("mode") or "auto").strip().lower()
+    if mode not in ("auto", "keyword", "semantic"):
+        mode = "auto"
     try:
         max_per = max(1, min(5, int(str(node.params.get("max_per_book") or "3"))))
     except ValueError:
         max_per = 3
+    try:
+        top_k = max(1, min(10, int(str(node.params.get("top_k") or "5"))))
+    except ValueError:
+        top_k = 5
 
     def _project_files(ref_book_id: str) -> str:
         parts = []
@@ -345,37 +355,63 @@ def wf_script_query_reference(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> 
             parts.append(f"【{ch.title}】\n{ch.content}")
         return "\n\n".join(parts)
 
-    try:
-        res = search_reference_books(
-            wfd.library,
-            ctx.book_id,
-            keyword,
-            project_files=_project_files,
-            max_per_book=max_per,
-        )
-    except Exception as exc:
-        return NodeResult(error=f"参考书检索失败: {exc}")
     lines = [f"参考书命中「{keyword}」："]
-    for item in res.get("results", []):
-        lines.append(f"——{item['ref_name']}——")
-        for h in item.get("hits", []):
-            lines.append(f"({h['count']}次) {h['snippet']}")
-        # 高级参考书（项目）知识层：图谱/设定
-    if wfd.library is not None:
+
+    # S244 语义通道（全书库向量检索）
+    semantic_n = 0
+    if (
+        mode in ("auto", "semantic")
+        and wfd.library_vectors is not None
+        and wfd.embedder is not None
+        and wfd.embedder.available
+    ):
         try:
-            for ref in wfd.library.get_references(ctx.book_id):
-                if ref.get("type") != "project":
-                    continue
-                klines = render_reference_knowledge(
-                    wfd.graph, wfd.settings, str(ref.get("id", "")), keyword
+            qvec = wfd.embedder.embed([keyword])[0]
+            for h in wfd.library_vectors.search(qvec, top_k=top_k):
+                book = wfd.library.get_book(h["book_id"]) if wfd.library else None
+                name = book["name"] if book else h["book_id"]
+                fname = str(h.get("filename", "")).replace(".md", "")
+                lines.append(
+                    f"——全书库语义命中（相似度 {h['score']:.2f}）《{name}》{fname}——\n"
+                    f"{h['text'][:300]}"
                 )
-                if klines:
-                    lines.append(f"——项目「{ref.get('id', '?')}」（知识层：图谱/设定）——")
-                    lines.extend(klines)
+                semantic_n += 1
         except Exception as exc:
-            logger.warning("参考书知识层渲染失败: %s", exc)
+            logger.warning("query_reference 语义通道降级: %s", exc)
+
+    # 关键词通道 + 知识层（mode=semantic 时跳过）
+    if mode in ("auto", "keyword"):
+        try:
+            res = search_reference_books(
+                wfd.library,
+                ctx.book_id,
+                keyword,
+                project_files=_project_files,
+                max_per_book=max_per,
+            )
+        except Exception as exc:
+            return NodeResult(error=f"参考书检索失败: {exc}")
+        for item in res.get("results", []):
+            lines.append(f"——{item['ref_name']}——")
+            for h in item.get("hits", []):
+                lines.append(f"({h['count']}次) {h['snippet']}")
+        # 高级参考书（项目）知识层：图谱/设定
+        if wfd.library is not None:
+            try:
+                for ref in wfd.library.get_references(ctx.book_id):
+                    if ref.get("type") != "project":
+                        continue
+                    klines = render_reference_knowledge(
+                        wfd.graph, wfd.settings, str(ref.get("id", "")), keyword
+                    )
+                    if klines:
+                        lines.append(f"——项目「{ref.get('id', '?')}」（知识层：图谱/设定）——")
+                        lines.extend(klines)
+            except Exception as exc:
+                logger.warning("参考书知识层渲染失败: %s", exc)
     if len(lines) == 1:
-        return NodeResult(output=f"参考书中未命中「{keyword}」（含图谱/设定层）。")
+        note = "（已尝试语义+关键词双通道）" if mode == "auto" else ""
+        return NodeResult(output=f"参考书中未命中「{keyword}」{note}。")
     return NodeResult(output="\n\n".join(lines))
 
 

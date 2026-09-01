@@ -22,25 +22,31 @@ def make_reference_lookup_implementer(
     book_id: str = "main",
     graph: Any = None,
     settings: Any = None,
+    vectors: Any = None,
+    embedder: Any = None,
 ) -> tuple[Any, Any]:
-    """参考书检索工具（S86 + 分级）：搜当前项目已选的参考书（书库的书 + 其他项目）。
+    """参考书检索工具（S86 + 分级 + S244 语义通道）：搜当前项目已选的参考书
+    （书库的书 + 其他项目）+ S244 起可语义检索**全书库**。
 
     参考书分级（设计定案）：
     - 低级参考书（书库的书）：只检索原文文本片段（现状）。
     - 高级参考书（项目）：除原文片段外，还可检索该项目的知识层——图谱实体卡片
       （名称/类型/状态/关系）与设定档条目（分类/内容），只读、不注入、按需检索。
 
-    参考书不注入任何信息——需要借鉴某本书的写法/设定/氛围时主动检索。
+    S244 语义通道：vectors+embedder 可用时（mode=auto/semantic），额外对**全书库**
+    做 embedding 余弦检索——零关键词重叠的模糊查询（「像中世纪行会的设定」）
+    也能命中；不可用时自动降级纯关键词，不报错。
     """
 
     spec = ToolSpec(
         name="reference_lookup",
         description=(
-            "检索本项目已选的参考书（书库的书或其他项目），按关键词返回原文片段"
-            "（含书名/章节）；项目型参考书是高级参考书，还会返回图谱实体卡片与设定档"
-            "条目（人物状态/关系/世界观规则）。需要借鉴某本参考书的写法、设定细节、"
-            "氛围、结构，或确认同世界观旧作/原作的人物设定时使用——如模仿某书的"
-            "群像描写、确认同人原作的人物关系与状态、参考同题材书的官职/礼法细节。"
+            "检索参考书：① 项目已选参考书按关键词返回原文片段（含书名/章节）；"
+            "项目型参考书还会返回图谱实体卡片与设定档条目（人物状态/关系/世界观规则）。"
+            "② S244 语义检索：mode=semantic 或 auto 时对**全书库**做语义相似检索，"
+            "适合模糊描述（'类似中世纪行会的权力斗争设定'）——无精确关键词也能命中。"
+            "需要借鉴某本书的写法、设定细节、氛围、结构，或确认同世界观旧作/原作的"
+            "人物设定时使用；模糊探索书库内容时用 mode=semantic。"
             "注意：参考书是借鉴来源，不是本项目正典——检索到后对照自身剧情判断"
             "是否适用，不要照搬设定。"
         ),
@@ -49,7 +55,19 @@ def make_reference_lookup_implementer(
                 name="keyword",
                 type="string",
                 required=True,
-                description="检索关键词/短语（独特词效果好，如'钟表铺'而非'门'）",
+                description=(
+                    "检索关键词/短语或自然语言描述。mode=keyword 时用独特词"
+                    "（如'钟表铺'而非'门'）；mode=semantic 时可用自然语言短语"
+                ),
+            ),
+            ParamSpec(
+                name="mode",
+                type="string",
+                required=False,
+                description=(
+                    "检索模式：auto（缺省，关键词+语义双通道合并）/"
+                    "keyword（仅项目参考书关键词）/semantic（仅全书库语义相似）"
+                ),
             ),
             ParamSpec(
                 name="max_per_book",
@@ -65,6 +83,9 @@ def make_reference_lookup_implementer(
         keyword = str(arguments.get("keyword", "")).strip()
         if not keyword:
             return ToolResult(call=call, ok=False, content="缺少参数 keyword。")
+        mode = str(arguments.get("mode", "auto") or "auto").strip().lower()
+        if mode not in ("auto", "keyword", "semantic"):
+            mode = "auto"
         try:
             max_per = max(1, min(5, int(str(arguments.get("max_per_book", "3")) or 3)))
         except ValueError:
@@ -79,40 +100,86 @@ def make_reference_lookup_implementer(
                 parts.append(f"【{ch.title}】\n{ch.content}")
             return "\n\n".join(parts)
 
-        from anyspark.library.search import search_reference_books
-
-        res = search_reference_books(
-            library_store, book_id, keyword, project_files=_project_files, max_per_book=max_per
+        # S244 语义通道（mode=auto/semantic 且向量索引可用时）：全书库余弦检索
+        semantic_lines: list[str] = []
+        semantic_failed = False
+        semantic_unavailable = vectors is None or embedder is None or not (
+            getattr(embedder, "available", False)
         )
-        # 知识层命中（高级参考书=项目）：对每个 project 类型参考书追加图谱/设定条目
-        knowledge_hits = 0
-        knowledge_sections: list[str] = []
-        if library_store is not None:
-            for ref in library_store.get_references(book_id):
-                if ref.get("type") != "project":
-                    continue
-                klines = render_reference_knowledge(
-                    graph, settings, str(ref.get("id", "")), keyword
-                )
-                if klines:
-                    knowledge_hits += len(klines)
-                    knowledge_sections.append(
-                        f"——项目「{ref.get('id', '?')}」（知识层：图谱/设定）——\n"
-                        + "\n".join(klines)
+        if mode in ("auto", "semantic") and not semantic_unavailable:
+            try:
+                qvec = embedder.embed([keyword])[0]
+                for h in vectors.search(qvec, top_k=5):
+                    book = library_store.get_book(h["book_id"]) if library_store else None
+                    name = book["name"] if book else h["book_id"]
+                    fname = str(h.get("filename", "")).replace(".md", "")
+                    semantic_lines.append(
+                        f"——全书库语义命中（相似度 {h['score']:.2f}）"
+                        f"《{name}》{fname}——\n{h['text'][:300]}"
                     )
-        if not res["results"] and not knowledge_sections:
+            except Exception as exc:  # embedding 故障降级，不阻断关键词通道
+                logger.warning("reference_lookup 语义通道降级: %s", exc)
+                semantic_failed = True
+
+        # 关键词通道（mode=semantic 时跳过项目参考书关键词检索）
+        res: dict[str, Any] = {"results": []}
+        knowledge_sections: list[str] = []
+        knowledge_hits = 0
+        if mode in ("auto", "keyword"):
+            from anyspark.library.search import search_reference_books
+
+            res = search_reference_books(
+                library_store, book_id, keyword, project_files=_project_files, max_per_book=max_per
+            )
+            # 知识层命中（高级参考书=项目）：对每个 project 类型参考书追加图谱/设定条目
+            if library_store is not None:
+                for ref in library_store.get_references(book_id):
+                    if ref.get("type") != "project":
+                        continue
+                    klines = render_reference_knowledge(
+                        graph, settings, str(ref.get("id", "")), keyword
+                    )
+                    if klines:
+                        knowledge_hits += len(klines)
+                        knowledge_sections.append(
+                            f"——项目「{ref.get('id', '?')}」（知识层：图谱/设定）——\n"
+                            + "\n".join(klines)
+                        )
+        if not res["results"] and not knowledge_sections and not semantic_lines:
+            if mode == "semantic" and semantic_unavailable:
+                return ToolResult(
+                    call=call,
+                    ok=False,
+                    content="语义检索不可用：未配置 EMBEDDING（可用 DEEPSEEK_* 兑底）；"
+                    "可改用 mode=keyword 关键词检索。",
+                )
+            if mode == "semantic" and semantic_failed:
+                return ToolResult(
+                    call=call,
+                    ok=False,
+                    content="语义检索暂不可用（embedding 服务异常），请稍后重试或改用关键词模式。",
+                )
             refs = library_store.get_references(book_id) if library_store else []
-            names = "、".join(r.get("name", r.get("id", "?")) for r in refs) or "（未选参考书）"
+            names = "、".join(str(r.get("name") or r.get("id") or "?") for r in refs)
+            names = names or "（未选参考书）"
+            hint = (
+                "；也可尝试 mode=semantic 用自然语言描述模糊搜全书库" if mode == "keyword" else ""
+            )
             return ToolResult(
                 call=call,
                 ok=False,
-                content=f"参考书「{names}」中未命中「{keyword}」（含图谱/设定层）。",
+                content=f"参考书「{names}」中未命中「{keyword}」（含图谱/设定层）{hint}。",
             )
         lines = [f"参考书命中「{keyword}」："]
-        for r in res["results"]:
-            lines.append(f"——{r['ref_name']}——")
-            for h in r.get("hits", []):
-                lines.append(f"({h['count']}次) {h['snippet']}")
+        if semantic_lines:
+            lines.append("【语义匹配（全书库）】")
+            lines.extend(semantic_lines)
+        if res["results"]:
+            lines.append("【关键词匹配（项目已选参考书）】")
+            for r in res["results"]:
+                lines.append(f"——{r['ref_name']}——")
+                for h in r.get("hits", []):
+                    lines.append(f"({h['count']}次) {h['snippet']}")
         lines.extend(knowledge_sections)
         if knowledge_hits:
             lines.append(f"（含 {knowledge_hits} 条图谱/设定命中）")
