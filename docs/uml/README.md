@@ -56,6 +56,8 @@
 |------|------|
 | [archify/anyspark-architecture.html](archify/anyspark-architecture.html) | **可交互运行时架构图**：浏览器→FastAPI→Agent 循环→模型适配层→DeepSeek 主路径 + 工具循环/持久化两个侧视图；暗/亮主题、PNG 导出，浏览器直接打开 |
 | [archify/anyspark-architecture.json](archify/anyspark-architecture.json) | 上图的 JSON IR 源（showcase 9/9 校验过）；改架构后用 pi-archify 包的 `archify_validate`/`archify_deliver` 重新生成 HTML |
+| [archify/anyspark-structure.html](archify/anyspark-structure.html) | **可交互全项目结构图**：包级依赖方向（core←领域包←app 单向无环）+ 各层规模标注（app 18.9k/前端 24.8k/领域包×9 12.1k）+ 持久化双载体 + 后台/质量基建卡片；与运行时图互补看结构与流量两个切面 |
+| [archify/anyspark-structure.json](archify/anyspark-structure.json) | 上图的 JSON IR 源（showcase 9/9 校验过） |
 
 ## 接口全清单
 
