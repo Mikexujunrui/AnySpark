@@ -1030,6 +1030,10 @@ def wf_script_list_split(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> NodeR
     raw = wf_resolve(str(node.params.get("text") or ""), ctx).strip()
     if not raw:
         return NodeResult(error="list_split 缺 text（清单为空）")
+    # S248 实测：上游 agent 常裹 ```json 围栏（对齐 PlotGenerator/tree_commit 先剥）
+    fence = _re.search(r"```(?:json)?\s*(.*?)\s*```", raw, _re.DOTALL)
+    if fence:
+        raw = fence.group(1).strip()
     items: list[str] = []
     try:
         parsed = _json.loads(raw)

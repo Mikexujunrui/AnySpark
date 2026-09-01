@@ -621,3 +621,18 @@ V1 标题轨迹口径已注明）/ 申报书起草（大纲→逐节→汇编）
 预置模板总数 14。学术润色无需新模板：批量改写 + instruction 参数。
 
 **测试**：模板预置断言 + 多平台改写 e2e（8 用例全过）。文档：COMPETITION/BACKEND-MAP 同步。
+
+---
+
+## S248b: 校园场景真实模型冒烟——5 场景实测通过 + 修 list_split 围栏缺陷
+
+**背景**：单元测试全用假模型（只证管线通），主人质问"能否真实产出示例"——
+补 scripts/campus_smoke.py 用真实 DeepSeek 逐场景产出示例（临时库隔离）。
+
+**实测结果**：persona（学术/小说产出差异显著）/ check（4 处埋瑕疵全命中+额外
+14 项发现）/ review（规范英文回复信）/ multiplatform（小红书版带 emoji+话题标签）/
+proposal（含合规论证完整申报书）全部通过。
+
+**实测抓到并修复**：①list_split 漏剥 ```json 围栏（大纲 agent 输出带围栏→JSON
+解析失败→按行切碎；对齐 PlotGenerator/tree_commit 先剥围栏）②冒烟取终局节点
+不能 reversed（node_states 字母序非执行序）——按 merge/finish 节点名取。
