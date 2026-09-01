@@ -39,6 +39,23 @@ def model_for_task(
     return deps.model
 
 
+def plot_template_strings(deps: AppDeps) -> list[str]:
+    """探索模板描述串（skill 表 type=plot 类）——agent 工具装配与 HTTP 探索端点
+    共用同一口径（审计 R3 收敛：此前 agent_factory/routes_explore 各自内联同
+    一表达式，改口径时容易漏改一处）。"""
+    return [f"{s.name}：{s.description}" for s in deps.skills.plot_skills()]
+
+
+def worldrule_constraints(deps: AppDeps, book_id: str) -> list[str]:
+    """探索约束 = 设定档「世界观规则」类别条目（S85：直接注入不匹配，模型自己判断）。
+    与 plot_template_strings 同理收敛两条探索路径的公共口径。"""
+    return [
+        e.content
+        for e in deps.settings.list(book_id)
+        if e.category == "世界观规则" and (e.content or "").strip()
+    ]
+
+
 def make_agent(
     deps: AppDeps,
     system_prompt: str,
@@ -96,8 +113,8 @@ def make_agent(
             book_id=book_id,
             # S121：子 Agent 内核装配依赖（主循环 run_subagent 工具）
             subagent_deps=deps,
-            # S68→S128：探索注入真实模板库（skill 表 type=plot 类，L2+L3 物理并入）
-            templates=[f"{s.name}：{s.description}" for s in deps.skills.plot_skills()],
+            # S68→S128：探索注入真实模板库（口径见 plot_template_strings）
+            templates=plot_template_strings(deps),
             # S145（第三方评审 P0-1）：参考书库装配补传——此前漏传 library，
             # reference_lookup 工具因 ctx.library is None 在生产装配中永不注册
             # （S86 声称"检索走 agent 工具"实际落空；仅 workflow query_reference

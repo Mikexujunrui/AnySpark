@@ -241,7 +241,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 |---|---|---|---|
 | R1 ✅ | JSON 宽容解析 8 处各自实现 | ~~8 处~~ → core/jsonutil.py 共享 parse_json_object/parse_json_array（S83） |
 | R2 ✅ | ingest_document 工具 vs ingest_upload 端点重复消化编排 | ~~两处~~ → server/ingest.py ingest_pipeline 共享（S83） |
-| R3 | explore_direction 工具 vs routes_explore 端点重复组装（轻度，未修） | toolkit.py vs routes_explore.py | 可后续抽共享 |
+| R3 ✅ | explore_direction 工具 vs routes_explore 端点重复组装 → S240 收敛：plot_template_strings/worldrule_constraints 两助手落 agent_factory，两条探索路径同源调用（工具侧约束仍传 None——agent 有 setting_query 可自主查证，不叠注入） | ~~toolkit.py vs routes_explore.py~~ → agent_factory.py 单一口径 |
 
 ### 🔴 断链（S83 已修复 ✅）
 
@@ -254,7 +254,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | # | 发现 | 建议 |
 |---|---|---|
 | Y1 ✅ | review vs check 同名导出 run_review/ReviewReport | review 加 run_review_panel 别名 + 文档显著标注（S83） |
-| Y2 | server/retry.py 纯 re-export 兼容层；core/tools.py（echo/add）生产从不注册 | 保留（测试用）或清理，低优先 |
+| Y2 ✅ | server/retry.py 纯 re-export 兼容层（S240 删：唯一调用方 test_retry 已改直连 core.retry）；core/tools.py（echo/add）生产从不注册 → 保留（core 测试最小夹具，文件头已注明用途，删除需改 2 测试零收益） | | |
 | Y3 | 无"工具清单单一真相"（23 工具名/开关/用途散落 6 文件） | 本地图 §4 已补——代码侧可后续建 `tools_manifest` 常量（非必须） |
 
 ### ✅ 已核查无问题

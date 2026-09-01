@@ -12,7 +12,11 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException
 
 from anyspark.explore import DirectionCard, IntentUnderstander, run_exploration
-from anyspark.server.agent_factory import model_for_task
+from anyspark.server.agent_factory import (
+    model_for_task,
+    plot_template_strings,
+    worldrule_constraints,
+)
 from anyspark.server.deps import AppDeps
 from anyspark.server.logging import logger
 from anyspark.server.schemas import (
@@ -39,15 +43,9 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
     @router.post("/api/explore/cards", response_model=list[dict[str, object]])
     def explore_cards(req: ExploreCardsIn) -> list[dict[str, object]]:
         """确认后的意图 → 方向卡 ×4（并行探索，三来源混合）。"""
-        # 约束 = 设定档"世界观规则"类别（全书固定规则，直接注入不匹配——模型自己判断）
-        constraints = [
-            e.content
-            for e in deps.settings.list(req.book_id)
-            if e.category == "世界观规则" and (e.content or "").strip()
-        ]
-        # S68→S128：探索注入真实模板库（skill 表 type=plot 类，L2 默认+L3 外部
-        # 已物理并入；阶段 2 后探索只读 plot 类，纪律 2 防其他 type 污染）
-        templates = [f"{s.name}：{s.description}" for s in deps.skills.plot_skills()]
+        # 约束/模板口径收敛到 agent_factory（R3）：与 agent 工具装配同源
+        constraints = worldrule_constraints(deps, req.book_id)
+        templates = plot_template_strings(deps)
         cards = run_exploration(
             model_for_task(deps, "planning"),
             req.seed,
@@ -81,12 +79,8 @@ def make_explore_router(deps: AppDeps) -> APIRouter:
             if node is None:
                 raise HTTPException(status_code=404, detail=f"终点节点不存在：{req.to_node_id}")
             to_desc = node.content
-        # 约束 = 设定档"世界观规则"类别（全书固定规则）+ 请求临时约束（直接注入，不匹配）
-        constraints = [
-            e.content
-            for e in deps.settings.list(req.book_id)
-            if e.category == "世界观规则" and (e.content or "").strip()
-        ] + req.constraints
+        # 约束 = 世界观规则（同源口径）+ 请求临时约束（直接注入，不匹配）
+        constraints = worldrule_constraints(deps, req.book_id) + req.constraints
         result = explore_path(
             model_for_task(deps, "planning"), from_desc, to_desc, constraints, n=req.n
         )

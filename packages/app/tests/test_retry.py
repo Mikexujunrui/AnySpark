@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from anyspark.server.retry import retry_with_backoff
+from anyspark.core.retry import retry_with_backoff
 from anyspark.server.tools_writing import (
     WritingTools,
     _extract_docx_text,
