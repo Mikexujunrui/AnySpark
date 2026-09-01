@@ -61,7 +61,7 @@ from anyspark.workflow import WorkflowEngine, WorkflowGenerator, WorkflowStore
 class BgTask:
     """后台任务（S62：取代元组魔法派发——kind 字段 + 类型化负载，新增任务类型只加一条）。"""
 
-    kind: str  # chapter|refine|skill_drafts|summarize
+    kind: str  # chapter|refine|skill_drafts|summarize|library_index
     title: str = ""
     content: str = ""
     order: int = 0

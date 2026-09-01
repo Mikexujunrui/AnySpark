@@ -7,6 +7,7 @@ anyspark.library.search — 参考书检索（S86）。
 
 from __future__ import annotations
 
+import logging
 import re
 from typing import Any
 
@@ -144,8 +145,6 @@ def search_library_hybrid(
                 )
         except Exception as exc:  # embedding 服务故障时降级关键词，不阻塞检索
             degraded = True
-            import logging
-
             logging.getLogger("anyspark.library").warning(
                 "书库语义检索降级（embedding 失败）: %s", exc
             )

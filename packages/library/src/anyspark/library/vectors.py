@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import struct
 import threading
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -112,6 +113,15 @@ def chunk_text(text: str, size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) 
     return chunks
 
 
+@dataclass
+class _NpCache:
+    """numpy 检索缓存（签名失效；S62 风格：dataclass 替代元组魔法索引）。"""
+
+    signature: tuple[int, int]  # (chunk 总数, max id)
+    metas: list[tuple[str, str, int, str]]  # (book_id, filename, chunk_idx, text)
+    matrix: Any  # np.ndarray (N, dim) float32
+
+
 class LibraryVectors:
     """书库向量索引：增量索引 + 余弦检索（SQLite 持久化）。"""
 
@@ -119,7 +129,7 @@ class LibraryVectors:
         self._conn = sqlite_connect(str(db_path))
         self._lock = threading.Lock()
         self._cache_lock = threading.Lock()
-        self._np_cache: tuple[tuple[int, int], list[tuple[str, str, int, str]], Any] | None = None
+        self._np_cache: _NpCache | None = None
         with self._lock:
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
@@ -231,33 +241,24 @@ class LibraryVectors:
         缓存以 (chunk 总数, max_id) 为签名，索引变更自动失效重载。
         numpy 不可用时回落纯 Python 逐条计算（正确性一致，量大时较慢）。
         """
-        sql = "SELECT id, book_id, filename, chunk_idx, text, embedding FROM library_chunks"
-        args: list[Any] = []
-        if book_ids:
-            sql += f" WHERE book_id IN ({','.join('?' * len(book_ids))})"
-            args = list(book_ids)
-        rows = self._conn.execute(sql, args).fetchall()
-        if not rows:
-            return []
-
         try:
             import numpy as np
+        except ImportError:  # pragma: no cover —— 纯 Python 兜底路径
+            np = None
 
-            have_np = True
-        except ImportError:
-            have_np = False
-
-        if have_np:
+        if np is not None:
             q = np.asarray(query_vec, dtype=np.float32)
-            mat, metas = self._matrix_cache_np()
-            if mat is None or len(mat) == 0:
+            cache = self._matrix_cache_np()
+            if cache.matrix.shape[0] == 0:
                 return []
+            mat, metas = cache.matrix, cache.metas
             # 同维过滤（换过 embedding 模型后旧维度 chunk 跳过）
             if len(query_vec) != mat.shape[1]:
                 return []
             if book_ids:
+                wanted = set(book_ids)  # 循环外建一次（勿在生成器内重建）
                 mask = np.fromiter(
-                    (m[0] in set(book_ids) for m in metas), dtype=bool, count=len(metas)
+                    (m[0] in wanted for m in metas), dtype=bool, count=len(metas)
                 )
                 mat = mat[mask]
                 metas = [m for m, keep in zip(metas, mask.tolist(), strict=True) if keep]
@@ -270,13 +271,13 @@ class LibraryVectors:
                 return []
             scores = (mat @ q) / (norms.ravel() * qn)
             order = np.argsort(scores)[::-1]
-            out2: list[dict[str, Any]] = []
+            hits: list[dict[str, Any]] = []
             for idx in order[: top_k * 2]:  # 多取一些再过阈值
                 s = float(scores[idx])
                 if s <= SCORE_THRESHOLD:
                     break
                 book_id, filename, chunk_idx, text = metas[idx]
-                out2.append(
+                hits.append(
                     {
                         "book_id": book_id,
                         "filename": filename,
@@ -285,11 +286,14 @@ class LibraryVectors:
                         "score": round(s, 4),
                     }
                 )
-            return out2[:top_k]
+            return hits[:top_k]
 
-        # 纯 Python 兜底（正确性一致；量大时较慢）
+        # 纯 Python 兜底（numpy 缺失时；正确性一致，量大时较慢）
+        rows = self._conn.execute(
+            "SELECT book_id, filename, chunk_idx, text, embedding FROM library_chunks"
+        ).fetchall()
         scored: list[dict[str, Any]] = []
-        for _cid, book_id, filename, chunk_idx, text, blob in rows:
+        for book_id, filename, chunk_idx, text, blob in rows:
             vec = unpack_vector(blob)
             if len(vec) != len(query_vec):
                 continue  # 维度不符（换过模型）——跳过，重索引后恢复
@@ -307,7 +311,7 @@ class LibraryVectors:
         scored.sort(key=lambda h: h["score"], reverse=True)
         return scored[:top_k]
 
-    def _matrix_cache_np(self) -> tuple[Any, Any]:
+    def _matrix_cache_np(self) -> _NpCache:
         """numpy 矩阵内存缓存（S247）：签名 (chunk 数, max id) 变更才重载。
 
         50K chunk × 1024 维 float32 ≈ 200MB 常驻——书库属长尾增长，
@@ -318,22 +322,21 @@ class LibraryVectors:
         sig = self._conn.execute(
             "SELECT COUNT(*), COALESCE(MAX(id), 0) FROM library_chunks"
         ).fetchone()
-        with self._cache_lock:
-            if self._np_cache is not None and self._np_cache[0] == (sig[0], sig[1]):
-                return self._np_cache[2], self._np_cache[1]  # (mat, metas)
+        cached = self._np_cache
+        if cached is not None and cached.signature == (sig[0], sig[1]):
+            return cached
         rows = self._conn.execute(
             "SELECT id, book_id, filename, chunk_idx, text, embedding FROM library_chunks"
         ).fetchall()
         metas = [(r[1], r[2], r[3], r[4]) for r in rows]
         if rows:
-            mat = np.stack(
-                [np.frombuffer(r[5], dtype=np.float32) for r in rows]
-            )
+            mat = np.stack([np.frombuffer(r[5], dtype=np.float32) for r in rows])
         else:
             mat = np.zeros((0, 1), dtype=np.float32)
+        cache = _NpCache(signature=(sig[0], sig[1]), metas=metas, matrix=mat)
         with self._cache_lock:
-            self._np_cache = ((sig[0], sig[1]), metas, mat)
-        return mat, metas
+            self._np_cache = cache
+        return cache
 
     def stats(self) -> dict[str, Any]:
         """索引概况（书数/chunk 数/维度）。"""
