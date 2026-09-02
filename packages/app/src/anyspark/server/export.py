@@ -59,13 +59,13 @@ def export_latex(chapters: list[dict[str, str]]) -> str:
         lines = str(c["content"]).splitlines()
         in_code = False
         para: list[str] = []
-        in_list = False
+        in_list = ""  # 当前列表环境：""（不在列表）/ "itemize" / "enumerate"
         for line in lines:
             if line.strip().startswith("```"):
                 _flush_para(para)
                 if in_list:
-                    body.append("\\end{itemize}")
-                    in_list = False
+                    body.append(f"\\end{{{in_list}}}")
+                    in_list = ""
                 body.append("\\begin{verbatim}" if not in_code else "\\end{verbatim}")
                 in_code = not in_code
                 continue
@@ -76,8 +76,8 @@ def export_latex(chapters: list[dict[str, str]]) -> str:
             if m:
                 _flush_para(para)
                 if in_list:
-                    body.append("\\end{itemize}")
-                    in_list = False
+                    body.append(f"\\end{{{in_list}}}")
+                    in_list = ""
                 # ##/### → subsection/subsubsection（# 已被章标题占用）
                 hashes = len(m.group(1))
                 cmd = "subsection" if hashes <= 2 else "subsubsection"
@@ -87,21 +87,26 @@ def export_latex(chapters: list[dict[str, str]]) -> str:
             if not stripped:
                 _flush_para(para)
                 if in_list:
-                    body.append("\\end{itemize}")
-                    in_list = False
+                    body.append(f"\\end{{{in_list}}}")
+                    in_list = ""
                 continue
             if stripped.startswith(("- ", "* ", "+ ")) or _NUM_ITEM_RE.match(stripped):
                 _flush_para(para)
+                env = "enumerate" if _NUM_ITEM_RE.match(stripped) else "itemize"
                 if not in_list:
-                    body.append("\\begin{itemize}")
-                    in_list = True
+                    body.append(f"\\begin{{{env}}}")
+                    in_list = env
+                elif in_list != env:  # 类型切换：闭旧开新
+                    body.append(f"\\end{{{in_list}}}")
+                    body.append(f"\\begin{{{env}}}")
+                    in_list = env
                 inner = stripped.lstrip("-*+ ").lstrip("0123456789. ")
                 body.append(f"\\item {_tex_escape(inner)}")
                 continue
             para.append(_tex_escape(line))
         _flush_para(para)
         if in_list:
-            body.append("\\end{itemize}")
+            body.append(f"\\end{{{in_list}}}")
     preamble = (
         "% AnySpark LaTeX 导出（V1：ctex 文档类，中文直出）\n"
         "\\documentclass[UTF8]{ctexart}\n"

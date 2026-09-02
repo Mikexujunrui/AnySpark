@@ -673,3 +673,28 @@ multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补�
 
 **启示（再次）**：假模型 e2e 只证管线拓扑，不证数据流语义——凡"参数传递"
 必须真模型或显式断言 item 内容。
+
+---
+
+## S251: 新增功能代码自审——5 处修复（设计哲学/微 bug/健壮性）
+
+**审核范围**：S246~S250b 全部新增（genres/seeds_campus/citation/connectors/
+export_latex/list_split/冒烟脚本）。
+
+**设计哲学问题（已修）**：
+①学术七维双份文本——seeds_campus 内联拷贝与 genres.ACADEMIC 物理分离，profile
+更新后模板漂移；改单一来源（模板构建时 import ACADEMIC），instruction 去重前缀。
+
+**微 bug（已修）**：
+②citation.format_note 缺字段判断绕且漏空串（嵌套 isinstance 使 title="" 不算
+missing）→ 简化为 not meta.get(k)。
+③fmt_gbt7714 head 重复调用 _gbt_authors 两次 → 提变量。
+
+**健壮性（已修）**：
+④import-arxiv 未捕 ET.ParseError（arXiv 非 XML 时 500 裸栈）→ 502 干净报错。
+⑤export_latex 有序列表丢编号（全转 itemize）→ 有序/无序各归 enumerate/itemize，
+含类型切换闭旧开新。
+
+**自查通过项**：genres frozen dataclass 内容全自然语言/fiction 回退逐字一致；
+_clean_write 整体替换人设（非行 hack）；routes_check 一行选包；store 迁移幂等；
+connectors 固定域名+noqa 标注；无 YAGNI 违规。

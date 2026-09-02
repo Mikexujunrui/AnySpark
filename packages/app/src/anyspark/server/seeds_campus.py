@@ -5,19 +5,17 @@
 chapter_by_id / chapter_title_by_id / write_chapter / accumulate），模板即数据——
 用户改节点指令即改行为，零新机制。
 
-拆解维度与 server.genres 的 ACADEMIC/REPORT profile 同源口径（学术七维）。
+拆解维度与 server.genres 的 ACADEMIC profile 单一来源（模板构建时引用，防漂移）。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-# 学术七维（与 genres.ACADEMIC.decomposition_dimensions 同口径；模板数据内联）
-_ACADEMIC_DIMS = (
-    "研究问题（问题定义与动机）/方法与数据（可复现性、数据来源）/贡献与结论"
-    "（如何主张、如何回应问题）/论证链（论点-证据-推理衔接）/结构与组织"
-    "（章节分工与过渡）/表达规范（术语一致、客观句式）/文献使用（引用密度与位置）。"
-)
+from anyspark.server.genres import ACADEMIC
+
+# 学术七维单一来源：引用 genres.ACADEMIC（内联拷贝会在 profile 更新后漂移）
+_ACADEMIC_DIMS = ACADEMIC.decomposition_dimensions
 
 
 def _seed_paper_refine_template(workflow_store: Any, wf_def_cls: Any) -> None:
@@ -65,7 +63,8 @@ def _seed_paper_refine_template(workflow_store: Any, wf_def_cls: Any) -> None:
                             "你是学术论文结构分析师。拆解以下文本批次，输出单条方法论 skill"
                             "（严格 JSON 单元素数组，字段：name/description/content/example，"
                             "example 留空）。聚焦可迁移的写作方法论，不要复述内容。\n"
-                            "拆解维度（学术七维）：" + _ACADEMIC_DIMS + "\n\n"
+                            + _ACADEMIC_DIMS
+                            + "\n\n"
                             "文本批次：\n{{batch}}\n"
                         ),
                         "output_key": "partial",

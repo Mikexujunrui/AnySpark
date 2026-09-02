@@ -60,6 +60,8 @@ def make_library_router(deps: AppDeps) -> APIRouter:
     @router.post("/api/library/import-arxiv", response_model=dict[str, Any])
     def import_arxiv(req: dict[str, str]) -> dict[str, Any]:
         """arXiv 论文导入（S250，D3）：建库书 + 摘要章节 + cite_meta 自动落全。"""
+        import xml.etree.ElementTree as ET
+
         from anyspark.library.connectors import import_arxiv_paper
 
         aid = (req.get("arxiv_id") or "").strip()
@@ -71,6 +73,8 @@ def make_library_router(deps: AppDeps) -> APIRouter:
             raise HTTPException(400, str(e)) from e
         except OSError as e:
             raise HTTPException(502, f"arXiv 请求失败：{e}") from e
+        except ET.ParseError as e:
+            raise HTTPException(502, f"arXiv 返回非预期格式：{e}") from e
 
     @router.post("/api/library/{book_id}/cite-meta", response_model=dict[str, bool])
     def set_cite_meta(book_id: str, req: dict[str, Any]) -> dict[str, bool]:

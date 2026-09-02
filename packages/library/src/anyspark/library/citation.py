@@ -76,7 +76,8 @@ def fmt_gbt7714(meta: dict[str, Any]) -> str:
     doi = str(meta.get("doi") or "").strip()
     url = str(meta.get("url") or "").strip()
 
-    head = f"{_gbt_authors(meta)}. " if _gbt_authors(meta) else ""
+    authors_str = _gbt_authors(meta)
+    head = f"{authors_str}. " if authors_str else ""
     body = f"{title}[{marker}]. "
     tail = ""
     if et == "article":
@@ -195,11 +196,8 @@ def minimal_meta(book_name: str) -> dict[str, Any]:
 
 def format_note(meta: dict[str, Any]) -> str:
     """缺失关键字段的提示（供工具输出末尾附「待补全」说明）。"""
-    missing = [
-        k
-        for k in ("authors", "title", "year")
-        if not (meta.get(k) or ([meta.get(k)] if isinstance(meta.get(k), str) else []))
-    ]
+    # 空串/空列表/None 都算缺（曾用嵌套 isinstance 判断，绕且漏空串——已简化）
+    missing = [k for k in ("authors", "title", "year") if not meta.get(k)]
     parts = []
     note = str(meta.get("note") or "").strip()
     if note:
