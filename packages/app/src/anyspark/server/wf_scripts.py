@@ -516,8 +516,13 @@ def wf_script_batch_prepare(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> No
     缺省=当前项目全部章节（list_chapters 同源）。输出 JSON 数组供 loop collection_var。
     """
     import json as _json
+    import re as _re
 
     raw = wf_resolve(str(node.params.get("chapter_ids") or ""), ctx).strip()
+    # S258b：未传参时占位符原样保留（wf_resolve 对缺失变量保原样）——视为未提供
+    # （模板文档承诺“缺省=全部章节”），不落入“全部未匹配报错”分支（S252 修复回归）
+    if _re.fullmatch(r"\{\{[^{}]+\}\}", raw):
+        raw = ""
     ids: list[str] = []
     if raw:
         raw_items: list[str] = []

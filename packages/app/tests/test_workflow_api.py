@@ -355,11 +355,17 @@ def test_batch_prepare_unmatched_ids_errors_instead_of_full_fallback() -> None:
     assert res.error, "全部未匹配应报错而非回退全量"
     assert "未匹配" in (res.error or "")
 
-    # 未提供输入 → 缺省全部章节（原语义保留）
+    # 未提供输入（空串或未解析占位符）→ 缺省全部章节（S258b：模板文档承诺的
+    # "缺省=全部" 路径——wf_resolve 对缺失变量保 {{xxx}} 原样，不得落入报错分支）
     node2 = SimpleNamespace(params={"chapter_ids": "", "output_key": "ids"})
     res2 = wf_script_batch_prepare(wfd, ctx, node2)
     assert not res2.error
     assert len(_json.loads(res2.output or "[]")) == 2
+
+    node2b = SimpleNamespace(params={"chapter_ids": "{{chapter_ids}}", "output_key": "ids"})
+    res2b = wf_script_batch_prepare(wfd, ctx, node2b)
+    assert not res2b.error, "未解析占位符应视为未提供（缺省全部），而非报错"
+    assert len(_json.loads(res2b.output or "[]")) == 2
 
     # 部分匹配 → 宽容跳过未匹配（S158 语义保留）
     node3 = SimpleNamespace(params={"chapter_ids": "第一章,不存在Y", "output_key": "ids"})
