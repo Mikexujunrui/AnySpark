@@ -224,11 +224,13 @@ def _parse_parts(parts: list[dict[str, Any]]) -> tuple[str, list[ToolCall], str]
                 args = raw
             else:  # 截断防护（S21）：args 非对象 → 标记，不执行，让模型重发
                 args = {"_raw": json.dumps(raw, ensure_ascii=False), "_malformed": True}
+            # S253：id 用 name+序号（对齐流式路径 S178）——同名并行调用此前 id 重复
+            tid = f"{fc.get('name') or ''}_{len(tool_calls)}"
             tool_calls.append(
                 ToolCall(
                     name=fc.get("name") or "",
                     arguments=args,
-                    id=fc.get("name") or "",  # Gemini 无 call id——用函数名兼作 id
+                    id=tid,
                 )
             )
     return "".join(text_parts), tool_calls, "".join(reasoning_parts)
@@ -256,10 +258,11 @@ class GeminiModel:
         self._max_tokens = max_tokens
         self._thinking_cfg = thinking_to_gemini(thinking)
         self._context_window = context_window or int(os.getenv("GEMINI_CONTEXT_WINDOW", "1000000"))
-        # S214：超时分阶段——connect/pool 10s，read 不超时（流式思考数分钟不断产 token）
+        # S214：超时分阶段——connect/pool 10s；read 600s（S253：原 read=None 永不超时，
+        # TCP 假死会让工作线程永久挂起；600s 只拦死连接不误杀正常流）
         self._client = httpx.Client(
             trust_env=False,
-            timeout=httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0),
+            timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=10.0),
         )
 
     @property
@@ -285,8 +288,8 @@ class GeminiModel:
             "maxOutputTokens": self._max_tokens,
         }
         if self._thinking_cfg is not None:
-            gen["thinkingConfig"] = self._thinking_cfg
             # S213：启用思考内容返回——流式 thought part 实时转发，避免思考期 SSE 静默
+            # （S253：删重复赋值的死行——首行 thinkingConfig 从未被读取）
             gen["thinkingConfig"] = {**self._thinking_cfg, "includeThoughts": True}
         payload["generationConfig"] = gen
         return payload

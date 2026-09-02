@@ -159,17 +159,29 @@ def make_agent(
         cfg = deps.models.get(model_id)
         if cfg is None:
             raise ValueError(f"模型配置不存在: {model_id}")
-        m = RetryingModel(
-            DeepSeekModel(
-                base_url=cfg.base_url,
-                api_key=cfg.resolved_api_key(),
-                model=cfg.model,
-                temperature=eff_temp,
-                max_tokens=cfg.max_tokens,
-                context_window=cfg.context_window,
-                thinking=cfg.thinking if thinking is None else thinking,
+        if isinstance(base_model, ModelProvider):
+            # S253：走协议分发（此前恒建 DeepSeekModel，指定 Claude/Gemini 配置
+            # 会用 Chat Completions 协议打错误端点——审核发现）
+            m = RetryingModel(
+                base_model.build_for_config(
+                    cfg,
+                    temperature=eff_temp,
+                    thinking=cfg.thinking if thinking is None else thinking,
+                )
             )
-        )
+        else:
+            # 非 provider 场景（测试注入 fake）：按配置构造 openai 兼容适配器（原行为）
+            m = RetryingModel(
+                DeepSeekModel(
+                    base_url=cfg.base_url,
+                    api_key=cfg.resolved_api_key(),
+                    model=cfg.model,
+                    temperature=eff_temp,
+                    max_tokens=cfg.max_tokens,
+                    context_window=cfg.context_window,
+                    thinking=cfg.thinking if thinking is None else thinking,
+                )
+            )
     elif isinstance(base_model, ModelProvider):
         # S47 运行时模型 + S98 快速模式：按任务解析槽位模型（模式分流；未配回退激活）
         if task:

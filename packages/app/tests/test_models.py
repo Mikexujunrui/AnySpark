@@ -13,7 +13,12 @@ from fastapi.testclient import TestClient
 
 from anyspark.core.types import Message
 from anyspark.models.deepseek import DeepSeekModel, _apply_thinking
-from anyspark.models.registry import ModelConfig, ModelProvider, ModelRegistry
+from anyspark.models.registry import (
+    ModelConfig,
+    ModelProvider,
+    ModelRegistry,
+    default_base_url_for,
+)
 
 
 def _db() -> Path:
@@ -472,3 +477,58 @@ def test_chat_rejects_unknown_model_id() -> None:
     client = TestClient(build_app(db_path=_db()))
     r = client.post("/api/chat", json={"message": "写《第1章》50字", "model_id": "nope"})
     assert r.status_code == 400
+
+
+def test_resolved_api_key_no_cross_protocol_leak(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """S253 回归：未填 key 时 resolved_api_key 返回 None（适配器按协议取各自 env）。
+
+    此前统一回退 DEEPSEEK_API_KEY，会把 DashScope key 发往 Anthropic/Gemini 端点。
+    """
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "anthropic-key")
+    reg = ModelRegistry(_db())
+    cfg = ModelConfig(
+        id="c", name="c", base_url="http://localhost:1", model="m", protocol="anthropic"
+    )
+    assert cfg.resolved_api_key() is None
+    # 适配器层回退到自家协议 env
+    inst = ModelProvider(reg)._build_cfg(cfg)
+    assert inst._api_key == "anthropic-key"
+    # 显式 key 优先
+    cfg2 = ModelConfig(
+        id="c2",
+        name="c2",
+        base_url="http://localhost:1",
+        model="m",
+        api_key="explicit",
+        protocol="anthropic",
+    )
+    assert cfg2.resolved_api_key() == "explicit"
+
+
+def test_default_base_url_per_protocol() -> None:
+    """S253：各协议缺省端点不再恒为 DashScope。"""
+    assert "dashscope" in default_base_url_for("openai")
+    assert "anthropic" in default_base_url_for("anthropic")
+    assert "googleapis" in default_base_url_for("gemini")
+    assert "openai.com" in default_base_url_for("responses")
+
+
+def test_models_api_protocol_defaults_and_zero_temperature() -> None:
+    """S253 回归：新增模型 base_url 按协议缺省；temperature=0.0 不被 or 吞掉。"""
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(db_path=_db()))
+    r = client.post(
+        "/api/models",
+        json={"name": "Claude 直连", "model": "claude-sonnet-4-5", "protocol": "anthropic"},
+    ).json()
+    assert r["ok"] is True
+    assert "anthropic" in r["model"]["base_url"], "anthropic 协议缺省端点应指向 api.anthropic.com"
+    # temperature=0.0（确定性输出）必须保留
+    r2 = client.post(
+        "/api/models",
+        json={"name": "精确模型", "model": "m", "temperature": 0.0},
+    ).json()
+    assert r2["ok"] is True
+    assert r2["model"]["temperature"] == 0.0

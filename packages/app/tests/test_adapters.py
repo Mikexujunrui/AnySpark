@@ -734,3 +734,38 @@ def test_anthropic_parse_content_redacted_thinking() -> None:
     ]
     _, _, _, reasoning_blocks = _parse_content(content)
     assert reasoning_blocks == [{"type": "redacted_thinking", "data": "REDACTED_X"}]
+
+
+def test_responses_parse_output_reasoning_top_level_item() -> None:
+    """S253 回归：reasoning 是顶层 item（summary 为 part 列表）。
+
+    此前在 message.content 里找 type=reasoning 永不命中，思考内容丢失。
+    """
+    from types import SimpleNamespace
+
+    from anyspark.models.responses import _parse_output
+
+    output = [
+        SimpleNamespace(
+            type="reasoning", summary=[SimpleNamespace(type="summary_text", text="想了一步。")]
+        ),
+        SimpleNamespace(type="message", content=[SimpleNamespace(type="output_text", text="答")]),
+        SimpleNamespace(type="function_call", call_id="c1", name="t", arguments="{}"),
+    ]
+    text, calls, reasoning = _parse_output(output)
+    assert text == "答"
+    assert reasoning == "想了一步。"
+    assert len(calls) == 1 and calls[0].id == "c1"
+
+
+def test_gemini_parse_parts_unique_ids_for_parallel_calls() -> None:
+    """S253 回归：非流式同名并行 functionCall 的 id 需唯一（对齐流式 S178）。"""
+    from anyspark.models.gemini import _parse_parts
+
+    parts = [
+        {"functionCall": {"name": "read_chapter", "args": {"title": "第一章"}}},
+        {"functionCall": {"name": "read_chapter", "args": {"title": "第二章"}}},
+    ]
+    _, calls, _ = _parse_parts(parts)
+    assert len(calls) == 2
+    assert calls[0].id != calls[1].id, "同名并行调用 id 重复会导致配对错乱"

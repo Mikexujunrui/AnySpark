@@ -676,6 +676,37 @@ multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补�
 
 ---
 
+## S253: 全库审核修复批②——多协议收尾 + 模型层健壮性
+
+**多协议收尾（S131 遗留，审核发现三处停留在单协议时代）**：
+1. resolved_api_key 跨协议 key 泄漏（严重）：此前未填 key 统一回退 DEEPSEEK_API_KEY，
+   会把 DashScope key 当 x-api-key 发往 Anthropic/Gemini 端点。改只返回显式 key，
+   缺省回退交适配器按协议取各自 env（openai→DEEPSEEK/anthropic→ANTHROPIC/gemini→GEMINI/
+   responses→OPENAI_API_KEY）。
+2. agent_factory 请求级 model_id 恒建 DeepSeekModel（严重）：指定 Claude/Gemini 配置
+   会用 Chat Completions 协议打错误端点。新增 ModelProvider.build_for_config 走协议
+   分发（非 provider 场景保留原路径）。
+3. 新增模型 base_url 缺省恒为 DashScope（中）：registry 新增 default_base_url_for
+   （按协议取各适配器 DEFAULT_BASE_URL）；顺修 temperature=0.0 被 `or` 吞掉的缺陷。
+
+**模型层健壮性**：
+4. read=None 永不超时（4 适配器）→ read=600s：S214 有意容忍长思考，但 TCP 假死
+   变永久线程挂起；600s 只拦"10 分钟无字节"死连接，不误杀持续产 token 的流。
+5. responses.py OpenAI 客户端 timeout=120.0 未用 _httpx_timeout（双源不一致）——
+   120s 会把含长思考的正常流当超时杀掉，与 S214 设计相悖。统一。
+6. anthropic message_delta usage 无条件覆盖 → 合并：帧缺 input_tokens 时保留
+   message_start 已记录值（用量统计不再系统性少记）。
+7. responses 推理模型 temperature=0.7 直接 400（GPT-5/o 系只收默认 1）→ 推理模式
+   不发送 temperature。
+8. responses 非流式 reasoning 解析失效：reasoning 是顶层 item（原在 message.content
+   里找永不命中）且 summary 是 part 列表。修 _parse_output。
+9. responses function_call_created 非公开流事件 → 改监听 response.output_item.added。
+10. gemini 非流式同名并行 functionCall id 重复（流式 S178 已修，非流式漏修）→
+    对齐 name_序号；删 thinkingConfig 重复赋值死行。
+11. sqlite metadata json.loads 无容错（单行坏数据让整个会话加载崩）→ _loads_metadata。
+
+**测试**：test_models/test_adapters 新增 5 个回归（key 泄漏/协议缺省端点/0.0 温度/
+reasoning 解析/并行 id 唯一），61+58 passed；ruff 全绿。
 ## S252: 全库审核修复批①——P0 数据面（md 双写/收束导出/批量回退/人工标记绕过）
 
 **背景**：本会话对全库做了系统代码审核（6 域并行深审 + 静态基线），本阶段起分批修复。

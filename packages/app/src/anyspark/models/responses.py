@@ -143,8 +143,11 @@ def _parse_output(output: list[Any]) -> tuple[str, list[ToolCall], str]:
             for block in getattr(item, "content", []) or []:
                 if getattr(block, "type", None) == "output_text":
                     text_parts.append(getattr(block, "text", "") or "")
-                elif getattr(block, "type", None) == "reasoning":
-                    reasoning_parts.append(getattr(block, "summary", "") or "")
+        elif itype == "reasoning":
+            # S253：reasoning 是顶层 item（不在 message.content 里，原判断永不命中）；
+            # summary 是 part 列表（每项有 .text），不是字符串
+            for part in getattr(item, "summary", []) or []:
+                reasoning_parts.append(getattr(part, "text", "") or "")
         elif itype == "function_call":
             raw = getattr(item, "arguments", "") or ""
             try:
@@ -185,12 +188,15 @@ class ResponsesModel:
         self._reasoning = thinking_to_responses(thinking)
         self._context_window = context_window or int(os.getenv("OPENAI_CONTEXT_WINDOW", "200000"))
         # S131：同 deepseek.py——trust_env=False 防环境变量代理劫持本地端点请求（502）
-        # S214：超时分阶段——connect/pool 10s，read 不超时（流式思考数分钟不断产 token）
-        _httpx_timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+        # S214：超时分阶段——connect/pool 10s；read 600s（S253：原 read=None 永不超时，
+        # TCP 假死会让工作线程永久挂起；600s 只拦死连接不误杀正常流）。
+        # S253：顺修 OpenAI 客户端 timeout=120.0 未用 _httpx_timeout 的双源不一致——
+        # 120s 会把含长思考的正常流当超时杀掉，与 S214 设计相悶。
+        _httpx_timeout = httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=10.0)
         self._client = OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
-            timeout=120.0,
+            timeout=_httpx_timeout,
             http_client=httpx.Client(trust_env=False, timeout=_httpx_timeout),  # type: ignore[arg-type]
         )
 
@@ -206,9 +212,12 @@ class ResponsesModel:
         kwargs: dict[str, Any] = {
             "model": self._model,
             "input": to_responses_input(messages),
-            "temperature": self._temperature,
             "max_output_tokens": self._max_tokens,
         }
+        # S253：GPT-5/o 系推理模型只接受默认 temperature=1，传 0.7 直接 400——
+        # 推理模式（thinking 档位映射）下不发送 temperature，交 API 默认
+        if self._reasoning is None:
+            kwargs["temperature"] = self._temperature
         if tools:
             kwargs["tools"] = [to_responses_tool(t) for t in tools]
         if self._reasoning is not None:
@@ -277,10 +286,15 @@ class ResponsesModel:
                 acc = tool_acc.setdefault(idx, {"name": "", "args": "", "call_id": ""})
                 acc["args"] = getattr(event, "arguments", "") or ""
                 acc["call_id"] = getattr(event, "item_id", "") or ""
-            elif etype == "response.function_call_created":
-                idx = getattr(event, "output_index", 0) or 0
-                acc = tool_acc.setdefault(idx, {"name": "", "args": "", "call_id": ""})
-                acc["name"] = getattr(event, "name", "") or ""
+            elif etype == "response.output_item.added":
+                # S253：response.function_call_created 非公开流事件（实测不触发，
+                # 工具名此前全靠 final_output 兜底）——改监听公开事件拿工具名
+                item = getattr(event, "item", None)
+                if item is not None and getattr(item, "type", "") == "function_call":
+                    idx = getattr(event, "output_index", 0) or 0
+                    acc = tool_acc.setdefault(idx, {"name": "", "args": "", "call_id": ""})
+                    acc["name"] = getattr(item, "name", "") or ""
+                    acc["call_id"] = getattr(item, "id", "") or acc["call_id"]
             elif etype == "response.reasoning_summary_text.delta":
                 reasoning_parts.append(getattr(event, "delta", "") or "")
                 # S213：思考增量实时转发——避免思考期 SSE 静默致前端 idle 超时误杀
@@ -307,7 +321,7 @@ class ResponsesModel:
             elif etype == "response.failed":
                 raise RuntimeError(f"Responses API 流式失败: {getattr(event, 'error', '')}")
 
-        # 流式工具调用可能未在 function_call_created 拿到 name——从 final_output 兜底解析
+        # 流式工具调用可能未拿全（老事件名残留/中途断流）——从 final_output 兜底解析
         if final_output:
             _, final_calls, _ = _parse_output(final_output)
             return ModelOutput(

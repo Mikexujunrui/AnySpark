@@ -305,10 +305,11 @@ class AnthropicModel:
         self._context_window = context_window or int(
             os.getenv("ANTHROPIC_CONTEXT_WINDOW", "200000")
         )
-        # S214：超时分阶段——connect/pool 10s，read 不超时（流式思考数分钟不断产 token）
+        # S214：超时分阶段——connect/pool 10s；read 600s（S253：原 read=None 永不超时，
+        # TCP 假死会让工作线程永久挂起；600s 只拦死连接不误杀正常流）
         self._client = httpx.Client(
             trust_env=False,
-            timeout=httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0),
+            timeout=httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=10.0),
         )
 
     @property
@@ -471,11 +472,18 @@ class AnthropicModel:
                 # 的 output_tokens 是初始值 ~1）；不捕获则记录的 completion_tokens 恒为 ~1
                 u2 = data.get("usage")
                 if isinstance(u2, dict):
+                    # S253：合并而非覆盖——message_delta 可能缺 input_tokens（API 版本
+                    # 相关），直接重建会把 message_start 已记录的 prompt_tokens 清零，
+                    # 用量统计系统性少记
+                    _prev = usage if isinstance(usage, dict) else {}
+                    in_tok = int(u2.get("input_tokens") or 0) or int(
+                        _prev.get("prompt_tokens") or 0
+                    )
+                    out_tok = int(u2.get("output_tokens") or 0)
                     usage = {
-                        "prompt_tokens": int(u2.get("input_tokens") or 0),
-                        "completion_tokens": int(u2.get("output_tokens") or 0),
-                        "total_tokens": int(u2.get("input_tokens") or 0)
-                        + int(u2.get("output_tokens") or 0),
+                        "prompt_tokens": in_tok,
+                        "completion_tokens": out_tok,
+                        "total_tokens": in_tok + out_tok,
                     }
             elif etype == "message_start":
                 msg = data.get("message") or {}

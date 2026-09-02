@@ -23,6 +23,16 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _loads_metadata(raw: str | None) -> dict[str, Any]:
+    """S253：metadata 容错解析——单行损坏不再让整个会话加载抛异常
+    （此前 json.loads 无容错，一行坏数据导致 messages/recent_messages 全体不可用）。"""
+    try:
+        data = json.loads(raw or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _conversation_from_row(row: tuple[Any, ...]) -> Conversation:
     # 兼容旧库：可能 (id, created_at) / (+parent_id, fork_point, title) / (+book_id)
     cid, created_at = row[0], row[1]
@@ -255,7 +265,7 @@ class SqliteConversationStore(ConversationStore):
                 Message(
                     role=row["role"],
                     content=row["content"],
-                    metadata=json.loads(row["metadata"] or "{}"),
+                    metadata=_loads_metadata(row["metadata"]),
                 )
                 for row in rows
             ]
@@ -469,7 +479,7 @@ class SqliteConversationStore(ConversationStore):
             Message(
                 role=row["role"],
                 content=row["content"],
-                metadata=json.loads(row["metadata"] or "{}"),
+                metadata=_loads_metadata(row["metadata"]),
             )
             for row in reversed(rows)
         ]

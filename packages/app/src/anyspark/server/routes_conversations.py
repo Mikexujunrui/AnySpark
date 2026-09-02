@@ -12,12 +12,13 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from anyspark.core import Conversation
-from anyspark.models import DEFAULT_BASE_URL, validate_protocol, validate_thinking
+from anyspark.models import validate_protocol, validate_thinking
 from anyspark.models.registry import (
     DEFAULT_CONTEXT_WINDOW,
     DEFAULT_MAX_TOKENS,
     DEFAULT_TEMPERATURE,
     ModelConfig,
+    default_base_url_for,
     slugify,
 )
 from anyspark.server.deps import AppDeps
@@ -260,12 +261,17 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
         cfg = ModelConfig(
             id=req.id or slugify(req.name),
             name=req.name,
-            base_url=req.base_url or DEFAULT_BASE_URL,
+            # S253：缺省端点按协议取各自的（此前恒为 DashScope，添加 Claude/Gemini
+            # 不填 base_url 必指向错误端点——schemas 注释早已声称按协议，实现未跟上）
+            base_url=req.base_url or default_base_url_for(req.protocol),
             model=req.model,
             api_key=req.api_key,
             context_window=req.context_window or DEFAULT_CONTEXT_WINDOW,
             max_tokens=req.max_tokens or DEFAULT_MAX_TOKENS,
-            temperature=req.temperature or DEFAULT_TEMPERATURE,
+            # S253：温度 0.0（确定性输出）是合法值，不能用 or 吞掉
+            temperature=(
+                req.temperature if req.temperature is not None else DEFAULT_TEMPERATURE
+            ),
             thinking=req.thinking,
             protocol=req.protocol,
         )

@@ -208,9 +208,10 @@ class DeepSeekModel:
         # S131：显式 trust_env=False——openai SDK 默认 client 会读环境变量代理（国内网络
         # 常配 HTTP(S)_PROXY），把本地端点（Ollama/vLLM 等 127.0.0.1）请求发到代理导致 502。
         # 用 httpx2 自建 client 关闭代理读取；远端 API 不受影响（SDK 直连不走系统代理）。
-        # S214：超时分阶段——connect/pool 10s 快速发现连不上；read 不超时（流式深度思考
-        # 可能数分钟持续产 token，read timeout 会误杀正常流。idle 兜底由 SSE 层管）。
-        _httpx_timeout = httpx.Timeout(connect=10.0, read=None, write=30.0, pool=10.0)
+        # S214：超时分阶段——connect/pool 10s 快速发现连不上；read 600s（S253：
+        # 原 read=None 永不超时，TCP 假死会让工作线程永久挂起；600s 只拦"10 分钟
+        # 无任何字节"的死连接，不误杀持续产 token 的正常流；SSE 层 180s idle 兜底不变）
+        _httpx_timeout = httpx.Timeout(connect=10.0, read=600.0, write=30.0, pool=10.0)
         self._client = OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,

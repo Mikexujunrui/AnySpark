@@ -67,8 +67,12 @@ CREATE TABLE IF NOT EXISTS model_configs (
 
 # 协议 → 适配器工厂（统一构造签名：base_url/api_key/model/temperature/max_tokens/
 # context_window/thinking——DeepSeekModel 兼容该签名，新增适配器同款）
+from anyspark.models.anthropic import DEFAULT_BASE_URL as _ANTHROPIC_BASE_URL  # noqa: E402
 from anyspark.models.anthropic import AnthropicModel  # noqa: E402
+from anyspark.models.deepseek import DEFAULT_BASE_URL as _OPENAI_COMPAT_BASE_URL  # noqa: E402
+from anyspark.models.gemini import DEFAULT_BASE_URL as _GEMINI_BASE_URL  # noqa: E402
 from anyspark.models.gemini import GeminiModel  # noqa: E402
+from anyspark.models.responses import DEFAULT_BASE_URL as _RESPONSES_BASE_URL  # noqa: E402
 from anyspark.models.responses import ResponsesModel  # noqa: E402
 
 _PROTOCOL_FACTORIES: dict[str, type] = {
@@ -77,6 +81,20 @@ _PROTOCOL_FACTORIES: dict[str, type] = {
     "gemini": GeminiModel,
     "responses": ResponsesModel,
 }
+
+# S253：各协议缺省端点（S131 收尾——此前新增配置缺省恒为 DashScope，
+# 添加 Claude/Gemini 不填 base_url 即指向错误端点）。适配器构造内也有同款回退。
+_PROTOCOL_DEFAULT_BASE_URLS: dict[str, str] = {
+    "openai": _OPENAI_COMPAT_BASE_URL,
+    "anthropic": _ANTHROPIC_BASE_URL,
+    "gemini": _GEMINI_BASE_URL,
+    "responses": _RESPONSES_BASE_URL,
+}
+
+
+def default_base_url_for(protocol: str | None) -> str:
+    """S253：按协议取缺省端点（未知协议回退 openai 兼容端点）。"""
+    return _PROTOCOL_DEFAULT_BASE_URLS.get(validate_protocol(protocol), _OPENAI_COMPAT_BASE_URL)
 
 
 def validate_protocol(protocol: str | None) -> str:
@@ -125,7 +143,11 @@ class ModelConfig:
         return d
 
     def resolved_api_key(self) -> str | None:
-        return self.api_key or os.getenv("DEEPSEEK_API_KEY")
+        """S253：只返回显式配置的 key；缺省回退交给适配器按协议取各自的 env
+        （openai→DEEPSEEK_API_KEY / anthropic→ANTHROPIC_API_KEY / gemini→GEMINI_API_KEY /
+        responses→OPENAI_API_KEY）。此前统一回退 DEEPSEEK_API_KEY，会把 DashScope key
+        当 x-api-key 发往 Anthropic/第三方端点（跨协议凭证泄漏，审核发现）。"""
+        return self.api_key
 
 
 def default_env_config() -> ModelConfig:
@@ -378,6 +400,19 @@ class ModelProvider:
     def build(self, temperature: float | None = None, thinking: str | None = None) -> Any:
         """按当前激活配置构造适配器（可覆盖温度/思考强度；None=用配置值）。"""
         cfg = self._registry.active()
+        return self._build_cfg(cfg, temperature, thinking)
+
+    def build_for_config(
+        self,
+        cfg: Any,
+        temperature: float | None = None,
+        thinking: str | None = None,
+    ) -> Any:
+        """S253：按显式配置构造（请求级 model_id 路径）——走协议分发。
+
+        修此前 agent_factory 恒建 DeepSeekModel 的缺陷：指定 Claude/Gemini 配置
+        会用 Chat Completions 协议打错误端点（审核发现）。
+        """
         return self._build_cfg(cfg, temperature, thinking)
 
     def build_for_task(
