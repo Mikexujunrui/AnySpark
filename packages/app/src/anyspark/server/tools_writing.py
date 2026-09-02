@@ -476,7 +476,14 @@ class WritingTools:
         # S143（AI 文件编辑闭环）：人工修改过的文件不静默覆盖——
         # 人在前端保存过（PUT /api/sandbox/file）即标记；AI 再写被拦，
         # 返回提示让 agent 告知用户（内容自然语言可编辑：人改过的 AI 尊重）。
-        if path.exists() and raw in _read_human_edits(self._book_id):
+        # S252：改用 resolved 路径比对——此前按原始字符串比对，agent 传
+        # `./notes/x.md`、反斜杠、大小写变体即可绕过标记静默覆盖人工编辑
+        human_paths = set()
+        for rel in _read_human_edits(self._book_id):
+            hp = _resolve_sandbox_path(rel, self._book_id)
+            if hp is not None:
+                human_paths.add(hp)
+        if path.exists() and path in human_paths:
             return ToolResult(
                 call=call,
                 ok=False,

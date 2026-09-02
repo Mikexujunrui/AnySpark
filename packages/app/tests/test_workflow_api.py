@@ -327,6 +327,47 @@ def test_workflow_agent_run_passes_params() -> None:
     assert "JSON" in res2.content or "不是合法" in res2.content
 
 
+def test_batch_prepare_unmatched_ids_errors_instead_of_full_fallback() -> None:
+    """S252 回归：batch_prepare 传入 id 全部未匹配 → 显式报错（不再静默回退全量）。
+
+    此前笔误 id 落进「缺省全部章节」分支，一次笔误触发全书批量改写（审核发现）；
+    部分未匹配保留宽容跳过语义，但留 warning 日志。
+    """
+    import json as _json
+    from types import SimpleNamespace
+
+    from anyspark.server.wf_scripts import WfScriptDeps, wf_script_batch_prepare
+    from anyspark.store.sqlite import ChapterStore
+    from anyspark.workflow import RunContext
+
+    db = Path(tempfile.mkdtemp()) / "bp.db"
+    store = ChapterStore(str(db))
+    store.upsert("main", "第一章", "a", 1)
+    store.upsert("main", "第二章", "b", 2)
+
+    wfd = WfScriptDeps()
+    wfd.chapters = store
+    ctx = RunContext(task_id="t", book_id="main", definition=None, results={})  # type: ignore[arg-type]
+
+    # 全部未匹配 → 显式报错
+    node = SimpleNamespace(params={"chapter_ids": "不存在的章节X", "output_key": "ids"})
+    res = wf_script_batch_prepare(wfd, ctx, node)
+    assert res.error, "全部未匹配应报错而非回退全量"
+    assert "未匹配" in (res.error or "")
+
+    # 未提供输入 → 缺省全部章节（原语义保留）
+    node2 = SimpleNamespace(params={"chapter_ids": "", "output_key": "ids"})
+    res2 = wf_script_batch_prepare(wfd, ctx, node2)
+    assert not res2.error
+    assert len(_json.loads(res2.output or "[]")) == 2
+
+    # 部分匹配 → 宽容跳过未匹配（S158 语义保留）
+    node3 = SimpleNamespace(params={"chapter_ids": "第一章,不存在Y", "output_key": "ids"})
+    res3 = wf_script_batch_prepare(wfd, ctx, node3)
+    assert not res3.error
+    assert len(_json.loads(res3.output or "[]")) == 1
+
+
 def test_workflow_completion_notify_system_notice() -> None:
     """S158c：任务终态 → 系统通知（manual_notices action=system）。
 

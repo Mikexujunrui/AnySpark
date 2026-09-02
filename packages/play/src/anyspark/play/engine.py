@@ -183,8 +183,10 @@ class PlayEngine:
         opt_dicts: list[dict[str, Any]] = []
         if options:
             opt_dicts = self._store.add_options(child_id, options[:MAX_OPTIONS])
-            self._store.set_current(session_id, child_id)
-        else:
+        # S252：无论继续还是自然收束，current 都要指向新节点——收束时若不 set_current，
+        # current 停在父节点，export 的 path_to 导出会缺失最后一幕（结局场景，审核发现）
+        self._store.set_current(session_id, child_id)
+        if ended:
             self._store.end_session(session_id)
         node = self._node_view(self._store.get_node(child_id), opt_dicts)
         return {"node": node, "ended": ended}

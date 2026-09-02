@@ -676,6 +676,26 @@ multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补�
 
 ---
 
+## S252: 全库审核修复批①——P0 数据面（md 双写/收束导出/批量回退/人工标记绕过）
+
+**背景**：本会话对全库做了系统代码审核（6 域并行深审 + 静态基线），本阶段起分批修复。
+S252 修数据正确性类 P0 四项：
+
+1. **routes_chapters 三处补 md 双写**（严重）：update/patch/restore 此前只写 SQLite
+   镜像不回写 md 权威（create/delete 原本双写），/api/workspace/import 按文件为准会
+   把旧 md 灌回——编辑器保存被静默回滚。补 workspace.write_chapter（OSError 降级
+   warning 不阻断）+ API 级回归测试（test_workspace.py 四段断言 md 跟随）。
+2. **play 自然收束导出丢失结局**（严重）：收束分支只 end_session 不 set_current，
+   current 停在父节点，export path_to 缺最后一幕。统一 set_current(child) 后再终止；
+   补回归测试 test_natural_ending_export_includes_final_scene。
+3. **batch_prepare 笔误触发全书改写**（中）：传入 id 全部未匹配时静默回退全量章节。
+   改为显式报错（附未解析项提示）；部分未匹配保留宽容跳过（S158 语义）但补 warning
+   日志；补单测三分支断言。
+4. **write_file 人工编辑标记可绕过**（中）：按原始字符串比对标记，agent 传 `./x`、
+   反斜杠变体即绕过静默覆盖人工编辑（击穿 S143 不变量）。改 resolved 路径比对；
+   补变体回归测试（./ 前缀/反斜杠/无标记正常写三分支）。
+
+**测试**：涉及 5 个测试文件 41 passed；ruff 全绿。
 ## S251: 新增功能代码自审——5 处修复（设计哲学/微 bug/健壮性）
 
 **审核范围**：S246~S250b 全部新增（genres/seeds_campus/citation/connectors/

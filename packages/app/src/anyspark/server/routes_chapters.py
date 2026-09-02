@@ -150,6 +150,12 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         if ch is None:
             raise HTTPException(status_code=404, detail="章节不存在")
         deps.chapters.upsert(ch.book_id, ch.title, req.content, ch.order_index, ch.narrative_line)
+        # S252：稿纸保存补 md 双写（此前只写库镜像，import 按文件为准会把旧 md 灌回，
+        # 静默回滚用户编辑——审核发现；与 create_chapter 双写对齐）
+        try:
+            deps.workspace.write_chapter(ch.book_id, ch.order_index, ch.title, req.content)
+        except OSError as exc:
+            logger.warning("章节 md 回写失败（库已更新）: %s《%s》: %s", ch.book_id, ch.title, exc)
         updated = deps.chapters.get(chapter_id)
         if updated is None:
             raise HTTPException(status_code=500, detail="保存后章节读取失败")
@@ -190,6 +196,18 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         restored = deps.chapters.restore_version(chapter_id, req.version_id)
         if restored is None:
             raise HTTPException(status_code=404, detail="版本不存在")
+        # S252：版本恢复补 md 双写（同 update——md 权威必须跟随库镜像，防 import 回滚）
+        try:
+            deps.workspace.write_chapter(
+                restored.book_id, restored.order_index, restored.title, restored.content
+            )
+        except OSError as exc:
+            logger.warning(
+                "恢复版本 md 回写失败（库已更新）: %s《%s》: %s",
+                restored.book_id,
+                restored.title,
+                exc,
+            )  # noqa: E501
         # S85：恢复也是内容变化 → 后台图谱抽取（防图谱漂移）
         deps.bg_queue.put(
             BgTask(
@@ -241,6 +259,13 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         # S152g：按章节所属项目写回（此前硬编码 "main"——定点编辑 A 项目章节
         # 会把内容 upsert 到 main 项目，原项目不更新）
         deps.chapters.upsert(ch.book_id, ch.title, new_content, ch.order_index, ch.narrative_line)
+        # S252：定点编辑补 md 双写（同 update——md 权威必须跟随库镜像）
+        try:
+            deps.workspace.write_chapter(ch.book_id, ch.order_index, ch.title, new_content)
+        except OSError as exc:
+            logger.warning(
+                "定点编辑 md 回写失败（库已更新）: %s《%s》: %s", ch.book_id, ch.title, exc
+            )  # noqa: E501
         # S132b 信号入口：定点编辑（内容实际变化）→ modified 信号（含段落删除/替换）
         if ok_all and new_content != ch.content:
             deps.signal_collector.modified(ch.content, new_content, "定点编辑", book_id=ch.book_id)

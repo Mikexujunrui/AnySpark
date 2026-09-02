@@ -60,6 +60,46 @@ def test_sandbox_isolated_by_book() -> None:
         assert m["files"] == []
 
 
+def test_write_file_human_edit_guard_survives_path_variants() -> None:
+    """S252 回归：人工编辑标记对路径变体（./ 前缀/反斜杠）依然生效。
+
+    此前按原始字符串比对，agent 传 `./note.md` 即绕过标记静默覆盖人工编辑。
+    """
+    import anyspark.server.tools_writing as tw
+    from anyspark.core import ToolSpec
+    from anyspark.server.tools_writing import WritingTools, _mark_human_edit
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tw._SANDBOX_ROOT = Path(tmp)
+        # 人工保存过 note.md（模拟 PUT /api/sandbox/file 落标记）
+        (Path(tmp) / "main").mkdir(parents=True)
+        (Path(tmp) / "main" / "note.md").write_text("人工内容", encoding="utf-8")
+        _mark_human_edit("note.md", "main")
+
+        tools = WritingTools(chapters=None, book_id="main")  # type: ignore[arg-type]
+        # 变体 1：./ 前缀 → 仍被拦截
+        r1 = tools.write_file(
+            ToolSpec(name="write_file"), {"path": "./note.md", "content": "AI 覆盖"}
+        )
+        assert not r1.ok, "./ 变体不应绕过人工编辑标记"
+        assert "人工" in r1.content
+        # 变体 2：反斜杠分隔 → 仍被拦截
+        (Path(tmp) / "main" / "sub").mkdir()
+        (Path(tmp) / "main" / "sub" / "x.md").write_text("人工内容2", encoding="utf-8")
+        _mark_human_edit("sub/x.md", "main")
+        r2 = tools.write_file(
+            ToolSpec(name="write_file"), {"path": "sub\\x.md", "content": "AI 覆盖"}
+        )
+        assert not r2.ok, "反斜杠变体不应绕过人工编辑标记"
+        # 人工内容未被覆盖
+        assert (Path(tmp) / "main" / "note.md").read_text(encoding="utf-8") == "人工内容"
+        # 无标记的新文件正常写入
+        r3 = tools.write_file(
+            ToolSpec(name="write_file"), {"path": "fresh.md", "content": "AI 新建"}
+        )
+        assert r3.ok
+
+
 def test_sandbox_legacy_migration() -> None:
     """旧全局沙箱直接文件 → sandbox_list 触发迁移归入 main（幂等）。"""
     with tempfile.TemporaryDirectory() as tmp:

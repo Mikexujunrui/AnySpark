@@ -158,6 +158,49 @@ def test_stop_and_export() -> None:
     assert session is not None and session["status"] == "ended"
 
 
+class _EndingModel:
+    """第 2 次调用返回空选项（剧情自然收束）。"""
+
+    model_name = "scripted-ending"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def respond(self, messages: list[Message], tools) -> ModelOutput:  # type: ignore[no-untyped-def]
+        self.calls += 1
+        if self.calls == 1:
+            return ModelOutput(text=_payload(1))
+        return ModelOutput(
+            text=json.dumps(
+                {"scene": "终幕：信中人现身，故事收束。", "options": []}, ensure_ascii=False
+            )
+        )
+
+
+def test_natural_ending_export_includes_final_scene() -> None:
+    """S252 回归：剧情自然收束（模型不返回选项）后导出必须包含最后一幕。
+
+    此前收束分支只 end_session 不 set_current，current 停在父节点，
+    path_to 导出缺失结局场景（审核发现）。
+    """
+    store = PlayStore(_db())
+    ws = _ws()
+    ws.write_card("main", "角色卡", "陈渡", "# 陈渡\n沉默寡言。")
+    engine = PlayEngine(store, _EndingModel(), ws)
+
+    created = engine.create(role="陈渡", seed="码头雨夜", title="终幕测试")
+    sid = created["session"]["id"]
+    result = engine.choose(sid, custom_text="我拆了信")
+    assert result["ended"] is True
+
+    session = store.get_session(sid)
+    assert session is not None and session["status"] == "ended"
+    # current 必须指向终幕节点（而非父节点）
+    assert session["current_node_id"]
+    md = export_path_markdown(store, sid)
+    assert "终幕：信中人现身" in md
+
+
 def test_missing_role_card_raises() -> None:
     """无角色卡 → 报错（对齐 role_play 先例）。"""
     store = PlayStore(_db())

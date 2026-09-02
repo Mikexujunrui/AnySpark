@@ -135,6 +135,45 @@ def test_patch_chapter_dual() -> None:
     assert store.list_by_book("main")[0].content == "第一段。\n改写段。"
 
 
+def test_chapter_update_restore_patch_dual_writes_md() -> None:
+    """S252 回归：稿纸保存/版本恢复/定点编辑必须回写 md 权威文件。
+
+    此前只写库镜像，/api/workspace/import 按文件为准会把旧 md 灌回，
+    静默回滚用户编辑（审核发现；create/delete 原本已双写）。
+    """
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    ws = _ws()
+    client = TestClient(build_app(model=_FakeModel(), db_path=db, workspace=ws))
+
+    # create（原有双写，作为基础数据）
+    r = client.post("/api/chapters", json={"title": "第一章", "content": "原文A"})
+    assert r.status_code == 200, r.text
+    cid = r.json()["id"]
+    assert ws.read_chapter("main", 0, "第一章") == "原文A"
+
+    # 稿纸保存 → md 必须更新
+    r = client.put(f"/api/chapters/{cid}", json={"content": "稿纸保存B"})
+    assert r.status_code == 200, r.text
+    assert ws.read_chapter("main", 0, "第一章") == "稿纸保存B"
+
+    # 定点编辑 → md 必须更新
+    r = client.post(
+        f"/api/chapters/{cid}/patch",
+        json={"operations": [{"type": "replace", "anchor": "稿纸保存B", "content": "定点C"}]},
+    )
+    assert r.status_code == 200, r.text
+    assert ws.read_chapter("main", 0, "第一章") == "定点C"
+
+    # 版本恢复 → md 必须跟随库镜像回到历史版
+    versions = client.get(f"/api/chapters/{cid}").json()["versions"]
+    assert versions, "应有版本历史"
+    target = versions[-1]["id"]
+    r = client.post(f"/api/chapters/{cid}/restore", json={"version_id": target})
+    assert r.status_code == 200, r.text
+    restored_content = r.json()["content"]
+    assert ws.read_chapter("main", 0, "第一章") == restored_content
+
+
 # ---------------------------------------------------------------------------
 # API 端点
 # ---------------------------------------------------------------------------

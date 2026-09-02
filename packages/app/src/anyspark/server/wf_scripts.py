@@ -531,6 +531,7 @@ def wf_script_batch_prepare(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> No
         by_title = {c.title: c.id for c in all_chs}
         by_order = {str(c.order_index): c.id for c in all_chs}
         existing = {c.id for c in all_chs}
+        unresolved: list[str] = []
         for it in raw_items:
             if it in existing:
                 ids.append(it)
@@ -538,9 +539,24 @@ def wf_script_batch_prepare(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> No
                 ids.append(by_title[it])
             elif it in by_order:
                 ids.append(by_order[it])
+            else:
+                unresolved.append(it)
+    provided = bool(raw)
     if not ids:
-        # 缺省全部章节
+        if provided:
+            # S252：显式报错而非静默回退全量——一次笔误触发全书批量改写的通道（审核发现）
+            return NodeResult(
+                error="batch_prepare：传入的章节 id/标题/序号全部未匹配（共 "
+                f"{len(raw_items)} 项，如 {raw_items[:5]}）；请用 list_chapters 核对后重试，"
+                "或留空 chapter_ids 表示全部章节"
+            )
+        # 未提供输入 → 缺省全部章节
         ids = [c.id for c in wfd.chapters.list_by_book(ctx.book_id)]
+    elif unresolved:
+        # 部分未匹配：宽容继续（S158 设计），但必须留痕——静默丢弃会让用户以为全批都改了
+        logger.warning(
+            "batch_prepare 部分章节未匹配（已跳过 %d 项）: %s", len(unresolved), unresolved[:10]
+        )
     if not ids:
         return NodeResult(error="batch_prepare 无章节（chapter_ids 为空且项目无章节）")
     # S158：output 保持纯 JSON 数组（loop 的 collection_var 直接 json.loads）——
