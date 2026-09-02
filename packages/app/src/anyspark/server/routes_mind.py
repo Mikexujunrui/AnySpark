@@ -72,8 +72,9 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
         )
         deps.manual.add(entry)
         # S54-B：新增 style 偏好 → 后台生成对应 skill 候选草稿（人工确认生效）
+        # S255：入队带项目（草稿提炼按来源项目取偏好素材）
         if entry.category == "style":
-            deps.bg_queue.put(BgTask(kind="skill_drafts"))
+            deps.bg_queue.put(BgTask(kind="skill_drafts", book_id=entry.book_id))
         return entry.to_dict()
 
     @router.patch("/api/manual/{entry_id}", response_model=dict[str, Any])
@@ -220,8 +221,8 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
             )
         # S28：信号 → 后台提炼 → 说明书（异步，不阻塞操作；修复对齐闭环缺口）
         deps.bg_queue.put(BgTask(kind="refine"))
-        # S54-C：信号驱动 → skill 候选草稿（后台，人工确认生效）
-        deps.bg_queue.put(BgTask(kind="skill_drafts"))
+        # S54-C：信号驱动 → skill 候选草稿（后台，人工确认生效；S255：带项目）
+        deps.bg_queue.put(BgTask(kind="skill_drafts", book_id=req.book_id))
         return sig.to_dict()
 
     @router.post("/api/mind/reconcile", response_model=dict[str, Any])

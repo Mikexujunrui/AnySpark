@@ -21,6 +21,7 @@ data/records/<conversation_id>/
 from __future__ import annotations
 
 import json
+import re
 import sys
 import threading
 from pathlib import Path
@@ -45,7 +46,10 @@ class RunRecorder:
         self._lock = threading.Lock()
 
     def session_dir(self, conv_id: str) -> Path:
-        d = self.root / conv_id
+        # S255：会话 id 消毒（原样拼路径，Windows 下反斜杠不拆路由段但 Path 视为
+        # 分隔符，`..\..\x` 可越出 records 根读文件——与 workspace 层消毒标准对齐）
+        safe = re.sub(r'[\\/:*?"<>|\r\n.]', "", conv_id).strip() or "未命名"
+        d = self.root / safe
         d.mkdir(parents=True, exist_ok=True)
         return d
 

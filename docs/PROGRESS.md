@@ -676,6 +676,30 @@ multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补�
 
 ---
 
+## S255: 全库审核修复批④——book_id 硬编码清扫 + 扫描器补盲
+
+**逃过 S152h 扫描器的硬编码（审核发现：扫描器只查 book_id="main" 字面量形态）**：
+1. toolkit 三处漏传 ctx.book_id（中）：make_data_env（扩展工具数据快照恒为 main）、
+   make_mind_register/mind_manage（"记一下"落 main 心智模型）。
+2. GraphExtractor 组合根绑定 main 类型集（中）：extract() 新增 types 每次调用覆盖，
+   tasks.extract_chapter / routes_graph 抽取端点按章节所属项目传 types_for(book_id)；
+   组合根不再绑定（回退默认五类），非 main 项目自定义类型集真正生效。
+3. refine_skill_drafts 硬编码 main（中）：加 book_id 参数（bg 队列透传 task.book_id），
+   routes_mind 两处入队带项目——非主项目文风偏好进入候选源。
+4. signal_refine 计数按 ctx.book_id（轻，仅输出文案）。
+
+**扫描器补盲**：scan_main_hardcode 新增位置参数形态检测（manual.list("project","main")/
+types_for("main")/make_data_env(...,"main")），当前检出 0（含 app.py 那处已重构）。
+
+**同批卫生**：
+5. recorder.session_dir 会话 id 消毒（Windows 反斜杠可越出 records 根，对齐 workspace 标准）。
+6. plots.open_must 的 current_order 死参数真正生效（同书多钩子按植入序升序——最久的排最前）。
+
+**已知问题（未修，记录）**：test_wrapup_lists_open_hooks 全量跑有顺序依赖 flake
+（单跑/多数组合通过；:memory: 多 store 连接隔离语义 + 特定前置文件组合触发），
+本批未引入，留专项排查。
+
+**测试**：graph/app/template 相关 49+43+89 passed；ruff 全绿；扫描门禁通过。
 ## S254: 全库审核修复批③——agent 工具层防御
 
 **静默改写数据类（审核重点）**：

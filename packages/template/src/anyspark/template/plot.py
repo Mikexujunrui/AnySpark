@@ -292,13 +292,18 @@ class PlotStore:
 
     def open_must(self, book_id: str = "main", current_order: int = 0) -> list[PlotPoint]:
         """S31：未回收的主线钩子（作者承诺清单——wrapup/收尾检查用）。
-        current_order：当前章节序号（老龄化提示用）。"""
+        current_order：当前章节序号（S255 起真正生效：同书多钩子按开放时长
+        降序排序——挂着最久的主线承诺排最前，最先被作者看到）。"""
         points = self.list_points(book_id)
-        return [
+        musts = [
             p
             for p in points
             if p.status == "open" and p.priority == "must" and p.attention != "ignore"
         ]
+        # S255：同书多钩子按植入序号升序——挂着最久的主线承诺排最前，
+        # 先被作者看到（planted_order=0 未知排末尾）
+        musts.sort(key=lambda p: p.planted_order if p.planted_order > 0 else 10**9)
+        return musts
 
     def resolve_all(self, book_id: str = "main", chapter_ref: str = "全书导入") -> int:
         """S31：完整书导入归档——所有 open 标 resolved + 记录归档章。

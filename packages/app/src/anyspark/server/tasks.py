@@ -29,7 +29,8 @@ def _bg_worker_inner(
             elif task.kind == "refine":
                 refine_from_signals(deps)
             elif task.kind == "skill_drafts":
-                refine_skill_drafts(deps)
+                # S255：触发来源项目透传（路由入队时带 book_id）
+                refine_skill_drafts(deps, book_id=task.book_id)
             elif task.kind == "summarize":
                 summarize_conversation(deps, task.conv_id)
             elif task.kind == "library_index":  # S247：书库向量索引（大书导入后台化）
@@ -52,7 +53,10 @@ def index_library_book(deps: AppDeps, book_id: str) -> None:
         result = deps.library_vectors.index_book_signed(book_id, files, deps.embedder.embed)
         logger.info(
             "书库向量索引完成 book=%s indexed=%s skipped=%s chunks=%s",
-            book_id, result["indexed"], result["skipped"], result["chunks"],
+            book_id,
+            result["indexed"],
+            result["skipped"],
+            result["chunks"],
         )
     except Exception as exc:
         logger.warning("书库向量索引失败 book=%s: %s", book_id, exc)
@@ -105,9 +109,7 @@ def refine_from_signals(
         logger.warning("信号提炼失败(不影响主链路): %s", exc)
 
 
-def refine_skill_drafts(
-    deps: AppDeps,
-) -> None:
+def refine_skill_drafts(deps: AppDeps, book_id: str = "main") -> None:
     """S54 B/C：心智联动 + 信号驱动 → 生成 skill 候选草稿（人工确认生效）。
 
     B 心智联动：deps.manual 有 style 偏好（如"喜欢白话文风"）但没有对应 skill →
@@ -119,7 +121,8 @@ def refine_skill_drafts(
     """
     try:
         # 素材：style 偏好条目 + 最近修改/接受信号（体现用户认可写法）
-        manual_entries = deps.manual.list("project", "main")
+        # S255：按触发来源项目取（原硬编码 main——非主项目文风偏好永不进入候选源）
+        manual_entries = deps.manual.list("project", book_id)
         style_prefs = [e.content for e in manual_entries if e.category == "style"][:3]
         recent = deps.signals.recent(limit=20)
         signal_texts = [s.content for s in recent if s.kind in ("accepted", "modified")][:5]
@@ -176,7 +179,11 @@ def extract_chapter(
     """章节落盘后自动：图谱抽取 + 伏笔自动回收（后台任务）。失败只记日志，绝不阻断写作。"""
     try:
         existing = [e.to_dict() for e in deps.graph.list_entities(book_id)]
-        ext = deps.graph_extractor.extract(title, content, existing)
+        # S255：类型集按章节所属项目取（原组合根一次性绑定 main，架空非 main
+        # 项目自定义类型集——S50 内容化被绕过）
+        ext = deps.graph_extractor.extract(
+            title, content, existing, types=deps.graph.types_for(book_id)
+        )
         deps.graph.ingest_chapter(book_id, title, order, ext, line)
         logger.info(
             "图谱抽取完成: 《%s》 实体%d 关系%d 事件%d",

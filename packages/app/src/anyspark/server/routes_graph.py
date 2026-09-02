@@ -225,7 +225,10 @@ def make_graph_router(deps: AppDeps) -> APIRouter:
                 detail="chapter_ref 应为章节标题（短字符串），不是正文片段",
             )
         existing = [e.to_dict() for e in deps.graph.list_entities(req.book_id)]
-        ext = deps.graph_extractor.extract(req.chapter_ref, req.text, existing)
+        # S255：类型集按请求项目取（非 main 项目自定义类型集生效）
+        ext = deps.graph_extractor.extract(
+            req.chapter_ref, req.text, existing, types=deps.graph.types_for(req.book_id)
+        )
         chs = deps.chapters.list_by_book(req.book_id)
         order = next((c.order_index for c in chs if c.title == req.chapter_ref), len(chs))
         deps.graph.ingest_chapter(req.book_id, req.chapter_ref, order, ext)

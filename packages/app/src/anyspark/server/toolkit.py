@@ -242,10 +242,11 @@ def build_toolkit(
         registry.register(rt_spec, rt_impl)
         # S53c ① 心智登记工具：对话中"记一下"→ 即时落心智条目（user 来源高置信度）
         if ctx.manual is not None:
-            md_spec, md_impl = make_mind_register_implementer(ctx.manual)
+            # S255：传 book_id——缺省 main 导致非主项目对话的"记一下"落进 main 心智模型
+            md_spec, md_impl = make_mind_register_implementer(ctx.manual, book_id=ctx.book_id)
             registry.register(md_spec, md_impl)
             # S73d 心智纠正工具：用户明确要求改/删时 agent 代执行（内容裁决权在用户）
-            mm_specs, mm_impls = make_mind_manage_implementer(ctx.manual)
+            mm_specs, mm_impls = make_mind_manage_implementer(ctx.manual, book_id=ctx.book_id)
             for _s, _i in zip(mm_specs, mm_impls, strict=True):
                 registry.register(_s, _i)
             # S132c 跨会话对账工具：条目 vs 最近信号 → 冲突提示（只读，纠正走 mind_update/delete）
@@ -278,7 +279,11 @@ def build_toolkit(
     _ext_data_env: dict[str, Any] | None = None
     for _ext in ctx.ext_tools.active_tools():
         if _ext_data_env is None:
-            _ext_data_env = make_data_env(ctx.workspace, ctx.chapters, ctx.graph)
+            # S255：快照按当前项目取（缺省 main 导致扩展工具在非 main 书读错数据；
+            # 该调用点为位置/关键字混合，scan_main_hardcode 扫描器此前查不到）
+            _ext_data_env = make_data_env(
+                ctx.workspace, ctx.chapters, ctx.graph, book_id=ctx.book_id
+            )
         registry.register(tool_spec_from_ext(_ext), _make_ext_impl(_ext, _ext_data_env))
 
     # S48-P5 代码扩展（沙箱 run_code）：默认可用（S114 哲学：安全靠沙箱兜底不靠隐藏；

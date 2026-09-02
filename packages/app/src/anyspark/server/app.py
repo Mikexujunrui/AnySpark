@@ -251,7 +251,9 @@ def build_app(
     skill_generator = SkillGenerator(model)  # S54：文风提炼→skill 候选（人工确认生效）
     # 知识图谱（S7：AI 事实源）
     graph = GraphStore(real_db)
-    graph_extractor = GraphExtractor(model, types=graph.types_for("main"))  # S50：类型集内容化
+    # S255：不在此绑定类型集——实际抽取按章节所属项目传 types_for(book_id)
+    # （见 tasks.extract_chapter / routes_graph 抽取端点；ctor 内部回退默认五类）
+    graph_extractor = GraphExtractor(model)
     graph_injector = GraphInjector(graph)
     graph_verifier = GraphVerifier(graph)
     # token 预算 + 两阶段压缩（S8：长书上下文刚需；S26：预算按模型窗口配置——

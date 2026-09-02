@@ -22,6 +22,17 @@ PKG_DIRS = ["packages"]
 
 # 匹配 `book_id="main"` / `book_id = "main"` / `book_id='main'`（调用点传参形态）
 _CALL_RE = re.compile(r"book_id\s*=\s*[\"']main[\"']")
+# S255：位置参数形态检测——已知 book_id 参数化 API 以位置参数收 "main"（逃过
+# 上面的关键字形态扫描，如 manual.list("project", "main") / types_for("main") /
+# make_data_env(a, b, c, "main")）。白名单新增需同步注释原因。
+_POS_PATTERNS = [
+    # 心智条目查询（scope, book_id）：manual.list("project", "main")
+    re.compile(r"\.list\(\s*[\"']project[\"']\s*,\s*[\"']main[\"']\s*\)"),
+    # 类型集查询：graph.types_for("main")
+    re.compile(r"types_for\(\s*[\"']main[\"']\s*\)"),
+    # 数据快照第 4 参位置传 "main"：make_data_env(a, b, c, "main")
+    re.compile(r"make_data_env\([^)]*[\"']main[\"']\s*\)"),
+]
 # 合法排除：
 #  1) 单行内函数签名默认参数：def f(... book_id: str = "main" ...) / def f(book_id="main")
 #  2) 带类型注解的字段/参数：book_id: str = "main"（dataclass/schema 字段、
@@ -43,7 +54,7 @@ def scan_file(path: Path) -> list[tuple[int, str]]:
         # 跳过注释/文档字符串行
         if stripped.startswith("#") or stripped.startswith('"""') or stripped.startswith("'''"):
             continue
-        if not _CALL_RE.search(line):
+        if not _CALL_RE.search(line) and not any(p.search(line) for p in _POS_PATTERNS):
             continue
         # 默认参数声明：形如 def f(..., book_id: str = "main", ...) 或 def f(book_id="main")
         # （跨行声明无法单行判定——保守：整函数体上下文在调用扫描时人工复核）

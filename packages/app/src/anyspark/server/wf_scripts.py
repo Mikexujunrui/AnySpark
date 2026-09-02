@@ -449,9 +449,10 @@ def wf_script_signal_refine(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> No
     """S134：信号 → 偏好提炼 → 说明书（复用 tasks.refine_from_signals，增量游标）。"""
     from anyspark.server import tasks as _tasks
 
-    before = len(wfd.deps.manual.list("project", "main"))
+    before = len(wfd.deps.manual.list("project", ctx.book_id))
     _tasks.refine_from_signals(wfd.deps)
-    after = len(wfd.deps.manual.list("project", "main"))
+    after = len(wfd.deps.manual.list("project", ctx.book_id))
+    # S255：计数按当前项目（原硬编码 main，仅影响输出文案但会误导）
     return NodeResult(output=f"信号提炼完成（说明书 {before}→{after} 条）")
 
 

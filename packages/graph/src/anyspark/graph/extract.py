@@ -144,17 +144,22 @@ class GraphExtractor:
         chapter_ref: str,
         text: str,
         existing: list[dict[str, Any]] | None = None,
+        types: list[str] | None = None,
     ) -> Extraction:
         """抽取一章：新实体 + 关系 + 事件（已有实体不重复）。
+
+        types：本次抽取的类型集覆盖（S255：按章节所属项目传 types_for(book_id)——
+        原实现组合根一次性绑定 main 类型集，架空非 main 项目自定义类型集）。
 
         >>> 宽容解析的补强（benchmark 发现）：模型输出偶发截断/非法 JSON，
         解析结果全空时重试一次（不同采样）；仍空则返回空（不阻塞调用方）。
         """
+        use_types = list(types) if types else self._types
         existing_text = ""
         if existing:
             names = "\n".join(f"- {e['name']}（{e['entity_type']}）" for e in existing[:50])
             existing_text = f"\n{names}\n"
-        prompt = EXTRACT_PROMPT.replace("{types_line}", _types_line(self._types)) + (
+        prompt = EXTRACT_PROMPT.replace("{types_line}", _types_line(use_types)) + (
             existing_text + f"\n章节《{chapter_ref}》正文：\n{text[:6000]}"
         )
         parsed = Extraction()
@@ -163,7 +168,7 @@ class GraphExtractor:
                 [Message(role="system", content=prompt)],
                 [],
             )
-            candidate = self._parse(output.text)
+            candidate = self._parse(output.text, use_types)
             # 实体或状态更新任一非空即接受（S20：states 也是有效产出）
             if candidate.entities or candidate.states:
                 parsed = candidate
@@ -173,7 +178,7 @@ class GraphExtractor:
         self.dropped_types = self._dropped_types
         return parsed
 
-    def _parse(self, raw: str) -> Extraction:
+    def _parse(self, raw: str, use_types: list[str]) -> Extraction:
         """宽容解析模型输出（围栏/前后文字/非法类型容错）。"""
         data = _parse_json_object(raw)
         extraction = Extraction()
@@ -185,7 +190,7 @@ class GraphExtractor:
             # S146（评审 4.1）：类型归一 + 非法类型不再静默降级为"设定"——
             # 丢弃并计数（模型输出了类型集外的词，可能是"人物"等别名，
             # 也可能是真错误；宁可丢弃不可语义误导）。
-            etype = _normalize_type(str(item.get("type", "")), tuple(self._types))
+            etype = _normalize_type(str(item.get("type", "")), tuple(use_types))
             if etype is None:
                 self._dropped_types += 1
                 continue
