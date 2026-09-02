@@ -400,3 +400,42 @@ def test_upload_delete_removes_file() -> None:
     # 已删除文件再删 → 404
     r3 = client.delete(f"/api/upload/main/{name}")
     assert r3.status_code == 404
+
+
+def test_chapter_status_and_reorder_endpoints() -> None:
+    """S257 回归：章节状态与拖拽重排真实落库（原为伪造成功响应的 stub）。
+
+    status 列迁移幂等；reorder 同步 md 文件名序号（文件名承载序号，双写纪律）。
+    """
+    db = Path(tempfile.mkdtemp()) / "t.db"
+    ws = _ws()
+    client = TestClient(build_app(model=_FakeModel(), db_path=db, workspace=ws))
+
+    r1 = client.post("/api/chapters", json={"title": "第一章", "content": "A"}).json()
+    r2 = client.post("/api/chapters", json={"title": "第二章", "content": "B"}).json()
+    assert ws.read_chapter("main", 0, "第一章") == "A"
+    assert ws.read_chapter("main", 1, "第二章") == "B"
+
+    # 定稿状态真实落库（非法值 422）
+    r = client.post(f"/api/chapters/{r2['id']}/status", json={"status": "final"})
+    assert r.status_code == 200, r.text
+    assert client.get(f"/api/chapters/{r2['id']}").json()["status"] == "final"
+    assert client.get(f"/api/chapters/{r1['id']}").json()["status"] == "draft"
+    bad = client.post(f"/api/chapters/{r2['id']}/status", json={"status": "怪值"})
+    assert bad.status_code == 422
+
+    # 拖拽重排：第二章拖到第一位
+    r = client.post("/api/chapters/reorder", json={"book_id": "main", "ids": [r2["id"], r1["id"]]})
+    assert r.status_code == 200, r.text
+    chs = client.get("/api/chapters?book_id=main").json()
+    assert [c["title"] for c in chs] == ["第二章", "第一章"], "重排后 order_index 应更新"
+    assert chs[0]["status"] == "final", "重排不得丢状态"
+    # md 文件名序号同步（权威文件跟随，防 import 回弹）
+    assert ws.read_chapter("main", 0, "第二章") == "B"
+    assert ws.read_chapter("main", 1, "第一章") == "A"
+    assert ws.read_chapter("main", 0, "第一章") is None
+
+    # 未知章节 id → 404
+    assert client.post(
+        "/api/chapters/reorder", json={"book_id": "main", "ids": ["nope"]}
+    ).status_code == 404

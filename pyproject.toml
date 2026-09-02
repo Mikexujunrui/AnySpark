@@ -86,7 +86,7 @@ ignore = [
 "packages/core/src/anyspark/__init__.py" = ["F401"]  # 纯 API 再导出 shim
 # S54：生成 prompt/测试样例是长中文行（JSON 格式说明），断行破坏内容
 "packages/align/src/anyspark/align/skillgen.py" = ["E501"]
-"packages/align/tests/test_skillgen.py" = ["E501"]
+"packages/app/tests/test_align_skillgen.py" = ["E501"]  # S256：自 align 迁入（原 packages/align/tests/test_skillgen.py）
 # S59：工作流生成目录/测试样例是长中文行（JSON 定义），断行破坏内容
 "packages/workflow/src/anyspark/workflow/generator.py" = ["E501"]
 "packages/workflow/tests/test_workflow.py" = ["E501"]

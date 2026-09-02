@@ -240,7 +240,7 @@ class _FakeEmbedder:
     available = True
     model = "fake-embed"
 
-    def embed(self, texts: list) -> list:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         out = []
         for t in texts:
             out.append([
@@ -256,10 +256,12 @@ class _FakeEmbedder:
 class _FakeVectors:
     """fake 向量索引：返回固定命中（模拟全书库语义召回）。"""
 
-    def __init__(self, hits: list) -> None:
+    def __init__(self, hits: list[dict[str, object]]) -> None:
         self._hits = hits
 
-    def search(self, query_vec: list, book_ids: list | None = None, top_k: int = 8) -> list:
+    def search(
+        self, query_vec: list[float], book_ids: list[str] | None = None, top_k: int = 8
+    ) -> list[dict[str, object]]:
         _ = query_vec, book_ids
         return self._hits[:top_k]
 
@@ -271,7 +273,7 @@ def _make_semantic_tool(vectors: Any = None, embedder: Any = None) -> tuple[Any,
     lib.add_book("魔法之书")
     lib.import_chapter("魔法之书", "第一章", "少年握紧法杖，魔法的光辉照亮塔顶。")
     lib.set_references("main", [{"type": "library", "id": "魔法之书"}])
-    spec, impl = make_reference_lookup_implementer(
+    _spec, impl = make_reference_lookup_implementer(
         lib, None, book_id="main", vectors=vectors, embedder=embedder
     )
     return impl, lib
@@ -333,7 +335,7 @@ def test_semantic_embedder_down_reports_unavailable() -> None:
     class DownEmbedder:
         available = True
 
-        def embed(self, texts: list) -> list:
+        def embed(self, texts: list[str]) -> list[list[float]]:
             raise RuntimeError("embedding 服务 502")
 
     hits = [{"book_id": "魔法之书", "filename": "第一章.md", "chunk_idx": 0,
