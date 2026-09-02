@@ -172,8 +172,11 @@ class StoryTreeStore:
                 "UPDATE story_nodes SET chosen=0 WHERE book_id=? AND id<>?",
                 (node.book_id, node_id),
             )
+            # S256：锚点被选为主线时保留锚点身份（docstring 承诺"锚点不受影响"，
+            # 原实现无条件 kind='main' 把锚点改写掉）
+            new_kind = "anchor" if node.kind == "anchor" else "main"
             self._conn.execute(
-                "UPDATE story_nodes SET chosen=1, kind='main' WHERE id=?", (node_id,)
+                "UPDATE story_nodes SET chosen=1, kind=? WHERE id=?", (new_kind, node_id)
             )
             self._conn.commit()
         return self.get(node_id)

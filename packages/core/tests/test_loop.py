@@ -34,10 +34,10 @@ def _no_tool(text: str) -> ModelOutput:
     return ModelOutput(text=text)
 
 
-def _make_agent(model: Model) -> Agent:
+def _make_agent(model: Model, **overrides: Any) -> Agent:
     registry = ToolRegistry()
     register_builtins(registry)
-    return Agent(model=model, registry=registry)
+    return Agent(model=model, registry=registry, **overrides)
 
 
 def test_loop_runs_without_tools() -> None:
@@ -560,10 +560,10 @@ def test_terminate_stops_loop() -> None:
 
 
 def test_workflow_status_polling_not_deadloop() -> None:
-    """S158c：workflow_status 轮询合法（等异步任务，幂等只读）——不触发 S108 死循环拦截。
+    """S158c/S256：轮询类幂等只读工具豁免死循环判定（豁免集合由装配注入）。
 
     连续 N 轮只调 workflow_status（签名相同）不应被当作死循环终止；
-    之后正常终答。
+    之后正常终答。core 不再硬编码工具名——不注入豁免则会被拦截（机制纯性）。
     """
     from anyspark.core import ToolCall
 
@@ -572,7 +572,17 @@ def test_workflow_status_polling_not_deadloop() -> None:
         for _ in range(15)
     ]
     polls.append(_no_tool("任务还在跑，我先结束，后台继续。"))
-    agent = _make_agent(ScriptedModel(polls))
+    # 不注入豁免：S108 死循环拦截照常生效（用注册过的 echo 验证机制仍在）
+    echo_loops = [
+        ModelOutput(tool_calls=[ToolCall(name="echo", arguments={"text": "hi"})])
+        for _ in range(15)
+    ]
+    echo_loops.append(_no_tool("停"))
+    agent_no_exempt = _make_agent(ScriptedModel(echo_loops))
+    turn_ne = agent_no_exempt.run("复读")
+    assert turn_ne.error is not None and "重复的工具调用" in turn_ne.text
+    # 注入豁免（app 装配形态）：轮询合法
+    agent = _make_agent(ScriptedModel(polls), deadloop_exempt_tools=frozenset({"workflow_status"}))
     turn = agent.run("查任务进度")
     assert turn.error is None
     assert "重复的工具调用" not in turn.text

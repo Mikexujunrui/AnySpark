@@ -213,6 +213,17 @@ class WorkflowDef:
                     errors.append(f"loop 节点 {n.id} 缺 body（循环体节点 id 列表）")
                 elif any(b not in node_ids for b in body):
                     errors.append(f"loop 节点 {n.id} 的 body 引用未知节点")
+                else:
+                    # S256：body 节点不得携带出边——引擎按 body 列表顺序执行，
+                    # body 节点的出边会被 _advance 提前推进（目标被提前执行且
+                    # body 再次执行=双倍 LLM 调用，审核发现）
+                    out_sources = {e.source for e in self.edges}
+                    offenders = [b for b in body if b in out_sources]
+                    if offenders:
+                        errors.append(
+                            f"loop 节点 {n.id} 的 body 节点 {offenders} 带出边"
+                            "（循环体节点不能有出边，执行顺序由 body 列表决定）"
+                        )
                 if int(n.params.get("max_iterations", 0)) <= 0:
                     errors.append(f"loop 节点 {n.id} 缺 max_iterations（>0 防死循环）")
                 # S129：collection_var 模式与 continue_condition 模式二选一

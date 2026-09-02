@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -26,8 +27,24 @@ from .prompts import OUTPUT_SCHEMA, SUMMARIZE_SYSTEM
 
 logger = logging.getLogger(__name__)
 
-# 系统默认评审员目录：随包分发（hatch force-include 打进 wheel 的 anyspark/reviewers）
-DEFAULT_REVIEWERS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "reviewers"
+def _default_reviewers_dir() -> Path:
+    """系统默认评审员目录：兼容 repo 与 wheel 两种布局。
+
+    S256：原单一 repo 路径在 wheel 安装后解析到 <env>/reviewers——评审员静默
+    加载 0 个（测试从 repo 跑永远测不到，审核发现）。环境变量
+    ANYSPARK_REVIEWERS_DIR 可显式覆盖。
+    """
+    env = os.getenv("ANYSPARK_REVIEWERS_DIR")
+    if env:
+        return Path(env)
+    here = Path(__file__).resolve().parent
+    repo_layout = here.parent.parent.parent / "reviewers"  # packages/review/reviewers
+    if repo_layout.is_dir():
+        return repo_layout
+    return here.parent / "reviewers"  # wheel: <site-packages>/anyspark/reviewers
+
+
+DEFAULT_REVIEWERS_DIR = _default_reviewers_dir()
 
 # 单评审员评审超时（秒）
 REVIEW_TIMEOUT = 90

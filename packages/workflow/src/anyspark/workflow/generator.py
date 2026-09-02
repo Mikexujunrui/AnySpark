@@ -64,6 +64,7 @@ NODE_CATALOG = """可用节点类型（kind 字段）：
             continue_condition: 继续条件（rule 表达式，为真继续循环；
                                  留空=固定跑满 max_iterations）}
    loop 出边 = 循环结束后走的下一个节点。
+   注意：body 列表内的循环体节点不能有出边（执行顺序由 body 列表决定）。
 
 边（edges）：[{source: 节点id, target: 节点id, condition?: {...}}]
 每个非 gate 节点最多一条出边；gate 可多条（条件路由）。

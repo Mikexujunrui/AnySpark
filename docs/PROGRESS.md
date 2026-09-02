@@ -676,6 +676,33 @@ multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补�
 
 ---
 
+## S256: 全库审核修复批⑤——包层修复（workflow/review/core/align）
+
+**workflow**：
+1. validate 禁 loop body 节点带出边（中）：引擎按 body 列表顺序执行，body 节点
+   出边会被 _advance 提前推进——目标被提前执行且 body 再次执行=双倍 LLM 调用；
+   generator NODE_CATALOG 同步提示。已核实内置 seeds 模板无违例（自带 validate）。
+
+**review**：
+2. 评审员目录兼容 repo/wheel 双布局（中）：原单一 repo 路径在 wheel 安装后解析到
+   <env>/reviewers——评审团静默空转（测试从 repo 跑永远测不到）；ANYSPARK_REVIEWERS_DIR
+   环境变量可覆盖。
+
+**core（机制纯性）**：
+3. 死循环判定去 workflow_status 硬编码（中）：Agent 新增 deadloop_exempt_tools
+   豁免集合（default 空），app 装配注入 {"workflow_status"}——core 回归纯机制层；
+   测试改为验证注入机制+未注入时拦截照常生效。
+
+**align**：
+4. skillgen 长书骨架重编号 bug（中）：>2000 章降采样后重编 1..N，而定点精读按
+   笔记引用章号映射真实章节——S114 实测书 1281 章低于阈值未暴露。行号改真实章号。
+5. storytree choose 保留锚点身份（中）：锚点被选为主线时不再被改写为 main
+   （对齐 docstring"锚点不受影响"承诺）。
+6. 测试层反向依赖解除（中）：5 个 build_app HTTP 集成测试迁往 app/tests
+   （test_align_*.py），删除无引用的 align conftest——align 可独立装包跑测；
+   test_node_add_and_choose 补真实断言（原零断言）。
+
+**测试**：core/review/workflow/align 187+ passed；ruff 全绿。
 ## S255: 全库审核修复批④——book_id 硬编码清扫 + 扫描器补盲
 
 **逃过 S152h 扫描器的硬编码（审核发现：扫描器只查 book_id="main" 字面量形态）**：

@@ -116,6 +116,9 @@ class Agent:
     _tool_ms: list[tuple[str, int]] = field(default_factory=list, repr=False)
     # S108：最近工具调用签名（重复检测——连续 N 轮相同判定死循环）
     _call_signatures: list[str] = field(default_factory=list, repr=False)
+    # S256：死循环判定豁免工具（幂等只读轮询类）——由 app 装配时注入（如
+    # workflow_status）；core 保持纯机制层不写应用工具名（审核发现）
+    deadloop_exempt_tools: frozenset[str] = field(default_factory=frozenset)
     # S25：运行中插话/追问队列（线程安全，pi steering/followUp 移植）
     steer_queue: queue.SimpleQueue[Message] = field(default_factory=queue.SimpleQueue)
     followup_queue: queue.SimpleQueue[Message] = field(default_factory=queue.SimpleQueue)
@@ -349,9 +352,12 @@ class Agent:
             # S108：重复调用检测（智能停止，非硬限——对齐 pi shouldStopAfterTurn 钩子位）：
             # 连续 6 轮工具调用签名完全相同（name+参数）→ 判定死循环，停止报错。
             # 递进式真实任务（每轮不同参数）永不误伤；真死循环（同一调用反复）拦截。
-            # S158c：workflow_status 轮询合法（等异步任务完成，幂等只读），不参与死循环判定
+            # S158c→S256：轮询类幂等只读工具（原 workflow_status）不参与死循环判定——
+            # 豁免集合由 app 装配注入（deadloop_exempt_tools），core 不写应用工具名
             if output.tool_calls:
-                sig_calls = [c for c in output.tool_calls if c.name != "workflow_status"]
+                sig_calls = [
+                    c for c in output.tool_calls if c.name not in self.deadloop_exempt_tools
+                ]
                 if sig_calls:
                     sig = json.dumps(
                         sorted(

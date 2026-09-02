@@ -13,15 +13,28 @@ def _db() -> Path:
 
 
 def test_node_add_and_choose() -> None:
-    """叙事树：加节点 + 选择主线（chosen 链）。"""
+    """叙事树：加节点 + 选择主线（chosen 链唯一）+ 锚点选主线保留锚点身份。"""
     s = StoryTreeStore(_db())
     try:
         root = s.add_node("怀表初见", kind="root")
         n2 = s.add_node("雾中楼", parent_id=root.id)
         n3 = s.add_node("石墙刻字", parent_id=n2.id)
-        # 选为主线
+        # 选为主线：chosen 链唯一
         s.choose(n3.id)
+        got2, got3 = s.get(n2.id), s.get(n3.id)
+        assert got3 is not None and got3.chosen is True and got3.kind == "main"
+        assert got2 is not None and got2.chosen is False
+        # 主线切换：旧轨迹让位
         s.choose(n2.id)
+        got2b, got3b = s.get(n2.id), s.get(n3.id)
+        assert got2b is not None and got2b.chosen is True
+        assert got3b is not None and got3b.chosen is False
+        # S256 回归：锚点被选为主线时保留锚点身份（原实现无条件改写为 main）
+        anc = s.add_node("白泽现身", parent_id=n2.id)
+        s.mark_anchor(anc.id)
+        s.choose(anc.id)
+        gota = s.get(anc.id)
+        assert gota is not None and gota.chosen is True and gota.kind == "anchor"
     finally:
         s.close()
 

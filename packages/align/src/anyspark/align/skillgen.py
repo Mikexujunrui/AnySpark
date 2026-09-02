@@ -811,8 +811,12 @@ class SkillGenerator:
         titles = [t for t, _ in chapters]
         if n > _MAX_SKELETON_TITLES:
             step = n / _MAX_SKELETON_TITLES
-            titles = [titles[int(i * step)] for i in range(_MAX_SKELETON_TITLES - 1)] + [titles[-1]]
-        skeleton = "\n".join(f"第{i + 1}章 {t}" for i, t in enumerate(titles))
+            picks = [int(i * step) for i in range(_MAX_SKELETON_TITLES - 1)] + [n - 1]
+            # S256：行号用真实章号——原降采样后重编 1..N，而 _refine_architecture
+            # 按笔记引用的章号映射真实章节，>2000 章的书定点精读会读错章
+            skeleton = "\n".join(f"第{p + 1}章 {titles[p]}" for p in picks)
+        else:
+            skeleton = "\n".join(f"第{i + 1}章 {t}" for i, t in enumerate(titles))
         name = book_name.strip() or "本书"
         prompt = SKELETON_PROMPT.format(book_name=name) + skeleton
         try:

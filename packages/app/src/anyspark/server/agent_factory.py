@@ -318,4 +318,6 @@ def make_agent(
         system_prompt=full_prompt,
         context_compressor=deps.budget.compress,  # token 预算两阶段压缩（S8）
         persist_compression=True,  # S26：压缩结果回写 deps.store（pi compaction entry 语义）
+        # S256：轮询类幂等只读工具豁免死循环判定（原 core 硬编码 workflow_status）
+        deadloop_exempt_tools=frozenset({"workflow_status"}),
     )
