@@ -94,6 +94,23 @@ def make_search_chapters_implementer(chapters: Any, book_id: str = "main") -> tu
             except ValueError:
                 frag = 20
             use_regex = str(arguments.get("regex", "")).strip().lower() in ("true", "1", "yes")
+            if use_regex:
+                # S254：正则防护——Python re 无超时且工具同步执行，灾难性回溯
+                # 会无限挂起会话线程；入口限长 + 粗筛嵌套量词（量词作用在
+                # 含内层量词的组上，如 (a+)+），残余风险见 S254 台账
+                for t in terms:
+                    if len(t) > 200:
+                        return ToolResult(
+                            call=call,
+                            ok=False,
+                            content=f"正则过长（>200 字符），拒绝执行：{t[:50]}…",
+                        )
+                    if re.search(r"\([^()]*[+*][^()]*\)\s*[+*{]", t):
+                        return ToolResult(
+                            call=call,
+                            ok=False,
+                            content=f"疑似嵌套量词（灾难性回溯风险），拒绝执行：{t}",
+                        )
             items = chapters.list_by_book(book_id)
             if not items:
                 return ToolResult(call=call, ok=True, content="暂无章节。")

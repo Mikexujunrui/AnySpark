@@ -155,17 +155,21 @@ def make_mind_manage_implementer(manual: Any, book_id: str = "main") -> tuple[li
         if new_category not in ("collab", "style", "habit"):
             new_category = entry.category
         locked = arguments.get("locked")
-        if locked is not None:
-            manual.set_locked(entry.id, bool(locked))
-        if entry.locked and (new_content or new_category != entry.category):
+        wants_unlock = locked is not None and not bool(locked)
+        has_change = bool(new_content) or new_category != entry.category
+        # S254：先判锁再改锁——此前用过期的 entry.locked 判锁且 set_locked 先执行，
+        # "解锁+改内容"同调用时解锁已生效但修改被拒（副作用半套用 + 错误信息误导）
+        if entry.locked and has_change and not wants_unlock:
             return ToolResult(
                 call=call,
                 ok=False,
                 content=(
                     f"条目已锁定（用户主权不可改）：[{entry.category}] {entry.content}"
-                    "；先解锁再修改"
+                    "；解锁后修改请传 locked=false 与新内容一次完成"
                 ),
             )
+        if locked is not None:
+            manual.set_locked(entry.id, bool(locked))
         updated = manual.update(
             entry.id,
             content=new_content or entry.content,

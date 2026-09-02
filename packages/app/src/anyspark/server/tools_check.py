@@ -60,6 +60,13 @@ def make_check_implementer(model: Any, checks: list[Any] | None = None) -> tuple
         rule = str(arguments.get("rule", "")).strip()
         if not text:
             return ToolResult(call=call, ok=False, content="缺少参数 text。")
+        # S254：长度闸——超长文本直达多检测者 LLM 叠加成本，同层工具均有钳制
+        if len(text) > 50_000:
+            return ToolResult(
+                call=call,
+                ok=False,
+                content=f"文本超长（{len(text)} > 50000 字），请分章/分段送检。",
+            )
         try:
             if rule:
                 # 自然语言规则：LLM 编译（内容判断）→ 失败回退轻量模板

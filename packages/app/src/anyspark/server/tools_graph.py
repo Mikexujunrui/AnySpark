@@ -60,11 +60,9 @@ def make_graph_query_implementer(graph: Any, book_id: str = "main") -> tuple[Any
                 elif desc:
                     line += f" {desc}"
                 lines.append(line)
-            # 相关关系（实体参与的三元组）
-            relations = graph.list_relations(book_id, limit=_RELATION_LIMIT)
-            rels = [r for r in relations if r.from_name in names or r.to_name in names][
-                :_RELATION_LIMIT
-            ]
+            # 相关关系（实体参与的三元组）——S254：SQL 侧过滤（原 limit=15 预取后过滤，
+            # 关系总量>15 时相关三元组被随机丢弃）
+            rels = graph.relations_among(book_id, [e.id for e in entities], limit=_RELATION_LIMIT)
             if rels:
                 lines.append(f"相关关系（{len(rels)} 条）：")
                 lines.extend(f"- {r.from_name} —{r.rel_type}→ {r.to_name}" for r in rels)

@@ -398,6 +398,16 @@ class WritingTools:
         for c in self._chapters.list_by_book(self._book_id):
             if c.title == title:
                 new_content, results = apply_patch(c.content, ops)
+                # S254：补丁后复查总长——此前可绕过 write_chapter 的长度上限
+                if len(new_content) > MAX_FILE_CHARS:
+                    return ToolResult(
+                        call=call,
+                        ok=False,
+                        content=(
+                            f"补丁后章节超长（{len(new_content)} > {MAX_FILE_CHARS} 字），未保存；"
+                            "请删减后再试。"
+                        ),
+                    )
                 ok_all = all(r.get("ok") for r in results)
                 # 保存（旧版进版本历史，S48 双写文件权威）；写后缓存失效
                 cid = self._write_dual(title, new_content, c.order_index, c.narrative_line)
@@ -611,6 +621,9 @@ _WRITING_SPECS: list[ToolSpec] = [
             ),
             ParamSpec(name="content", type="string", required=True, description="文件内容"),
         ],
+        # S254：写类工具标串行——同批并发 write_file 同路径为非确定序覆盖，
+        # 与 write_chapter/patch_chapter 的 S25 约定一致
+        execution_mode="sequential",
     ),
 ]
 

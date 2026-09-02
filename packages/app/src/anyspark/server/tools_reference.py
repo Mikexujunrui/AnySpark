@@ -399,7 +399,14 @@ def make_citation_export_implementer(library_store: Any) -> tuple[Any, Any]:
     from anyspark.library.citation import fmt_bibtex, fmt_gbt7714, format_note, minimal_meta
 
     def implementer(spec: ToolSpec, arguments: dict[str, Any]) -> ToolResult:
-        bid = str(arguments["library_book_id"])
+        # S254：必填参数改 .get+诊断（原 arguments[...] 直取与同层风格离群）
+        bid = str(arguments.get("library_book_id", "")).strip()
+        if not bid:
+            return ToolResult(
+                call=ToolCall(name=spec.name, arguments=arguments),
+                ok=False,
+                content="缺少参数 library_book_id（先用 search_materials/list 找书）。",
+            )
         style = str(arguments.get("style") or "gbt7714").lower()
         book = library_store.get_book(bid)
         if book is None:

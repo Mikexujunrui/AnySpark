@@ -693,6 +693,29 @@ class GraphStore:
             ).fetchall()
         return [self._relation_from_row(r) for r in rows]
 
+    def relations_among(
+        self, book_id: str, entity_ids: list[str], limit: int = 50
+    ) -> list[Relation]:
+        """两端都在给定实体集合内的关系（SQL 侧过滤）。
+
+        S254：known_facts/graph_query 此前取 list_relations(limit) 再 Python 过滤——
+        关系总量超 limit 时相关三元组被静默截断/丢弃（审核发现）。"""
+        ids = [i for i in entity_ids if i]
+        if not ids:
+            return []
+        placeholders = ",".join("?" * len(ids))
+        rows = self._conn.execute(
+            "SELECT r.*, fe.name AS from_name, te.name AS to_name "
+            "FROM graph_relations r "
+            "JOIN graph_entities fe ON fe.id = r.from_id "
+            "JOIN graph_entities te ON te.id = r.to_id "
+            f"WHERE r.book_id=? AND r.from_id IN ({placeholders}) "
+            f"AND r.to_id IN ({placeholders}) "
+            "ORDER BY r.rowid DESC LIMIT ?",
+            (book_id, *ids, *ids, limit),
+        ).fetchall()
+        return [self._relation_from_row(r) for r in rows]
+
     def relations_of(self, book_id: str, entity_id: str, limit: int = 50) -> list[Relation]:
         """某实体涉及的全部关系（双向）。"""
         rows = self._conn.execute(
@@ -938,9 +961,8 @@ class GraphStore:
             rows = rows + extra
         entities = [self._entity_from_row(r) for r in rows]
         ids = {e.id for e in entities}
-        rels = [r for r in self.list_relations(book_id) if r.from_id in ids and r.to_id in ids][
-            :max_relations
-        ]
+        # S254：SQL 侧过滤（原 list_relations(limit=200)+Python 过滤在关系总量超限时截断）
+        rels = self.relations_among(book_id, list(ids), limit=max_relations)
 
         ewhere = "book_id=?"
         eargs: list[Any] = [book_id]

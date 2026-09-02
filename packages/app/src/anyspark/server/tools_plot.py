@@ -136,7 +136,8 @@ def make_plot_implementer(plots: Any, book_id: str = "main") -> tuple[list[Any],
                 status="resolved",
                 resolved_chapter=chapter_ref or p.resolved_chapter,
             )
-            assert updated is not None
+            if updated is None:  # S254：assert 在 -O 下被剥，显式判断对齐 update_point
+                return ToolResult(call=call, ok=False, content=f"伏笔不存在：{plot_id}")
             where = f"（回收于 {updated.resolved_chapter}）" if updated.resolved_chapter else ""
             return ToolResult(
                 call=call,
@@ -199,6 +200,21 @@ def make_plot_implementer(plots: Any, book_id: str = "main") -> tuple[list[Any],
             attention = str(arguments.get("attention", "")).strip() or None
             status = str(arguments.get("status", "")).strip() or None
             chapter_ref = str(arguments.get("chapter_ref", "")).strip() or None
+            # S254：枚举白名单校验——store 会把非法值静默改默认（must→soft 等），
+            # 主线承诺被 agent 一次笔误静默降级；工具层拒绝并提示合法值
+            for fname, val, allowed in (
+                ("priority", priority, ("must", "soft")),
+                ("attention", attention, ("care", "ignore")),
+                ("status", status, ("open", "resolved")),
+            ):
+                if val is not None and val not in allowed:
+                    return ToolResult(
+                        call=call,
+                        ok=False,
+                        content=(
+                            f"非法的 {fname}={val!r}（可选：{'/'.join(allowed)}），未做任何修改。"
+                        ),
+                    )
             updated = plots.update(
                 plot_id,
                 priority=priority,
@@ -208,8 +224,15 @@ def make_plot_implementer(plots: Any, book_id: str = "main") -> tuple[list[Any],
             )
             if updated is None:
                 return ToolResult(call=call, ok=False, content=f"伏笔不存在：{plot_id}")
+            # S254：回显终值（防静默纠偏感知缺失）
             return ToolResult(
-                call=call, ok=True, content=f"已更新伏笔#{plot_id[:8]}（{updated.status}）"
+                call=call,
+                ok=True,
+                content=(
+                    f"已更新伏笔#{plot_id[:8]}：status={updated.status}，"
+                    f"priority={updated.priority}，attention={updated.attention}"
+                ),
+                data={"plot_id": plot_id, "status": updated.status},
             )
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"更新失败：{exc}")
@@ -502,8 +525,21 @@ def make_story_tree_implementer(story_tree: Any, book_id: str = "main") -> tuple
         chosen = bool(chosen_arg) if chosen_arg is not None else kind == "main"
         try:
             parent_id = str(arguments.get("parent_id") or "").strip() or None
-            if parent_id is not None and story_tree.get(parent_id) is None:
-                return ToolResult(call=call, ok=False, content=f"父节点不存在：{parent_id}")
+            if parent_id is not None:
+                parent = story_tree.get(parent_id)
+                if parent is None:
+                    return ToolResult(call=call, ok=False, content=f"父节点不存在：{parent_id}")
+                # S254：父节点按项目校验（store.get 无 book 作用域，A 项目节点
+                # 可挂到 B 项目节点下——跨项目叙事树内容渗透）
+                if getattr(parent, "book_id", book_id) != book_id:
+                    return ToolResult(
+                        call=call,
+                        ok=False,
+                        content=(
+                            f"父节点 {parent_id[:8]} 属于项目「{parent.book_id}」，"
+                            f"当前项目是「{book_id}」，不能跨项目挂树。"
+                        ),
+                    )
             if parent_id is None:
                 tail = _story_line_tail(story_tree, book_id)
                 if tail is None:

@@ -15,11 +15,16 @@ anyspark.server.tools_workflow — 工作流 agent 工具（S59 补充：Agent �
 from __future__ import annotations
 
 import json
+import threading
 from typing import Any
 
 from anyspark.core import ToolCall
 from anyspark.core.protocol import ParamSpec, ToolResult, ToolSpec
 from anyspark.server.logging import logger
+
+# S254：每项目并发闸（workflow_run 同步占槽，finally 释放）
+_WF_LOCK = threading.Lock()
+_RUNNING_WF_BY_BOOK: dict[str, str] = {}
 
 
 def make_workflow_tools(
@@ -135,9 +140,29 @@ def make_workflow_tools(
             wf = workflow_store.get_template(template_id)
             if wf is None:
                 return ToolResult(call=call, ok=False, content=f"模板不存在: {template_id}")
-            task_id = workflow_store.create_task(
-                wf, book_id=final_book, template_id=template_id, params=run_params
-            )
+            # S254：并发闸——同一项目同时只跑一个工作流（此前无上限孵化 daemon
+            # 线程，agent 可刷起多个高成本任务叠加计费/资源）。同步占槽防检查-
+            # 启动间隙并发穿透；create_task 失败回滚槽位
+            with _WF_LOCK:
+                running = _RUNNING_WF_BY_BOOK.get(final_book)
+                if running:
+                    return ToolResult(
+                        call=call,
+                        ok=False,
+                        content=(
+                            f"项目「{final_book}」已有工作流在运行（task_id: {running}），"
+                            "请等它完成（用 workflow_status 查进度）后再启动新任务。"
+                        ),
+                    )
+                _RUNNING_WF_BY_BOOK[final_book] = "starting"
+            try:
+                task_id = workflow_store.create_task(
+                    wf, book_id=final_book, template_id=template_id, params=run_params
+                )
+            except Exception:
+                with _WF_LOCK:
+                    _RUNNING_WF_BY_BOOK.pop(final_book, None)
+                raise
         except Exception as exc:
             return ToolResult(call=call, ok=False, content=f"启动失败: {exc}")
 
@@ -145,9 +170,13 @@ def make_workflow_tools(
         import threading
 
         def _run() -> None:
-            # 状态已在任务里，后台异常不抛给 Agent
-            with contextlib.suppress(Exception):
-                workflow_engine.run_task(task_id)
+            try:
+                # 状态已在任务里，后台异常不抛给 Agent
+                with contextlib.suppress(Exception):
+                    workflow_engine.run_task(task_id)
+            finally:
+                with _WF_LOCK:
+                    _RUNNING_WF_BY_BOOK.pop(final_book, None)
             # S158c：任务终态 → 系统通知（agent 下次会话注入知晓）
             if manual is not None:
                 try:

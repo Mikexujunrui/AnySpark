@@ -676,6 +676,34 @@ multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补�
 
 ---
 
+## S254: 全库审核修复批③——agent 工具层防御
+
+**静默改写数据类（审核重点）**：
+1. mind_update 先判锁再改锁（中）：此前用过期 locked 值判锁且 set_locked 先执行，
+   "解锁+改内容"同调用时解锁生效但修改被拒（副作用半套用+误导错误）。解锁后状态判断。
+2. plot_update 枚举白名单校验（中）：store 会把非法值静默改默认（must→soft 等），
+   主线承诺被 agent 一次笔误静默降级；工具层拒绝+回显终值。plot_resolve 的 assert
+   改显式判断（-O 下被剥）。
+3. story_tree_add 跨项目挂树（中）：store.get 无 book 作用域，A 项目节点可挂 B 项目
+   节点下；工具层校验父节点归属。
+
+**防挂死/防炸类**：
+4. search_chapters 正则防护（中）：限长 200 + 拒绝嵌套量词（灾难性回溯无限挂起
+   会话线程；Python re 无超时，同步路径只能入口拦截；粗筛有残余风险已在注释注明）。
+5. execute_extension 参数注入改 repr()（中）：json.dumps 把 true/false/null 直接嵌
+   Python 源码必 NameError；repr 生成合法 Python 字面量。
+6. explore run_code timeout 拒 nan/inf（轻）：math.isfinite 校验回默认 10s。
+7. workflow_run 每项目并发闸（轻）：同步占槽+finally 释放，防无上限孵化 daemon
+   线程叠加高成本任务；create_task 失败回滚槽位。
+
+**一致性/卫生**：
+8. graph_query 关系查询 SQL 侧过滤（中）：graph 包新增 relations_among(ids)，
+   known_facts 同款修复（原 limit 预取+Python 过滤，关系超限时三元组被截断/丢弃）。
+9. citation_export 必填参数改 .get+诊断；check_text 加 5 万字长度闸；
+   patch_chapter 补丁后复查总长（堵绕过 write_chapter 上限的通道）；
+   write_file 标 execution_mode=sequential（与写类工具 S25 约定一致）。
+
+**测试**：graph/tools 系 61+86 passed；ruff 全绿。
 ## S253: 全库审核修复批②——多协议收尾 + 模型层健壮性
 
 **多协议收尾（S131 遗留，审核发现三处停留在单协议时代）**：

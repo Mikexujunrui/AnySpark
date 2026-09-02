@@ -226,9 +226,11 @@ def execute_extension(
 
     call = ToolCall(name=ext.name, arguments=arguments)
     # 包装：注入 args 调用 run()，返回字符串（print 兜底已输出）
+    # S254：用 repr() 生成 Python 字面量——此前 json.dumps 把 true/false/null 直接嵌
+    # 源码（Python 里是 NameError），声明 boolean 参数的扩展工具必炸且报因误导
     wrapped = (
         f"{ext.code}\n\n"
-        f"__args = {json.dumps(arguments, ensure_ascii=False)}\n"
+        f"__args = {arguments!r}\n"
         f"__res = run(__args)\n"
         f"print(__res if isinstance(__res, str) else str(__res), end='')\n"
     )

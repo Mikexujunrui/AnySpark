@@ -361,7 +361,12 @@ def make_codex_implementer(
         if not code:
             return ToolResult(call=call, ok=False, content="缺少参数 code。")
         try:
+            import math
+
             timeout = float(str(arguments.get("timeout", "10")) or "10")
+            # S254：nan/inf 对 min/max 透明，会直传 subprocess timeout 挂死/异常
+            if not math.isfinite(timeout) or timeout <= 0:
+                timeout = 10.0
         except ValueError:
             timeout = 10.0
         from anyspark.server.codex import make_data_env, run_code
