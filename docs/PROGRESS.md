@@ -676,126 +676,51 @@ multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补�
 
 ---
 
-## S258: 全库审核修复批⑦——总闸收尾 + 测试防网络抖动
+## S251: 新增功能代码自审——5 处修复（设计哲学/微 bug/健壮性）
 
-1. 测试禁打真实 API（重要）：app/tests 新增 autouse 夹具清 DEEPSEEK/ANTHROPIC/
-   GEMINI/OPENAI/EMBEDDING_API_KEY——此前 test_wrapup/test_query_reference 等未注入
-   fake model 的测试静默用真实 DashScope key 打线上 API（网络抖动型 flake +
-   真实计费，审核发现）；需真实 env 形态的测试用 monkeypatch.setenv 自行覆盖。
-   全 app 套件 500 passed 零失败（原全量跑必有 1 个顺序依赖 flake）。
-2. S214 read 超时测试更新为 600s 有界约定（S253 行为变更的配套）。
-3. responses OpenAI timeout 类型标注对齐 deepseek 既有模式（httpx2 与 SDK
-   类型不同源，type: ignore[arg-type]）。
-4. 既有测试 15 处 mypy 错误清零（get_book None 收窄/泛型参数/注解补齐/
-   build_app 占位 model 标注）——mypy packages 234 文件全绿。
-5. ruff format 6 文件重排 + per-file-ignores 路径随 test_align_skillgen 迁移更新。
-## S257: 全库审核修复批⑥——前端回归 + 伪实现转真（决策 B 对齐）
+**审核范围**：S246~S250b 全部新增（genres/seeds_campus/citation/connectors/
+export_latex/list_split/冒烟脚本）。
 
-**ChatPanel 必现回归（审核 git blame 实证为 S213 重构漏删）**：
-1. start 事件旧代码重复 push——每条流式回复首个 text_delta 渲染成孤儿气泡（一行删除）。
-2. runWorkflow 硬编码 'main'——非 main 项目批量提议批准落错项目，改传 bookId prop。
-3. 批量轮询 interval 随会话切换/卸载统一清理（batchTimersRef）——原跨会话 setMessages
-   污染 + 泄漏。
-4. beforeunload beacon 改用 SSE 会话内实际激活会话 id（原 prop 未回传时取消信号落空）。
-5. alert×5 → showToast 统一提示体系；删 5 处无开关诊断 console.log。
+**设计哲学问题（已修）**：
+①学术七维双份文本——seeds_campus 内联拷贝与 genres.ACADEMIC 物理分离，profile
+更新后模板漂移；改单一来源（模板构建时 import ACADEMIC），instruction 去重前缀。
 
-**伪实现转真（决策 B「禁止模拟实现」对齐）**：
-6. 章节 status（draft/final）真实落库：chapters 表 ALTER 加列（幂等迁移）+
-   POST /api/chapters/{id}/status + ChapterOut 携带——前端「定稿」按钮此前
-   伪造成功刷新即丢。
-7. 拖拽重排真实持久化：POST /api/chapters/reorder + ChapterStore.reorder
-   （0 基序号对齐 next_order 约定）+ workspace.rename_chapter（md 权威文件名
-   承载序号同步——防 import 回弹）；未知 id 404。
-8. 搜索结果点击无反应修复：新增 chapterFocusStore（跨面板章节定位通道），
-   ChaptersPanel 订阅消费；tabStore 的 no-op openTab 不再是唯一路径。
-9. SkillPanel 补 bookId prop（skill 导入落当前项目——全前端唯一依赖
-   bookId='main' 默认值的调用点，清扫后其余 API 默认值均无实际调用依赖）。
-10. 删 streamChat 死代码（第二套 SSE 实现，0 调用方，活路径 useSSE 唯一）。
+**微 bug（已修）**：
+②citation.format_note 缺字段判断绕且漏空串（嵌套 isinstance 使 title="" 不算
+missing）→ 简化为 not meta.get(k)。
+③fmt_gbt7714 head 重复调用 _gbt_authors 两次 → 提变量。
 
-**已知遗留（显式记录不混入本批）**：tsconfig strict 开启需修 249 处隐式 any/
-空值——留专项渐进开启；tools_web 默认搜索多引擎兜底 48s 罚时属产品行为决策；
-workflow 引擎递归深度/并行分支耗时均摊为设计级重构。
+**健壮性（已修）**：
+④import-arxiv 未捕 ET.ParseError（arXiv 非 XML 时 500 裸栈）→ 502 干净报错。
+⑤export_latex 有序列表丢编号（全转 itemize）→ 有序/无序各归 enumerate/itemize，
+含类型切换闭旧开新。
 
-**测试**：tsc -b 0 错误；vitest 18 passed；后端章节系 15+27 passed；ruff 全绿。
-## S256: 全库审核修复批⑤——包层修复（workflow/review/core/align）
+**自查通过项**：genres frozen dataclass 内容全自然语言/fiction 回退逐字一致；
+_clean_write 整体替换人设（非行 hack）；routes_check 一行选包；store 迁移幂等；
+connectors 固定域名+noqa 标注；无 YAGNI 违规。
 
-**workflow**：
-1. validate 禁 loop body 节点带出边（中）：引擎按 body 列表顺序执行，body 节点
-   出边会被 _advance 提前推进——目标被提前执行且 body 再次执行=双倍 LLM 调用；
-   generator NODE_CATALOG 同步提示。已核实内置 seeds 模板无违例（自带 validate）。
+---
 
-**review**：
-2. 评审员目录兼容 repo/wheel 双布局（中）：原单一 repo 路径在 wheel 安装后解析到
-   <env>/reviewers——评审团静默空转（测试从 repo 跑永远测不到）；ANYSPARK_REVIEWERS_DIR
-   环境变量可覆盖。
+## S252: 全库审核修复批①——P0 数据面（md 双写/收束导出/批量回退/人工标记绕过）
 
-**core（机制纯性）**：
-3. 死循环判定去 workflow_status 硬编码（中）：Agent 新增 deadloop_exempt_tools
-   豁免集合（default 空），app 装配注入 {"workflow_status"}——core 回归纯机制层；
-   测试改为验证注入机制+未注入时拦截照常生效。
+**背景**：本会话对全库做了系统代码审核（6 域并行深审 + 静态基线），本阶段起分批修复。
+S252 修数据正确性类 P0 四项：
 
-**align**：
-4. skillgen 长书骨架重编号 bug（中）：>2000 章降采样后重编 1..N，而定点精读按
-   笔记引用章号映射真实章节——S114 实测书 1281 章低于阈值未暴露。行号改真实章号。
-5. storytree choose 保留锚点身份（中）：锚点被选为主线时不再被改写为 main
-   （对齐 docstring"锚点不受影响"承诺）。
-6. 测试层反向依赖解除（中）：5 个 build_app HTTP 集成测试迁往 app/tests
-   （test_align_*.py），删除无引用的 align conftest——align 可独立装包跑测；
-   test_node_add_and_choose 补真实断言（原零断言）。
+1. **routes_chapters 三处补 md 双写**（严重）：update/patch/restore 此前只写 SQLite
+   镜像不回写 md 权威（create/delete 原本双写），/api/workspace/import 按文件为准会
+   把旧 md 灌回——编辑器保存被静默回滚。补 workspace.write_chapter（OSError 降级
+   warning 不阻断）+ API 级回归测试（test_workspace.py 四段断言 md 跟随）。
+2. **play 自然收束导出丢失结局**（严重）：收束分支只 end_session 不 set_current，
+   current 停在父节点，export path_to 缺最后一幕。统一 set_current(child) 后再终止；
+   补回归测试 test_natural_ending_export_includes_final_scene。
+3. **batch_prepare 笔误触发全书改写**（中）：传入 id 全部未匹配时静默回退全量章节。
+   改为显式报错（附未解析项提示）；部分未匹配保留宽容跳过（S158 语义）但补 warning
+   日志；补单测三分支断言。
+4. **write_file 人工编辑标记可绕过**（中）：按原始字符串比对标记，agent 传 `./x`、
+   反斜杠变体即绕过静默覆盖人工编辑（击穿 S143 不变量）。改 resolved 路径比对；
+   补变体回归测试（./ 前缀/反斜杠/无标记正常写三分支）。
 
-**测试**：core/review/workflow/align 187+ passed；ruff 全绿。
-## S255: 全库审核修复批④——book_id 硬编码清扫 + 扫描器补盲
-
-**逃过 S152h 扫描器的硬编码（审核发现：扫描器只查 book_id="main" 字面量形态）**：
-1. toolkit 三处漏传 ctx.book_id（中）：make_data_env（扩展工具数据快照恒为 main）、
-   make_mind_register/mind_manage（"记一下"落 main 心智模型）。
-2. GraphExtractor 组合根绑定 main 类型集（中）：extract() 新增 types 每次调用覆盖，
-   tasks.extract_chapter / routes_graph 抽取端点按章节所属项目传 types_for(book_id)；
-   组合根不再绑定（回退默认五类），非 main 项目自定义类型集真正生效。
-3. refine_skill_drafts 硬编码 main（中）：加 book_id 参数（bg 队列透传 task.book_id），
-   routes_mind 两处入队带项目——非主项目文风偏好进入候选源。
-4. signal_refine 计数按 ctx.book_id（轻，仅输出文案）。
-
-**扫描器补盲**：scan_main_hardcode 新增位置参数形态检测（manual.list("project","main")/
-types_for("main")/make_data_env(...,"main")），当前检出 0（含 app.py 那处已重构）。
-
-**同批卫生**：
-5. recorder.session_dir 会话 id 消毒（Windows 反斜杠可越出 records 根，对齐 workspace 标准）。
-6. plots.open_must 的 current_order 死参数真正生效（同书多钩子按植入序升序——最久的排最前）。
-
-**已知问题（未修，记录）**：test_wrapup_lists_open_hooks 全量跑有顺序依赖 flake
-（单跑/多数组合通过；:memory: 多 store 连接隔离语义 + 特定前置文件组合触发），
-本批未引入，留专项排查。
-
-**测试**：graph/app/template 相关 49+43+89 passed；ruff 全绿；扫描门禁通过。
-## S254: 全库审核修复批③——agent 工具层防御
-
-**静默改写数据类（审核重点）**：
-1. mind_update 先判锁再改锁（中）：此前用过期 locked 值判锁且 set_locked 先执行，
-   "解锁+改内容"同调用时解锁生效但修改被拒（副作用半套用+误导错误）。解锁后状态判断。
-2. plot_update 枚举白名单校验（中）：store 会把非法值静默改默认（must→soft 等），
-   主线承诺被 agent 一次笔误静默降级；工具层拒绝+回显终值。plot_resolve 的 assert
-   改显式判断（-O 下被剥）。
-3. story_tree_add 跨项目挂树（中）：store.get 无 book 作用域，A 项目节点可挂 B 项目
-   节点下；工具层校验父节点归属。
-
-**防挂死/防炸类**：
-4. search_chapters 正则防护（中）：限长 200 + 拒绝嵌套量词（灾难性回溯无限挂起
-   会话线程；Python re 无超时，同步路径只能入口拦截；粗筛有残余风险已在注释注明）。
-5. execute_extension 参数注入改 repr()（中）：json.dumps 把 true/false/null 直接嵌
-   Python 源码必 NameError；repr 生成合法 Python 字面量。
-6. explore run_code timeout 拒 nan/inf（轻）：math.isfinite 校验回默认 10s。
-7. workflow_run 每项目并发闸（轻）：同步占槽+finally 释放，防无上限孵化 daemon
-   线程叠加高成本任务；create_task 失败回滚槽位。
-
-**一致性/卫生**：
-8. graph_query 关系查询 SQL 侧过滤（中）：graph 包新增 relations_among(ids)，
-   known_facts 同款修复（原 limit 预取+Python 过滤，关系超限时三元组被截断/丢弃）。
-9. citation_export 必填参数改 .get+诊断；check_text 加 5 万字长度闸；
-   patch_chapter 补丁后复查总长（堵绕过 write_chapter 上限的通道）；
-   write_file 标 execution_mode=sequential（与写类工具 S25 约定一致）。
-
-**测试**：graph/tools 系 61+86 passed；ruff 全绿。
+**测试**：涉及 5 个测试文件 41 passed；ruff 全绿。
 ## S253: 全库审核修复批②——多协议收尾 + 模型层健壮性
 
 **多协议收尾（S131 遗留，审核发现三处停留在单协议时代）**：
@@ -827,45 +752,124 @@ types_for("main")/make_data_env(...,"main")），当前检出 0（含 app.py 那
 
 **测试**：test_models/test_adapters 新增 5 个回归（key 泄漏/协议缺省端点/0.0 温度/
 reasoning 解析/并行 id 唯一），61+58 passed；ruff 全绿。
-## S252: 全库审核修复批①——P0 数据面（md 双写/收束导出/批量回退/人工标记绕过）
+## S254: 全库审核修复批③——agent 工具层防御
 
-**背景**：本会话对全库做了系统代码审核（6 域并行深审 + 静态基线），本阶段起分批修复。
-S252 修数据正确性类 P0 四项：
+**静默改写数据类（审核重点）**：
+1. mind_update 先判锁再改锁（中）：此前用过期 locked 值判锁且 set_locked 先执行，
+   "解锁+改内容"同调用时解锁生效但修改被拒（副作用半套用+误导错误）。解锁后状态判断。
+2. plot_update 枚举白名单校验（中）：store 会把非法值静默改默认（must→soft 等），
+   主线承诺被 agent 一次笔误静默降级；工具层拒绝+回显终值。plot_resolve 的 assert
+   改显式判断（-O 下被剥）。
+3. story_tree_add 跨项目挂树（中）：store.get 无 book 作用域，A 项目节点可挂 B 项目
+   节点下；工具层校验父节点归属。
 
-1. **routes_chapters 三处补 md 双写**（严重）：update/patch/restore 此前只写 SQLite
-   镜像不回写 md 权威（create/delete 原本双写），/api/workspace/import 按文件为准会
-   把旧 md 灌回——编辑器保存被静默回滚。补 workspace.write_chapter（OSError 降级
-   warning 不阻断）+ API 级回归测试（test_workspace.py 四段断言 md 跟随）。
-2. **play 自然收束导出丢失结局**（严重）：收束分支只 end_session 不 set_current，
-   current 停在父节点，export path_to 缺最后一幕。统一 set_current(child) 后再终止；
-   补回归测试 test_natural_ending_export_includes_final_scene。
-3. **batch_prepare 笔误触发全书改写**（中）：传入 id 全部未匹配时静默回退全量章节。
-   改为显式报错（附未解析项提示）；部分未匹配保留宽容跳过（S158 语义）但补 warning
-   日志；补单测三分支断言。
-4. **write_file 人工编辑标记可绕过**（中）：按原始字符串比对标记，agent 传 `./x`、
-   反斜杠变体即绕过静默覆盖人工编辑（击穿 S143 不变量）。改 resolved 路径比对；
-   补变体回归测试（./ 前缀/反斜杠/无标记正常写三分支）。
+**防挂死/防炸类**：
+4. search_chapters 正则防护（中）：限长 200 + 拒绝嵌套量词（灾难性回溯无限挂起
+   会话线程；Python re 无超时，同步路径只能入口拦截；粗筛有残余风险已在注释注明）。
+5. execute_extension 参数注入改 repr()（中）：json.dumps 把 true/false/null 直接嵌
+   Python 源码必 NameError；repr 生成合法 Python 字面量。
+6. explore run_code timeout 拒 nan/inf（轻）：math.isfinite 校验回默认 10s。
+7. workflow_run 每项目并发闸（轻）：同步占槽+finally 释放，防无上限孵化 daemon
+   线程叠加高成本任务；create_task 失败回滚槽位。
 
-**测试**：涉及 5 个测试文件 41 passed；ruff 全绿。
-## S251: 新增功能代码自审——5 处修复（设计哲学/微 bug/健壮性）
+**一致性/卫生**：
+8. graph_query 关系查询 SQL 侧过滤（中）：graph 包新增 relations_among(ids)，
+   known_facts 同款修复（原 limit 预取+Python 过滤，关系超限时三元组被截断/丢弃）。
+9. citation_export 必填参数改 .get+诊断；check_text 加 5 万字长度闸；
+   patch_chapter 补丁后复查总长（堵绕过 write_chapter 上限的通道）；
+   write_file 标 execution_mode=sequential（与写类工具 S25 约定一致）。
 
-**审核范围**：S246~S250b 全部新增（genres/seeds_campus/citation/connectors/
-export_latex/list_split/冒烟脚本）。
+**测试**：graph/tools 系 61+86 passed；ruff 全绿。
+## S255: 全库审核修复批④——book_id 硬编码清扫 + 扫描器补盲
 
-**设计哲学问题（已修）**：
-①学术七维双份文本——seeds_campus 内联拷贝与 genres.ACADEMIC 物理分离，profile
-更新后模板漂移；改单一来源（模板构建时 import ACADEMIC），instruction 去重前缀。
+**逃过 S152h 扫描器的硬编码（审核发现：扫描器只查 book_id="main" 字面量形态）**：
+1. toolkit 三处漏传 ctx.book_id（中）：make_data_env（扩展工具数据快照恒为 main）、
+   make_mind_register/mind_manage（"记一下"落 main 心智模型）。
+2. GraphExtractor 组合根绑定 main 类型集（中）：extract() 新增 types 每次调用覆盖，
+   tasks.extract_chapter / routes_graph 抽取端点按章节所属项目传 types_for(book_id)；
+   组合根不再绑定（回退默认五类），非 main 项目自定义类型集真正生效。
+3. refine_skill_drafts 硬编码 main（中）：加 book_id 参数（bg 队列透传 task.book_id），
+   routes_mind 两处入队带项目——非主项目文风偏好进入候选源。
+4. signal_refine 计数按 ctx.book_id（轻，仅输出文案）。
 
-**微 bug（已修）**：
-②citation.format_note 缺字段判断绕且漏空串（嵌套 isinstance 使 title="" 不算
-missing）→ 简化为 not meta.get(k)。
-③fmt_gbt7714 head 重复调用 _gbt_authors 两次 → 提变量。
+**扫描器补盲**：scan_main_hardcode 新增位置参数形态检测（manual.list("project","main")/
+types_for("main")/make_data_env(...,"main")），当前检出 0（含 app.py 那处已重构）。
 
-**健壮性（已修）**：
-④import-arxiv 未捕 ET.ParseError（arXiv 非 XML 时 500 裸栈）→ 502 干净报错。
-⑤export_latex 有序列表丢编号（全转 itemize）→ 有序/无序各归 enumerate/itemize，
-含类型切换闭旧开新。
+**同批卫生**：
+5. recorder.session_dir 会话 id 消毒（Windows 反斜杠可越出 records 根，对齐 workspace 标准）。
+6. plots.open_must 的 current_order 死参数真正生效（同书多钩子按植入序升序——最久的排最前）。
 
-**自查通过项**：genres frozen dataclass 内容全自然语言/fiction 回退逐字一致；
-_clean_write 整体替换人设（非行 hack）；routes_check 一行选包；store 迁移幂等；
-connectors 固定域名+noqa 标注；无 YAGNI 违规。
+**已知问题（未修，记录）**：test_wrapup_lists_open_hooks 全量跑有顺序依赖 flake
+（单跑/多数组合通过；:memory: 多 store 连接隔离语义 + 特定前置文件组合触发），
+本批未引入，留专项排查。
+
+**测试**：graph/app/template 相关 49+43+89 passed；ruff 全绿；扫描门禁通过。
+## S256: 全库审核修复批⑤——包层修复（workflow/review/core/align）
+
+**workflow**：
+1. validate 禁 loop body 节点带出边（中）：引擎按 body 列表顺序执行，body 节点
+   出边会被 _advance 提前推进——目标被提前执行且 body 再次执行=双倍 LLM 调用；
+   generator NODE_CATALOG 同步提示。已核实内置 seeds 模板无违例（自带 validate）。
+
+**review**：
+2. 评审员目录兼容 repo/wheel 双布局（中）：原单一 repo 路径在 wheel 安装后解析到
+   <env>/reviewers——评审团静默空转（测试从 repo 跑永远测不到）；ANYSPARK_REVIEWERS_DIR
+   环境变量可覆盖。
+
+**core（机制纯性）**：
+3. 死循环判定去 workflow_status 硬编码（中）：Agent 新增 deadloop_exempt_tools
+   豁免集合（default 空），app 装配注入 {"workflow_status"}——core 回归纯机制层；
+   测试改为验证注入机制+未注入时拦截照常生效。
+
+**align**：
+4. skillgen 长书骨架重编号 bug（中）：>2000 章降采样后重编 1..N，而定点精读按
+   笔记引用章号映射真实章节——S114 实测书 1281 章低于阈值未暴露。行号改真实章号。
+5. storytree choose 保留锚点身份（中）：锚点被选为主线时不再被改写为 main
+   （对齐 docstring"锚点不受影响"承诺）。
+6. 测试层反向依赖解除（中）：5 个 build_app HTTP 集成测试迁往 app/tests
+   （test_align_*.py），删除无引用的 align conftest——align 可独立装包跑测；
+   test_node_add_and_choose 补真实断言（原零断言）。
+
+**测试**：core/review/workflow/align 187+ passed；ruff 全绿。
+## S257: 全库审核修复批⑥——前端回归 + 伪实现转真（决策 B 对齐）
+
+**ChatPanel 必现回归（审核 git blame 实证为 S213 重构漏删）**：
+1. start 事件旧代码重复 push——每条流式回复首个 text_delta 渲染成孤儿气泡（一行删除）。
+2. runWorkflow 硬编码 'main'——非 main 项目批量提议批准落错项目，改传 bookId prop。
+3. 批量轮询 interval 随会话切换/卸载统一清理（batchTimersRef）——原跨会话 setMessages
+   污染 + 泄漏。
+4. beforeunload beacon 改用 SSE 会话内实际激活会话 id（原 prop 未回传时取消信号落空）。
+5. alert×5 → showToast 统一提示体系；删 5 处无开关诊断 console.log。
+
+**伪实现转真（决策 B「禁止模拟实现」对齐）**：
+6. 章节 status（draft/final）真实落库：chapters 表 ALTER 加列（幂等迁移）+
+   POST /api/chapters/{id}/status + ChapterOut 携带——前端「定稿」按钮此前
+   伪造成功刷新即丢。
+7. 拖拽重排真实持久化：POST /api/chapters/reorder + ChapterStore.reorder
+   （0 基序号对齐 next_order 约定）+ workspace.rename_chapter（md 权威文件名
+   承载序号同步——防 import 回弹）；未知 id 404。
+8. 搜索结果点击无反应修复：新增 chapterFocusStore（跨面板章节定位通道），
+   ChaptersPanel 订阅消费；tabStore 的 no-op openTab 不再是唯一路径。
+9. SkillPanel 补 bookId prop（skill 导入落当前项目——全前端唯一依赖
+   bookId='main' 默认值的调用点，清扫后其余 API 默认值均无实际调用依赖）。
+10. 删 streamChat 死代码（第二套 SSE 实现，0 调用方，活路径 useSSE 唯一）。
+
+**已知遗留（显式记录不混入本批）**：tsconfig strict 开启需修 249 处隐式 any/
+空值——留专项渐进开启；tools_web 默认搜索多引擎兜底 48s 罚时属产品行为决策；
+workflow 引擎递归深度/并行分支耗时均摊为设计级重构。
+
+**测试**：tsc -b 0 错误；vitest 18 passed；后端章节系 15+27 passed；ruff 全绿。
+## S258: 全库审核修复批⑦——总闸收尾 + 测试防网络抖动
+
+1. 测试禁打真实 API（重要）：app/tests 新增 autouse 夹具清 DEEPSEEK/ANTHROPIC/
+   GEMINI/OPENAI/EMBEDDING_API_KEY——此前 test_wrapup/test_query_reference 等未注入
+   fake model 的测试静默用真实 DashScope key 打线上 API（网络抖动型 flake +
+   真实计费，审核发现）；需真实 env 形态的测试用 monkeypatch.setenv 自行覆盖。
+   全 app 套件 500 passed 零失败（原全量跑必有 1 个顺序依赖 flake）。
+2. S214 read 超时测试更新为 600s 有界约定（S253 行为变更的配套）。
+3. responses OpenAI timeout 类型标注对齐 deepseek 既有模式（httpx2 与 SDK
+   类型不同源，type: ignore[arg-type]）。
+4. 既有测试 15 处 mypy 错误清零（get_book None 收窄/泛型参数/注解补齐/
+   build_app 占位 model 标注）——mypy packages 234 文件全绿。
+5. ruff format 6 文件重排 + per-file-ignores 路径随 test_align_skillgen 迁移更新。
+
