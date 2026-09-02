@@ -38,6 +38,75 @@ def scenario_d2() -> None:
     _show("BibTeX", fmt_bibtex(meta), 500)
 
 
+def scenario_project() -> None:
+    """完整示例项目（全真实）：arXiv 导入×3 → 拆论文 → 文献综述 → 学术写作
+    → 检测 → 引用导出 → LaTeX 导出。临时库隔离。
+    """
+    from anyspark.server.tools_writing import WritingTools
+    from anyspark.server.workspace import Workspace
+    from anyspark.store.sqlite import ChapterStore
+
+    model = _real_model()
+    db = Path(tempfile.mkdtemp()) / "project.db"
+    client = _app(model, db)
+    client.post("/api/genre", json={"genre": "academic", "book_id": "main"})
+
+    # 1) 真实网络导入三篇注意力/LLM 论文
+    ids = ["1706.03762", "1810.04805", "2005.14165"]  # Attention/BERT/GPT-3
+    bids: list[str] = []
+    for aid in ids:
+        r = client.post("/api/library/import-arxiv", json={"arxiv_id": aid})
+        assert r.status_code == 200, r.text
+        bids.append(r.json()["book_id"])
+    print(f"\n① 导入 3 篇真实论文 → {bids}")
+
+    # 2) 拆论文（真实模型，摘要级语料）
+    t = _run_workflow(client, "拆论文", {"library_book_id": bids[0]}, timeout_s=360)
+    assert t["status"] == "done", t.get("error")
+    _show("② 拆论文 → 方法论 skill 草稿", _final_output(t), 600)
+
+    # 3) 文献综述（真实模型，三篇要点汇编）
+    t = _run_workflow(
+        client,
+        "文献综述",
+        {"paper_ids": ",".join(bids), "topic": "注意力机制与大语言模型的演进"},
+        timeout_s=600,
+    )
+    assert t["status"] == "done", t.get("error")
+    _show("③ 文献综述草稿", _final_output(t), 1200)
+
+    # 4) 学术写作（文体=academic）→ 入章
+    ws = Workspace(root=Path(tempfile.mkdtemp()))
+    chapters = ChapterStore(str(db))
+    tools = WritingTools(chapters, book_id="main", workspace=ws, model=model)
+    intro = tools._clean_write(
+        title="引言",
+        intent="写一段论文引言（约150字）：注意力机制如何推动大语言模型发展",
+        references="",
+    )
+    _show("④ 学术写作（引言）", intro, 500)
+    assert client.post(
+        "/api/chapters",
+        json={"book_id": "main", "title": "第一章 引言", "content": intro},
+    ).status_code == 200
+
+    # 5) 学术检测（真实模型规则包）
+    r = client.post(
+        "/api/check", json={"text": intro, "target": "引言", "book_id": "main"}
+    )
+    findings = r.json().get("findings") or []
+    print(f"\n⑤ 学术检测：{r.json().get('hard_count', len(findings))} 项发现")
+    for f in findings[:2]:
+        print(f"   - [{f.get('category')}] {str(f.get('message'))[:80]}")
+
+    # 6) 引用导出 + LaTeX
+    r = client.get(f"/api/library/{bids[0]}/citations?style=bibtex").json()
+    _show("⑥a 引用条目（BibTeX）", str(r["entry"]), 350)
+    tex = client.get("/api/export/book?format=latex&book_id=main").text
+    has_sec = "\\section" in tex
+    print(f"\n⑥b LaTeX 导出：{len(tex)} 字符，含 \\section → {has_sec}")
+
+
 # 故意埋瑕疵的学术段落（术语漂移/口语化/无据断言/数据不一致）
 FLAWED_ACADEMIC = (
     "本研究探讨了手机依赖这个问题。大学生们每天都离不开智能手机，"
@@ -209,6 +278,7 @@ def main() -> None:
         "multiplatform": scenario_multiplatform,
         "proposal": scenario_proposal,
         "d2": scenario_d2,
+        "project": scenario_project,
     }
     chosen = sys.argv[1:] or ["check"]
     for name in chosen:

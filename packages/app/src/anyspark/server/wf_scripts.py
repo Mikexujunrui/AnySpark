@@ -1048,6 +1048,10 @@ def wf_script_list_split(wfd: WfScriptDeps, ctx: RunContext, node: Any) -> NodeR
             t = _re.sub(r"^(?:[-*•]|意见\s*\d+[：:.]?)\s*", "", t)
             if t:
                 items.append(t)
+    # S250 实测：单行逗号串（paper_ids="a,b,c"）从未被切开——假模型 e2e 掩盖了它；
+    # 单行且含分隔符时按逗号/顿号/分号二次切分
+    if len(items) == 1 and _re.search(r"[,，;；]", items[0]):
+        items = [t.strip() for t in _re.split(r"[,，;；]", items[0]) if t.strip()]
     if not items:
         return NodeResult(error="list_split 未切出任何条目")
     return NodeResult(output=_json.dumps(items, ensure_ascii=False))

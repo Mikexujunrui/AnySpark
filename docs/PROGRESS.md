@@ -657,3 +657,19 @@ id 归一/建库书/摘要章节/cite_meta 落全；知网无公开 API 不做�
 **实测**：真实 arXiv 导入（Attention Is All You Need，8 作者→et al 正确、
 键 vaswani2017attention）+ 24 库测试 + 12 app e2e + 42 回归全过。
 campus_smoke.py 加 d2 场景。
+
+---
+
+## S250b: 完整示例项目真实跑通 + 修 list_split 逗号串切分缺陷
+
+**背景**：主人再问"能否真实示例项目"——单场景冒烟已过，但拆论文/文献综述
+两工作流从未吃真数据。补 campus_smoke.py project 场景：arXiv 导入×3（真实网络）→
+拆论文（skill 草稿落盘）→ 文献综述（主题化综述，据标题推断标注保留）→
+学术写作 → 检测（2 项发现合理）→ BibTeX/LaTeX 导出，全链路真实模型+网络通过。
+
+**实测抓到并修复**：list_split 逗号串切分从未实现（JSON/按行两通道而已）——
+multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补单行含分隔符二次
+切分 + 回归测试（test_list_split_comma_line）。
+
+**启示（再次）**：假模型 e2e 只证管线拓扑，不证数据流语义——凡"参数传递"
+必须真模型或显式断言 item 内容。
