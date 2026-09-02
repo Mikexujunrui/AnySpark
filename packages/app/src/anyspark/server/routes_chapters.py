@@ -21,7 +21,9 @@ from anyspark.server.schemas import (
     ChapterCreate,
     ChapterOut,
     ChapterPatchIn,
+    ChapterReorderIn,
     ChapterRestoreIn,
+    ChapterStatusIn,
     ChapterUpdate,
 )
 
@@ -105,6 +107,7 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
                 content=c.content,
                 order_index=c.order_index,
                 updated_at=c.updated_at,
+                status=c.status,
             )
             for c in items
         ]
@@ -141,6 +144,7 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
             order_index=ch.order_index,
             updated_at=ch.updated_at,
             versions=ch.versions or [],
+            status=ch.status,
         )
 
     @router.put("/api/chapters/{chapter_id}", response_model=ChapterOut)
@@ -181,6 +185,7 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
             content=updated.content,
             order_index=updated.order_index,
             updated_at=updated.updated_at,
+            status=updated.status,
         )
 
     @router.post("/api/chapters/{chapter_id}/restore", response_model=ChapterOut)
@@ -207,7 +212,7 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
                 restored.book_id,
                 restored.title,
                 exc,
-            )  # noqa: E501
+            )
         # S85：恢复也是内容变化 → 后台图谱抽取（防图谱漂移）
         deps.bg_queue.put(
             BgTask(
@@ -227,6 +232,7 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
             order_index=restored.order_index,
             updated_at=restored.updated_at,
             versions=restored.versions or [],
+            status=restored.status,
         )
 
     @router.delete("/api/chapters/{chapter_id}", response_model=dict[str, object])
@@ -265,7 +271,7 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
         except OSError as exc:
             logger.warning(
                 "定点编辑 md 回写失败（库已更新）: %s《%s》: %s", ch.book_id, ch.title, exc
-            )  # noqa: E501
+            )
         # S132b 信号入口：定点编辑（内容实际变化）→ modified 信号（含段落删除/替换）
         if ok_all and new_content != ch.content:
             deps.signal_collector.modified(ch.content, new_content, "定点编辑", book_id=ch.book_id)
@@ -287,6 +293,34 @@ def make_chapters_router(deps: AppDeps) -> APIRouter:
             "results": results,
             "chars": len(new_content),
         }
+
+    @router.post("/api/chapters/{chapter_id}/status", response_model=dict[str, object])
+    def set_chapter_status(chapter_id: str, req: ChapterStatusIn) -> dict[str, object]:
+        """S257：设置章节状态（draft/final）——前端「定稿」按钮真实落库。"""
+        if req.status not in ("draft", "final"):
+            raise HTTPException(status_code=422, detail="status 只支持 draft/final")
+        if not deps.chapters.set_status(chapter_id, req.status):
+            raise HTTPException(status_code=404, detail="章节不存在")
+        return {"ok": True, "id": chapter_id, "status": req.status}
+
+    @router.post("/api/chapters/reorder", response_model=dict[str, object])
+    def reorder_chapters(req: ChapterReorderIn) -> dict[str, object]:
+        """S257：章节重排（真实实现——此前前端拖拽调用伪造成功响应的 stub，
+        刷新后顺序回弹，违背决策 B）。库 order_index + md 文件名序号同步更新。"""
+        if not req.ids:
+            raise HTTPException(status_code=422, detail="ids 不能为空")
+        before = {c.id: (c.order_index, c.title) for c in deps.chapters.list_by_book(req.book_id)}
+        unknown = [i for i in req.ids if i not in before]
+        if unknown:
+            raise HTTPException(status_code=404, detail=f"章节不存在: {unknown[:3]}")
+        moved = deps.chapters.reorder(req.book_id, req.ids)
+        for c in deps.chapters.list_by_book(req.book_id):
+            old_order, old_title = before[c.id]
+            if (c.order_index, c.title) != (old_order, old_title):
+                deps.workspace.rename_chapter(
+                    req.book_id, old_order, old_title, c.order_index, c.title
+                )
+        return {"ok": True, "count": moved}
 
     @router.get("/api/chapters/{chapter_id}/export")
     def export_chapter(chapter_id: str, format: str = "txt") -> Response:

@@ -254,6 +254,25 @@ class Workspace:
             return True
         return False
 
+    def rename_chapter(
+        self, book_id: str, old_order: int, old_title: str, new_order: int, new_title: str
+    ) -> bool:
+        """S257：重排/改名后的 md 权威文件同步（文件名承载序号与标题）。
+
+        旧文件不存在返回 False（幂等，无文件可改）；新文件已存在先删（Windows
+        rename 不覆盖已存在目标）。"""
+        old = self.chapter_file(book_id, old_order, old_title)
+        if not old.exists():
+            return False
+        new = self.chapter_file(book_id, new_order, new_title)
+        if old == new:
+            return True
+        with self._file_lock:
+            if new.exists():
+                new.unlink()
+            old.rename(new)
+        return True
+
     # -- 上传区 --
     def save_upload(self, book_id: str, filename: str, data: bytes) -> Path:
         """保存原始上传物到上传区（只读存档；文件名消毒防穿越，保留扩展名）。"""

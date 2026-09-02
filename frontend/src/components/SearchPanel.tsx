@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { showToast } from './ui/toast-utils'
 import Icon from './ui/Icon'
-import { openTab } from '../stores/tabStore'
+import { useChapterFocus } from '../stores/chapterFocusStore'
 import { emitTabSwitch } from '../lib/events'
 import { triggerRefresh } from '../store'
 
@@ -138,7 +138,8 @@ export default function SearchPanel({ bookId, onClose }: { bookId: string; onClo
   }
 
   function handleChapterClick(ch: ChapterHit) {
-    openTab(ch.id, ch.title, bookId)
+    // S257：跨面板定位到该章（原调用 no-op 的 tabStore.openTab，点击无任何反应）
+    useChapterFocus.getState().focusChapter(ch.id)
     onClose?.()
   }
 

@@ -8,6 +8,7 @@ import MarkdownEditor from './editor/MarkdownEditor'
 import WordCountGoal from './editor/WordCountGoal'
 import { useAutoSave } from '../hooks/useAutoSave'
 import { useTabs, openTab, closeTab, setActiveTab, clearTabsForBook } from "../stores/tabStore"
+import { useChapterFocus } from '../stores/chapterFocusStore'
 import { api } from '../api'
 import ChapterHistoryPanel from './ChapterHistoryPanel'
 import ImpactPanel from './ImpactPanel'
@@ -72,6 +73,17 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { loadChapters(); loadVolumes() }, [bookId, refreshKey])
+
+  // S257：响应跨面板章节定位请求（SearchPanel 点击命中 → 定位到该章）
+  const focusChapterId = useChapterFocus((s) => s.chapterId)
+  const focusSeq = useChapterFocus((s) => s.seq)
+  useEffect(() => {
+    if (!focusChapterId || focusSeq === 0) return
+    const target = chapters.find((c) => c.id === focusChapterId)
+    if (target) selectChapter(target)
+    useChapterFocus.getState().consume()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSeq, chapters])
 
   // 切换书籍时清除旧书的标签页
   useEffect(() => {

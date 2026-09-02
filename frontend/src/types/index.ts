@@ -6,6 +6,8 @@ export interface Chapter {
   content: string;
   order_index: number;
   updated_at: string;
+  /** S257：draft 草稿 / final 定稿 */
+  status?: string;
 }
 
 // 聊天消息角色

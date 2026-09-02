@@ -9,6 +9,8 @@ interface SkillPanelProps {
   open: boolean;
   onClose: () => void;
   embedded?: boolean;
+  /** S257：当前项目（skill 导入按项目落库——原漏传落 main） */
+  bookId?: string;
 }
 
 // S104：AI 生成候选草稿区（agent skill_refine 产出 → 人工确认转正）
@@ -112,7 +114,7 @@ function DraftSection({ drafts, onApprove, onReject }: { drafts: { id: string; n
   );
 }
 
-export default function SkillPanel({ open, onClose, embedded = false }: SkillPanelProps) {
+export default function SkillPanel({ open, onClose, embedded = false, bookId = 'main' }: SkillPanelProps) {
   const skills = useSkillStore((s) => s.skills);
   const drafts = useSkillStore((s) => s.drafts);
   const loading = useSkillStore((s) => s.loading);
@@ -141,7 +143,7 @@ export default function SkillPanel({ open, onClose, embedded = false }: SkillPan
   // S118 提案 D：导入 skill 文件（复用上传区 + ingest 判别路由 → 草稿待确认）
   const handleImportFile = async (file: File) => {
     setImportMsg("导入中…");
-    const r = await importSkillFile(file);
+    const r = await importSkillFile(file, bookId);
     if (r.kind === "skill") {
       setImportMsg(`已识别为 skill《${r.title}》→ 草稿待确认（草稿区可采纳）`);
     } else {

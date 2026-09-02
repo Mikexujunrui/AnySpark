@@ -39,9 +39,10 @@ export const deleteChapter = (_bookId: string, chapterId: string): Promise<unkno
 export const getVolumes = (..._args: unknown[]): Promise<{ volumes: unknown[] }> =>
   Promise.resolve({ volumes: [] });
 
-// ── Chapter reorder：V4 无重排端点，降级（本地排序由前端处理）──
-export const reorderChapters = (..._args: unknown[]): Promise<{ ok: boolean; count: number }> =>
-  Promise.resolve({ ok: true, count: 0 });
+// ── Chapter reorder：真实持久化（S257：后端 POST /api/chapters/reorder，
+// 库 order_index + md 文件名序号同步——原 stub 伪造成功，刷新后顺序回弹）──
+export const reorderChapters = (bookId: string, ids: string[]): Promise<{ ok: boolean; count: number }> =>
+  post("/api/chapters/reorder", { book_id: bookId, ids });
 
 // ── Notes：V4 无书笔记，降级 ──
 export const getNotes = (): Promise<unknown[]> => Promise.resolve([]);
@@ -55,11 +56,14 @@ export const exportBook = (_bookId: string, format?: string): Promise<Response> 
   return fetch(url);
 };
 
-// ── Chapter status：V4 无 promote/demote，降级（兼容任意调用签名）──
-export const promoteChapter = (..._args: unknown[]): Promise<{ status: string }> =>
-  Promise.resolve({ status: "ok" });
-export const demoteChapter = (..._args: unknown[]): Promise<{ status: string }> =>
-  Promise.resolve({ status: "ok" });
+// ── Chapter status：真实落库（S257：后端 status 列 + /api/chapters/{id}/status；
+// 原 stub 伪造成功，违背决策 B）──
+export const setChapterStatus = (chapterId: string, status: "draft" | "final"): Promise<{ ok: boolean; status: string }> =>
+  post(`/api/chapters/${chapterId}/status`, { status });
+export const promoteChapter = (_bookId: string, chapterId: string): Promise<{ status: string }> =>
+  setChapterStatus(chapterId, "final");
+export const demoteChapter = (_bookId: string, chapterId: string): Promise<{ status: string }> =>
+  setChapterStatus(chapterId, "draft");
 
 // ── Outline（大纲 ≈ V4 计划）──
 export const getOutline = (bookId: string): Promise<unknown> => {

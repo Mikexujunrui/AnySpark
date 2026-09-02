@@ -48,7 +48,7 @@ export default function PanelHost({ panelKey, bookId, sessionId, onPanelClose }:
       {panelKey === 'characters' && <div className="h-full min-h-0 flex flex-col"><CharactersPanel bookId={bookId} /></div>}
       {panelKey === 'outline' && <div className="h-full min-h-0 flex flex-col"><OutlinePanel bookId={bookId} /></div>}
       {panelKey === 'foreshadows' && <div className="h-full min-h-0 flex flex-col"><PlotPanel bookId={bookId} /></div>}
-      {panelKey === 'styles' && <div className="h-full min-h-0 flex flex-col"><SkillPanel open embedded onClose={onPanelClose || (() => {})} /></div>}
+      {panelKey === 'styles' && <div className="h-full min-h-0 flex flex-col"><SkillPanel open embedded bookId={bookId} onClose={onPanelClose || (() => {})} /></div>}
       {panelKey === 'storytree' && <div className="h-full min-h-0 flex flex-col"><StoryTreeView bookId={bookId} /></div>}
       {panelKey === 'workflow' && <div className="h-full min-h-0 flex flex-col"><WorkflowPanel bookId={bookId} /></div>}
       {panelKey === 'search' && <div className="h-full min-h-0 flex flex-col"><SearchPanel bookId={bookId} /></div>}

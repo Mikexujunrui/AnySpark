@@ -191,6 +191,7 @@ class ChapterOut(BaseModel):
     order_index: int
     updated_at: str
     versions: list[dict[str, Any]] = []  # 版本历史（content/note/saved_at）
+    status: str = "draft"  # S257：draft 草稿 / final 定稿
 
 
 class ChapterCreate(BaseModel):
@@ -592,6 +593,19 @@ class ChapterPatchIn(BaseModel):
     """S44：定点编辑操作列表。"""
 
     operations: list[dict[str, Any]]
+
+
+class ChapterStatusIn(BaseModel):
+    """S257：章节状态（draft 草稿 / final 定稿）。"""
+
+    status: str
+
+
+class ChapterReorderIn(BaseModel):
+    """S257：章节重排（前端拖拽排序持久化）。"""
+
+    book_id: str = "main"
+    ids: list[str]
 
 
 class ImpactIn(BaseModel):

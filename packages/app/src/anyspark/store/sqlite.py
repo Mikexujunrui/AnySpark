@@ -501,6 +501,7 @@ class Chapter:
     updated_at: str
     versions: list[dict[str, Any]]  # 旧版本快照 [{content, saved_at, note}]
     narrative_line: str = "main"  # S29 多线叙事：本章属于哪条线（时序校验按线比较）
+    status: str = "draft"  # S257：draft 草稿 / final 定稿（前端「定稿」按钮真实落库）
 
 
 class ChapterStore:
@@ -522,7 +523,8 @@ class ChapterStore:
                 order_index INTEGER NOT NULL DEFAULT 0,
                 narrative_line TEXT NOT NULL DEFAULT 'main',
                 created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
+                updated_at TEXT NOT NULL,
+                status TEXT NOT NULL DEFAULT 'draft'
             );
             CREATE TABLE IF NOT EXISTS chapter_versions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -539,6 +541,12 @@ class ChapterStore:
         if "narrative_line" not in cols:
             self._conn.execute(
                 "ALTER TABLE chapters ADD COLUMN narrative_line TEXT NOT NULL DEFAULT 'main'"
+            )
+        # S257：章节状态列（draft 草稿 / final 定稿——前端「定稿」按钮此前
+        # 调伪造成功响应的 API，违背决策 B；配套 /api/chapters/{id}/status）
+        if "status" not in cols:
+            self._conn.execute(
+                "ALTER TABLE chapters ADD COLUMN status TEXT NOT NULL DEFAULT 'draft'"
             )
         self._conn.commit()
 
@@ -724,12 +732,13 @@ class ChapterStore:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             versions=versions,
+            status=row["status"],
         )
 
     def list_by_book(self, book_id: str) -> list[Chapter]:
         with self._lock:
             rows = self._conn.execute(
-                "SELECT id, title, content, order_index FROM chapters "
+                "SELECT id, title, content, order_index, status FROM chapters "
                 "WHERE book_id = ? ORDER BY order_index",
                 (book_id,),
             ).fetchall()
@@ -743,9 +752,46 @@ class ChapterStore:
                 created_at="",
                 updated_at="",
                 versions=[],
+                status=r["status"],
             )
             for r in rows
         ]
+
+    def set_status(self, chapter_id: str, status: str) -> bool:
+        """S257：设置章节状态（draft 草稿 / final 定稿）。非法值/章节不存在返回 False。"""
+        if status not in ("draft", "final"):
+            return False
+        with self._lock:
+            cur = self._conn.execute(
+                "UPDATE chapters SET status=?, updated_at=? WHERE id=?",
+                (status, _now(), chapter_id),
+            )
+            self._conn.commit()
+        return cur.rowcount > 0
+
+    def reorder(self, book_id: str, ordered_ids: list[str]) -> int:
+        """S257：按给定 id 顺序重排 order_index（真实实现——此前前端拖拽调用
+        伪造成功响应的 stub，刷新后顺序回弹）。
+
+        未列出的章节排在其后保持原有相对顺序；调用方需同步重命名 md 权威文件
+        （文件名承载序号，见 workspace.rename_chapter）。返回实际重排章数。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT id FROM chapters WHERE book_id=? ORDER BY order_index, rowid",
+                (book_id,),
+            ).fetchall()
+            id_set = {r["id"] for r in rows}
+            listed = [i for i in ordered_ids if i in id_set]
+            remaining = [r["id"] for r in rows if r["id"] not in set(listed)]
+            now = _now()
+            with self._conn:
+                for i, cid in enumerate([*listed, *remaining]):
+                    self._conn.execute(
+                        # 0 基序号（与 next_order 的 MAX+1 约定一致，新建从 0 起）
+                        "UPDATE chapters SET order_index=?, updated_at=? WHERE id=?",
+                        (i, now, cid),
+                    )
+        return len(listed)
 
     def delete(self, chapter_id: str) -> bool:
         """删除章节及其版本历史（前端章节树管理用；md 文件删除由调用方负责）。

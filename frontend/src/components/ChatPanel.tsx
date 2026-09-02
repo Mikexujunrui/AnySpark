@@ -97,6 +97,8 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   const saveTimerRef = useRef(null)
   const hideTimerRef = useRef(null)
   const lastSentMsgRef = useRef('')
+  // S257：批量任务轮询 timer 登记（随会话切换/卸载清理，防跨会话消息污染）
+  const batchTimersRef = useRef<number[]>([])
   // ── Chunk buffering: avoid per-chunk setMessages during streaming ──
   const chunkBufferRef = useRef('')
   const chunkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -139,7 +141,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     })
   }, [])
 
-  const { sendMessage: sseSend, cancel: sseCancel, streaming } = useSSE({
+  const { sendMessage: sseSend, cancel: sseCancel, streaming, conversationId: activeConvRef } = useSSE({
     bookId,
     sessionId,
     agentMode: 'write',
@@ -170,8 +172,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
           }
           return updated
         })
-        streamingRef.current = true
-        if (event.text) setMessages(prev => [...prev, { role: 'agent', text: event.text }])
+        // S257：删除旧实现残留的重复 push（每条流式回复首个 text_delta 被渲染成孤儿气泡）
       } else if (event.type === 'append') {
         if (event.text) {
           // Buffer chunks and flush at throttled rate to avoid per-chunk re-renders
@@ -355,14 +356,25 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   // ── Cancel session on page unload (refresh / close) ──
   useEffect(() => {
     function onBeforeUnload() {
-      if (streaming && sessionId) {
+      // S257：用 SSE 会话内实际激活的会话 id（本轮新建会话时 prop 尚未回传，
+      // 原实现用旧 sessionId 导致取消信号落空）
+      const activeConv = activeConvRef.current || sessionId
+      if (streaming && activeConv) {
         // Use sendBeacon for reliable delivery during page unload
-        navigator.sendBeacon(`/api/chat/cancel`, new Blob([JSON.stringify({ conversation_id: sessionId })], { type: 'application/json' }))
+        navigator.sendBeacon(`/api/chat/cancel`, new Blob([JSON.stringify({ conversation_id: activeConv })], { type: 'application/json' }))
       }
     }
     window.addEventListener('beforeunload', onBeforeUnload)
     return () => window.removeEventListener('beforeunload', onBeforeUnload)
-  }, [streaming, sessionId])
+  }, [streaming, sessionId, activeConvRef])
+
+  // ── S257：批量任务轮询 timer 随会话切换/卸载清理 ──
+  useEffect(() => {
+    return () => {
+      batchTimersRef.current.forEach(t => window.clearInterval(t))
+      batchTimersRef.current = []
+    }
+  }, [sessionId])
 
 
   // 命令注册表驱动（真正的命令系统：ui 前端执行 / ai 翻译指令）
@@ -376,18 +388,14 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     setLoaded(false)
     if (!sessionId) return
     const url = `/api/conversations/${sessionId}/messages`
-    console.log(`${DIAG_PREFIX} ChatPanel — 加载历史消息 | session=%s | url=%s`, sessionId, url)
     fetch(url)
       .then(r => {
-        console.log(`${DIAG_PREFIX} ChatPanel — 历史消息响应 | status=%d | content-type=%s`, r.status, r.headers.get('content-type'))
         if (!r.ok) throw new Error(`HTTP ${r.status}`)
         return r.json()
       })
       .then(data => {
         const isArray = Array.isArray(data)
         const count = isArray ? data.length : 0
-        console.log(`${DIAG_PREFIX} ChatPanel — 历史消息解析完成 | isArray=%s | count=%d | type=%s`,
-          isArray, count, typeof data)
         if (isArray && count > 0) {
           // S107b+S145b：后端 {role,content} → 前端 {role,text}；过滤空文本 agent 消息（空气泡根治）
           const mapped = normalizeHistoryMessages(data)
@@ -459,7 +467,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     setUploading(true)
 
     const sizeMB = (file.size / 1024 / 1024).toFixed(1)
-    console.log(`${DIAG_PREFIX} ChatPanel — 上传文件 | name=%s | size=%sMB`, file.name, sizeMB)
     setMessages(prev => [...prev,
       { role: 'user', text: `[上传] 上传文档: ${file.name} (${sizeMB} MB)` },
     ])
@@ -485,7 +492,6 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data?.detail || data?.error || `上传失败 (${res.status})`)
-      console.log(`${DIAG_PREFIX} ChatPanel — 上传完成 | status=%d`, res.status)
       setMessages(prev => [...prev, {
         role: 'agent',
         text: `[完成] 已上传「${file.name}」到上传区。\n\n现在可以给我指令处理这个文件，例如：\n• "把《${file.name}》按章节拆解并写入"\n• "提取这个文件的全部设定"\n• "分析这个小说的文风特征"`,
@@ -855,12 +861,13 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         setMessages(prev => [...prev, { role: 'agent', text: `⚠️ ${label}模板不存在` }])
         return
       }
-      const r = await runWorkflow(tmpl.id, 'main', {
+      const r = await runWorkflow(tmpl.id, bookId, {
         chapter_ids: JSON.stringify(ids),
         ...(isRewrite && instruction ? { instruction } : {}),
       })
       const taskId = r.task_id
-      // 轮询进度 → 替换进度消息（找到以 [label 开头的最新 agent 消息）
+      // S257：轮询 timer 登记到 ref——切换会话/卸载时统一清理（原实现不随会话
+      // 切换清理，轮询回调把进度写进新会话的消息流——跨会话污染+泄漏）
       const timer = window.setInterval(async () => {
         try {
           const t = await getWorkflowTask(taskId)
@@ -885,6 +892,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
           window.clearInterval(timer)
         }
       }, 3000)
+      batchTimersRef.current.push(timer)
     } catch {
       setMessages(prev => [...prev, { role: 'agent', text: `⚠️ ${label}提交失败，请检查后端` }])
     }
@@ -955,11 +963,11 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   // ── Autopilot control handlers ──
   async function handleAutopilotPause() {
     if (!autopilotState?.taskId) return
-    try { await api.pauseTask(bookId, autopilotState.taskId); setAutopilotState(prev => ({ ...prev, status: 'paused' })) } catch (e) { alert(e.message) }
+    try { await api.pauseTask(bookId, autopilotState.taskId); setAutopilotState(prev => ({ ...prev, status: 'paused' })) } catch (e) { showToast(e instanceof Error ? e.message : '暂停失败', 'error') }
   }
   async function handleAutopilotResume() {
     if (!autopilotState?.taskId) return
-    try { await api.resumeTask(bookId, autopilotState.taskId); setAutopilotState(prev => ({ ...prev, status: 'running' })) } catch (e) { alert(e.message) }
+    try { await api.resumeTask(bookId, autopilotState.taskId); setAutopilotState(prev => ({ ...prev, status: 'running' })) } catch (e) { showToast(e instanceof Error ? e.message : '恢复失败', 'error') }
   }
   function handleAutopilotCancel() {
     // 弹确认窗（原 confirm）——确认后执行真实取消
@@ -971,7 +979,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
     try {
       await api.cancelTask(bookId, autopilotState.taskId)
       cleanupAutopilot()
-    } catch (e) { alert(e.message) }
+    } catch (e) { showToast(e instanceof Error ? e.message : '操作失败', 'error') }
   }
   async function handleAutopilotForceStop() {
     if (!autopilotState?.taskId) return
@@ -988,7 +996,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
         text: '🚫 Autopilot 已强制中止',
         autopilot: true,
       }])
-    } catch (e) { alert(e.message) }
+    } catch (e) { showToast(e instanceof Error ? e.message : '操作失败', 'error') }
   }
   function cleanupAutopilot() {
     if (autopilotAbortRef.current) {
@@ -1002,7 +1010,7 @@ export default function ChatPanel({ bookId, sessionId, autoModeEnabled, transfor
   }
   async function handleAutopilotSkip() {
     if (!autopilotState?.taskId) return
-    try { await api.retryTask(bookId, autopilotState.taskId) } catch (e) { alert(e.message) }
+    try { await api.retryTask(bookId, autopilotState.taskId) } catch (e) { showToast(e instanceof Error ? e.message : '操作失败', 'error') }
   }
   function handleAutopilotClose() {
     cleanupAutopilot()

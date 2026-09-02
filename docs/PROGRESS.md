@@ -676,6 +676,34 @@ multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补�
 
 ---
 
+## S257: 全库审核修复批⑥——前端回归 + 伪实现转真（决策 B 对齐）
+
+**ChatPanel 必现回归（审核 git blame 实证为 S213 重构漏删）**：
+1. start 事件旧代码重复 push——每条流式回复首个 text_delta 渲染成孤儿气泡（一行删除）。
+2. runWorkflow 硬编码 'main'——非 main 项目批量提议批准落错项目，改传 bookId prop。
+3. 批量轮询 interval 随会话切换/卸载统一清理（batchTimersRef）——原跨会话 setMessages
+   污染 + 泄漏。
+4. beforeunload beacon 改用 SSE 会话内实际激活会话 id（原 prop 未回传时取消信号落空）。
+5. alert×5 → showToast 统一提示体系；删 5 处无开关诊断 console.log。
+
+**伪实现转真（决策 B「禁止模拟实现」对齐）**：
+6. 章节 status（draft/final）真实落库：chapters 表 ALTER 加列（幂等迁移）+
+   POST /api/chapters/{id}/status + ChapterOut 携带——前端「定稿」按钮此前
+   伪造成功刷新即丢。
+7. 拖拽重排真实持久化：POST /api/chapters/reorder + ChapterStore.reorder
+   （0 基序号对齐 next_order 约定）+ workspace.rename_chapter（md 权威文件名
+   承载序号同步——防 import 回弹）；未知 id 404。
+8. 搜索结果点击无反应修复：新增 chapterFocusStore（跨面板章节定位通道），
+   ChaptersPanel 订阅消费；tabStore 的 no-op openTab 不再是唯一路径。
+9. SkillPanel 补 bookId prop（skill 导入落当前项目——全前端唯一依赖
+   bookId='main' 默认值的调用点，清扫后其余 API 默认值均无实际调用依赖）。
+10. 删 streamChat 死代码（第二套 SSE 实现，0 调用方，活路径 useSSE 唯一）。
+
+**已知遗留（显式记录不混入本批）**：tsconfig strict 开启需修 249 处隐式 any/
+空值——留专项渐进开启；tools_web 默认搜索多引擎兜底 48s 罚时属产品行为决策；
+workflow 引擎递归深度/并行分支耗时均摊为设计级重构。
+
+**测试**：tsc -b 0 错误；vitest 18 passed；后端章节系 15+27 passed；ruff 全绿。
 ## S256: 全库审核修复批⑤——包层修复（workflow/review/core/align）
 
 **workflow**：
