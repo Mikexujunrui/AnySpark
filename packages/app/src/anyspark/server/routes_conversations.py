@@ -269,9 +269,7 @@ def make_conversations_router(deps: AppDeps) -> APIRouter:
             context_window=req.context_window or DEFAULT_CONTEXT_WINDOW,
             max_tokens=req.max_tokens or DEFAULT_MAX_TOKENS,
             # S253：温度 0.0（确定性输出）是合法值，不能用 or 吞掉
-            temperature=(
-                req.temperature if req.temperature is not None else DEFAULT_TEMPERATURE
-            ),
+            temperature=(req.temperature if req.temperature is not None else DEFAULT_TEMPERATURE),
             thinking=req.thinking,
             protocol=req.protocol,
         )

@@ -103,9 +103,7 @@ def make_reference_lookup_implementer(
         # S244 语义通道（mode=auto/semantic 且向量索引可用时）：全书库余弦检索
         semantic_lines: list[str] = []
         semantic_failed = False
-        semantic_unavailable = (
-            vectors is None or embedder is None or not embedder.available
-        )
+        semantic_unavailable = vectors is None or embedder is None or not embedder.available
         if mode in ("auto", "semantic") and not semantic_unavailable:
             try:
                 qvec = embedder.embed([keyword])[0]

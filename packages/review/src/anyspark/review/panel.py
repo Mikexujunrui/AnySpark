@@ -27,6 +27,7 @@ from .prompts import OUTPUT_SCHEMA, SUMMARIZE_SYSTEM
 
 logger = logging.getLogger(__name__)
 
+
 def _default_reviewers_dir() -> Path:
     """系统默认评审员目录：兼容 repo 与 wheel 两种布局。
 

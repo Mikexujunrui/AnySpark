@@ -22,6 +22,25 @@ from anyspark.server.toolkit import ToolContext, build_toolkit
 from anyspark.server.tools_extensions import ExtensionToolStore
 
 
+@pytest.fixture(autouse=True)
+def _no_live_llm(monkeypatch: Any) -> None:
+    """S258：测试禁打真实 LLM/embedding API。
+
+    build_app 会加载 .env——未注入 fake model 的测试此前会静默用真实
+    DashScope key 打线上 API（网络抖动型 flake + 真实计费）。清掉密钥后：
+    适配器 fail-fast（本地构造不受影响）；需要真实 env 形态的测试用
+    monkeypatch.setenv 自行覆盖（后执行者优先）。
+    """
+    for key in (
+        "DEEPSEEK_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "OPENAI_API_KEY",
+        "EMBEDDING_API_KEY",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 @pytest.fixture
 def make_toolkit() -> Any:
     """最小装配 factory：make_toolkit(**overrides) → registry（默认全 None 依赖）。"""

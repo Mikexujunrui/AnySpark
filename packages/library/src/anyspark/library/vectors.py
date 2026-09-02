@@ -257,9 +257,7 @@ class LibraryVectors:
                 return []
             if book_ids:
                 wanted = set(book_ids)  # 循环外建一次（勿在生成器内重建）
-                mask = np.fromiter(
-                    (m[0] in wanted for m in metas), dtype=bool, count=len(metas)
-                )
+                mask = np.fromiter((m[0] in wanted for m in metas), dtype=bool, count=len(metas))
                 mat = mat[mask]
                 metas = [m for m, keep in zip(metas, mask.tolist(), strict=True) if keep]
                 if len(mat) == 0:

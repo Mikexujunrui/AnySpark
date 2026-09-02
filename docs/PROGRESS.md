@@ -676,6 +676,19 @@ multiplatform 假模型 e2e 掩盖（整串传给假模型也"通过"）。补�
 
 ---
 
+## S258: 全库审核修复批⑦——总闸收尾 + 测试防网络抖动
+
+1. 测试禁打真实 API（重要）：app/tests 新增 autouse 夹具清 DEEPSEEK/ANTHROPIC/
+   GEMINI/OPENAI/EMBEDDING_API_KEY——此前 test_wrapup/test_query_reference 等未注入
+   fake model 的测试静默用真实 DashScope key 打线上 API（网络抖动型 flake +
+   真实计费，审核发现）；需真实 env 形态的测试用 monkeypatch.setenv 自行覆盖。
+   全 app 套件 500 passed 零失败（原全量跑必有 1 个顺序依赖 flake）。
+2. S214 read 超时测试更新为 600s 有界约定（S253 行为变更的配套）。
+3. responses OpenAI timeout 类型标注对齐 deepseek 既有模式（httpx2 与 SDK
+   类型不同源，type: ignore[arg-type]）。
+4. 既有测试 15 处 mypy 错误清零（get_book None 收窄/泛型参数/注解补齐/
+   build_app 占位 model 标注）——mypy packages 234 文件全绿。
+5. ruff format 6 文件重排 + per-file-ignores 路径随 test_align_skillgen 迁移更新。
 ## S257: 全库审核修复批⑥——前端回归 + 伪实现转真（决策 B 对齐）
 
 **ChatPanel 必现回归（审核 git blame 实证为 S213 重构漏删）**：

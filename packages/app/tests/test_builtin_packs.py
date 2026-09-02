@@ -135,7 +135,7 @@ def test_write_chapter_genre_persona() -> None:
 
 
 def test_genre_api_roundtrip() -> None:
-    client = TestClient(build_app(model=_Skills(), db_path=_db()))
+    client = TestClient(build_app(model=_Skills(), db_path=_db()))  # type: ignore[arg-type]  # 占位：genre 端点不触模型
     g = client.get("/api/genre").json()
     assert g["genre"] == "fiction"  # 无文件=缺省
     r = client.post("/api/genre", json={"genre": "academic", "book_id": "main"})
@@ -216,7 +216,7 @@ def test_review_reply_template_runs() -> None:
 # S248：校园模板包（拆论文/文献综述/申报书起草/多平台改写）预置 + e2e
 # ---------------------------------------------------------------------------
 def test_campus_templates_seeded() -> None:
-    client = TestClient(build_app(model=_Skills(), db_path=_db()))
+    client = TestClient(build_app(model=_Skills(), db_path=_db()))  # type: ignore[arg-type]  # 占位：genre 端点不触模型
     names = {t["name"] for t in client.get("/api/workflows").json()}
     assert {"拆论文", "文献综述", "申报书起草", "多平台改写"} <= names
 

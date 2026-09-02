@@ -196,7 +196,7 @@ class ResponsesModel:
         self._client = OpenAI(
             base_url=self._base_url,
             api_key=self._api_key,
-            timeout=_httpx_timeout,
+            timeout=_httpx_timeout,  # type: ignore[arg-type]  # S66：httpx2 与 SDK 类型标注不同源
             http_client=httpx.Client(trust_env=False, timeout=_httpx_timeout),  # type: ignore[arg-type]
         )
 

@@ -243,13 +243,15 @@ class _FakeEmbedder:
     def embed(self, texts: list[str]) -> list[list[float]]:
         out = []
         for t in texts:
-            out.append([
-                float(t.count("魔法")),
-                float(t.count("剑")),
-                float(t.count("行会")),
-                float(t.count("权力")),
-                1.0,
-            ])
+            out.append(
+                [
+                    float(t.count("魔法")),
+                    float(t.count("剑")),
+                    float(t.count("行会")),
+                    float(t.count("权力")),
+                    1.0,
+                ]
+            )
         return out
 
 
@@ -282,12 +284,15 @@ def _make_semantic_tool(vectors: Any = None, embedder: Any = None) -> tuple[Any,
 def test_semantic_mode_hits_whole_library() -> None:
     """mode=semantic：不依赖项目参考书选择，直接语义搜全书库。"""
     hits = [
-        {"book_id": "魔法之书", "filename": "第一章.md", "chunk_idx": 0,
-         "text": "少年握紧法杖，魔法的光辉照亮塔顶。", "score": 0.72},
+        {
+            "book_id": "魔法之书",
+            "filename": "第一章.md",
+            "chunk_idx": 0,
+            "text": "少年握紧法杖，魔法的光辉照亮塔顶。",
+            "score": 0.72,
+        },
     ]
-    impl, _ = _make_semantic_tool(
-        vectors=_FakeVectors(hits), embedder=_FakeEmbedder()
-    )
+    impl, _ = _make_semantic_tool(vectors=_FakeVectors(hits), embedder=_FakeEmbedder())
     r = _call(impl, keyword="学徒的修行", mode="semantic")
     assert r.ok
     assert "语义命中" in r.content
@@ -299,12 +304,15 @@ def test_semantic_mode_hits_whole_library() -> None:
 def test_auto_mode_merges_both_channels() -> None:
     """mode=auto（缺省）：语义 + 关键词双通道合并输出。"""
     hits = [
-        {"book_id": "魔法之书", "filename": "第一章.md", "chunk_idx": 0,
-         "text": "少年握紧法杖，魔法的光辉照亮塔顶。", "score": 0.65},
+        {
+            "book_id": "魔法之书",
+            "filename": "第一章.md",
+            "chunk_idx": 0,
+            "text": "少年握紧法杖，魔法的光辉照亮塔顶。",
+            "score": 0.65,
+        },
     ]
-    impl, _ = _make_semantic_tool(
-        vectors=_FakeVectors(hits), embedder=_FakeEmbedder()
-    )
+    impl, _ = _make_semantic_tool(vectors=_FakeVectors(hits), embedder=_FakeEmbedder())
     r = _call(impl, keyword="魔法")  # 不传 mode → auto
     assert r.ok
     assert "语义匹配" in r.content
@@ -338,8 +346,15 @@ def test_semantic_embedder_down_reports_unavailable() -> None:
         def embed(self, texts: list[str]) -> list[list[float]]:
             raise RuntimeError("embedding 服务 502")
 
-    hits = [{"book_id": "魔法之书", "filename": "第一章.md", "chunk_idx": 0,
-             "text": "魔法", "score": 0.5}]
+    hits = [
+        {
+            "book_id": "魔法之书",
+            "filename": "第一章.md",
+            "chunk_idx": 0,
+            "text": "魔法",
+            "score": 0.5,
+        }
+    ]
     impl, _ = _make_semantic_tool(vectors=_FakeVectors(hits), embedder=DownEmbedder())
     r = _call(impl, keyword="学徒", mode="semantic")
     assert not r.ok
@@ -349,8 +364,13 @@ def test_semantic_embedder_down_reports_unavailable() -> None:
 def test_invalid_mode_falls_back_to_auto() -> None:
     """非法 mode → 回落 auto（不报错）。"""
     hits = [
-        {"book_id": "魔法之书", "filename": "第一章.md", "chunk_idx": 0,
-         "text": "魔法", "score": 0.5},
+        {
+            "book_id": "魔法之书",
+            "filename": "第一章.md",
+            "chunk_idx": 0,
+            "text": "魔法",
+            "score": 0.5,
+        },
     ]
     impl, _ = _make_semantic_tool(vectors=_FakeVectors(hits), embedder=_FakeEmbedder())
     r = _call(impl, keyword="魔法", mode="nonsense")

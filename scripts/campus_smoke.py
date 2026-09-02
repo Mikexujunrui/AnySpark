@@ -23,6 +23,7 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
+
 def scenario_d2() -> None:
     """D2/D3：真实 arXiv 导入 → 引用导出 → LaTeX 导出（纯机制，零模型调用）。"""
     import tempfile
@@ -85,15 +86,16 @@ def scenario_project() -> None:
         references="",
     )
     _show("④ 学术写作（引言）", intro, 500)
-    assert client.post(
-        "/api/chapters",
-        json={"book_id": "main", "title": "第一章 引言", "content": intro},
-    ).status_code == 200
+    assert (
+        client.post(
+            "/api/chapters",
+            json={"book_id": "main", "title": "第一章 引言", "content": intro},
+        ).status_code
+        == 200
+    )
 
     # 5) 学术检测（真实模型规则包）
-    r = client.post(
-        "/api/check", json={"text": intro, "target": "引言", "book_id": "main"}
-    )
+    r = client.post("/api/check", json={"text": intro, "target": "引言", "book_id": "main"})
     findings = r.json().get("findings") or []
     print(f"\n⑤ 学术检测：{r.json().get('hard_count', len(findings))} 项发现")
     for f in findings[:2]:

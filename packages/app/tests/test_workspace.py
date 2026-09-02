@@ -436,6 +436,7 @@ def test_chapter_status_and_reorder_endpoints() -> None:
     assert ws.read_chapter("main", 0, "第一章") is None
 
     # 未知章节 id → 404
-    assert client.post(
-        "/api/chapters/reorder", json={"book_id": "main", "ids": ["nope"]}
-    ).status_code == 404
+    assert (
+        client.post("/api/chapters/reorder", json={"book_id": "main", "ids": ["nope"]}).status_code
+        == 404
+    )

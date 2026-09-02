@@ -245,9 +245,12 @@ def test_deepseek_reasoning_content_forwarded() -> None:
 
 
 def test_httpx_timeout_read_is_none_all_adapters(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    """S214：四个协议适配器的 httpx client read 超时应为 None（流式不被掐断）。
+    """S214→S253：四个协议适配器 httpx client read 超时 = 600s 有界上限。
 
-    这是最关键的硬伤修复——旧代码 timeout=120 会掐断正常流式。
+    S214 原 read=None 让 TCP 假死变成工作线程永久挂起（审核发现）；600s 只拦
+    "10 分钟无任何字节"的死连接，持续产 token 的正常流不误杀——流式不被掐断
+    的本意保持，同时给挂起一个可恢复上界。旧 timeout=120 掐断流式的历史问题
+    不回归（read != 120）。
     """
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
     from anyspark.models.anthropic import AnthropicModel
@@ -256,32 +259,31 @@ def test_httpx_timeout_read_is_none_all_adapters(monkeypatch) -> None:  # type: 
 
     # Anthropic / Gemini 直接用 httpx.Client
     am = AnthropicModel(api_key="sk-test", base_url="http://mock.test")
-    assert am._client.timeout.read is None, "Anthropic read 超时应为 None"
+    assert am._client.timeout.read == 600.0, "Anthropic read 超时应为 600s（有界不死等）"
     assert am._client.timeout.connect == 10.0
 
     gm = GeminiModel(api_key="sk-test", base_url="http://mock.test")
-    assert gm._client.timeout.read is None, "Gemini read 超时应为 None"
+    assert gm._client.timeout.read == 600.0, "Gemini read 超时应为 600s"
 
     # DeepSeek 用 OpenAI SDK（内嵌 httpx client）——验证配置传入
     dm = DeepSeekModel(api_key="sk-test", base_url="http://mock.test")
     # OpenAI SDK 的 _client 是内部 httpx client，timeout 由 http_client 覆盖
     inner = dm._client._client  # OpenAI SDK 内部 httpx client
-    assert inner.timeout.read is None, "DeepSeek 内部 httpx read 超时应为 None"
+    assert inner.timeout.read == 600.0, "DeepSeek 内部 httpx read 超时应为 600s"
 
 
 def test_httpx_timeout_old_120_not_used() -> None:
-    """S214：旧的全局 timeout=120 不应再出现（会掐断流式）。"""
+    """S214/S253：旧的全局 timeout=120 不应再出现（会掐断流式）。"""
     from anyspark.models.anthropic import AnthropicModel
     from anyspark.models.gemini import GeminiModel
 
     am = AnthropicModel(api_key="sk-test", base_url="http://mock.test")
-    # read=None，不再是 120
-    assert am._client.timeout.read is None
-    # 不应该所有维度都是 120（旧的 timeout=120 行为）
+    # read=600 有界上限，绝不是 120
+    assert am._client.timeout.read == 600.0
     assert am._client.timeout.read != 120.0
 
     gm = GeminiModel(api_key="sk-test", base_url="http://mock.test")
-    assert gm._client.timeout.read is None
+    assert gm._client.timeout.read == 600.0
 
 
 # ---------------------------------------------------------------------------

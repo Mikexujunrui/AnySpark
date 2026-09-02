@@ -574,8 +574,7 @@ def test_workflow_status_polling_not_deadloop() -> None:
     polls.append(_no_tool("任务还在跑，我先结束，后台继续。"))
     # 不注入豁免：S108 死循环拦截照常生效（用注册过的 echo 验证机制仍在）
     echo_loops = [
-        ModelOutput(tool_calls=[ToolCall(name="echo", arguments={"text": "hi"})])
-        for _ in range(15)
+        ModelOutput(tool_calls=[ToolCall(name="echo", arguments={"text": "hi"})]) for _ in range(15)
     ]
     echo_loops.append(_no_tool("停"))
     agent_no_exempt = _make_agent(ScriptedModel(echo_loops))

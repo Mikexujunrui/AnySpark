@@ -42,17 +42,22 @@ def test_store_cite_meta_roundtrip() -> None:
     db = _db()
     store = LibraryStore(str(db))
     book = store.add_book("某论文")
-    assert store.get_book(book["id"])["cite_meta"] is None
-    assert store.get_book(book["id"])["has_cite_meta"] is False
+    got_book = store.get_book(book["id"])
+    assert got_book is not None
+    assert got_book["cite_meta"] is None
+    assert got_book["has_cite_meta"] is False
     meta = {"entry_type": "article", "authors": ["张三"], "title": "T", "year": "2024"}
     assert store.set_cite_meta(book["id"], meta) is True
     got = store.get_book(book["id"])
+    assert got is not None
     assert got["cite_meta"] == meta
     assert got["has_cite_meta"] is True
     assert store.set_cite_meta("不存在", meta) is False
     # 旧库重开（列已存在的迁移路径）不报错、数据仍在
     store2 = LibraryStore(str(db))
-    assert store2.get_book(book["id"])["cite_meta"] == meta
+    got2 = store2.get_book(book["id"])
+    assert got2 is not None
+    assert got2["cite_meta"] == meta
 
 
 def test_citation_export_tool() -> None:
@@ -109,7 +114,7 @@ def test_citations_http_route() -> None:
 # ---------------------------------------------------------------------------
 # arXiv 导入（D3）：mock 网络层，验证建书/摘要章节/cite_meta 落全
 # ---------------------------------------------------------------------------
-def test_import_arxiv_mocked(monkeypatch) -> None:
+def test_import_arxiv_mocked(monkeypatch: Any) -> None:
     from anyspark.library import connectors
 
     def fake_fetch(raw: str) -> dict[str, Any]:
@@ -134,10 +139,12 @@ def test_import_arxiv_mocked(monkeypatch) -> None:
     out = import_arxiv_paper(store, "https://arxiv.org/abs/2101.00001")
     bid = out["book_id"]
     assert (store.root / bid / "00-摘要.md").read_text(encoding="utf-8").startswith("# 摘要")
-    assert store.get_book(bid)["cite_meta"]["title"].startswith("A Study of Phone")
+    final_book = store.get_book(bid)
+    assert final_book is not None
+    assert final_book["cite_meta"]["title"].startswith("A Study of Phone")
 
 
-def test_import_arxiv_http_route(monkeypatch) -> None:
+def test_import_arxiv_http_route(monkeypatch: Any) -> None:
     client = _client()
 
     def fake_fetch(raw: str) -> dict[str, Any]:
