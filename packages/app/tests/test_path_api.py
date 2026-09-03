@@ -324,3 +324,49 @@ def test_import_txt_book_rollback_on_failure() -> None:
     # 项目目录已回滚（书架无此项目）
     books = client.get("/api/books").json()
     assert all(b["id"] != "坏书" for b in books)
+
+
+def test_update_book_renames_display_title() -> None:
+    """S259：书架改名——只动显示名（书名.txt），book_id 主键不变；
+    只改名（description 缺省 None）不得把简介顺带清空。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    ws = _ws()
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=ws))
+    client.post("/api/books", json={"content": "旧书名"})
+    # 先建档简介，验证只改名时简介不动
+    client.post("/api/brief", json={"content": "项目简介内容", "book_id": "旧书名"})
+
+    r = client.put(
+        "/api/books/旧书名",
+        json={"title": "新书名（修订版）"},
+    )
+    assert r.status_code == 200, r.text
+    d = r.json()
+    assert d["id"] == "旧书名"  # 主键不变
+    assert d["title"] == "新书名（修订版）"
+    assert "项目简介内容" in d["brief"]  # 简介未被清空
+
+    # 书架列表用显示名，id 仍是目录名
+    books = client.get("/api/books").json()
+    book = next(b for b in books if b["id"] == "旧书名")
+    assert book["title"] == "新书名（修订版）"
+
+    # 不存在的项目 404
+    assert client.put("/api/books/不存在", json={"title": "x"}).status_code == 404
+
+
+def test_update_book_updates_description() -> None:
+    """S259：书架编辑同时传 description → 简介同步更新。"""
+    from fastapi.testclient import TestClient
+
+    from anyspark.server.app import build_app
+
+    client = TestClient(build_app(model=_ScriptedModel(), db_path=_db(), workspace=_ws()))
+    client.post("/api/books", json={"content": "书A"})
+    r = client.put("/api/books/书A", json={"title": "书A", "description": "新简介"})
+    assert r.status_code == 200, r.text
+    assert "新简介" in r.json()["brief"]
+    assert client.get("/api/brief?book_id=书A").json()["content"].strip() == "新简介"

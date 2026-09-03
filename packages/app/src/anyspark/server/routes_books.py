@@ -11,7 +11,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from anyspark.server.deps import AppDeps
-from anyspark.server.schemas import BriefIn, ImportTxtBookIn
+from anyspark.server.schemas import BookUpdateIn, BriefIn, ImportTxtBookIn
 
 
 def make_books_router(deps: AppDeps) -> APIRouter:
@@ -34,7 +34,7 @@ def make_books_router(deps: AppDeps) -> APIRouter:
             books.append(
                 {
                     "id": book_id,
-                    "title": book_id,
+                    "title": workspace.read_title(book_id),
                     "chapterCount": len(chs),
                     "totalChars": total_chars,
                     "brief": brief[:200] if brief else "",
@@ -129,6 +129,36 @@ def make_books_router(deps: AppDeps) -> APIRouter:
             "kind": result.kind,
             "count": len(result.chapters),
             "chapters": result.chapters,
+        }
+
+    @router.put("/api/books/{book_id}", response_model=dict[str, Any])
+    def update_book(book_id: str, req: BookUpdateIn) -> dict[str, Any]:
+        """S259 书架编辑项目信息：改显示名（书名.txt）+ 可选简介。
+
+        book_id（目录名）是全部 project 级数据的主键——改名只动显示名元数据，
+        不做目录重命名（全链路主键迁移属实体改名专项）。description=None 时
+        简介不动（只改名的请求不得把简介顺带清空）。返回与 list_books 同构。
+        """
+        from anyspark.server.workspace import _safe_title
+
+        safe = _safe_title(book_id)
+        workspace = deps.workspace
+        # 不经 project_dir（其 mkdir 副作用会把“不存在的项目”凭空建出来）
+        if not (workspace.root / safe).is_dir():
+            raise HTTPException(status_code=404, detail=f"项目不存在: {book_id}")
+        title = req.title.strip()
+        if title:
+            workspace.write_title(safe, title)
+        if req.description is not None:
+            workspace.write_brief(safe, req.description)
+        chs = deps.chapters.list_by_book(safe)
+        return {
+            "id": safe,
+            "title": workspace.read_title(safe),
+            "chapterCount": len(chs),
+            "totalChars": sum(len(c.content or "") for c in chs),
+            "brief": workspace.read_brief(safe)[:200],
+            "updatedAt": max((c.updated_at for c in chs), default=""),
         }
 
     @router.delete("/api/books/{book_id}", response_model=dict[str, Any])

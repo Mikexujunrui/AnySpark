@@ -133,6 +133,30 @@ class Workspace:
         except OSError:
             return ""
 
+    # S259：书名显示名（书名.txt）——显示名与 book_id（目录名）解耦。
+    # book_id 是全部 project 级数据（章节库/图谱/伏笔/心智…）的主键，目录改名需全链路
+    # 主键迁移；书架改书名只动显示名文件，不牵动主键（目录重命名属实体改名专项）。
+    def title_file(self, book_id: str = "main") -> Path:
+        return self.project_dir(book_id) / "书名.txt"
+
+    def read_title(self, book_id: str = "main") -> str:
+        """读项目显示名（书名.txt）；无文件/空内容回退 book_id（书名=目录名的历史行为）。"""
+        f = self.title_file(book_id)
+        if not f.exists():
+            return book_id
+        try:
+            return f.read_text(encoding="utf-8").strip() or book_id
+        except OSError:
+            return book_id
+
+    def write_title(self, book_id: str = "main", title: str = "") -> Path:
+        """写项目显示名（覆盖；空标题回退 book_id）。单行化——换行折叠为空格。
+        不做 _safe_title 消毒：显示名不进路径，保留原始字符（书名可含点号等）。"""
+        cleaned = " ".join(title.split()) or book_id
+        f = self.title_file(book_id)
+        f.write_text(cleaned + "\n", encoding="utf-8")
+        return f
+
     # S247：项目文体（genre）——权威在文件，与简介同型；未知/缺省回退 fiction
     def genre_file(self, book_id: str = "main") -> Path:
         return self.project_dir(book_id) / "文体.txt"

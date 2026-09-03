@@ -127,7 +127,7 @@ workflow 模板，agent 提议→批准→模板执行，带断点/续跑/回滚
 | routes_chat_stats | T7 验证指标 + S101 作者写作统计（纯 SQL 读现有表，零新表） | db_path |
 | routes_chat_aux | 低摩擦交互：direction（方向声明）/candidates（候选卡堆）/rewrite（改写渐变条）——S207 从 routes_chat 拆出 | model/models |
 | routes_conversations | 会话 CRUD/fork/rename + 模型注册表 CRUD/激活（protocol 字段透传 S131）+ S147 历史接口过滤空 assistant 消息（工具轮声明不展示，防空气泡） | store/models |
-| routes_books | 书架（项目枚举/创建/删除） | workspace/chapters |
+| routes_books | 书架（项目枚举/创建/改名/删除）：GET/POST/DELETE /api/books + POST /api/books/import-txt（S156 txt 成书）+ PUT /api/books/{id}（S259 改显示名书名.txt+可选简介；book_id 主键不变） | workspace/chapters |
 | routes_workspace | 工作区总览/章节 import/上传/上传区 CRUD（POST 上传 + GET 读 + DELETE 删素材 S144）+ S141 AI 沙箱浏览（GET /api/sandbox 文件树 + GET /api/sandbox/file 读内容）+ S143 人工编辑保存（PUT /api/sandbox/file 落人工修改标记，AI write_file 不再静默覆盖） | workspace |
 | routes_chapters | 章节 CRUD/patch/restore（S138 版本回溯：POST /{id}/restore 恢复到历史版本）/export/wrapup | chapters/workspace/export |
 | routes_manual→routes_mind | manual/brief/signals/mind 全部 | manual/signals/workspace/mind_planner |

@@ -235,6 +235,14 @@ class BriefIn(BaseModel):
     book_id: str = "main"
 
 
+class BookUpdateIn(BaseModel):
+    """S259 书架编辑项目信息。title=显示名（书名.txt，不动 book_id 主键）；
+    description=None 表示不动简介——只改名的请求不得把简介顺带清空。"""
+
+    title: str = ""
+    description: str | None = None
+
+
 class GenreIn(BaseModel):
     """S247 项目文体（fiction/academic/report）——写作引擎/检测骨架/拆解维度按文体切换。"""
 

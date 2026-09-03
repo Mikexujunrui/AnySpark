@@ -160,9 +160,11 @@ export default function Bookshelf() {
   async function handleSaveEdit() {
     if (!editing.title?.trim()) return
     try {
+      // S259：简介用 brief 字段——后端 list_books 返回 brief，此前误绑不存在的
+      // description（恒空），保存时把空串传给后端导致项目简介被清空
       await api.updateBook(editing.id, {
         title: editing.title,
-        description: editing.description || '',
+        description: editing.brief || '',
       })
       setEditing(null)
       loadBooks()
@@ -404,8 +406,8 @@ export default function Bookshelf() {
                   </div>
                   <div>
                     <label className="text-xs text-zinc-400 block mb-1">简介</label>
-                    <textarea value={editing.description || ''} rows={3}
-                      onChange={e => setEditing({ ...editing, description: e.target.value })}
+                    <textarea value={editing.brief || ''} rows={3}
+                      onChange={e => setEditing({ ...editing, brief: e.target.value })}
                       className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-4 py-2.5 text-sm text-zinc-200 focus:outline-none focus:border-zinc-500 resize-none" />
                   </div>
                 </div>

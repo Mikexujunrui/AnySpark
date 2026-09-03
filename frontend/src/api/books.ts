@@ -32,8 +32,13 @@ export const importTxtBook = (title: string, filename: string, dataB64: string):
     data_b64: dataB64,
     mode: "chapters",
   });
+// S259：书架编辑项目信息——后端 PUT /api/books/{id}（显示名书名.txt + 可选简介）。
+// 此前误调 PUT /api/brief 且丢弃 title，改名无效还把简介覆盖为空。
 export const updateBook = (id: string, data: Partial<BookData>): Promise<BookData> =>
-  put(`/api/brief`, { content: data.description || "", book_id: id }).then(() => ({ id, ...data } as BookData));
+  put<BookData>(`/api/books/${encodeURIComponent(id)}`, {
+    title: data.title || "",
+    description: data.description ?? null,
+  });
 export const deleteBook = (id: string): Promise<unknown> => del(`/api/books/${id}`);
 export const importSparkProject = async (..._args: unknown[]): Promise<{ ok: boolean; book: BookData; stats: Record<string, unknown> }> => {
   throw new Error("旧项目导入不支持（V4 决策A：全新项目不背沉没成本）");
