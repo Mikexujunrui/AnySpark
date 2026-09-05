@@ -860,6 +860,16 @@ types_for("main")/make_data_env(...,"main")），当前检出 0（含 app.py 那
 workflow 引擎递归深度/并行分支耗时均摊为设计级重构。
 
 **测试**：tsc -b 0 错误；vitest 18 passed；后端章节系 15+27 passed；ruff 全绿。
+## S260: 修章节编辑未保存静默丢失 + 细纲产出落位引导/可下载
+
+**远程用户反馈批**：①书名改不了（S259 已修）②直接修改没有保存 ③写细纲不知落在哪/导不出。
+
+**问题②根因（章节编辑丢稿三连）**：useAutoSave.isDirty 是 ref 不是 state——markDirty 不触发渲染，UI「● 未保存」指示永不显示；切章 selectChapter 直接覆盖编辑缓冲，30 秒自动保存间隔内切章=静默丢稿；关页无提醒。另有一处隐性竞态：flush 只写服务器不同步 chapters 数组，切走再切回显示保存前的旧文。
+
+**修复**：isDirty 改 state（翻转才 setState 防每键重渲染）；flush 成功才清 dirty；切章/建章前 flush+同步数组；beforeunload 提醒；修正与实现矛盾的「已移除自动保存」注释（实际 30 秒自动保存一直在）。
+
+**问题③（细纲落位）**：系统有 plan_register（大纲面板）与 write_file（笔记/ → AI文件面板）但 DEFAULT_SYSTEM 无落位引导，AI 写细纲要么淹没在对话里要么写进用户不知道的笔记目录。修复：提示词增落位约定（逐章细纲→plan_register；文档型→write_file 笔记/ 并明确告知路径）+ FilesPanel 加下载按钮（细纲/笔记可导出本地）。
+
 ## S259: 修书架改名无效 + 简介被清空双 bug
 
 **症状**：书架「编辑项目信息」改书名保存后无效；且保存会把项目简介静默清空。
