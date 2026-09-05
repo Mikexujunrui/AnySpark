@@ -102,7 +102,8 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
     return () => document.removeEventListener('mousedown', handleClick)
   }, [showCreateMenu])
 
-  // 移除自动保存：用户只能通过 Ctrl+S 手动保存，避免点击编辑5秒后自动创建版本
+  // 保存策略：30 秒静默自动保存（防丢稿）+ Ctrl+S/保存按钮手动保存；
+  // 切章/关页前强制 flush（此前 30 秒内切章未保存内容静默丢失）
 
   // 字数目标持久化
   useEffect(() => {
@@ -175,6 +176,18 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [editing, showFindReplace, chapters, selectedId])
+
+  // S260：关页/刷新前有未保存内容时提醒（浏览器原生确认框，阻断意外丢稿）
+  useEffect(() => {
+    function handleBeforeUnload(e: BeforeUnloadEvent) {
+      if (autoSave.isDirty) {
+        e.preventDefault()
+        e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
+  })
 
   // 查找替换核心函数
   useEffect(() => {
@@ -281,7 +294,18 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
     } catch (e) { /* silent */ }
   }
 
-  function selectChapter(ch) {
+  // S260：切章/建新章前先把未保存内容落到当前章（写作场景宁多存不丢稿）；
+  // flush 需在读取新章内容前完成，否则旧内容被覆盖丢失。
+  // flush 只写服务器不同步 chapters 数组——这里一并同步（否则列表条目陈旧，
+  // 切走再切回会显示保存前的旧文）；若切回的就是当前章，用最新编辑缓冲。
+  async function selectChapter(ch) {
+    if (autoSave.isDirty) {
+      await autoSave.flush()
+      setChapters(prev => prev.map(c =>
+        c.id === selectedId ? { ...c, title: editTitle, content: editContent } : c
+      ))
+      if (ch.id === selectedId) ch = { ...ch, title: editTitle, content: editContent }
+    }
     setEditing(false)
     setShowHistory(false)
     setShowChapterOutline(false)
@@ -332,6 +356,7 @@ export default function ChaptersPanel({ bookId }: { bookId: string }) {
       ))
       setEditing(false)
       setCommitMsg('')
+      autoSave.markClean()
       triggerRefresh()
       showToast('已保存', 'success')
     } catch (e) {

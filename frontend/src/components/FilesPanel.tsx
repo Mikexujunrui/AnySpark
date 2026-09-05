@@ -82,6 +82,20 @@ export default function FilesPanel({ open = true, onClose, embedded = false, boo
     }
   }
 
+  // S260：下载当前文件（细纲/笔记等导出为本地 md/txt）
+  const downloadFile = () => {
+    if (!selected) return
+    const blob = new Blob([editing ? editText : content], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = selected.split('/').pop() || 'file.md'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }
+
   // S143：保存编辑（PUT → 落人工修改标记，AI write_file 不再静默覆盖）
   const saveEdit = async () => {
     if (!selected || saving) return
@@ -188,12 +202,21 @@ export default function FilesPanel({ open = true, onClose, embedded = false, boo
                   <span className="text-xs text-zinc-400 truncate">{selected}</span>
                   <div className="flex items-center gap-1.5 shrink-0 ml-2">
                     {!editing ? (
-                      <button
-                        onClick={() => { setEditText(content); setEditing(true) }}
-                        className="text-[11px] px-2 py-0.5 bg-sky-600/20 border border-sky-700/50 text-sky-300 hover:bg-sky-600/30 rounded transition-colors"
-                      >
-                        编辑
-                      </button>
+                      <>
+                        <button
+                          onClick={downloadFile}
+                          className="text-[11px] px-2 py-0.5 bg-violet-600/20 border border-violet-700/50 text-violet-300 hover:bg-violet-600/30 rounded transition-colors"
+                          title="下载此文件到本地（细纲/笔记可直接导出）"
+                        >
+                          下载
+                        </button>
+                        <button
+                          onClick={() => { setEditText(content); setEditing(true) }}
+                          className="text-[11px] px-2 py-0.5 bg-sky-600/20 border border-sky-700/50 text-sky-300 hover:bg-sky-600/30 rounded transition-colors"
+                        >
+                          编辑
+                        </button>
+                      </>
                     ) : (
                       <>
                         <button
