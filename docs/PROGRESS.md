@@ -927,3 +927,31 @@ https 可用——origin/public  remote 改 https 地址。fetch 后核实本地
 origin/feat/shell-port +5、origin/main +136、origin/integrate-f3 +373、
 public/main +34，behind 全部 0（本地包含远程全部历史）。推送 feat/shell-port+
 main（本地 main 快进到 HEAD）+integrate-f3 至 origin，HEAD 至 public/main。
+
+## S262: 面向用户 README 重写 + 效果图 + 默认模型跟随在售迭代 + 图谱布局 bug 修复
+
+**背景**（主人指令）：README 原为开发台账式（阶段史/门禁命令），不面向用户、
+未阐明设计哲学、缺效果图；重写并推送公开仓库。
+
+**交付**：
+- README 全重写：定位一句话 + 能力清单 + 8 张效果图 + 设计哲学七条
+  （写作即对话/机制硬编码内容自然语言/模型无关/用户主权人工闸门/
+  渐进披露/文件权威/全部真实）+ 三平台桌面版与源码快速开始 + 开发者入口
+- 效果图（docs/assets/screenshots/，puppeteer 真实 UI 截图）：隔离演示数据根
+  （data/ 临时移走）+ 演示项目《雾城夜雨》——前两章 fixture、第三章 agent
+  真实续写（写章→自查→登记伏笔闭环）、图谱抽取 16 实体、拆书工作流产技巧草稿；
+  截图后演示数据销毁、原数据恢复。复现脚本入库：scripts/readme_demo.py +
+  scripts/readme_shots.js
+- **默认模型跟随在售迭代**：deepseek-v4-flash 已下线（404 Model not exist），
+  .env/.env.example/DEFAULT_MODEL 改 deepseek-v4.1-flash；test_models 断言同步
+- **FullGraphView 布局 bug 修复**（截图实测发现的真 bug）：loading 早退渲染
+  spinner 时容器 div 未挂载，ResizeObserver effect 空 deps 挂在 null 上永不
+  观测 → size 停默认 900×600 → 力导中心偏左上且顶部裁切（所有用户可见）；
+  deps 改 [loading, error, entities.length] 容器出现后重挂观测
+- 演示期发现并记录（未修，另立阶段）：① DashScope 账户欠费（Arrearage）——
+  演示改用 DeepSeek 官方协议配置（模型无关设计实证）；② 书库后台向量索引
+  在网络重试期间持写锁 → 全应用 database is locked（与 S261 测试失败同根因
+  的生产面表现），需「网络调用前提交事务」改造
+
+**门禁**：前后端都改 + pyproject 敏感文件 → 全量总闸 ✅（ruff check+format/
+pytest 798 passed/mypy 224/scan/tsc/eslint/build/vitest 18 passed）。

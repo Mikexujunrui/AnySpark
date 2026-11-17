@@ -36,7 +36,7 @@ def test_registry_seeds_env_default() -> None:
     cfgs = reg.list()
     assert len(cfgs) == 1
     assert cfgs[0].is_active is True
-    assert cfgs[0].model == "deepseek-v4-flash"
+    assert cfgs[0].model == "deepseek-v4.1-flash"
 
 
 def test_registry_syncs_default_from_env(monkeypatch) -> None:  # type: ignore[no-untyped-def]
@@ -348,7 +348,7 @@ def test_provider_follows_activation(monkeypatch) -> None:  # type: ignore[no-un
         )
     )
     provider = ModelProvider(reg)
-    assert provider.model_name == "deepseek-v4-flash"  # 种子激活
+    assert provider.model_name == "deepseek-v4.1-flash"  # 种子激活
 
     reg.activate("pro")
     assert provider.model_name == "deepseek-v4-pro"  # 即时跟随

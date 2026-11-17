@@ -115,6 +115,9 @@ export default function FullGraphView({ bookId, preset, title }: { bookId: strin
   }, [bookId])
 
   // ── 容器尺寸 ──
+  // deps 带 loading/error/实体数：loading 早退渲染 spinner 时容器 div 尚未挂载，
+  // 空 deps 会让 ResizeObserver 挂在 null 上永不观测→size 停默认 900×600，
+  // 力导中心偏左上且顶部裁切（S262 截图实测发现）
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -124,7 +127,7 @@ export default function FullGraphView({ bookId, preset, title }: { bookId: strin
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [loading, error, entities.length])
 
   // ── 当前可视数据（全图过滤 or 聚焦子图）──
   const view = useMemo(() => {

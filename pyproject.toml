@@ -95,6 +95,8 @@ ignore = [
 "packages/app/tests/test_reasoning_stream.py" = ["E501"]
 # S59 补充：workflow model 条件冒烟脚本是长中文 JSON 行
 "scripts/workflow_model_cond_smoke.py" = ["E501"]
+# S262：README 演示脚本内嵌演示章节散文 fixture，断行破坏正文内容
+"scripts/readme_demo.py" = ["E501"]
 # S64：评审团提示词是给 LLM 看的内容（JSON 示例紧凑性优先），断行破坏语义
 "packages/review/src/anyspark/review/prompts.py" = ["E501"]
 

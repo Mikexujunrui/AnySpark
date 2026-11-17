@@ -243,7 +243,7 @@ def test_provider_build_for_task_divides(monkeypatch: pytest.MonkeyPatch) -> Non
     # 未配槽位（默认 store）→ 回退激活
     store2 = ModeStore(_db())
     provider2 = ModelProvider(reg, mode=ModeResolver(store2, reg))
-    assert provider2.build_for_task("writing").model_name == "deepseek-v4-flash"  # 激活配置
+    assert provider2.build_for_task("writing").model_name == "deepseek-v4.1-flash"  # 激活配置
     # 无 resolver → 始终激活配置
     provider3 = ModelProvider(reg)
-    assert provider3.build_for_task("writing").model_name == "deepseek-v4-flash"
+    assert provider3.build_for_task("writing").model_name == "deepseek-v4.1-flash"

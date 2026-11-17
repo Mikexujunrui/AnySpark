@@ -44,7 +44,7 @@ class ModelIn(BaseModel):
     id: str | None = None
     name: str
     base_url: str | None = None  # 缺省用 env 默认端点（各协议各自的默认端点）
-    model: str  # 模型名（如 deepseek-v4-flash / claude-sonnet-4-5 / gemini-2.5-flash / gpt-5）
+    model: str  # 模型名（如 deepseek-v4.1-flash / claude-sonnet-4-5 / gemini-2.5-flash / gpt-5）
     api_key: str | None = None  # 缺省用 env（openai→DEEPSEEK_API_KEY；
     # anthropic→ANTHROPIC_API_KEY…）
     context_window: int | None = None

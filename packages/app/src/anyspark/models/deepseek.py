@@ -39,11 +39,12 @@ from anyspark.core import (
 )
 from anyspark.core.protocol import ToolSpec
 
-# 与 pi 同款默认：DashScope 兼容端点 + deepseek-v4-flash
+# 与 pi 同款默认：DashScope 兼容端点 + deepseek-v4.1-flash
+# （S262：v4-flash 已下线 404，缺省跟随官方在售迭代；可用 DEEPSEEK_MODEL 覆盖）
 DEFAULT_BASE_URL = os.getenv(
     "DEEPSEEK_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
-DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash")
+DEFAULT_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-v4.1-flash")
 
 # 思考强度合法取值（S47）：None=不传（模型默认）；off=显式关闭；
 # low/medium/high/xhigh/max = reasoning_effort（OpenAI 标准参数，可顶层直传）
