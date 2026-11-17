@@ -76,3 +76,39 @@ def test_deletion_idempotent(store: UserSkeletonStore) -> None:
 def test_remove_nonexistent_deletion(store: UserSkeletonStore) -> None:
     # 删除不存在的标记返回 False
     assert store.remove_deletion("不存在") is False
+
+
+def test_check_tool_accepts_custom_checks() -> None:
+    """check_text 工具与路由同源：调用方注入的自定义检测项生效。
+
+    S246 接线补缺的回归防护——agent 自查必须看得见用户自定义检测项，
+    否则工具与 /api/check 两条通道行为分裂。
+    """
+    import json
+
+    from anyspark.check.skeleton import SkeletonCheckItem
+    from anyspark.core.protocol import ToolSpec
+    from anyspark.core.types import Message, ModelOutput, ToolResult
+    from anyspark.server.tools_check import make_check_implementer
+
+    class FakeCheckModel:
+        model_name = "fake-check"
+
+        def respond(self, messages: list[Message], tools: object) -> ModelOutput:
+            prompt = messages[0].content if messages else ""
+            if "自定义项" in prompt:
+                return ModelOutput(
+                    text=json.dumps(
+                        [{"message": "命中", "evidence": "第1段", "severity": "hard"}],
+                        ensure_ascii=False,
+                    ),
+                    tool_calls=[],
+                )
+            return ModelOutput(text="[]", tool_calls=[])
+
+    custom = [SkeletonCheckItem("自定义项", "检测自定义问题")]
+    _, impl = make_check_implementer(FakeCheckModel(), checks=custom)
+    spec = ToolSpec(name="check_text", description="t", params=[])
+    r = impl(spec, {"text": "测试正文。"})
+    assert isinstance(r, ToolResult)
+    assert r.ok is True and "命中" in r.content

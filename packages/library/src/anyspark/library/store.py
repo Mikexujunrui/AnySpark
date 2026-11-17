@@ -9,10 +9,7 @@ anyspark.library.store — 书库存储（S86）。
 
 from __future__ import annotations
 
-import contextlib
-import json
 import re
-import sqlite3
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -73,9 +70,6 @@ class LibraryStore:
                 CREATE INDEX IF NOT EXISTS idx_refs_book ON book_references(book_id);
                 """
             )
-            # S250：引用元数据列（D2 文献=书库条目+cite_meta JSON；旧库幂等迁移）
-            with contextlib.suppress(sqlite3.OperationalError):
-                self._conn.execute("ALTER TABLE library_books ADD COLUMN cite_meta TEXT")
             self._conn.commit()
 
     # -- 书库 CRUD --
@@ -93,25 +87,6 @@ class LibraryStore:
             self._conn.commit()
         return {"id": bid, "name": name, "path": str(d)}
 
-    def set_cite_meta(self, book_id: str, meta: dict[str, Any]) -> bool:
-        """写入引用元数据（JSON）；书不存在返回 False。"""
-        with self._lock:
-            cur = self._conn.execute(
-                "UPDATE library_books SET cite_meta=? WHERE id=?",
-                (json.dumps(meta, ensure_ascii=False), book_id),
-            )
-            self._conn.commit()
-            return cur.rowcount > 0
-
-    def _cite_meta(self, raw: str | None) -> dict[str, Any] | None:
-        if not raw:
-            return None
-        try:
-            v = json.loads(raw)
-            return v if isinstance(v, dict) else None
-        except json.JSONDecodeError:
-            return None
-
     def list_books(self) -> list[dict[str, Any]]:
         """全部书库书（含章节数）。"""
         out: list[dict[str, Any]] = []
@@ -127,7 +102,6 @@ class LibraryStore:
                         "source": r["source"],
                         "chapters": len(files),
                         "created_at": r["created_at"],
-                        "has_cite_meta": bool(r["cite_meta"]),
                     }
                 )
         return out
@@ -144,8 +118,6 @@ class LibraryStore:
         return {
             "id": row["id"],
             "name": row["name"],
-            "cite_meta": self._cite_meta(row["cite_meta"]),
-            "has_cite_meta": bool(row["cite_meta"]),
             "source": row["source"],
             "chapters": len(files),
             "created_at": row["created_at"],

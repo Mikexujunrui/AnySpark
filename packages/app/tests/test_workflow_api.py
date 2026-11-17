@@ -416,3 +416,26 @@ def test_workflow_completion_notify_system_notice() -> None:
         assert any("失败" in x["new_content"] and "抽取失败" in x["new_content"] for x in n2)
     finally:
         manual.close()
+
+
+def test_list_split_comma_line() -> None:
+    """S250 实测回潮防护：单行逗号串必须切开（假模型 e2e 曾掩盖）。"""
+    from dataclasses import dataclass, field
+    from typing import Any
+
+    from anyspark.server.wf_scripts import wf_script_list_split
+    from anyspark.workflow.engine import NodeResult
+
+    @dataclass
+    class _Ctx:
+        task_id: str = "t"
+        book_id: str = "main"
+        definition: Any = None
+        results: dict[str, Any] = field(default_factory=dict)
+
+    node = type("N", (), {"id": "s", "kind": "script", "params": {"text": "a b,c d，e；f"}})()
+    r = wf_script_list_split(None, _Ctx(), node)  # type: ignore[arg-type]
+    assert isinstance(r, NodeResult) and r.output
+    import json as _j
+
+    assert _j.loads(r.output) == ["a b", "c d", "e", "f"]

@@ -108,7 +108,6 @@ def build_toolkit(
     if enable_domain:
         from anyspark.server.tools_domain import (
             make_batch_implementer,
-            make_citation_export_implementer,
             make_graph_query_implementer,
             make_graph_register_implementer,
             make_ingest_implementer,
@@ -225,9 +224,6 @@ def build_toolkit(
                 embedder=ctx.embedder,
             )
             registry.register(rl_spec, rl_impl)
-            # S250：引用导出（D2 文献=书库条目+cite_meta，GB/T 7714/BibTeX）
-            ce_spec, ce_impl = make_citation_export_implementer(ctx.library)
-            registry.register(ce_spec, ce_impl)
         rc_spec, rc_impl = make_read_context_implementer(ctx.chapters, book_id=ctx.book_id)
         registry.register(rc_spec, rc_impl)
         # S108：资料库查询（原 enable_extras 默认关→挪到 domain 默认开：AI 应能查看资料库）

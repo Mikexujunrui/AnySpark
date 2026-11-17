@@ -10,7 +10,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from anyspark.check import SKELETON_CHECKS, compile_rule, compile_with_model, get_pack, run_review
+from anyspark.check import SKELETON_CHECKS, compile_rule, compile_with_model, run_review
 from anyspark.server.agent_factory import model_for_task
 from anyspark.server.deps import AppDeps
 from anyspark.server.schemas import CheckRequest, RuleRequest
@@ -56,11 +56,8 @@ def make_check_router(deps: AppDeps) -> APIRouter:
         """多检测者审读正文（骨架+AI动态检测项，并行）+ 图谱事实证据 + 时序校验。"""
         # S194：AI 动态生成检测项——从图谱/伏笔提取作品专属检测重点
         book_ctx = _build_book_context(deps, req.book_id)
-        # S247：基础骨架按项目文体选择（novel/academic），用户增删在所选骨架上叠加
-        # （S246 种子方案无法表达"按体裁选择"，导致小说检测被学术项污染，已回退）
-        genre = req.genre or deps.workspace.read_genre(req.book_id)
-        # S195：合并所选骨架 + 用户添加项 - 用户删除项
-        all_checks = deps.user_skeleton.merged_checks(get_pack(genre))
+        # S195：合并系统骨架 + 用户添加项 - 用户删除项
+        all_checks = deps.user_skeleton.merged_checks(SKELETON_CHECKS)
         report = run_review(
             model_for_task(deps, "editing"),
             req.target,

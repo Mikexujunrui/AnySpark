@@ -174,30 +174,18 @@ def make_tools_router(deps: AppDeps) -> APIRouter:
 
     @router.get("/api/export/book", response_model=None)
     def export_book(format: str = "md", book_id: str = "main") -> Response:
-        """全书导出（S48-P3）：txt/md/epub/latex（epub 携图；latex 为 D2 学术导出）。"""
+        """全书导出（S48-P3）：txt/md/epub（epub 携图）。"""
         from urllib.parse import quote
 
         from anyspark.server.export import (
             export_epub,
-            export_latex,
             export_md,
             export_txt,
         )
 
         items = deps.chapters.list_by_book(book_id)
         chs = [{"title": c.title, "content": c.content} for c in items]
-        fmt = format if format in ("txt", "md", "epub", "latex") else "md"
-        if fmt == "latex":
-            safe_t = quote("anyspark-book.tex")
-            return Response(
-                content=export_latex(chs),
-                media_type="application/x-tex; charset=utf-8",
-                headers={
-                    "Content-Disposition": (
-                        f"attachment; filename=book.tex; filename*=UTF-8''{safe_t}"
-                    )
-                },
-            )
+        fmt = format if format in ("txt", "md", "epub") else "md"
         if fmt == "epub":
             data = export_epub(
                 "AnySpark 作品",

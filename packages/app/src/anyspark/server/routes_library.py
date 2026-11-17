@@ -57,51 +57,6 @@ def make_library_router(deps: AppDeps) -> APIRouter:
         deps.bg_queue.put(BgTask(kind="library_index", book_id=req.book_id))
         return {"ok": True, "book_id": req.book_id, "chapters": count, "index": "queued"}
 
-    @router.post("/api/library/import-arxiv", response_model=dict[str, Any])
-    def import_arxiv(req: dict[str, str]) -> dict[str, Any]:
-        """arXiv 论文导入（S250，D3）：建库书 + 摘要章节 + cite_meta 自动落全。"""
-        import xml.etree.ElementTree as ET
-
-        from anyspark.library.connectors import import_arxiv_paper
-
-        aid = (req.get("arxiv_id") or "").strip()
-        if not aid:
-            raise HTTPException(400, "缺 arxiv_id（示例：2101.00001 或 abs 链接）")
-        try:
-            return import_arxiv_paper(deps.library, aid)
-        except ValueError as e:
-            raise HTTPException(400, str(e)) from e
-        except OSError as e:
-            raise HTTPException(502, f"arXiv 请求失败：{e}") from e
-        except ET.ParseError as e:
-            raise HTTPException(502, f"arXiv 返回非预期格式：{e}") from e
-
-    @router.post("/api/library/{book_id}/cite-meta", response_model=dict[str, bool])
-    def set_cite_meta(book_id: str, req: dict[str, Any]) -> dict[str, bool]:
-        """写入引用元数据（S250，D2）：authors/title/venue/year/volume/... JSON。"""
-        ok = deps.library.set_cite_meta(book_id, req)
-        if not ok:
-            raise HTTPException(404, f"书库无此书：{book_id}")
-        return {"ok": True}
-
-    @router.get("/api/library/{book_id}/citations", response_model=dict[str, Any])
-    def export_citations(book_id: str, style: str = "gbt7714") -> dict[str, Any]:
-        """导出该书引用条目（gbt7714|bibtex）；无元数据书诚实标注待补全。"""
-        from anyspark.library.citation import (
-            fmt_bibtex,
-            fmt_gbt7714,
-            format_note,
-            minimal_meta,
-        )
-
-        book = deps.library.get_book(book_id)
-        if book is None:
-            raise HTTPException(404, f"书库无此书：{book_id}")
-        meta = book.get("cite_meta") or minimal_meta(book["name"])
-        fmt = fmt_bibtex(meta) if style == "bibtex" else fmt_gbt7714(meta)
-        note = format_note(meta)
-        return {"style": style, "entry": fmt, "note": note, "meta": meta}
-
     @router.delete("/api/library/{book_id}", response_model=dict[str, bool])
     def delete_library_book(book_id: str) -> dict[str, bool]:
         ok = deps.library.delete_book(book_id)

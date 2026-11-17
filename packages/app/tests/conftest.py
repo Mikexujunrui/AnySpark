@@ -27,8 +27,11 @@ def _no_live_llm(monkeypatch: Any) -> None:
     """S258：测试禁打真实 LLM/embedding API。
 
     build_app 会加载 .env——未注入 fake model 的测试此前会静默用真实
-    DashScope key 打线上 API（网络抖动型 flake + 真实计费）。清掉密钥后：
-    适配器 fail-fast（本地构造不受影响）；需要真实 env 形态的测试用
+    DashScope key 打线上 API（网络抖动型 flake + 真实计费）。
+    必须置空串而非 delenv：load_dotenv 缺省 override=False 只补缺失键，
+    删掉反而让 .env 重新注入真实 key（S261 实测：模型下线后 404/重试
+    占写锁引发 database is locked 连环失败）。空串占位后 dotenv
+    不覆盖，适配器 fail-fast；需要真实 env 形态的测试用
     monkeypatch.setenv 自行覆盖（后执行者优先）。
     """
     for key in (
@@ -38,7 +41,7 @@ def _no_live_llm(monkeypatch: Any) -> None:
         "OPENAI_API_KEY",
         "EMBEDDING_API_KEY",
     ):
-        monkeypatch.delenv(key, raising=False)
+        monkeypatch.setenv(key, "")
 
 
 @pytest.fixture

@@ -243,13 +243,6 @@ class BookUpdateIn(BaseModel):
     description: str | None = None
 
 
-class GenreIn(BaseModel):
-    """S247 项目文体（fiction/academic/report）——写作引擎/检测骨架/拆解维度按文体切换。"""
-
-    genre: str
-    book_id: str = "main"
-
-
 class ImportTxtBookIn(BaseModel):
     """S156 书架页"单个 txt 直接上传成书"：建项目 + 存上传区 + 消化原子完成。
 
@@ -356,7 +349,6 @@ class CheckRequest(BaseModel):
     chapter_order: int | None = None  # 时序校验：当前章节序号（校验时空倒置）
     line: str = "main"  # S29 多线叙事：当前写作的叙事线（时序校验按线比较）
     book_id: str = "main"
-    genre: str | None = None  # S247：检测骨架按文体选择；缺省读项目文体（工作区文件）
 
 
 class RuleRequest(BaseModel):

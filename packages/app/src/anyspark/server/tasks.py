@@ -217,15 +217,7 @@ def review_for_learning(deps: AppDeps, book_id: str, title: str, content: str) -
     """
     try:
         entries = deps.manual.list("project", book_id)
-        # S247：学习审查关注点按文体切换（fiction 无附加提示，行为不变）
-        from anyspark.server.genres import get_profile
-
-        hint = ""
-        if deps.workspace is not None:
-            hint = get_profile(deps.workspace.read_genre(book_id)).learning_hint
         subject = f"章节：{title}\n\n{content[:1200]}"
-        if hint:
-            subject = f"{hint}\n\n{subject}"
         prompt = build_learning_review_prompt(entries, subject)
         output = model_for_task(deps, "extraction").respond(
             [Message(role="system", content=prompt)], []

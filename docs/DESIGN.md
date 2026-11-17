@@ -1747,7 +1747,7 @@ ALTER 自动迁移）：
   登记有上下文判断力；后台机械抽取贵且碎片化。回收（resolve）自动化维持现状。
 - 图谱抽取不变（已是全自动后台链路）；本节只补叙事树/计划/设定的写渠道。
 
-### 12.47 检测规则包与审稿回复（S246：校园场景，领域拓展走内容不走硬编码）
+### 12.47 检测规则包与审稿回复（S246：校园场景，领域拓展走内容不走硬编码）【S261 已移除，见 §12.49】
 
 > 背景（校园智能体比赛）：骨架检测项原为小说体裁第一性原理默认值，学术文本
 > 需要"术语一致性/论断证据"等另一组检测项。实现纪律：**领域拓展包=内容数据，
@@ -1774,7 +1774,7 @@ ALTER 自动迁移）：
 **诚信立场（设计内）**：诚信自查检测项明确"辅助自查、不代替作者判断"；
 不做查重/AIGC 检测规避（定位辅助工具，见 docs/COMPETITION.md 缺陷清单 D4）。
 
-### 12.48 文体 profile（S247：写作引擎/检测骨架/学习审查按项目文体切换）
+### 12.48 文体 profile（S247：写作引擎/检测骨架/学习审查按项目文体切换）【S261 已移除，见 §12.49】
 
 > 背景（缺陷 D1）：小说语境固化在 prompt 层。文体 profile 把"按体裁变化的自然
 > 语言内容"收敛为 profile 数据（genres.py：fiction/academic/report），机制不分
@@ -1791,3 +1791,36 @@ ALTER 自动迁移）：
 - **学习审查**：academic/report 文体在审查文本前拼关注点提示（fiction 无附加，行为不变）
 - **待接线**：check_text 工具的合并骨架基准集暂为 novel（toolkit 装配处一行，
   因并行会话持有该文件暂缓），HTTP 路由已同源感知文体
+
+### 12.49 学术校园拓展移除（S261：回归小说特化主线）
+
+> 背景：S246-S251 簇为校园智能体比赛做的领域拓展（学术检测包/文体 profile/
+> 校园模板包/引用管理/LaTeX 导出/arXiv 连接器）。比赛结束后项目回归
+> 「AI 写小说」主线，学术能力无真实使用场景——按 YAGNI 与 S62/S63 哲学
+> （去画蛇添足机制）整簇移除，而非留着积灰。
+
+**移除清单**：
+- genres.py（fiction/academic/report 三 profile）+ 文体.txt 读写 + /api/genre GET/POST
+- seeds_campus.py（拆论文/文献综述/申报书起草/多平台改写）+ 审稿回复预置模板
+- ACADEMIC_CHECKS/CHECK_PACKS/get_pack 双骨架（check 包回归单一小说骨架）
+- library/citation.py（GB/T 7714/BibTeX）+ connectors.py（arXiv Atom）+
+  cite_meta 列读写 + citation_export 工具 + import-arxiv/cite-meta/citations 路由
+- export_latex + 全书导出 format=latex 分支
+- scripts/campus_smoke.py + docs/COMPETITION.md + 学术专属测试
+  （test_builtin_packs/test_d2_d3/test_citation）
+
+**保留（通用机制，与学术无关）**：list_split 清单切分原语（含剥围栏/逗号串
+回归测试，迁至 test_workflow_api）；check_text 与 /api/check 同源合并骨架接线
+（回归测试迁至 test_check_store）；S195 用户骨架增删通道。
+
+**行为回归**：写作引擎人设/要求句回到小说硬编码（与 fiction profile 逐字一致，
+存量项目零变化）；检测=单一小说骨架+用户叠加；学习审查无文体提示。
+
+**数据兼容**：旧库 library_books.cite_meta 列保留（SQLite 删列成本高且无害），
+代码不再读写；新库建表无此列。
+
+**连带修复（测试防真实 API 回潮）**：S258 清密钥 fixture 实际无效——
+load_dotenv 缺省 override=False 只补缺失键，delenv 反而让 .env 重新注入真实
+key；改为空串占位后 dotenv 不覆盖。模型下线后该缺陷显形为 404 + 后台
+embedding 重试占写锁（database is locked 连环失败）；test_wrapup 改注入
+fake 写作模型，test_mode 改 monkeypatch 占位 key。

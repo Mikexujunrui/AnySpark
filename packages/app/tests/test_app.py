@@ -674,7 +674,8 @@ def test_wrapup_lists_open_hooks() -> None:
 
     from anyspark.server.app import build_app
 
-    client = TestClient(build_app(db_path=":memory:"))
+    # fake 写作模型：本测试验 wrapup 钩子列举，不依赖真实生成（S258 禁打真实 API）
+    client = TestClient(build_app(db_path=":memory:", model=FakeWritingModel()))
     # 先登记 must 钩子
     client.post(
         "/api/plot/item",

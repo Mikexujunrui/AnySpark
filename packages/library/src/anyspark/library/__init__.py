@@ -10,7 +10,6 @@ S244：书库 RAG——语义向量检索（embedding.py + vectors.py），
 
 from __future__ import annotations
 
-from .connectors import fetch_arxiv, import_arxiv_paper
 from .embedding import EmbeddingClient
 from .search import search_library_hybrid, search_reference_books
 from .store import LibraryStore
@@ -22,8 +21,6 @@ __all__ = [
     "LibraryVectors",
     "chunk_text",
     "cosine",
-    "fetch_arxiv",
-    "import_arxiv_paper",
     "search_library_hybrid",
     "search_reference_books",
 ]

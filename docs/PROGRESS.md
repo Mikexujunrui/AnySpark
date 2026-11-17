@@ -892,3 +892,38 @@ workflow 引擎递归深度/并行分支耗时均摊为设计级重构。
    build_app 占位 model 标注）——mypy packages 234 文件全绿。
 5. ruff format 6 文件重排 + per-file-ignores 路径随 test_align_skillgen 迁移更新。
 
+## S261: 移除学术校园拓展（S246-S251 簇）+ 测试防真实 API 回潮修复 + 远程同步
+
+**背景**（主人指令）：项目回归「AI 写小说」主线，删除多余的学术校园拓展；
+比较远程仓库差异并同步到最新。搁置 2.5 个月后首次开工（上次提交 2026-09-05）。
+
+**交付**（DESIGN §12.49，§12.47/12.48 加状态标注）：
+- 移除：genres.py（三文体 profile）/seeds_campus.py（拆论文/文献综述/申报书起草/
+  多平台改写）/审稿回复预置模板/ACADEMIC_CHECKS+CHECK_PACKS+get_pack 双骨架/
+  /api/genre GET+POST/文体.txt 读写/library citation.py+connectors.py/cite_meta
+  读写/citation_export 工具/import-arxiv+cite-meta+citations 路由/export_latex+
+  format=latex 分支/campus_smoke.py/COMPETITION.md/学术专属测试三文件
+- 保留（通用机制）：list_split 清单切分原语（逗号串回归测试迁 test_workflow_api）、
+  check_text 与 /api/check 同源合并骨架接线（回归测试迁 test_check_store）、
+  S195 用户骨架增删通道
+- 行为回归：写作引擎人设/要求句回到小说硬编码（与 fiction profile 逐字一致，
+  存量项目零变化）；检测=单一小说骨架+用户叠加；学习审查无文体提示
+- **S258 回潮修复**：清密钥 fixture 实际无效——load_dotenv 缺省 override=False
+  只补缺失键，delenv 反而让 .env 重新注入真实 key；改空串占位。模型下线后
+  该缺陷显形：404 + 后台 embedding 重试占写锁 → database is locked 连环失败
+  （stash 对照实证：6 个失败在改动前 HEAD 同样存在，非本次删除引起）。
+  test_wrapup 改注入 fake 写作模型；test_mode 改 monkeypatch 占位 key
+- 数据清理（备份 data/anyspark.backup-20261117-201919.db）：3 个学术演示工作区 +
+  3 本 arXiv 库书 + 5 个校园模板及其任务/节点态/孤儿消息；旧库 cite_meta 列
+  保留不读写（SQLite 删列成本高且无害），新库建表无此列
+- 文档：BACKEND-MAP 路由表/工具表同步（routes_workflow/routes_check/
+  routes_library/citation_export 行）；uml 无学术接线无需改
+
+**门禁**：后端层全绿（ruff check+format/mypy 224 文件/scan_main_hardcode/
+pytest **798 passed**）；无前端改动，前端层按 S96 自动分层跳过。
+
+**远程同步**（2026-11-17 实测）：SSH 22/443 均被重置（与 8 月记录相反），
+https 可用——origin/public  remote 改 https 地址。fetch 后核实本地严格领先：
+origin/feat/shell-port +5、origin/main +136、origin/integrate-f3 +373、
+public/main +34，behind 全部 0（本地包含远程全部历史）。推送 feat/shell-port+
+main（本地 main 快进到 HEAD）+integrate-f3 至 origin，HEAD 至 public/main。

@@ -25,7 +25,6 @@ from anyspark.server.logging import logger
 from anyspark.server.schemas import (
     BriefGenerateIn,
     BriefIn,
-    GenreIn,
     ManualDecayIn,
     ManualEntryIn,
     ManualEntryPatch,
@@ -120,27 +119,6 @@ def make_mind_router(deps: AppDeps) -> APIRouter:
         else:
             deps.workspace.delete_brief(req.book_id)
         return {"book_id": req.book_id, "content": content, "exists": bool(content)}
-
-    # S247 项目文体（genre）：写作引擎/检测骨架/拆解维度按文体切换，权威在文件
-    @router.get("/api/genre", response_model=dict[str, Any])
-    def get_genre(book_id: str = "main") -> dict[str, Any]:
-        """读项目文体（无文件=fiction 缺省）。"""
-        from anyspark.server.genres import get_profile
-
-        genre = deps.workspace.read_genre(book_id)
-        return {"book_id": book_id, "genre": genre, "label": get_profile(genre).label}
-
-    @router.post("/api/genre", response_model=dict[str, Any])
-    def save_genre(req: GenreIn) -> dict[str, Any]:
-        """写项目文体（权威在文件；未知值在读方 get_profile 兜底回退 fiction）。"""
-        from anyspark.server.genres import get_profile
-
-        deps.workspace.write_genre(req.book_id, req.genre)
-        return {
-            "book_id": req.book_id,
-            "genre": req.genre,
-            "label": get_profile(req.genre).label,
-        }
 
     @router.post("/api/brief/generate", response_model=dict[str, Any])
     def generate_brief(req: BriefGenerateIn) -> dict[str, Any]:

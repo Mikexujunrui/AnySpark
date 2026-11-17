@@ -5,6 +5,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from anyspark.models.mode import (
@@ -227,13 +228,12 @@ def test_mode_api_single_field_switch() -> None:
     assert got["slot_pro"] == "x" and got["slot_flash"] == "y"  # 槽位保留
 
 
-def test_provider_build_for_task_divides() -> None:
+def test_provider_build_for_task_divides(monkeypatch: pytest.MonkeyPatch) -> None:
     """provider.build_for_task：模式分流生效；未配槽位回退激活配置。"""
-    import os
-
     from anyspark.models.registry import ModelProvider
 
-    os.environ.setdefault("DEEPSEEK_API_KEY", "sk-test")
+    # 占位 key 仅供本地构造（不打真实 API）；setdefault 会被 conftest 的空串占位挡住
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-test")
     reg = _reg(_db())
     store = ModeStore(_db())
     store.save(ModeConfig(mode="split", slot_pro="v4-pro", slot_flash="v4-flash"))
