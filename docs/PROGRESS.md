@@ -982,3 +982,22 @@ Token Plan 无 embedding 模型（/models 31 个全非 embed，实测）→ RAG 
 
 **门禁**：全量总闸 ✅（ruff check+format/mypy 224/scan/pytest **800 passed**，
 含 2 新回归）。连带修两测试的 .env 泄漏依赖（种子断言/回落测试显式占位 env）。
+
+## S264: 激活配置换百炼 Token Plan 廉价创作模型（横评选型）
+
+**背景**（主人指令）：激活配置换成 Token Plan 里便宜且适合文本创作的模型。
+
+**选型横评**（真实调用，同一段冷硬派续写 prompt，250 字）：
+- deepseek-v4.1-flash（153 tokens）✅ 胜出：noir 笔触最克制（具体细节/留白/
+  钩子收敛），flash 档最便宜
+- qwen3.8-flash（173）：套话多、直白告知，警笛红蓝光破民国设定
+- qwen3.6-flash（191）：辞藻堆砌、钩子过满
+- MiniMax-M2.5（384）：文笔好但 token 2.5 倍且价档更高
+
+**落地**：激活 default（deepseek-v4.1-flash @ Token Plan）；thinking=off
+（横评即关思考产出，成本最优；可按请求/界面调回）；mode_config现状
+mode=flash + slot_flash=default 已全任务路由到它，无需改路由。
+实测：应用端到端聊天 2.6s/121 字/0 工具，正文质量符合预期；测试会话已清理。
+
+**性质**：纯数据配置变更（model_configs/mode 路由），无代码改动；不入库文件
+仅本台账记录。
