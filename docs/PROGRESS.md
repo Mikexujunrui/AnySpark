@@ -1001,3 +1001,24 @@ mode=flash + slot_flash=default 已全任务路由到它，无需改路由。
 
 **性质**：纯数据配置变更（model_configs/mode 路由），无代码改动；不入库文件
 仅本台账记录。
+
+## S265: 借鉴测试清单（2026-08~11 文献）——先测后改，效果说话
+
+**背景**（主人指令）：调研搁置期 RP/文学创作新方法后，做借鉴测试清单；
+不一定改，关键看效果。
+
+**交付**：docs/archive/plans/PLAN-BORROW-TESTS.md——8 张测试卡
+（T1 NstAgent 角色快照+章末Δ / T2 ConWriter 验证后提交+句级补丁 /
+T2b logprob 门控 / T3 PHASE-Tree 分层角色状态 / T4 TaDI 承诺账本+选择性检查 /
+T5 PLOTTER 图拓扑计划修复 / T6 MemoryForge 记忆 conditioning /
+T7 NstAgent 开源 bench 外部标尺 / T8 Tandem base 候选池）。
+- 通用协议：隔离数据根、judge≠writer 盲评、错误五分类 CED 口径、成本比必报、
+  决策闸门三条（CED−30%@≤1.2×成本 / 持平@−40%成本 / 能力缺口盲评≥70%）
+- 纪律：内容层先测（workflow/skill/脚本调既有 API），过闸门才立项机制化；
+  负面结果必入台账
+- 不确定性优先排序 + 共享 run 设计（写作 4 臂×12 章 / RP 4 臂×60 轮）
+
+**首批探针结果**：T2b 可行性✅（Token Plan logprobs/top_logprobs 实测可用，
+预测力待测）；T8 搁置（可用端点全 instruct 无 base 源）。
+
+**性质**：纯文档+探针，无代码改动。
