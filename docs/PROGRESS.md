@@ -955,3 +955,30 @@ main（本地 main 快进到 HEAD）+integrate-f3 至 origin，HEAD 至 public/m
 
 **门禁**：前后端都改 + pyproject 敏感文件 → 全量总闸 ✅（ruff check+format/
 pytest 798 passed/mypy 224/scan/tsc/eslint/build/vitest 18 passed）。
+
+## S263: 索引写锁根治 + 阿里云配置换百炼 Token Plan + embedding 显式关闭语义
+
+**背景**（主人指令）：旧 DashScope 账号已弃用（欠费 Arrearage），换 pi 配置里的
+最新阿里云（百炼 Token Plan 端点）；修 S262 记录的生产面 database is locked。
+
+**锁根治**（library/vectors.py）：index_book_signed 三阶段分离——①持锁只读
+计划（签名比对/切块/残留清单）②embed 网络**不持锁不开事务**（失败抛异常→
+旧索引保持原样）③短事务落库。旧实现在写事务打开期间调 embed（含重试退避），
+WAL 写锁被占数分钟→全应用锁死（S262 演示实测事故）。加 _indexing 集合防同书
+并发重入。回归测试 test_index_embed_phase_holds_no_write_lock：embed 内
+in_transaction/_lock 双断言 + 睡眠期间并发写立即完成 + 增量语义不变。
+
+**embedding 显式关闭**（library/embedding.py）：EMBEDDING_API_KEY 显式空串=
+关闭不回落 DEEPSEEK_*（旧逻辑空串 falsy 被回落链穿透，置空无效——实测抓出）。
+Token Plan 无 embedding 模型（/models 31 个全非 embed，实测）→ RAG 降级关键词
+检索；.env 置空 + .env.example 注释说明；回归测试覆盖空串关闭与未设回落两态。
+
+**配置迁移**：.env DEEPSEEK_* → Token Plan 端点/key/deepseek-v4.1-flash/1M 窗口；
+库内 default 与 deepseek-v4-pro 两行端点同步、api_key 清 NULL（resolved 走 env
+兜底——库内旧 key 曾挡住 .env 换 key）；激活配置保持 mimo-v2.5（用户现状不动）。
+
+**实测**：Token Plan 经应用端到端聊天通过（思考模型 content 正常产出）；导入
+期间并发写零错误；降级后索引静默跳过无后台噪音；scratch 验证书/项目已清理。
+
+**门禁**：全量总闸 ✅（ruff check+format/mypy 224/scan/pytest **800 passed**，
+含 2 新回归）。连带修两测试的 .env 泄漏依赖（种子断言/回落测试显式占位 env）。

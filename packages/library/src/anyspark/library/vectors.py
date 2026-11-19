@@ -130,6 +130,7 @@ class LibraryVectors:
         self._lock = threading.Lock()
         self._cache_lock = threading.Lock()
         self._np_cache: _NpCache | None = None
+        self._indexing: set[str] = set()  # 在索引的书（防同书并发重入）
         with self._lock:
             self._conn.executescript(_SCHEMA)
             self._conn.commit()
@@ -142,12 +143,22 @@ class LibraryVectors:
         signed_files: list[tuple[str, str, float, int]],  # (filename, text, mtime, size)
         embed: Any,
     ) -> dict[str, Any]:
-        """增量索引（带文件签名版）。签名未变的文件跳过。"""
-        indexed = 0
+        """增量索引（带文件签名版）。签名未变的文件跳过。
+
+        三阶段分离（S263 锁根治）：读计划（持锁只读）→ embed 网络（不持锁
+        不开事务）→ 短事务落库。旧实现在写事务打开期间调 embed（含重试
+        退避），WAL 写锁被占数分钟 → 全应用 database is locked（实测事故）。
+        网络阶段也不持 _lock：索引期间检索/.drop 不被阻塞。
+        """
+        # ── 阶段 1：只读计划（签名比对 + 切块 + 残留清单）──
+        plan: list[tuple[str, float, int, list[str]]] = []
         skipped = 0
         total_chunks = 0
         seen_files: set[str] = set()
         with self._lock:
+            if book_id in self._indexing:
+                return {"indexed": 0, "skipped": 0, "chunks": 0, "already_indexing": True}
+            self._indexing.add(book_id)
             for filename, text, mtime, size in signed_files:
                 seen_files.add(filename)
                 st = self._state(book_id, filename)
@@ -155,14 +166,30 @@ class LibraryVectors:
                     skipped += 1
                     total_chunks += st["chunks"]
                     continue
-                chunks = chunk_text(text)
-                # 清掉该文件旧 chunk 再写新（简单可靠的增量策略）
+                plan.append((filename, mtime, size, chunk_text(text)))
+            rows = self._conn.execute(
+                "SELECT DISTINCT filename FROM library_index_state WHERE book_id=?",
+                (book_id,),
+            ).fetchall()
+            stale = [fname for (fname,) in rows if fname not in seen_files]
+        # ── 阶段 2：网络 embed（无锁无事务；失败抛异常→旧索引保持原样）──
+        embedded: list[tuple[str, float, int, list[str], list[Any]]] = []
+        try:
+            for filename, mtime, size, chunks in plan:
+                vecs = embed(chunks) if chunks else []
+                embedded.append((filename, mtime, size, chunks, vecs))
+        finally:
+            with self._lock:
+                self._indexing.discard(book_id)
+        # ── 阶段 3：短事务落库（清旧 chunk + 写新 + 签名 + 清残留）──
+        indexed = 0
+        with self._lock:
+            for filename, mtime, size, chunks, vecs in embedded:
                 self._conn.execute(
                     "DELETE FROM library_chunks WHERE book_id=? AND filename=?",
                     (book_id, filename),
                 )
                 if chunks:
-                    vecs = embed(chunks)
                     dim = len(vecs[0]) if vecs else 0
                     now = _now()
                     self._conn.executemany(
@@ -187,21 +214,15 @@ class LibraryVectors:
                         (book_id, filename),
                     )
                 indexed += 1
-            # 清理已消失文件的残留索引
-            rows = self._conn.execute(
-                "SELECT DISTINCT filename FROM library_index_state WHERE book_id=?",
-                (book_id,),
-            ).fetchall()
-            for (fname,) in rows:
-                if fname not in seen_files:
-                    self._conn.execute(
-                        "DELETE FROM library_chunks WHERE book_id=? AND filename=?",
-                        (book_id, fname),
-                    )
-                    self._conn.execute(
-                        "DELETE FROM library_index_state WHERE book_id=? AND filename=?",
-                        (book_id, fname),
-                    )
+            for fname in stale:
+                self._conn.execute(
+                    "DELETE FROM library_chunks WHERE book_id=? AND filename=?",
+                    (book_id, fname),
+                )
+                self._conn.execute(
+                    "DELETE FROM library_index_state WHERE book_id=? AND filename=?",
+                    (book_id, fname),
+                )
             self._conn.commit()
         self._invalidate_cache()
         return {"indexed": indexed, "skipped": skipped, "chunks": total_chunks}

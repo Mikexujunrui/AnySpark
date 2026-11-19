@@ -297,9 +297,62 @@ def test_embedding_batching(monkeypatch) -> None:  # type: ignore[no-untyped-def
 
     monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://example.test/v1")
     monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
+    # 清掉 .env 泄漏的显式空串（S263 空串=关闭语义，不清则回落链被断）
+    monkeypatch.delenv("EMBEDDING_API_KEY", raising=False)
+    monkeypatch.delenv("EMBEDDING_BASE_URL", raising=False)
     c = EmbeddingClient()
     c._client = FakeClient()  # type: ignore[assignment]
     out = c.embed([f"t{i}" for i in range(25)])
     assert len(out) == 25
     assert calls == [10, 10, 5]  # 分批正确
     assert out[24] == [24.0, 24.0, 24.0, 24.0]  # 顺序保真（按 index 排序）
+
+
+def test_index_embed_phase_holds_no_write_lock() -> None:
+    """S263 锁根因回归：embed 网络阶段不得开写事务、不得持 store 锁。
+
+    旧实现在写事务打开期间调 embed（含重试退避），WAL 写锁被占数分钟 →
+    全应用 database is locked（实测事故）。断言：① embed 内 in_transaction
+    与 _lock 均为 False；② embed 睡眠期间另一连接的写立即完成（不被写锁阻塞）；
+    ③ 增量语义不变（签名未变二跑全跳过）。
+    """
+    import sqlite3
+    import threading
+    import time
+
+    d = Path(tempfile.mkdtemp())
+    vec = LibraryVectors(d / "v.db")
+    observed: dict[str, Any] = {}
+
+    def slow_embed(chunks: list[str]) -> list[list[float]]:
+        observed["in_transaction"] = vec._conn.in_transaction
+        observed["lock_held"] = vec._lock.locked()
+        time.sleep(0.5)
+        return [[1.0, 0.0, 0.0] for _ in chunks]
+
+    files = [("a.md", "魔法 剑 " * 200, 1.0, 100)]
+    t = threading.Thread(target=vec.index_book_signed, args=("b", files, slow_embed))
+    t.start()
+    time.sleep(0.15)  # 等 embed 进入睡眠（网络阶段）
+    other = sqlite3.connect(str(d / "v.db"), timeout=2)
+    t0 = time.monotonic()
+    other.execute("CREATE TABLE IF NOT EXISTS probe_write(x)")
+    other.commit()
+    elapsed = time.monotonic() - t0
+    other.close()
+    t.join(timeout=10)
+    assert not t.is_alive()
+    assert observed["in_transaction"] is False
+    assert observed["lock_held"] is False
+    assert elapsed < 0.4, f"并发写被索引写锁阻塞: {elapsed:.2f}s"
+    r = vec.index_book_signed("b", files, slow_embed)
+    assert r["skipped"] == 1 and r["indexed"] == 0
+
+
+def test_embedding_explicit_empty_key_disables(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    """S263：EMBEDDING_API_KEY 显式空串=关闭，不回落 DEEPSEEK_*（无 embedding 端点用）。"""
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://example.test/v1")
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-x")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "")
+    c = EmbeddingClient()
+    assert c.available is False

@@ -46,6 +46,11 @@ def test_registry_syncs_default_from_env(monkeypatch) -> None:  # type: ignore[n
     import anyspark.models.registry as reg_mod
 
     db = _db()
+    # 播种环境显式占位（.env 经 load_dotenv 会泄漏进 os.environ，
+    # 不占位则种子断言随本地 .env 漂移——S263 换端点后实测抓出）
+    monkeypatch.setenv("DEEPSEEK_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    monkeypatch.setenv("DEEPSEEK_MODEL", "deepseek-v4.1-flash")
+    monkeypatch.setenv("DEEPSEEK_CONTEXT_WINDOW", "65536")
     # 播种：默认 DashScope
     reg = reg_mod.ModelRegistry(db)
     assert reg.get("default").base_url == "https://dashscope.aliyuncs.com/compatible-mode/v1"  # type: ignore[union-attr]

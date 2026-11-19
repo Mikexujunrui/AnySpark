@@ -27,13 +27,21 @@ TIMEOUT = 30.0
 
 
 def resolve_embedding_config() -> dict[str, str | None]:
-    """从环境解析 embedding 配置（EMBEDDING_* 优先，DEEPSEEK_* 兜底）。"""
+    """从环境解析 embedding 配置（EMBEDDING_* 优先，DEEPSEEK_* 兜底）。
+
+    S263：EMBEDDING_API_KEY 显式空串=显式关闭（不回落 DEEPSEEK_*）——
+    有的端点（如百炼 Token Plan）无 embedding 模型，回落会让每次导入
+    触发必失败的后台索引；空串占位与测试清密钥语义同型（未设=回落，空=关）。
+    """
+    key = os.environ.get("EMBEDDING_API_KEY")
+    if key is None:
+        key = os.getenv("DEEPSEEK_API_KEY") or None
     return {
         "base_url": (
             os.getenv("EMBEDDING_BASE_URL") or os.getenv("DEEPSEEK_BASE_URL") or ""
         ).rstrip()
         or None,
-        "api_key": os.getenv("EMBEDDING_API_KEY") or os.getenv("DEEPSEEK_API_KEY") or None,
+        "api_key": key or None,
         "model": os.getenv("EMBEDDING_MODEL") or DEFAULT_MODEL,
     }
 
